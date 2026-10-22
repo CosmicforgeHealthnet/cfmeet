@@ -431,6 +431,7 @@ pub async fn claim_key_packages(
     crate::devices::directory_lookup_allowed(state, ctx).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
+    let claimer = acting.principal_id;
     state
         .db
         .transaction::<_, Value, Error>(move |txn| {
@@ -442,6 +443,22 @@ pub async fn claim_key_packages(
                     if !access::membership(txn, conversation.id, *p, false)
                         .await?
                         .is_some_and(|m| m.is_active())
+                    {
+                        return Err(Error::reason(
+                            ErrorCode::PrincipalNotAuthorized,
+                            "NOT_A_MEMBER",
+                        ));
+                    }
+                    // Appendix K: never hand a blocked principal's KeyPackages to the
+                    // principal on the other side of the block.
+                    if *p != claimer
+                        && crate::safety::blocks::blocked_between(
+                            txn,
+                            ctx2.scope.environment_id,
+                            claimer,
+                            *p,
+                        )
+                        .await?
                     {
                         return Err(Error::reason(
                             ErrorCode::PrincipalNotAuthorized,

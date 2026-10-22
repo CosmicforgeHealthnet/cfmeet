@@ -96,6 +96,7 @@ pub async fn resolve(
             retention_seconds: None,
             predecessor_conversation_id: None,
             profile_change_disclosure_acknowledged: false,
+            read_receipts: None,
             expected_policy_version: None,
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
         },

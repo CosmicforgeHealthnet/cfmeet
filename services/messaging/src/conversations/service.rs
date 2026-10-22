@@ -82,6 +82,8 @@ pub struct ConversationRow {
     pub predecessor_conversation_id: Option<Uuid>,
     /// The conversation that succeeded this one (set once).
     pub successor_conversation_id: Option<Uuid>,
+    /// Appendix K: `Some(false)` turns read receipts off for this conversation.
+    pub read_receipts: Option<bool>,
 }
 
 impl ConversationRow {
@@ -97,7 +99,7 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
      c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
-     c.predecessor_conversation_id, c.successor_conversation_id";
+     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -156,6 +158,7 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "retentionSeconds": c.retention_seconds,
         "predecessorConversationId": c.predecessor_conversation_id,
         "successorConversationId": c.successor_conversation_id,
+        "readReceipts": c.read_receipts,
     })
 }
 
@@ -252,6 +255,10 @@ pub struct CreateRequest {
     /// Required when the successor's security profile differs from the predecessor's.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub profile_change_disclosure_acknowledged: bool,
+    /// Appendix K: `false` turns read receipts off for this conversation (they can never
+    /// be turned on where the environment policy has them off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_receipts: Option<bool>,
     /// Optional optimistic guard: the application policy version the caller decided on.
     #[serde(default)]
     pub expected_policy_version: Option<i64>,
@@ -612,8 +619,8 @@ async fn create_in(
            context_namespace, context_ref, context_ref_version, security_profile, protocol, ciphersuite, mls_group_id, \
            security_policy_version, lifecycle_state, policy_snapshot_id, policy_version, created_by_principal_id, \
            created_by_credential_id, owner_principal_id, direct_pair_key, created_at, updated_at, state_changed_at, expires_at, \
-           expiry_grace_seconds, retention_seconds, predecessor_conversation_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23) \
+           expiry_grace_seconds, retention_seconds, predecessor_conversation_id, read_receipts) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23, $24) \
          ON CONFLICT DO NOTHING",
         vec![
             id.into(),
@@ -639,6 +646,7 @@ async fn create_in(
             request.expiry_grace_seconds.into(),
             request.retention_seconds.into(),
             request.predecessor_conversation_id.into(),
+            request.read_receipts.into(),
         ],
     )
     .await?;
@@ -661,14 +669,31 @@ async fn create_in(
             vec![id.into(), acting.principal_id.into(), env.into(), now.into()],
         )
         .await?;
+        let mut requested = None;
         if let Some(p) = counterpart {
-            db::exec(
-                txn,
-                "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at, updated_at) \
-                 VALUES ($1, $2, $3, 'MEMBER', $4, $4)",
-                vec![id.into(), p.into(), env.into(), now.into()],
-            )
-            .await?;
+            if context_policy.requests_require_acceptance {
+                // Appendix K: a message request — the counterpart is INVITED (no
+                // delivery, no events, no key packages claimed) until it accepts; then it
+                // sees the conversation from the start.
+                let expires = now + crate::membership::INVITATION_TTL;
+                db::exec(
+                    txn,
+                    "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, state, \
+                       joined_at, updated_at, invited_by_principal_id, invited_at, invitation_expires_at) \
+                     VALUES ($1, $2, $3, 'MEMBER', 'INVITED', $4, $4, $5, $4, $6)",
+                    vec![id.into(), p.into(), env.into(), now.into(), acting.principal_id.into(), expires.into()],
+                )
+                .await?;
+                requested = Some((p, expires));
+            } else {
+                db::exec(
+                    txn,
+                    "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, joined_at, updated_at) \
+                     VALUES ($1, $2, $3, 'MEMBER', $4, $4)",
+                    vec![id.into(), p.into(), env.into(), now.into()],
+                )
+                .await?;
+            }
         }
         db::exec(
             txn,
@@ -708,6 +733,28 @@ async fn create_in(
             now,
         )
         .await?;
+        if let Some((p, expires)) = requested {
+            outbox::enqueue_conversation(
+                txn,
+                id,
+                NewEvent {
+                    event_type: "messaging.member.invited",
+                    aggregate_type: "CONVERSATION",
+                    aggregate_id: id,
+                    scope: scope_of(ctx),
+                    payload: json!({
+                        "conversation_id": id,
+                        "principal_id": p,
+                        "role": "MEMBER",
+                        "invited_by_principal_id": acting.principal_id,
+                        "expires_at": rfc3339(expires),
+                    }),
+                },
+                request_ctx,
+                now,
+            )
+            .await?;
+        }
         crate::metrics::inc(
             "messaging_conversations_created_total",
             &[("profile", profile.as_str())],

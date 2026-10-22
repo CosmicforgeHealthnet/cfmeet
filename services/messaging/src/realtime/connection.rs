@@ -34,6 +34,7 @@ use super::{
     sessions::{self, SessionRow},
 };
 use crate::{
+    conversations::LifecycleState,
     conversations::{
         access::{self, Membership},
         policy::{self, EffectivePolicy},
@@ -473,6 +474,20 @@ impl Connection {
         )
         .await
         {
+            // §37: a conversation whose context authority revoked it has no live
+            // subscription (its history stays readable over the API).
+            Ok((c, _))
+                if c.state() == LifecycleState::Closed
+                    && c.lifecycle_reason.as_deref() == Some("CONTEXT_REVOKED") =>
+            {
+                self.send(error_frame(
+                    "CONVERSATION_NOT_ACTIVE",
+                    "The conversation's context was revoked.",
+                    rid,
+                ))
+                .await;
+                return Flow::Continue;
+            }
             Ok((_, m)) => m,
             // Unknown, foreign and non-member conversations are indistinguishable.
             Err(e) => return self.api_error(e, rid).await,
@@ -619,6 +634,16 @@ impl Connection {
                     s.last_delivered = seq;
                 }
                 crate::metrics::inc("messaging_realtime_events_delivered_total", &[]);
+                // §37: a context authority's revocation (e.g. Privacy Relay) ends every
+                // subscription right after the CLOSED event; history stays readable.
+                if row.event_type == "messaging.conversation.lifecycle-changed"
+                    && row.payload.get("lifecycle_state").and_then(Value::as_str) == Some("CLOSED")
+                    && row.payload.get("reason").and_then(Value::as_str) == Some("CONTEXT_REVOKED")
+                {
+                    self.revoke_subscription(conversation, "CONTEXT_REVOKED")
+                        .await;
+                    return Flow::Continue;
+                }
                 // The viewer's own removal ends the subscription right after the event.
                 if row.event_type == "messaging.member.removed"
                     && row.payload.get("principal_id").and_then(Value::as_str)

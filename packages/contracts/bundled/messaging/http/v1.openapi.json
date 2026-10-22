@@ -6833,6 +6833,10 @@
                 "smsBridgeEligible": {
                   "type": "boolean",
                   "description": "Requires MANAGED among allowedProfiles; SMS is never end-to-end encrypted."
+                },
+                "requestsRequireAcceptance": {
+                  "type": "boolean",
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             }
@@ -8411,7 +8415,8 @@
           "expiryGraceSeconds",
           "retentionSeconds",
           "predecessorConversationId",
-          "successorConversationId"
+          "successorConversationId",
+          "readReceipts"
         ],
         "properties": {
           "conversationId": {
@@ -8617,6 +8622,17 @@
                 "type": "null"
               }
             ]
+          },
+          "readReceipts": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -8799,6 +8815,10 @@
           "profileChangeDisclosureAcknowledged": {
             "type": "boolean",
             "description": "Required (true) when the successor's security profile differs from its predecessor's; refused otherwise with SECURITY_PROFILE_NOT_ALLOWED / PROFILE_CHANGE_DISCLOSURE_REQUIRED. Clients show the change (e.g. end-to-end encrypted to server-readable) before acknowledging."
+          },
+          "readReceipts": {
+            "type": "boolean",
+            "description": "Appendix K: false turns read receipts off for this conversation (never on where the environment policy has them off)."
           }
         },
         "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
@@ -9151,7 +9171,8 @@
                 "reportingEnabled",
                 "exportsEnabled",
                 "attachmentsEnabled",
-                "retentionDays"
+                "retentionDays",
+                "requestsRequireAcceptance"
               ],
               "properties": {
                 "enabled": {
@@ -9234,6 +9255,10 @@
                       "type": "null"
                     }
                   ]
+                },
+                "requestsRequireAcceptance": {
+                  "type": "boolean",
+                  "description": "Appendix K (DIRECT only): a new direct conversation is a message request — the counterpart is INVITED (no delivery, events or key packages) until it accepts (POST .../invitation/accept), then sees the conversation from the start. While pending, PRIVATE_E2EE requests carry no messages (REQUEST_PENDING); after a decline nothing more is delivered (DELIVERY_REFUSED / REQUEST_DECLINED)."
                 }
               }
             },
@@ -11301,11 +11326,16 @@
           },
           "shareLastSeen": {
             "type": "boolean"
+          },
+          "shareReadReceipts": {
+            "type": "boolean",
+            "description": "Appendix K: whether this principal's read position is shared with other members (its own sessions always follow it)."
           }
         },
         "required": [
           "visibility",
-          "shareLastSeen"
+          "shareLastSeen",
+          "shareReadReceipts"
         ]
       },
       "messaging.common.v1.PresenceSettingsRequest": {
@@ -11319,6 +11349,9 @@
             ]
           },
           "shareLastSeen": {
+            "type": "boolean"
+          },
+          "shareReadReceipts": {
             "type": "boolean"
           }
         },

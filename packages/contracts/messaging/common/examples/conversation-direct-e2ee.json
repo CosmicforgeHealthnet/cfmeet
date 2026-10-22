@@ -39,5 +39,6 @@
   "expiryGraceSeconds": null,
   "retentionSeconds": null,
   "predecessorConversationId": null,
-  "successorConversationId": null
+  "successorConversationId": null,
+  "readReceipts": null
 }

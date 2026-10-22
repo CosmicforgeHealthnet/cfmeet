@@ -400,6 +400,40 @@ pub(crate) async fn lock_sender<C: ConnectionTrait>(
         if crate::safety::blocks::direct_blocked(db, conversation, principal).await? {
             return Err(Error::code(ErrorCode::DeliveryRefused));
         }
+        if application {
+            // Appendix K message requests: nothing reaches a counterpart that declined;
+            // an E2EE request carries no messages before acceptance (the counterpart's
+            // devices cannot be in the group yet).
+            #[derive(FromQueryResult)]
+            struct Other {
+                state: String,
+                removed_reason: Option<String>,
+            }
+            let other: Option<Other> = db::one(
+                db,
+                "SELECT state, removed_reason FROM messaging_conversation_members WHERE conversation_id = $1 AND principal_id <> $2",
+                vec![conversation.id.into(), principal.into()],
+            )
+            .await?;
+            match other {
+                Some(o)
+                    if o.state == "LEFT"
+                        && o.removed_reason.as_deref() == Some("INVITATION_DECLINED") =>
+                {
+                    return Err(Error::reason(
+                        ErrorCode::DeliveryRefused,
+                        "REQUEST_DECLINED",
+                    ));
+                }
+                Some(o)
+                    if o.state == "INVITED"
+                        && conversation.profile() == SecurityProfile::PrivateE2ee =>
+                {
+                    return Err(Error::reason(ErrorCode::Conflict, "REQUEST_PENDING"));
+                }
+                _ => {}
+            }
+        }
     }
     Ok(())
 }
@@ -867,7 +901,18 @@ pub async fn set_read_cursor(
                     )
                     .await?;
                 }
-                if effective.privacy.read_receipts && current == request.sequence {
+                // Appendix K: receipts per environment, conversation and user.
+                let shares = effective.privacy.read_receipts
+                    && conversation.read_receipts != Some(false)
+                    && db::scalar_i64(
+                        txn,
+                        "SELECT count(*) FROM messaging_presence_settings WHERE environment_id = $1 AND principal_id = $2 \
+                           AND NOT share_read_receipts",
+                        vec![ctx.scope.environment_id.into(), acting.principal_id.into()],
+                    )
+                    .await?
+                        == 0;
+                if shares && current == request.sequence {
                     outbox::enqueue_conversation(
                         txn,
                         conversation.id,

@@ -587,7 +587,8 @@
           "expiryGraceSeconds",
           "retentionSeconds",
           "predecessorConversationId",
-          "successorConversationId"
+          "successorConversationId",
+          "readReceipts"
         ],
         "properties": {
           "conversationId": {
@@ -793,6 +794,17 @@
                 "type": "null"
               }
             ]
+          },
+          "readReceipts": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",

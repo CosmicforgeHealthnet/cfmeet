@@ -421,13 +421,18 @@ async fn activate<C: ConnectionTrait>(
     access::require_accepting(conversation, now)?;
     let class = ContextClass::parse(&conversation.context_class)
         .ok_or(Error::code(ErrorCode::InternalError))?;
-    if class == ContextClass::Direct {
+    let existing = access::membership(txn, conversation_id, request.principal_id, true).await?;
+    // A DIRECT conversation's membership is fixed, except that the counterpart of a
+    // message request joins by accepting it — and then sees the request from the start.
+    let direct_request = class == ContextClass::Direct
+        && source == "INVITATION"
+        && existing.as_ref().is_some_and(Membership::is_invited);
+    if class == ContextClass::Direct && !direct_request {
         return Err(Error::reason(
             ErrorCode::InvalidTransition,
             "DIRECT_MEMBERSHIP_FIXED",
         ));
     }
-    let existing = access::membership(txn, conversation_id, request.principal_id, true).await?;
     if existing.as_ref().is_some_and(Membership::is_active) {
         let view = member_row(txn, conversation_id, request.principal_id).await?;
         return Ok((200, view));
@@ -473,8 +478,13 @@ async fn activate<C: ConnectionTrait>(
         now,
     )
     .await?;
-    // The new member sees its own `member.added` event and everything after.
-    let visible_event = cursor - 1;
+    // The new member sees its own `member.added` event and everything after (the
+    // counterpart of a message request: the whole conversation).
+    let (next_sequence, visible_event) = if direct_request {
+        (1, 0)
+    } else {
+        (next_sequence, cursor - 1)
+    };
     if existing.is_some() {
         db::exec(
             txn,

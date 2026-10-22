@@ -237,8 +237,20 @@ async fn directory(
     Path(principal_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = caller.require_scope(MESSAGES_READ)?;
-    require_acting(&state, &caller, &headers).await?;
+    let acting = require_acting(&state, &caller, &headers).await?;
     devices::directory_lookup_allowed(&state, ctx).await?;
+    // Appendix K: a block (either direction) hides the other principal's keys — the same
+    // answer as an unknown principal.
+    if crate::safety::blocks::blocked_between(
+        &state.db,
+        ctx.scope.environment_id,
+        acting.principal_id,
+        principal_id,
+    )
+    .await?
+    {
+        return Err(ApiError::code(ErrorCode::NotFound));
+    }
     match state.principals.resolve(&ctx.scope, principal_id).await {
         Ok(status @ PrincipalStatus::Active { .. }) if status.is_messaging_capable() => {}
         Ok(_) => return Err(ApiError::code(ErrorCode::NotFound)),

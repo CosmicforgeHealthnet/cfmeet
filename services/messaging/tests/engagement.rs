@@ -1247,3 +1247,242 @@ async fn invitations_are_accepted_declined_revoked_or_expire() {
         "{types:?}"
     );
 }
+
+/// Appendix K (G-31): read receipts are shared only when the environment, the
+/// conversation AND the reader allow it; the reader's own sessions always follow.
+#[tokio::test]
+async fn read_receipts_are_configurable_per_user_and_conversation() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, reader) = (people[0], people[1]);
+    let receipts = |kind: &'static str| {
+        let sql = format!("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.read-cursor.{kind}'");
+        let h = &h;
+        async move { h.scalar(&sql).await }
+    };
+    let read = |conv: Value, who: Uuid| {
+        let h = &h;
+        let c = &c;
+        async move {
+            let cid = conv["conversationId"].as_str().unwrap().to_string();
+            let m = h.send_managed(c, &conv, owner, "read me").await;
+            let r = h
+                .put(
+                    c,
+                    Some(who),
+                    &format!("/v1/conversations/{cid}/read-cursor"),
+                    json!({ "sequence": m.json["sequence"] }),
+                )
+                .await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+    };
+    read(conv.clone(), reader).await;
+    assert_eq!(
+        (receipts("updated").await, receipts("synced").await),
+        (1, 1)
+    );
+    // The reader stops sharing: its sessions still sync, nobody else learns it.
+    let s = h
+        .put(
+            &c,
+            Some(reader),
+            "/v1/messaging/presence/settings",
+            json!({ "visibility": "CONVERSATION_MEMBERS", "shareReadReceipts": false }),
+        )
+        .await;
+    assert_eq!(s.status, StatusCode::OK, "{}", s.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/PresenceSettings",
+        &s.json,
+    );
+    assert_eq!(s.json["shareReadReceipts"], false);
+    read(conv.clone(), reader).await;
+    assert_eq!(
+        (receipts("updated").await, receipts("synced").await),
+        (1, 2)
+    );
+    // A conversation created without receipts shares none, whoever reads.
+    let quiet = h
+        .create_conversation(
+            &c,
+            owner,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "readReceipts": false }),
+        )
+        .await;
+    assert_eq!(quiet.status, StatusCode::CREATED, "{}", quiet.text);
+    assert_eq!(quiet.json["readReceipts"], false);
+    let qid = quiet.json["conversationId"].as_str().unwrap();
+    let third = h.principal(&c);
+    h.post(
+        &c,
+        Some(owner),
+        &format!("/v1/conversations/{qid}/members"),
+        json!({ "principalId": third }),
+    )
+    .await;
+    read(quiet.json.clone(), third).await;
+    assert_eq!(receipts("updated").await, 1);
+}
+
+/// Appendix K (G-31): with message requests on, a DIRECT conversation reaches the
+/// counterpart only after it accepts (it then sees the request); a declined request
+/// delivers nothing more; no KeyPackage of a pending counterpart is handed out; a block
+/// hides each side's device keys from the other.
+#[tokio::test]
+async fn direct_message_requests_and_block_aware_key_lookup() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let r = h
+        .put(
+            &c,
+            None,
+            "/v1/messaging/policy",
+            json!({ "expectedVersion": 0, "policy": { "contexts": {
+            "GROUP": { "requestsRequireAcceptance": true } } } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "DIRECT only: {}", r.text);
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "DIRECT": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"],
+        "defaultProfile": "MANAGED", "requestsRequireAcceptance": true } } }),
+    )
+    .await;
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["contexts"]["DIRECT"]["requestsRequireAcceptance"],
+        true
+    );
+    let (alice, bob, dave) = (h.principal(&c), h.principal(&c), h.principal(&c));
+    let req = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob }),
+        )
+        .await;
+    assert_eq!(req.status, StatusCode::CREATED, "{}", req.text);
+    let cid = req.json["conversationId"].as_str().unwrap().to_string();
+    let msgs = format!("/v1/conversations/{cid}/messages");
+    let hello = h
+        .send_managed(&c, &req.json, alice, "hello, may I ask something?")
+        .await;
+    assert_eq!(hello.status, StatusCode::CREATED, "{}", hello.text);
+    // Nothing reaches bob before he accepts.
+    assert_eq!(
+        h.get(&c, Some(bob), &msgs).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(bob), &format!("/v1/conversations/{cid}"))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    let inv = h.get(&c, Some(bob), "/v1/messaging/invitations").await;
+    assert_eq!(
+        inv.json["invitations"][0]["conversationId"].as_str(),
+        Some(cid.as_str()),
+        "{}",
+        inv.text
+    );
+    let a = h
+        .post(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{cid}/invitation/accept"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (a.status, a.json["state"].as_str()),
+        (StatusCode::OK, Some("ACTIVE")),
+        "{}",
+        a.text
+    );
+    let seen = h.get(&c, Some(bob), &msgs).await;
+    assert!(
+        seen.text.contains("hello, may I ask something?"),
+        "the request is visible: {}",
+        seen.text
+    );
+    assert_eq!(
+        h.send_managed(&c, &req.json, bob, "sure").await.status,
+        StatusCode::CREATED
+    );
+
+    // Declined: nothing more is delivered.
+    let other = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": dave }),
+        )
+        .await;
+    let oid = other.json["conversationId"].as_str().unwrap().to_string();
+    let d = h
+        .post(
+            &c,
+            Some(dave),
+            &format!("/v1/conversations/{oid}/invitation/decline"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(d.status, StatusCode::OK, "{}", d.text);
+    let r = h.send_managed(&c, &other.json, alice, "please?").await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("DELIVERY_REFUSED", "REQUEST_DECLINED"),
+        "{}",
+        r.text
+    );
+
+    // E2EE request: the pending counterpart's KeyPackages are not handed out.
+    let x = h.member(&c, 2).await;
+    let y = h.member(&c, 2).await;
+    let e2ee = h
+        .create_conversation(&c, x.principal, json!({ "contextClass": "DIRECT", "counterpartPrincipalId": y.principal, "securityProfile": "PRIVATE_E2EE" }))
+        .await;
+    assert_eq!(e2ee.status, StatusCode::CREATED, "{}", e2ee.text);
+    let eid = e2ee.json["conversationId"].as_str().unwrap();
+    let r = h
+        .post(
+            &c,
+            Some(x.principal),
+            &format!("/v1/conversations/{eid}/mls/key-package-claims"),
+            json!({ "principalIds": [y.principal] }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_A_MEMBER", "{}", r.text);
+
+    // Block-aware key lookup: neither side sees the other's devices; others still do.
+    let z = h.member(&c, 0).await;
+    let b = h
+        .post(
+            &c,
+            Some(x.principal),
+            "/v1/messaging/blocks",
+            json!({ "principalId": z.principal }),
+        )
+        .await;
+    assert!(b.status.is_success(), "{}", b.text);
+    let dir = |of: Uuid| format!("/v1/messaging/principals/{of}/devices");
+    assert_eq!(
+        h.get(&c, Some(x.principal), &dir(z.principal)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(z.principal), &dir(x.principal)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(y.principal), &dir(z.principal)).await.status,
+        StatusCode::OK
+    );
+}

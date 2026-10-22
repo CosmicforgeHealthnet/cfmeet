@@ -44,7 +44,7 @@ use crate::{
 };
 
 /// Version of the platform defaults below.
-pub const PLATFORM_POLICY_VERSION: i32 = 4;
+pub const PLATFORM_POLICY_VERSION: i32 = 5;
 /// Version of the policy document schema.
 pub const POLICY_SCHEMA_VERSION: i32 = 1;
 /// Version of the security policy persisted with every conversation (profile rules).
@@ -80,6 +80,9 @@ pub struct ContextPolicy {
     pub exports_enabled: bool,
     /// `None`: the environment's retention applies.
     pub retention_days: Option<i64>,
+    /// Appendix K (DIRECT only): a new direct conversation is a message REQUEST — the
+    /// counterpart is INVITED and receives nothing until it accepts.
+    pub requests_require_acceptance: bool,
 }
 
 /// Attachment policy of an environment (§69–§80). Sizes in bytes.
@@ -224,6 +227,7 @@ pub fn platform_defaults() -> EffectivePolicy {
                     reporting_enabled: true,
                     exports_enabled: false,
                     retention_days: None,
+                    requests_require_acceptance: false,
                 },
             )
         })
@@ -321,6 +325,8 @@ pub struct ContextOverride {
     pub retention_days: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sms_bridge_eligible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requests_require_acceptance: Option<bool>,
 }
 
 macro_rules! overrides {
@@ -641,6 +647,15 @@ pub fn resolve(
         }
         if o.retention_days.is_some() {
             c.retention_days = o.retention_days;
+        }
+        if let Some(v) = o.requests_require_acceptance {
+            if v && *class != ContextClass::Direct {
+                return Err(format!(
+                    "{}: requestsRequireAcceptance applies to DIRECT conversations only",
+                    class.as_str()
+                ));
+            }
+            c.requests_require_acceptance = v;
         }
         c.legal_hold_eligible = c.allowed_profiles.contains(&SecurityProfile::Managed);
         c.sms_bridge_eligible = match o.sms_bridge_eligible {
@@ -1082,7 +1097,11 @@ mod tests {
     #[test]
     fn version_3_feature_policies_are_explicit_and_regulated_contexts_never_hold_e2ee_archives() {
         let p = platform_defaults();
-        assert_eq!(p.platform_policy_version, 4);
+        assert_eq!(p.platform_policy_version, 5);
+        assert!(
+            p.contexts.values().all(|c| !c.requests_require_acceptance),
+            "message requests are off unless a policy turns them on"
+        );
         assert!(!p.attachments.enabled, "attachments are off until enabled");
         assert!(
             p.attachments.storage_budget_bytes.is_none(),
