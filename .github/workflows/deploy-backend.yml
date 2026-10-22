@@ -11,6 +11,11 @@ name: Deploy Backend
 #   - VPS_DEPLOY_PATH: Deployment path (e.g., /opt/cfmeet-production)
 
 on:
+  # One-time Part V Swagger documentation deployment; normal future merges stay manual.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-backend.yml"
   pull_request:
     paths:
       - "services/meeting-service/**"
@@ -82,7 +87,7 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   deploy:
-    if: github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(ops): one-time Part V Swagger VPS deployment') }}
     name: Deploy to VPS
     needs: test
     runs-on: ubuntu-latest
