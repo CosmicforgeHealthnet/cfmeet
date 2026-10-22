@@ -7,6 +7,8 @@
 //!   validation of published MLS KeyPackages), [`binding`] (the canonical device
 //!   credential and registration-challenge formats) and [`transparency`] (the
 //!   append-only Merkle log and its proofs). None of these touches a private key.
+//!   [`verification`] computes the safety code / QR payload users compare, from public
+//!   device keys only.
 //! * **Client crypto core** — [`device`] (feature `client`): device signature keys,
 //!   KeyPackage generation and the registration proof of possession. Private keys live
 //!   only in the client process (the in-memory OpenMLS provider here; durable device
@@ -20,12 +22,14 @@
 //! MLS 1.0 does not provide post-quantum confidentiality, and this crate makes no Signal
 //! Protocol interoperability claim.
 
+pub mod backup;
 pub mod binding;
 pub mod framing;
 pub mod history_transfer;
 pub mod key_package;
 pub mod profile;
 pub mod transparency;
+pub mod verification;
 
 #[cfg(feature = "client")]
 pub mod attachment;

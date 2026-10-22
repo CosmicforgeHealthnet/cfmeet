@@ -333,6 +333,13 @@ async fn a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_sepa
             .await,
         2
     );
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    assert!(
+        types.contains("messaging.message.sms-transport-changed"),
+        "sms-transport-changed not recorded: {types:?}"
+    );
 }
 
 #[tokio::test]
@@ -400,4 +407,50 @@ async fn an_unreachable_or_unconfigured_sms_gateway_never_affects_in_app_messagi
     );
     let sent = h.send_managed(&c, &conv, people[1], "in-app only").await;
     assert_eq!(sent.status, StatusCode::CREATED);
+}
+
+/// §28 / §108: SMS Bridge eligibility is part of the context policy. A MANAGED context is
+/// eligible by default; a tenant that opts the context out gets no bridge, and an
+/// E2EE-only context can never be made eligible.
+#[tokio::test]
+async fn sms_bridge_eligibility_follows_the_context_policy() {
+    let Some((h, _gw)) = harness().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let owner = people[0];
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let party = h.principal_of_kind(&c, "TELEPHONE_ENDPOINT");
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["contexts"]["GROUP"]["smsBridgeEligible"], true,
+        "{}",
+        effective.text
+    );
+    assert_eq!(
+        effective.json["effective"]["contexts"]["DIRECT"]["smsBridgeEligible"],
+        false
+    );
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED",
+                                         "smsBridgeEligible": false } } }),
+    )
+    .await;
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/sms-bridges"),
+            bridge_body(Uuid::new_v4(), party),
+        )
+        .await;
+    assert_eq!(r.reason(), "SMS_BRIDGE_NOT_ELIGIBLE", "{}", r.text);
+    let v = h.get(&c, None, "/v1/messaging/policy").await;
+    let bad = h
+        .put(&c, None, "/v1/messaging/policy",
+             json!({ "expectedVersion": v.json["version"], "policy": { "contexts": { "DIRECT": { "smsBridgeEligible": true } } } }))
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.text);
 }

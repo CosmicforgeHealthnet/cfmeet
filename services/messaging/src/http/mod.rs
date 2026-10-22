@@ -49,6 +49,8 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::search::http::customer_routes())
         .merge(crate::sms_bridge::http::messaging_routes())
         .merge(crate::usage::http::routes())
+        .merge(crate::backups::routes())
+        .merge(crate::membership::http::customer_routes())
 }
 
 /// Routes nested under `/v1/conversations`.
@@ -117,7 +119,10 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(32 * 1024))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
-    public.merge(customer).merge(internal)
+    public
+        .merge(customer)
+        .merge(internal)
+        .layer(from_fn(crate::metrics::http_layer))
 }
 
 /// The served API description: exactly the checked-in contract

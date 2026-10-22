@@ -877,3 +877,167 @@ async fn responses_and_events_conform_to_the_published_contracts() {
         );
     }
 }
+
+/// §155: a member removal racing a burst of that member's sends never commits a message
+/// after the removal: every accepted message precedes `member.removed` in the
+/// conversation's event order, and every later send is refused.
+#[tokio::test]
+async fn member_removal_racing_sends_never_commits_a_post_removal_message() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 3).await;
+    let (owner, sender) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let sends = (0..15).map(|i| {
+        let h = &h;
+        let c = &c;
+        let conv = &conv;
+        async move { h.send_managed(c, conv, sender, &format!("burst {i}")).await }
+    });
+    let removal_path = format!("/v1/conversations/{cid}/members/{sender}");
+    let removal = h.delete(&c, Some(owner), &removal_path);
+    let (results, removal) = tokio::join!(futures_join_all(sends), removal);
+    assert_eq!(removal.status, StatusCode::OK, "{}", removal.text);
+    for r in &results {
+        assert!(
+            r.status == StatusCode::CREATED || r.status == StatusCode::NOT_FOUND,
+            "{}",
+            r.text
+        );
+    }
+    let removed_at = h
+        .scalar(&format!(
+            "SELECT conversation_event_sequence FROM messaging_outbox_events WHERE conversation_id = '{cid}' \
+               AND event_type = 'messaging.member.removed' AND payload->>'principal_id' = '{sender}'"
+        ))
+        .await;
+    let after_removal = h
+        .scalar(&format!(
+            "SELECT count(*) FROM messaging_outbox_events e JOIN messaging_messages m ON m.id::text = e.payload->>'message_id' \
+              WHERE e.conversation_id = '{cid}' AND e.event_type = 'messaging.message.created' \
+                AND m.sender_principal_id = '{sender}' AND e.conversation_event_sequence > {removed_at}"
+        ))
+        .await;
+    assert_eq!(
+        after_removal, 0,
+        "a message was committed after the removal"
+    );
+    let accepted = results
+        .iter()
+        .filter(|r| r.status == StatusCode::CREATED)
+        .count() as i64;
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_messages WHERE sender_principal_id = '{sender}'"
+        ))
+        .await,
+        accepted,
+        "exactly the acknowledged messages exist"
+    );
+    let late = h.send_managed(&c, &conv, sender, "after").await;
+    assert_eq!(late.status, StatusCode::NOT_FOUND, "{}", late.text);
+}
+
+/// §50 / §146: the policy's edit and delete windows close for the sender (MANAGED edit,
+/// delete for everyone); a message still inside its window stays modifiable.
+#[tokio::test]
+async fn edit_and_delete_windows_close_per_policy() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "editing": { "editWindowSeconds": 60, "deleteWindowSeconds": 120 } }),
+    )
+    .await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let old = h.send_managed(&c, &conv, people[0], "old").await;
+    let path = |r: &Response| {
+        format!(
+            "/v1/conversations/{cid}/messages/{}",
+            r.json["messageId"].as_str().unwrap()
+        )
+    };
+    h.clock.advance(chrono::Duration::seconds(90));
+    let fresh = h.send_managed(&c, &conv, people[0], "fresh").await;
+    // Edit window (60 s) closed for the old message; open for the fresh one.
+    let r = h
+        .patch(&c, Some(people[0]), &path(&old), json!({ "text": "x" }))
+        .await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("MESSAGE_NOT_MODIFIABLE", "WINDOW_CLOSED"),
+        "{}",
+        r.text
+    );
+    let r = h
+        .patch(
+            &c,
+            Some(people[0]),
+            &path(&fresh),
+            json!({ "text": "fresh, edited" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // Delete window (120 s) still open at 90 s, closed at 130 s.
+    h.clock.advance(chrono::Duration::seconds(40));
+    let r = h.delete(&c, Some(people[0]), &path(&old)).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("MESSAGE_NOT_MODIFIABLE", "WINDOW_CLOSED"),
+        "{}",
+        r.text
+    );
+    let r = h.delete(&c, Some(people[0]), &path(&fresh)).await;
+    assert_eq!(r.json["deletion"], "DELETED", "{}", r.text);
+    // Deleting for oneself is not limited by the window.
+    let r = h
+        .delete(&c, Some(people[1]), &format!("{}?scope=ME", path(&old)))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+}
+
+/// §41: MANAGED text is plain text — markup and scripts are never interpreted: stored and
+/// returned exactly as sent, as a JSON string, so clients render them as text.
+#[tokio::test]
+async fn managed_text_is_plain_text_never_interpreted_markup() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let markup =
+        "<script>alert(1)</script> <img src=x onerror=alert(2)> **bold** [link](javascript:x)";
+    let sent = h.send_managed(&c, &conv, people[0], markup).await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    assert_eq!(
+        sent.json["managed"]["text"], markup,
+        "stored verbatim, not sanitized or rendered"
+    );
+    let cid = conv["conversationId"].as_str().unwrap();
+    let list = h
+        .get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/messages"),
+        )
+        .await;
+    assert!(list
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json")));
+    assert!(list.json["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["managed"]["text"] == markup));
+    // Control characters are refused (the only content rule besides the length bound).
+    let bad = h.send_managed(&c, &conv, people[0], "bell\u{7}").await;
+    assert_eq!(bad.code(), "CONTENT_REJECTED", "{}", bad.text);
+}

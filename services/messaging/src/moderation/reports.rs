@@ -208,15 +208,24 @@ pub async fn create(
         };
         let bytes =
             serde_json::to_vec(&evidence).map_err(|_| Error::code(ErrorCode::InternalError))?;
-        Some(ring.seal_record(
-            &evidence_aad(
-                ctx.scope.tenant_id,
-                ctx.scope.application_id,
-                ctx.scope.environment_id,
-                id,
-            ),
-            &bytes,
-        )?)
+        Some(
+            ring.seal_record(
+                &state.db,
+                &crate::messages::keys::KeyScope {
+                    tenant_id: ctx.scope.tenant_id,
+                    application_id: ctx.scope.application_id,
+                    environment_id: ctx.scope.environment_id,
+                },
+                &evidence_aad(
+                    ctx.scope.tenant_id,
+                    ctx.scope.application_id,
+                    ctx.scope.environment_id,
+                    id,
+                ),
+                &bytes,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -224,8 +233,9 @@ pub async fn create(
         Some((s, n, k)) => (Some(s), Some(n), Some(k)),
         None => (None, None, None),
     };
+    let txn = sea_orm::TransactionTrait::begin(&state.db).await?;
     db::exec(
-        &state.db,
+        &txn,
         "INSERT INTO messaging_reports (id, tenant_id, application_id, environment_id, conversation_id, security_profile, \
            reporter_principal_id, reported_principal_id, message_ids, category, evidence_kind, sealed_evidence, \
            evidence_nonce, evidence_key_id, created_at) \
@@ -249,6 +259,19 @@ pub async fn create(
         ],
     )
     .await?;
+    // §118: message.reported (ids and codes only; the reporter is not disclosed).
+    crate::events::outbox::record(
+        &txn,
+        "messaging.report.created",
+        "REPORT",
+        id,
+        crate::conversations::service::scope_of(ctx),
+        json!({ "report_id": id, "conversation_id": conversation.id, "security_profile": profile.as_str(),
+                "category": request.category, "evidence_kind": evidence_kind, "message_count": ids.len() }),
+        now,
+    )
+    .await?;
+    txn.commit().await?;
     audit::record(
         &state.db,
         AuditEntry {
@@ -265,6 +288,11 @@ pub async fn create(
     )
     .await?;
     crate::metrics::inc("messaging_reports_total", &[("evidence", evidence_kind)]);
+    // §88: a recipient complaint is a scoring signal on the reported principal (never an
+    // automatic restriction by itself).
+    if let Some(reported) = request.reported_principal_id {
+        crate::safety::abuse::signal(state, ctx, reported, crate::safety::abuse::COMPLAINT).await;
+    }
     // The reporter learns only that the report was received.
     Ok(
         json!({ "reportId": id, "status": "OPEN", "category": request.category, "evidenceKind": evidence_kind, "createdAt": rfc3339(now) }),
@@ -384,26 +412,38 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         vec![r.conversation_id.into(), r.message_ids.clone().into()],
     )
     .await?;
-    let evidence: Option<Evidence> =
-        match (&r.sealed_evidence, &r.evidence_nonce, &r.evidence_key_id) {
-            (Some(s), Some(n), Some(k)) => state
-                .managed_keys
-                .as_ref()
-                .and_then(|ring| {
-                    ring.open_record(
-                        &evidence_aad(r.tenant_id, r.application_id, r.environment_id, r.id),
-                        s,
-                        n,
-                        k,
-                    )
-                })
-                .and_then(|b| serde_json::from_slice(&b).ok()),
-            _ => None,
-        };
+    let evidence: Option<Evidence> = match (
+        &r.sealed_evidence,
+        &r.evidence_nonce,
+        &r.evidence_key_id,
+        state.managed_keys.as_ref(),
+    ) {
+        (Some(s), Some(n), Some(k), Some(ring)) => ring
+            .open_record(
+                &state.db,
+                &evidence_aad(r.tenant_id, r.application_id, r.environment_id, r.id),
+                s,
+                n,
+                k,
+                crate::messages::keys::DecryptPurpose::ReportEvidence,
+            )
+            .await
+            .and_then(|b| serde_json::from_slice(&b).ok()),
+        _ => None,
+    };
     let show_managed = effective.moderation.managed_evidence_allowed;
+    let mut managed_texts = Vec::with_capacity(rows.len());
+    for m in &rows {
+        managed_texts.push(if show_managed {
+            managed::stored_text_of(state, m).await
+        } else {
+            None
+        });
+    }
     let messages: Vec<Value> = rows
         .iter()
-        .map(|m| {
+        .zip(managed_texts)
+        .map(|(m, managed_text)| {
             let disclosed = evidence
                 .as_ref()
                 .and_then(|e| e.disclosure.iter().find(|d| d.message_id == m.id))
@@ -428,7 +468,7 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
                 }
                 SecurityProfile::Managed => {
                     v["managed"] = json!({
-                        "text": if show_managed { managed::stored_text_of(state, m) } else { None },
+                        "text": managed_text,
                         "visibility": if show_managed { "POLICY_ALLOWS_MODERATOR_ACCESS" } else { "POLICY_WITHHOLDS_CONTENT" },
                     });
                 }

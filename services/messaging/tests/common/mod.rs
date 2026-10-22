@@ -752,6 +752,29 @@ impl Harness {
         .await
     }
 
+    /// Every outbox event recorded so far, checked against the event contract
+    /// (`cfmeet.messaging.event`); returns the set of event types seen.
+    #[allow(dead_code)]
+    pub async fn conforming_event_types(&self) -> std::collections::BTreeSet<String> {
+        use sea_orm::ConnectionTrait;
+        let rows = self
+            .conn()
+            .query_all(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                "SELECT jsonb_build_object('event_type', event_type, 'payload', payload) FROM messaging_outbox_events ORDER BY sequence"
+                    .to_string(),
+            ))
+            .await
+            .unwrap();
+        let mut types = std::collections::BTreeSet::new();
+        for r in rows {
+            let e: Value = r.try_get_by_index(0).unwrap();
+            conforms("messaging/events/v1.schema.json", &e);
+            types.insert(e["event_type"].as_str().unwrap().to_string());
+        }
+        types
+    }
+
     pub async fn scalar(&self, sql: &str) -> i64 {
         self.conn()
             .query_one(Statement::from_string(
@@ -872,4 +895,46 @@ pub fn conforms(reference: &str, value: &Value) {
         errors.is_empty(),
         "{reference} violated: {errors:?}\n{value:#}"
     );
+}
+
+/// Whether the TCP listener on `port` belongs to process `pid` (Linux `/proc`).
+///
+/// A probed free port can be taken by another test's process between the probe and the
+/// bind; the newly spawned process then fails to bind and exits, while `/ready` on that
+/// port is answered by the OTHER process. Readiness counts only for the process that
+/// actually owns the listening socket.
+#[allow(dead_code)]
+pub fn process_owns_listener(pid: u32, port: u16) -> bool {
+    let suffix = format!(":{port:04X}");
+    let mut inodes = Vec::new();
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        let Ok(text) = std::fs::read_to_string(table) else {
+            continue;
+        };
+        for line in text.lines().skip(1) {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            // local_address, state 0A = LISTEN, inode.
+            if cols.len() > 9 && cols[1].ends_with(&suffix) && cols[3] == "0A" {
+                inodes.push(format!("socket:[{}]", cols[9]));
+            }
+        }
+    }
+    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+        return false;
+    };
+    fds.flatten().any(|fd| {
+        std::fs::read_link(fd.path())
+            .map(|target| inodes.iter().any(|i| target.as_os_str() == i.as_str()))
+            .unwrap_or(false)
+    })
+}
+
+/// The port of a `http://host:port` URL.
+#[allow(dead_code)]
+pub fn url_port(url: &str) -> u16 {
+    url.rsplit(':')
+        .next()
+        .and_then(|p| p.split('/').next())
+        .and_then(|p| p.parse().ok())
+        .expect("url with a port")
 }

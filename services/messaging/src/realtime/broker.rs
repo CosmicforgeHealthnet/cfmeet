@@ -39,6 +39,13 @@ pub enum BrokerMessage {
         reference_id: Uuid,
         conversation_id: Option<Uuid>,
     },
+    /// A principal advanced its read cursor: its own sessions follow (§55), whatever the
+    /// read-receipt policy shares with other members.
+    ReadCursor {
+        conversation_id: Uuid,
+        principal_id: Uuid,
+        read_sequence: i64,
+    },
     /// Ephemeral typing signal (never stored).
     Typing {
         conversation_id: Uuid,

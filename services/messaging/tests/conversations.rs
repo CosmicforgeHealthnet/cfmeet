@@ -1099,3 +1099,289 @@ async fn message_sequences_are_unique_and_gap_free_under_concurrency() {
             .is_err()
     );
 }
+
+/// §38 (G-04): a transactional conversation past `expiresAt` refuses new messages but
+/// stays readable (and extendable) for its grace period; then it becomes EXPIRED.
+#[tokio::test]
+async fn an_expiry_grace_period_keeps_the_conversation_readable_then_expires_it() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let (alice, _) = h.pair(&c).await;
+    let r = h
+        .put_policy(
+            &c,
+            0,
+            json!({ "contexts": { "TRANSACTION": { "maxLifetimeSeconds": 3600,
+            "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "expiryGraceSeconds": 60 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(
+        r.code(),
+        "VALIDATION_ERROR",
+        "a grace needs an expiring conversation: {}",
+        r.text
+    );
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "TRANSACTION", "expiryGraceSeconds": 2_592_001 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    let t = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "TRANSACTION", "expiryGraceSeconds": 600 }),
+            &key(),
+        )
+        .await;
+    assert_eq!(t.status, StatusCode::CREATED, "{}", t.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &t.json,
+    );
+    assert_eq!(t.json["expiryGraceSeconds"], 600);
+    let tid = t.json["conversationId"].as_str().unwrap().to_string();
+    let msgs = format!("/v1/conversations/{tid}/messages");
+    let send = |text: &'static str| {
+        let h = &h;
+        let c = &c;
+        let msgs = msgs.clone();
+        async move {
+            h.send(
+                Method::POST,
+                Some(&c.token),
+                Some(alice),
+                &msgs,
+                Some(json!({ "clientMessageId": Uuid::new_v4(), "text": text })),
+                &[],
+            )
+            .await
+        }
+    };
+    assert_eq!(send("before").await.status, StatusCode::CREATED);
+
+    // Past expiresAt, inside the grace: sends refused, reads allowed, still ACTIVE.
+    h.clock.advance(chrono::Duration::seconds(3600 + 30));
+    let refused = send("during grace").await;
+    assert_eq!(
+        (refused.code(), refused.reason()),
+        ("CONVERSATION_NOT_ACTIVE", "EXPIRED"),
+        "{}",
+        refused.text
+    );
+    let read = h.get(&c, Some(alice), &msgs).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text);
+    assert!(read.text.contains("before"));
+    assert_eq!(
+        messaging::conversations::service::expire_due(&h.state, 100)
+            .await
+            .unwrap(),
+        0,
+        "the worker waits for the grace to pass"
+    );
+    let view = h.get(&c, None, &format!("/v1/conversations/{tid}")).await;
+    assert_eq!(view.json["lifecycleState"], "ACTIVE");
+
+    // The grace lets the owner extend the conversation; sends resume.
+    let extended = h
+        .patch_conv(
+            &c,
+            None,
+            &t.json["conversationId"],
+            json!({ "expectedVersion": view.json["version"],
+            "expiresAt": (h.now() + chrono::Duration::minutes(10)).to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(extended.status, StatusCode::OK, "{}", extended.text);
+    assert_eq!(send("after extension").await.status, StatusCode::CREATED);
+
+    // After the new expiry plus the grace, the worker expires it.
+    h.clock
+        .advance(chrono::Duration::minutes(10 + 10) + chrono::Duration::seconds(1));
+    assert_eq!(
+        messaging::conversations::service::expire_due(&h.state, 100)
+            .await
+            .unwrap(),
+        1
+    );
+    let view = h.get(&c, None, &format!("/v1/conversations/{tid}")).await;
+    assert_eq!(view.json["lifecycleState"], "EXPIRED");
+}
+
+/// Appendix G (G-29): a security profile never changes in place; a deliberately created
+/// successor (with an explicit disclosure acknowledgement when the profile changes) carries
+/// provenance both ways, copies no content or members, and exists at most once.
+#[tokio::test]
+async fn a_profile_change_is_a_disclosed_successor_conversation_with_provenance() {
+    use sea_orm::ConnectionTrait;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let (alice, bob) = h.pair(&c).await;
+    let carol = h.principal(&c);
+    let r = h
+        .put_policy(&c, 0, json!({ "contexts": {
+            "DIRECT": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" },
+            "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } } }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let e2ee = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob }),
+            &key(),
+        )
+        .await;
+    assert_eq!(
+        e2ee.json["securityProfile"], "PRIVATE_E2EE",
+        "{}",
+        e2ee.text
+    );
+    let pid = e2ee.json["conversationId"].clone();
+    let successor = |ack: bool| {
+        json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob, "securityProfile": "MANAGED",
+                "predecessorConversationId": pid, "profileChangeDisclosureAcknowledged": ack })
+    };
+    // A move to a server-readable profile is never silent.
+    let r = h.create(&c, alice, successor(false), &key()).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        (
+            "SECURITY_PROFILE_NOT_ALLOWED",
+            "PROFILE_CHANGE_DISCLOSURE_REQUIRED"
+        ),
+        "{}",
+        r.text
+    );
+    // Only a member administrator of the predecessor; the same two principals.
+    let r = h.create(&c, carol, successor(true), &key()).await;
+    assert_eq!(r.reason(), "PREDECESSOR_NOT_FOUND", "{}", r.text);
+    let r = h
+        .create(&c, alice, json!({ "contextClass": "DIRECT", "counterpartPrincipalId": carol, "securityProfile": "MANAGED",
+            "predecessorConversationId": pid, "profileChangeDisclosureAcknowledged": true }), &key())
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "predecessorConversationId": pid }),
+            &key(),
+        )
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+
+    let s = h.create(&c, alice, successor(true), &key()).await;
+    assert_eq!(s.status, StatusCode::CREATED, "{}", s.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &s.json,
+    );
+    assert_eq!(s.json["securityProfile"], "MANAGED");
+    assert_eq!(s.json["predecessorConversationId"], pid);
+    let sid = s.json["conversationId"].clone();
+    let p = h
+        .get(
+            &c,
+            None,
+            &format!("/v1/conversations/{}", pid.as_str().unwrap()),
+        )
+        .await;
+    assert_eq!(p.json["successorConversationId"], sid);
+    assert_eq!(
+        p.json["securityProfile"], "PRIVATE_E2EE",
+        "the predecessor never changes profile"
+    );
+    assert_eq!(p.json["version"], 2);
+    // No content is copied.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{}'",
+            sid.as_str().unwrap()
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_audit WHERE action = 'CONVERSATION_SUCCESSOR_CREATED' AND target_id = '{}'", pid.as_str().unwrap()))
+            .await,
+        1
+    );
+    assert!(h
+        .conforming_event_types()
+        .await
+        .contains("messaging.conversation.successor-created"));
+    // One successor each; provenance is immutable.
+    let again = h
+        .create(&c, alice, json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob, "securityProfile": "PRIVATE_E2EE",
+            "predecessorConversationId": pid, "profileChangeDisclosureAcknowledged": true }), &key())
+        .await;
+    assert_eq!(again.reason(), "SUCCESSOR_EXISTS", "{}", again.text);
+    for sql in [
+        format!("UPDATE messaging_conversations SET predecessor_conversation_id = NULL, version = version + 1 WHERE id = '{}'", sid.as_str().unwrap()),
+        format!("UPDATE messaging_conversations SET successor_conversation_id = NULL, version = version + 1 WHERE id = '{}'", pid.as_str().unwrap()),
+    ] {
+        assert!(h.conn().execute_unprepared(&sql).await.is_err(), "{sql}");
+    }
+
+    // A same-profile GROUP successor needs no disclosure; members are not copied.
+    let g = h
+        .create(&c, alice, json!({ "contextClass": "GROUP" }), &key())
+        .await;
+    let gid = g.json["conversationId"].clone();
+    let r = h
+        .send(
+            Method::POST,
+            Some(&c.token),
+            Some(alice),
+            &format!("/v1/conversations/{}/members", gid.as_str().unwrap()),
+            Some(json!({ "principalId": bob })),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = h
+        .create(
+            &c,
+            bob,
+            json!({ "contextClass": "GROUP", "predecessorConversationId": gid }),
+            &key(),
+        )
+        .await;
+    assert_eq!(
+        r.reason(),
+        "PREDECESSOR_NOT_FOUND",
+        "a plain member cannot: {}",
+        r.text
+    );
+    let gs = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "predecessorConversationId": gid }),
+            &key(),
+        )
+        .await;
+    assert_eq!(gs.status, StatusCode::CREATED, "{}", gs.text);
+    assert_eq!(
+        gs.json["memberCount"], 1,
+        "members join the successor themselves"
+    );
+}

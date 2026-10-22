@@ -270,6 +270,12 @@ pub async fn create_intent(
     if !member.may_send(now) {
         return Err(Error::reason(ErrorCode::SendRestricted, "MUTED"));
     }
+    if member.is_read_only() {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "READ_ONLY_MEMBER",
+        ));
+    }
     let effective = policy::current(&state.db, ctx.scope.environment_id).await?;
     if !attachments_enabled(&effective, &conversation) {
         return Err(Error::reason(
@@ -612,11 +618,58 @@ async fn settle(
                     }
                     _ => {}
                 }
+                if let Some(event_type) = attachment_event(to) {
+                    record_attachment_event(txn, &row, event_type, to, reason, now).await?;
+                }
                 Ok(true)
             })
         })
         .await
         .map_err(Error::from)
+}
+
+/// The domain event of an attachment state (§118 / Appendix D), if it has one.
+fn attachment_event(state: &str) -> Option<&'static str> {
+    match state {
+        "READY" => Some("messaging.attachment.ready"),
+        "REJECTED" => Some("messaging.attachment.rejected"),
+        "QUARANTINED" => Some("messaging.attachment.quarantined"),
+        "DELETED" => Some("messaging.attachment.deleted"),
+        _ => None,
+    }
+}
+
+/// Records an attachment transition (ids and codes only; never names, keys or bytes).
+pub(crate) async fn record_attachment_event<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    row: &AttachmentRow,
+    event_type: &'static str,
+    state: &str,
+    reason: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    crate::events::outbox::record(
+        db,
+        event_type,
+        "ATTACHMENT",
+        row.id,
+        crate::events::outbox::EventScope {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        json!({
+            "attachment_id": row.id,
+            "conversation_id": row.conversation_id,
+            "message_id": row.message_id,
+            "security_profile": row.security_profile,
+            "state": state,
+            "reason": reason,
+        }),
+        now,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Verifies the stored object (size and SHA-256) and, for MANAGED, its content and scan.
@@ -1065,6 +1118,20 @@ pub async fn grant(
         )
         .map_err(storage_error)?;
     crate::metrics::inc("messaging_attachment_grants_total", &[]);
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        row.verified_size.unwrap_or(row.declared_size),
+        row.id,
+        Some(&row.security_profile),
+        now,
+    )
+    .await;
     Ok(json!({
         "attachmentId": row.id,
         "method": "GET",
@@ -1107,6 +1174,20 @@ pub async fn proxied(
         tracing::error!(attachment = %row.id, "stored object no longer matches its digest");
         return Err(Error::code(ErrorCode::IntegrityCheckFailed));
     }
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        bytes.len() as i64,
+        row.id,
+        Some(&row.security_profile),
+        state.now(),
+    )
+    .await;
     Ok((row, bytes))
 }
 

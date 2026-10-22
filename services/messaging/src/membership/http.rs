@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -39,6 +39,57 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/:conversation_id/bans", get(list_bans).post(ban))
         .route("/:conversation_id/bans/:principal_id", delete(unban))
+        .route(
+            "/:conversation_id/invitation/accept",
+            post(accept_invitation),
+        )
+        .route(
+            "/:conversation_id/invitation/decline",
+            post(decline_invitation),
+        )
+}
+
+/// Routes nested under `/v1/messaging`.
+pub fn customer_routes() -> Router<AppState> {
+    Router::new().route("/invitations", get(list_invitations))
+}
+
+async fn accept_invitation(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting =
+        crate::messages::http::acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    Ok(Json(
+        super::answer_invitation(&state, caller.context(), &acting, id, true).await?,
+    ))
+}
+
+async fn decline_invitation(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting =
+        crate::messages::http::acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    Ok(Json(
+        super::answer_invitation(&state, caller.context(), &acting, id, false).await?,
+    ))
+}
+
+async fn list_invitations(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting =
+        crate::messages::http::acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok(Json(
+        super::invitations(&state, caller.context(), &acting).await?,
+    ))
 }
 
 /// The administrator of a request: the verified acting principal, or the application.
@@ -59,6 +110,7 @@ async fn list(
     caller: CustomerCaller,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    axum::extract::Query(q): axum::extract::Query<super::ListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let acting = match acting_header(&headers)? {
         Some(p) => {
@@ -71,7 +123,7 @@ async fn list(
         }
     };
     Ok(Json(
-        super::list(&state, caller.context(), acting.as_ref(), id).await?,
+        super::list(&state, caller.context(), acting.as_ref(), id, q).await?,
     ))
 }
 

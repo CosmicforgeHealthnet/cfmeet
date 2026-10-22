@@ -32,15 +32,15 @@ async fn connections_require_a_valid_single_use_ticket_from_a_valid_client_token
     // No / garbage ticket.
     assert_eq!(rt.open(&"0".repeat(64), None).await.err(), Some(401));
     assert_eq!(rt.open("not-a-ticket", None).await.err(), Some(401));
-    // Client tokens are never accepted on the server API, and a server credential is
-    // never accepted for tickets.
+    // Client tokens reach only the member operations of the server API (§105; see
+    // tests/client_tokens_rest.rs), and a server credential is never accepted for tickets.
     let token = rt.token(&c, &alice).await;
     let r = h
         .send(
             axum::http::Method::GET,
             None,
             Some(alice.principal),
-            "/v1/conversations",
+            "/v1/messaging/policy",
             None,
             &[("authorization", &format!("CF-Client-Token {token}"))],
         )
@@ -827,3 +827,312 @@ async fn protocol_errors_never_close_and_frames_are_bounded() {
 use futures_util::SinkExt;
 use messaging::realtime::broker::Broker;
 use sea_orm::ConnectionTrait;
+
+/// §52 / §55 / §148: a message is DELIVERED to a recipient once one of its sessions
+/// acknowledged it (the sender sees `delivery.cursor.updated`), and one device advancing
+/// the read cursor moves the principal's other sessions even when read receipts are not
+/// shared with other members — who then learn nothing about it.
+#[tokio::test]
+async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "privacy": { "readReceipts": false } }),
+    )
+    .await;
+    let member = |principal, device| Member {
+        principal,
+        device,
+        group: None,
+        cursor: 0,
+    };
+    let a = member(alice, h.active_device(&c, alice).await);
+    let b1 = member(bob, h.active_device(&c, bob).await);
+    let b2 = member(bob, h.active_device(&c, bob).await);
+    let mut wa = rt.connect(&c, &a).await;
+    let mut wb1 = rt.connect(&c, &b1).await;
+    let mut wb2 = rt.connect(&c, &b2).await;
+    for w in [&mut wa, &mut wb1, &mut wb2] {
+        w.subscribe(&conv, None).await;
+    }
+    let sent = h.send_managed(&c, &conv, alice, "are you there?").await;
+    let seq = sent.json["sequence"].as_i64().unwrap();
+    wa.events(1).await;
+    wb2.events(1).await;
+    let created = wb1.events(1).await.remove(0);
+    let event_seq = created["eventSequence"].as_i64().unwrap();
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_received_cursors")
+            .await,
+        0,
+        "nothing is DELIVERED before a session acknowledges it"
+    );
+
+    // Bob's first device acknowledges: the message is DELIVERED to Bob.
+    wb1.send(json!({ "type": "ack", "conversationId": conv["conversationId"], "eventSequence": event_seq, "requestId": "d1" })).await;
+    wb1.next_of("ack.recorded").await;
+    let receipt = wa.events(1).await.remove(0);
+    assert_eq!(receipt["type"], "delivery.cursor.updated", "{receipt}");
+    assert_eq!(receipt["data"]["principalId"], json!(bob));
+    assert_eq!(receipt["data"]["deliveredSequence"], seq);
+    assert_eq!(
+        h.scalar(&format!("SELECT delivered_sequence FROM messaging_received_cursors WHERE principal_id = '{bob}'")).await,
+        seq
+    );
+    // A second acknowledgement of the same position records nothing new.
+    wb2.send(json!({ "type": "ack", "conversationId": conv["conversationId"], "eventSequence": event_seq, "requestId": "d2" })).await;
+    wb2.next_of("ack.recorded").await;
+
+    // Bob reads on a device: his other session follows; Alice learns nothing.
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!(
+                "/v1/conversations/{}/read-cursor",
+                conv["conversationId"].as_str().unwrap()
+            ),
+            json!({ "sequence": seq }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for w in [&mut wb1, &mut wb2] {
+        let synced = w.next_of("read-cursor.synced").await;
+        assert_eq!(
+            (
+                synced["conversationId"].clone(),
+                synced["readSequence"].clone()
+            ),
+            (conv["conversationId"].clone(), json!(seq))
+        );
+    }
+    wa.quiet("read-cursor.synced", Duration::from_millis(600))
+        .await;
+    wa.quiet("event", Duration::from_millis(300)).await;
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type IN ('messaging.read-cursor.updated', 'messaging.delivery-cursor.updated') \
+                  AND payload->>'principal_id' = (SELECT principal_id::text FROM messaging_received_cursors LIMIT 1) AND event_type = 'messaging.read-cursor.updated'").await,
+        0,
+        "read receipts are off: no member-visible read event"
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.delivery-cursor.updated'").await,
+        1,
+        "one receipt per advance"
+    );
+    h.conforming_event_types().await;
+}
+
+/// §134: the REALTIME_CONNECT switch refuses new tickets and connections (established
+/// connections are governed by revalidation as usual); releasing it restores them.
+#[tokio::test]
+async fn the_realtime_connect_switch_refuses_new_tickets_and_connections() {
+    use messaging::operations::{self, KillSwitch};
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (_conv, people) = h.managed_group(&c, 1).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let ticket = rt.ticket(&c, &m).await; // issued before the switch
+    let token = rt.token(&c, &m).await;
+    let env = c.context.scope.environment_id;
+    let now = chrono::Utc::now();
+    operations::set_switch(
+        h.conn(),
+        KillSwitch::RealtimeConnect,
+        Some(env),
+        true,
+        "INCIDENT",
+        "ops-1",
+        now,
+    )
+    .await
+    .unwrap();
+    let r = rt.ticket_with(&token).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("FEATURE_DISABLED", "KILL_SWITCH_ENGAGED"),
+        "{}",
+        r.text
+    );
+    assert!(
+        rt.open(&ticket, None).await.is_err(),
+        "a ticket issued before the switch cannot connect"
+    );
+    operations::set_switch(
+        h.conn(),
+        KillSwitch::RealtimeConnect,
+        Some(env),
+        false,
+        "RESOLVED",
+        "ops-1",
+        now,
+    )
+    .await
+    .unwrap();
+    let mut ws = rt.connect(&c, &m).await;
+    ws.send(json!({ "type": "ping", "requestId": "p" })).await;
+    ws.next_of("pong").await;
+}
+
+/// Appendix H.3: permessage-deflate is not negotiated (compression side channels) —
+/// a client offering it gets a connection without the extension.
+#[tokio::test]
+async fn websocket_compression_is_never_negotiated() {
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (_conv, people) = h.managed_group(&c, 1).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let ticket = rt.ticket(&c, &m).await;
+    let mut req = format!("ws://{}/v1/realtime", rt.addr)
+        .into_client_request()
+        .unwrap();
+    req.headers_mut().insert(
+        "sec-websocket-protocol",
+        HeaderValue::from_str(&format!("cfmeet.messaging.v1, cfmeet.ticket.{ticket}")).unwrap(),
+    );
+    req.headers_mut().insert(
+        "sec-websocket-extensions",
+        HeaderValue::from_static("permessage-deflate; client_max_window_bits"),
+    );
+    let (_stream, resp) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("handshake");
+    assert_eq!(resp.status(), 101);
+    assert!(
+        resp.headers().get("sec-websocket-extensions").is_none(),
+        "no extension is negotiated: {:?}",
+        resp.headers()
+    );
+}
+
+/// §129 (G-18): a closed realtime connection is metered as connection seconds of its
+/// device (a fact recorded when the connection ends).
+#[tokio::test]
+async fn realtime_connection_time_is_metered_when_the_connection_closes() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let alice = h.member(&c, 0).await;
+    let mut ws = rt.connect(&c, &alice).await;
+    h.clock.advance(chrono::Duration::seconds(90));
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/messaging/devices/{}/revoke", alice.device_id()),
+            json!({ "reason": "LOST_OR_STOLEN" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    ws.closed().await;
+    // The fact is written as the server finishes the connection: wait for that condition.
+    let sql = format!(
+        "SELECT count(*) FROM messaging_usage_records WHERE usage_type = 'REALTIME_CONNECTION' AND unit = 'SECONDS' \
+           AND subject_id = '{}' AND quantity >= 90",
+        alice.device_id()
+    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.scalar(&sql).await == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "connection time never metered"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(h.scalar(&sql).await, 1);
+}
+
+/// §144 / §158 (G-25): seeded property test of the realtime frame parser over a live
+/// connection — random text, random JSON and mutated valid frames never crash or wedge the
+/// connection: each gets at most an error frame and the connection keeps serving.
+#[tokio::test]
+async fn malformed_and_mutated_frames_never_break_a_connection() {
+    let settings = RealtimeSettings {
+        inbound_frames_per_second: 100_000,
+        ..test_settings()
+    };
+    let Some(rt) = Rt::with(settings).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let mut ws = rt.connect(&c, &m).await;
+    let mut x: u64 = 0x5eed_0ff4_a3e5 | 1;
+    let mut next = move || {
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        x.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    };
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let valid = [
+        json!({ "type": "subscribe", "conversationId": cid, "requestId": "s" }).to_string(),
+        json!({ "type": "typing", "conversationId": cid, "state": "started" }).to_string(),
+        json!({ "type": "ack", "conversationId": cid, "eventSequence": 1 }).to_string(),
+        json!({ "type": "presence.query", "principalIds": [people[1]] }).to_string(),
+    ];
+    for round in 0..30 {
+        for _ in 0..10 {
+            let frame = match next() % 4 {
+                0 => {
+                    let len = (next() % 512) as usize;
+                    String::from_utf8_lossy(&(0..len).map(|_| next() as u8).collect::<Vec<_>>())
+                        .into_owned()
+                }
+                1 => [
+                    "null",
+                    "[]",
+                    "{}",
+                    "1e999",
+                    "\"x\"",
+                    "{\"type\":7}",
+                    "{\"type\":\"\"}",
+                    "{\"type\":\"subscribe\"}",
+                ][(next() % 8) as usize]
+                    .to_string(),
+                _ => {
+                    let mut b = valid[(next() % 4) as usize].clone().into_bytes();
+                    let at = (next() as usize) % b.len();
+                    match next() % 3 {
+                        0 => b[at] = b' ' + (next() % 95) as u8,
+                        1 => b.truncate(at),
+                        _ => b.insert(at, b'{'),
+                    }
+                    String::from_utf8_lossy(&b).into_owned()
+                }
+            };
+            ws.send_raw(frame).await;
+        }
+        let rid = format!("p{round}");
+        ws.send(json!({ "type": "ping", "requestId": rid })).await;
+        assert_eq!(ws.next_of("pong").await["requestId"], rid, "round {round}");
+    }
+    for f in &ws.seen {
+        assert!(f["type"].is_string(), "every server frame is typed: {f}");
+    }
+}

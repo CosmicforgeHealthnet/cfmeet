@@ -86,6 +86,12 @@ pub async fn apply(
     ctx: &TrustedContext,
     request: ActionRequest,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ModerationActions,
+        ctx.scope.environment_id,
+    )
+    .await?;
     if !KINDS.contains(&request.kind.as_str()) {
         return Err(Error::validation(format!(
             "kind must be one of {}",
@@ -232,6 +238,17 @@ pub async fn apply(
                         ctx2.credential_id.into(),
                         now.into(),
                     ],
+                )
+                .await?;
+                crate::events::outbox::record(
+                    txn,
+                    "messaging.moderation.actioned",
+                    "MODERATION_ACTION",
+                    id,
+                    crate::conversations::service::scope_of(&ctx2),
+                    json!({ "action_id": id, "kind": req.kind, "conversation_id": req.conversation_id,
+                            "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
+                    now,
                 )
                 .await?;
                 audit::record(

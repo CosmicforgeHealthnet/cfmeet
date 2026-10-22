@@ -73,10 +73,23 @@ async fn customer_routes_fail_closed() {
         conforms("messaging/common/v1.schema.json#/$defs/Error", &r.json);
         assert!(r.headers.get("www-authenticate").is_some());
     }
-    // A client token is refused explicitly (no fake or permanent client tokens).
+    // This deployment has no client-token keys: client tokens are accepted nowhere (with
+    // keys, member routes verify them — tests/client_tokens_rest.rs).
     let r = h
         .raw(
             Request::get(&path)
+                .header("authorization", "CF-Client-Token abc.def.ghi")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::UNAUTHORIZED, "CLIENT_TOKENS_NOT_ENABLED")
+    );
+    let r = h
+        .raw(
+            Request::get("/v1/messaging/policy")
                 .header("authorization", "CF-Client-Token abc.def.ghi")
                 .body(Body::empty())
                 .unwrap(),

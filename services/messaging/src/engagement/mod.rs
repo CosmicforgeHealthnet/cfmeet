@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     conversations::{
-        access,
+        access, policy,
         service::{request_context, rfc3339, scope_of, ConversationRow},
     },
     db,
@@ -123,6 +123,10 @@ pub async fn react(
                 if conversation.profile() != SecurityProfile::Managed {
                     return Err(Error::reason(ErrorCode::ContentRejected, "E2EE_REACTIONS_ARE_MESSAGES"));
                 }
+                // Turning reactions off stops new ones; existing ones can still be removed.
+                if add && !policy::current(txn, ctx.scope.environment_id).await?.messages.reactions {
+                    return Err(Error::reason(ErrorCode::FeatureDisabled, "REACTIONS_DISABLED"));
+                }
                 if add && !message.is_active() {
                     return Err(Error::reason(ErrorCode::MessageNotModifiable, "MESSAGE_NOT_ACTIVE"));
                 }
@@ -201,14 +205,18 @@ pub async fn reactions(
 }
 
 /// `PUT` / `DELETE /v1/conversations/{id}/pins/{messageId}` (OWNER / ADMIN).
+/// `add` is `Some(expires_at)` for a pin (optionally expiring), `None` for an unpin. An
+/// expired pin is no longer listed nor counted; pinning the message again renews it.
 pub async fn pin(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,
     conversation_id: Uuid,
     message_id: Uuid,
-    add: bool,
+    add: Option<Option<DateTime<Utc>>>,
 ) -> Result<Value> {
+    let expires_at = add.flatten();
+    let add = add.is_some();
     let st = state.clone();
     let ctx = ctx.clone();
     let acting = acting.clone();
@@ -221,6 +229,12 @@ pub async fn pin(
                 if !member.is_admin() {
                     return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "NOT_ADMIN"));
                 }
+                if add && !policy::current(txn, ctx.scope.environment_id).await?.messages.pins {
+                    return Err(Error::reason(ErrorCode::FeatureDisabled, "PINS_DISABLED"));
+                }
+                if expires_at.is_some_and(|t| t <= now) {
+                    return Err(Error::validation("expiresAt must be in the future"));
+                }
                 let changed = if add {
                     let message = load_message(txn, conversation.id, message_id, false)
                         .await?
@@ -228,8 +242,9 @@ pub async fn pin(
                         .ok_or(Error::code(ErrorCode::NotFound))?;
                     let pinned = db::scalar_i64(
                         txn,
-                        "SELECT count(*) FROM messaging_message_pins WHERE conversation_id = $1",
-                        vec![conversation.id.into()],
+                        "SELECT count(*) FROM messaging_message_pins WHERE conversation_id = $1 \
+                           AND (expires_at IS NULL OR expires_at > $2) AND message_id <> $3",
+                        vec![conversation.id.into(), now.into(), message.id.into()],
                     )
                     .await?;
                     if pinned >= MAX_PINS {
@@ -237,9 +252,14 @@ pub async fn pin(
                     }
                     db::exec(
                         txn,
-                        "INSERT INTO messaging_message_pins (conversation_id, message_id, pinned_by_principal_id, pinned_at) \
-                         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-                        vec![conversation.id.into(), message.id.into(), acting.principal_id.into(), now.into()],
+                        "INSERT INTO messaging_message_pins (conversation_id, message_id, pinned_by_principal_id, pinned_at, expires_at) \
+                         VALUES ($1, $2, $3, $4, $5) \
+                         ON CONFLICT (conversation_id, message_id) DO UPDATE \
+                           SET pinned_by_principal_id = EXCLUDED.pinned_by_principal_id, pinned_at = EXCLUDED.pinned_at, \
+                               expires_at = EXCLUDED.expires_at \
+                         WHERE messaging_message_pins.expires_at IS DISTINCT FROM EXCLUDED.expires_at \
+                            OR messaging_message_pins.expires_at <= $4",
+                        vec![conversation.id.into(), message.id.into(), acting.principal_id.into(), now.into(), expires_at.into()],
                     )
                     .await?
                         == 1
@@ -258,12 +278,14 @@ pub async fn pin(
                         &ctx,
                         conversation.id,
                         if add { "messaging.pin.added" } else { "messaging.pin.removed" },
-                        json!({ "conversation_id": conversation.id, "message_id": message_id, "principal_id": acting.principal_id }),
+                        json!({ "conversation_id": conversation.id, "message_id": message_id, "principal_id": acting.principal_id,
+                                "expires_at": expires_at.map(rfc3339) }),
                         now,
                     )
                     .await?;
                 }
-                Ok(json!({ "conversationId": conversation.id, "messageId": message_id, "pinned": add, "changed": changed }))
+                Ok(json!({ "conversationId": conversation.id, "messageId": message_id, "pinned": add, "changed": changed,
+                           "expiresAt": expires_at.map(rfc3339) }))
             })
         })
         .await
@@ -275,6 +297,7 @@ struct PinRow {
     message_id: Uuid,
     pinned_by_principal_id: Uuid,
     pinned_at: DateTime<Utc>,
+    expires_at: Option<DateTime<Utc>>,
     sequence: i64,
 }
 
@@ -289,16 +312,67 @@ pub async fn pins(
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
     let rows: Vec<PinRow> = db::all(
         &state.db,
-        "SELECT p.message_id, p.pinned_by_principal_id, p.pinned_at, m.sequence FROM messaging_message_pins p \
+        "SELECT p.message_id, p.pinned_by_principal_id, p.pinned_at, p.expires_at, m.sequence FROM messaging_message_pins p \
            JOIN messaging_messages m ON m.id = p.message_id \
-         WHERE p.conversation_id = $1 AND m.sequence >= $2 AND m.lifecycle = 'ACTIVE' ORDER BY p.pinned_at",
-        vec![conversation.id.into(), member.visible_from_sequence.into()],
+         WHERE p.conversation_id = $1 AND m.sequence >= $2 AND m.lifecycle = 'ACTIVE' \
+           AND (p.expires_at IS NULL OR p.expires_at > $3) ORDER BY p.pinned_at",
+        vec![conversation.id.into(), member.visible_from_sequence.into(), state.now().into()],
     )
     .await?;
     Ok(
         json!({ "pins": rows.iter().map(|p| json!({ "messageId": p.message_id, "sequence": p.sequence,
-        "pinnedByPrincipalId": p.pinned_by_principal_id, "pinnedAt": rfc3339(p.pinned_at) })).collect::<Vec<_>>() }),
+        "pinnedByPrincipalId": p.pinned_by_principal_id, "pinnedAt": rfc3339(p.pinned_at),
+        "expiresAt": p.expires_at.map(rfc3339) })).collect::<Vec<_>>() }),
     )
+}
+
+#[derive(FromQueryResult)]
+struct ThreadRow {
+    reply_count: i64,
+    last_reply_sequence: Option<i64>,
+    last_reply_at: Option<DateTime<Utc>>,
+    unread_reply_count: i64,
+}
+
+/// `GET /v1/conversations/{id}/messages/{messageId}/thread` (members; §47): the thread's
+/// reply count, last reply and the caller's unread replies (from their read cursor) —
+/// counted from `ix_messaging_messages_thread`, only inside the caller's history window.
+pub async fn thread(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    root_id: Uuid,
+) -> Result<Value> {
+    let (conversation, root) =
+        visible_message(&state.db, ctx, conversation_id, root_id, acting).await?;
+    let member = access::membership(&state.db, conversation.id, acting.principal_id, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    let row: ThreadRow = db::one(
+        &state.db,
+        "WITH r AS (SELECT m.sequence, m.created_at, m.sender_principal_id, m.id FROM messaging_messages m \
+                     WHERE m.conversation_id = $1 AND m.thread_root_id = $2 AND m.id <> $2 AND m.sequence >= $4 \
+                       AND m.message_kind = 'APPLICATION' AND m.lifecycle = 'ACTIVE' \
+                       AND NOT EXISTS (SELECT 1 FROM messaging_message_hidden h WHERE h.message_id = m.id AND h.principal_id = $3)) \
+         SELECT (SELECT count(*) FROM r) AS reply_count, \
+                (SELECT max(sequence) FROM r) AS last_reply_sequence, \
+                (SELECT max(created_at) FROM r) AS last_reply_at, \
+                (SELECT count(*) FROM r WHERE r.sender_principal_id <> $3 AND r.sequence > \
+                   COALESCE((SELECT read_sequence FROM messaging_read_cursors WHERE conversation_id = $1 AND principal_id = $3), 0)) \
+                  AS unread_reply_count",
+        vec![conversation.id.into(), root.id.into(), acting.principal_id.into(), member.visible_from_sequence.into()],
+    )
+    .await?
+    .ok_or(Error::code(ErrorCode::InternalError))?;
+    Ok(json!({
+        "conversationId": conversation.id,
+        "rootMessageId": root.id,
+        "replyCount": row.reply_count,
+        "lastReplySequence": row.last_reply_sequence,
+        "lastReplyAt": row.last_reply_at.map(rfc3339),
+        "unreadReplyCount": row.unread_reply_count,
+    }))
 }
 
 #[derive(FromQueryResult)]
@@ -337,12 +411,14 @@ pub async fn unread(
 
 /// Records the reply relation of a new message (same transaction as the message).
 /// Returns the reloaded row. The target must be a visible application message of the
-/// same conversation.
+/// same conversation. With threads turned off by policy (§47) the reply is kept but no
+/// thread root is recorded.
 pub async fn set_reply<C: ConnectionTrait>(
     txn: &C,
     conversation: &ConversationRow,
     row: MessageRow,
     reply_to: Option<Uuid>,
+    threads: bool,
 ) -> Result<MessageRow> {
     let Some(target) = reply_to else {
         return Ok(row);
@@ -376,7 +452,7 @@ pub async fn set_reply<C: ConnectionTrait>(
         vec![
             row.id.into(),
             t.id.into(),
-            t.thread_root_id.unwrap_or(t.id).into(),
+            threads.then(|| t.thread_root_id.unwrap_or(t.id)).into(),
         ],
     )
     .await?;

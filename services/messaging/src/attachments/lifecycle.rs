@@ -157,6 +157,15 @@ pub async fn delete_attachment<C: ConnectionTrait>(
     .await?
         == 1;
     if ok {
+        super::record_attachment_event(
+            db,
+            row,
+            "messaging.attachment.deleted",
+            "DELETED",
+            Some(reason),
+            now,
+        )
+        .await?;
         super::derivatives::delete_for_attachment(db, row, reason, now).await?;
         // The object's committed bytes move to its deletion request: still charged until
         // the object is really removed (a legal hold keeps both).
@@ -237,12 +246,21 @@ pub async fn rescan_due(state: &AppState, batch: i64) -> Result<usize> {
                         {
                             super::quota::release(txn, &r, now).await?;
                             enqueue_deletion(txn, &r.object_key, r.environment_id, Some(r.id), "SCAN_UNAVAILABLE", now).await?;
+                            super::record_attachment_event(txn, &r, "messaging.attachment.rejected", "REJECTED", Some("SCAN_UNAVAILABLE"), now)
+                                .await?;
                         }
                         Ok(())
                     })
                 })
                 .await
                 .map_err(Error::from)?;
+            crate::operations::raise(
+                &state.db,
+                crate::operations::IncidentCategory::ScannerUnavailable,
+                "scanner",
+                state.now(),
+            )
+            .await;
             continue;
         }
         let bytes = match state
@@ -501,10 +519,21 @@ pub async fn run(state: AppState, interval: std::time::Duration) {
         }
         if ticks.is_multiple_of(60) {
             match super::quota::audit_all(&state.db).await {
-                Ok(drifted) => crate::metrics::gauge(
-                    "messaging_storage_accounting_drift_environments",
-                    drifted.len() as i64,
-                ),
+                Ok(drifted) => {
+                    crate::metrics::gauge(
+                        "messaging_storage_accounting_drift_environments",
+                        drifted.len() as i64,
+                    );
+                    for d in &drifted {
+                        crate::operations::raise(
+                            &state.db,
+                            crate::operations::IncidentCategory::StorageAccountingDrift,
+                            &d.environment_id.to_string(),
+                            state.now(),
+                        )
+                        .await;
+                    }
+                }
                 Err(e) => tracing::warn!(error = %e, "storage accounting audit failed"),
             }
         }

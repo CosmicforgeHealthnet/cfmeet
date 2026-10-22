@@ -29,6 +29,15 @@ mod m20261118_000016_attachment_derivatives;
 mod m20261119_000017_attachment_inspection;
 mod m20261120_000018_derivative_quota_accounting;
 mod m20261121_000019_derivative_reservations;
+mod m20261122_000020_message_revisions;
+mod m20261123_000021_received_cursors;
+mod m20261124_000022_backups_and_switches;
+mod m20261125_000023_managed_envelope_keys;
+mod m20261126_000024_conversation_retention_grace_pins;
+mod m20261127_000025_usage_jobs_incidents;
+mod m20261128_000026_conversation_successors;
+mod m20261129_000027_member_roles_invitations;
+mod m20261130_000028_privacy_controls;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -58,6 +67,15 @@ impl MigratorTrait for Migrator {
             Box::new(m20261119_000017_attachment_inspection::Migration),
             Box::new(m20261120_000018_derivative_quota_accounting::Migration),
             Box::new(m20261121_000019_derivative_reservations::Migration),
+            Box::new(m20261122_000020_message_revisions::Migration),
+            Box::new(m20261123_000021_received_cursors::Migration),
+            Box::new(m20261124_000022_backups_and_switches::Migration),
+            Box::new(m20261125_000023_managed_envelope_keys::Migration),
+            Box::new(m20261126_000024_conversation_retention_grace_pins::Migration),
+            Box::new(m20261127_000025_usage_jobs_incidents::Migration),
+            Box::new(m20261128_000026_conversation_successors::Migration),
+            Box::new(m20261129_000027_member_roles_invitations::Migration),
+            Box::new(m20261130_000028_privacy_controls::Migration),
         ]
     }
 

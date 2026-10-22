@@ -44,16 +44,40 @@ pub enum KillSwitch {
     SmsBridge,
     /// The webhook relay worker (relayed events wait PENDING).
     WebhookRelay,
+    /// New PRIVATE_E2EE conversations (MANAGED creation is unaffected; never a downgrade).
+    E2eeConversationCreate,
+    /// MANAGED messaging: new MANAGED conversations, sends and edits.
+    ManagedMessaging,
+    /// New realtime connections and tickets (established ones are revalidated as usual).
+    RealtimeConnect,
+    /// Server-side (MANAGED) search.
+    Search,
+    /// New compliance exports and export download grants.
+    Exports,
+    /// New moderation actions (high-risk administration).
+    ModerationActions,
+    /// Secure backup uploads, finalization and downloads.
+    Backups,
+    /// Key-transparency proof serving.
+    KtProofs,
 }
 
 impl KillSwitch {
-    pub const ALL: [KillSwitch; 6] = [
+    pub const ALL: [KillSwitch; 14] = [
         KillSwitch::MessageSend,
         KillSwitch::ConversationCreate,
         KillSwitch::E2eeOnboarding,
         KillSwitch::AttachmentUpload,
         KillSwitch::SmsBridge,
         KillSwitch::WebhookRelay,
+        KillSwitch::E2eeConversationCreate,
+        KillSwitch::ManagedMessaging,
+        KillSwitch::RealtimeConnect,
+        KillSwitch::Search,
+        KillSwitch::Exports,
+        KillSwitch::ModerationActions,
+        KillSwitch::Backups,
+        KillSwitch::KtProofs,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -64,6 +88,14 @@ impl KillSwitch {
             KillSwitch::AttachmentUpload => "ATTACHMENT_UPLOAD",
             KillSwitch::SmsBridge => "SMS_BRIDGE",
             KillSwitch::WebhookRelay => "WEBHOOK_RELAY",
+            KillSwitch::E2eeConversationCreate => "E2EE_CONVERSATION_CREATE",
+            KillSwitch::ManagedMessaging => "MANAGED_MESSAGING",
+            KillSwitch::RealtimeConnect => "REALTIME_CONNECT",
+            KillSwitch::Search => "SEARCH",
+            KillSwitch::Exports => "EXPORTS",
+            KillSwitch::ModerationActions => "MODERATION_ACTIONS",
+            KillSwitch::Backups => "BACKUPS",
+            KillSwitch::KtProofs => "KT_PROOFS",
         }
     }
 
@@ -235,6 +267,10 @@ pub enum IncidentCategory {
     SmsTransportFailed,
     AttachmentDeleteDeadLetter,
     KtRollbackDetected,
+    ScannerUnavailable,
+    RetentionBacklog,
+    StorageAccountingDrift,
+    AbuseWave,
 }
 
 impl IncidentCategory {
@@ -245,6 +281,10 @@ impl IncidentCategory {
             IncidentCategory::SmsTransportFailed => "SMS_TRANSPORT_FAILED",
             IncidentCategory::AttachmentDeleteDeadLetter => "ATTACHMENT_DELETE_DEAD_LETTER",
             IncidentCategory::KtRollbackDetected => "KT_ROLLBACK_DETECTED",
+            IncidentCategory::ScannerUnavailable => "SCANNER_UNAVAILABLE",
+            IncidentCategory::RetentionBacklog => "RETENTION_BACKLOG",
+            IncidentCategory::StorageAccountingDrift => "STORAGE_ACCOUNTING_DRIFT",
+            IncidentCategory::AbuseWave => "ABUSE_WAVE",
         }
     }
 
@@ -255,6 +295,10 @@ impl IncidentCategory {
             IncidentCategory::SmsTransportFailed => "LOW",
             IncidentCategory::AttachmentDeleteDeadLetter => "HIGH",
             IncidentCategory::KtRollbackDetected => "CRITICAL",
+            IncidentCategory::ScannerUnavailable => "HIGH",
+            IncidentCategory::RetentionBacklog => "MEDIUM",
+            IncidentCategory::StorageAccountingDrift => "MEDIUM",
+            IncidentCategory::AbuseWave => "HIGH",
         }
     }
 
@@ -266,6 +310,10 @@ impl IncidentCategory {
             IncidentCategory::SmsTransportFailed => "A bridged SMS submission failed after its retries.",
             IncidentCategory::AttachmentDeleteDeadLetter => "An attachment object could not be deleted from storage after its retries.",
             IncidentCategory::KtRollbackDetected => "The key-transparency log in the database is behind or diverges from the operator checkpoint; log appends are refused.",
+            IncidentCategory::ScannerUnavailable => "The attachment scanner stayed unavailable through the retry budget; an attachment was rejected (never delivered unscanned).",
+            IncidentCategory::RetentionBacklog => "Messages due for purge have waited longer than the retention backlog threshold.",
+            IncidentCategory::StorageAccountingDrift => "An environment's recorded attachment storage differs from the sum of its objects.",
+            IncidentCategory::AbuseWave => "Many principals of one environment were automatically restricted within an hour.",
         }
     }
 }
@@ -377,6 +425,126 @@ pub async fn resolve(
     }
     txn.commit().await?;
     Ok(done)
+}
+
+// ---------------------------------------------------------------------------------------
+// Dead letters (§136)
+// ---------------------------------------------------------------------------------------
+
+/// A dead-letter queue an operator can inspect and replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeadLetterKind {
+    /// Committed domain events that could not be published.
+    Outbox,
+    /// Public events the platform webhook ingress refused.
+    WebhookRelay,
+    /// Storage objects that could not be deleted.
+    ObjectDeletion,
+}
+
+impl DeadLetterKind {
+    pub const ALL: [DeadLetterKind; 3] = [
+        DeadLetterKind::Outbox,
+        DeadLetterKind::WebhookRelay,
+        DeadLetterKind::ObjectDeletion,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeadLetterKind::Outbox => "outbox",
+            DeadLetterKind::WebhookRelay => "webhook-relay",
+            DeadLetterKind::ObjectDeletion => "object-deletion",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.as_str() == s)
+    }
+
+    /// (table, id column, dead status, reset assignments).
+    fn sql(self) -> (&'static str, &'static str, &'static str, &'static str) {
+        match self {
+            DeadLetterKind::Outbox => (
+                "messaging_outbox_events",
+                "id",
+                "DEAD_LETTER",
+                "status = 'PENDING', attempts = 0, next_attempt_at = $1, lease_token = NULL, lease_expires_at = NULL",
+            ),
+            DeadLetterKind::WebhookRelay => (
+                "messaging_webhook_relay",
+                "event_id",
+                "DEAD_LETTER",
+                "status = 'PENDING', attempts = 0, next_attempt_at = $1",
+            ),
+            DeadLetterKind::ObjectDeletion => (
+                "messaging_object_deletions",
+                "id",
+                "DEAD",
+                "status = 'PENDING', attempts = 0, next_attempt_at = $1, lease_token = NULL, lease_expires_at = NULL",
+            ),
+        }
+    }
+}
+
+/// How many entries each dead-letter queue holds.
+pub async fn dead_letters<C: ConnectionTrait>(db: &C) -> Result<Vec<(DeadLetterKind, i64)>> {
+    let mut out = Vec::new();
+    for kind in DeadLetterKind::ALL {
+        let (table, _, dead, _) = kind.sql();
+        let n = db::scalar_i64(
+            db,
+            &format!("SELECT count(*) FROM {table} WHERE status = '{dead}'"),
+            vec![],
+        )
+        .await?;
+        out.push((kind, n));
+    }
+    Ok(out)
+}
+
+/// Re-queues dead-lettered entries of `kind` (one by id, or all of them) for their
+/// normal worker, with a fresh retry budget. The workers stay idempotent (event ids,
+/// relay keys, deletion of an absent object), so a replay never duplicates an effect.
+/// Audited in the same transaction. Returns how many entries were re-queued.
+pub async fn replay_dead_letters(
+    db: &DatabaseConnection,
+    kind: DeadLetterKind,
+    id: Option<Uuid>,
+    operator: &str,
+    now: DateTime<Utc>,
+) -> Result<u64> {
+    if !valid_operator(operator) {
+        return Err(Error::validation(
+            "operator must be 1-64 characters of [A-Za-z0-9._@-]",
+        ));
+    }
+    let (table, id_column, dead, reset) = kind.sql();
+    let txn = db.begin().await?;
+    let n = db::exec(
+        &txn,
+        &format!(
+            "UPDATE {table} SET {reset} WHERE status = '{dead}' AND ($2::uuid IS NULL OR {id_column} = $2)"
+        ),
+        vec![now.into(), id.into()],
+    )
+    .await?;
+    if n > 0 {
+        audit(
+            &txn,
+            operator,
+            "DEAD_LETTERS_REPLAYED",
+            kind.as_str(),
+            json!({ "count": n, "id": id }),
+            now,
+        )
+        .await?;
+    }
+    txn.commit().await?;
+    crate::metrics::inc(
+        "messaging_dead_letters_replayed_total",
+        &[("kind", kind.as_str())],
+    );
+    Ok(n)
 }
 
 // ---------------------------------------------------------------------------------------

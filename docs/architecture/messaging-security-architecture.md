@@ -1,4 +1,4 @@
-# Messaging security architecture — Part V Version 2.0 (Workstream A record)
+# Messaging security architecture — Part V Version 2.0 (Workstream A record, refreshed at backend closure)
 
 Source: *CF Meet Part V — Secure Unified Messaging & End-to-End Encryption Platform*,
 Version 2.0, 18 October 2026 (60 pages), Appendix G (normative), Appendix H, Appendix L,
@@ -24,9 +24,9 @@ which this repository cannot supply.
 | AD-04 | Post-quantum | Do not combine experimental PQ mechanisms with MLS 1.0 in v2. Provide protocol agility and a future hybrid MLS profile once an appropriate standard / audited library is available. | Classical suite only; no PQ claim. `libcrux-kem 0.0.9` is in the lockfile but in no build graph (CI-proven, scoped RustSec ignore). Protocol agility: protocol id, suite and binding formats are versioned. | PENDING owner approval |
 | AD-05 | Key transparency | Implement draft-aligned append-only key transparency with client proofs / monitoring; require external witness / auditor or equivalent anti-equivocation control before strong production claims. | RFC 9162 Merkle log, inclusion / consistency proofs, Ed25519-signed tree heads (dedicated server key), reported `UNWITNESSED`. Not aligned to a pinned KEYTRANS draft yet; no witness / auditor. | PENDING owner approval; witness open |
 | AD-06 | Web threat model | Web E2EE is supported but cannot protect against a malicious server that ships hostile JavaScript to the client. High-assurance claims require signed / reproducible native / desktop clients or stronger code-delivery controls. | `web` feature compile-checked for wasm32 only; no Web client exists in this repository. | PENDING owner approval |
-| AD-07 | History on new device | New devices receive future messages only by default; historical plaintext requires encrypted backup or authenticated device-to-device transfer. | Message store exists (opaque MLS ciphertext); a new device joins through a Welcome and can decrypt only from its join epoch; members' history windows bound replay. No backup / device-to-device transfer implemented. Nothing grants history server-side. | PENDING owner approval |
+| AD-07 | History on new device | New devices receive future messages only by default; historical plaintext requires encrypted backup or authenticated device-to-device transfer. | Message store exists (opaque MLS ciphertext); a new device joins through a Welcome and can decrypt only from its join epoch; members' history windows bound replay. Implemented candidates: authenticated device-to-device history transfer (`cf_messaging_crypto::history_transfer`, HPKE-sealed to the target device, comparison code; `/v1/messaging/history-transfers`) and the optional client-encrypted secure backup (`cf_messaging_crypto::backup`, CFMB1 format, recovery code; `/v1/messaging/backups`, off by default). The server stores only opaque bytes; nothing grants history server-side, and the DR test proves a new device without either cannot decrypt restored content. | PENDING owner approval |
 | AD-08 | E2EE attachments | Client encrypts before upload; server stores ciphertext and cannot truthfully perform plaintext malware scanning. | Implemented candidate (Part F, ADR 0050): `cf_messaging_crypto::attachment` (XChaCha20-Poly1305 STREAM, per-file key carried only in the MLS-protected descriptor); the server stores ciphertext only (CHECK: no name, no metadata, `application/octet-stream`), never sends it to a scanner and reports `NOT_APPLICABLE_ENCRYPTED`. | PENDING owner approval |
-| AD-09 | SMS | SMS is never E2EE. E2EE → SMS requires explicit per-message / channel downgrade and distinct transport copy. | No SMS path exists; `smsBridgeEligible` is always `false` in every policy snapshot. | PENDING owner approval |
+| AD-09 | SMS | SMS is never E2EE. E2EE → SMS requires explicit per-message / channel downgrade and distinct transport copy. | SMS Bridge implemented for MANAGED conversations only (`services/messaging/src/sms_bridge`): explicit versioned disclosure acknowledgement, a separate transport record per message, never for PRIVATE_E2EE (refused, never downgraded), `smsBridgeEligible` per context (default: where MANAGED is allowed). | PENDING owner approval |
 | AD-10 | Production claim | Independent cryptographic / security assessment is mandatory before marketing / declaring E2EE production parity with leading secure messengers. | No parity claim; no assessment performed. | PENDING (external assessment not started) |
 
 Also pending: legal confirmation of the MPL-2.0 `hpke-rs` 0.7 crates (file-level copyleft,
@@ -51,7 +51,7 @@ authorized recipient; metadata (who, when, sizes, membership) is visible to the 
 | Stolen device | Device revocation is immediate and terminal for API use and closes its KeyPackages. | MLS removal / epoch advance is Workstream E; local plaintext on the device. |
 | Malicious recipient | Membership authorization. | Copy / screenshot / forward. |
 | Browser XSS / hostile JS | Out of scope of this backend (AD-06). | Full compromise of a Web client. |
-| SMS downgrade | No SMS path; policy snapshots never allow it. | — |
+| SMS downgrade | PRIVATE_E2EE conversations are never bridged; a MANAGED bridge needs an explicit, versioned disclosure; transport state is kept apart from in-app state. | SMS content is visible to carriers by nature (disclosed). |
 | Supply chain | Exact pins of the MLS crates, `Cargo.lock` with `--locked` in CI, RustSec audit, licence allowlist, secret scan. | Zero-day in a dependency; no SBOM signing yet. |
 
 ## 3. Protocol and version registry
@@ -68,7 +68,9 @@ authorized recipient; metadata (who, when, sizes, membership) is visible to the 
 | Acceptance record | SHA-256, label `cfmeet-messaging-acceptance:v2`, length-prefixed fields | `services/messaging/src/conversations/sequence.rs` |
 | Transparency leaf | JSON leaf `version: 1` | `services/messaging/src/transparency/mod.rs` |
 | Signed tree head | Ed25519 over length-prefixed `cfmeet-messaging-kt-tree-head:v1`, log id, size, root, timestamp µs | `packages/messaging-crypto/src/transparency.rs` |
-| Platform policy | version 2 (SUPPORT defaults to PRIVATE_E2EE; `messages` features) | `services/messaging/src/conversations/policy.rs` |
+| Platform policy | version 5 (SUPPORT defaults to PRIVATE_E2EE; `messages` features; backups; DIRECT message requests) | `services/messaging/src/conversations/policy.rs` |
+| Safety code / QR | `cfmeet-messaging-safety-code:v1`, 60 digits, QR payload v1 | `packages/messaging-crypto/src/verification.rs` |
+| Secure backup | `CFMB1`, XChaCha20-Poly1305 STREAM, HKDF-SHA256 content keys | `packages/messaging-crypto/src/backup.rs` |
 
 Every change to an entry is a new version, never an in-place reinterpretation.
 
@@ -86,22 +88,25 @@ Every change to an entry is a new version, never an in-place reinterpretation.
    nothing is written — never a MANAGED fallback.
 4. Disabling a context or the E2EE device switch stops new work; it never relabels an
    existing conversation.
-5. Moving between profiles requires a new successor conversation with disclosure (later
-   workstream). SMS is never E2EE (AD-09) and no SMS path exists.
+5. Moving between profiles requires a deliberately created successor conversation
+   (`predecessorConversationId`) with an explicit disclosure acknowledgement when the
+   profile changes (`PROFILE_CHANGE_DISCLOSURE_REQUIRED`); no content or members are
+   copied and provenance is immutable. SMS is never E2EE (AD-09): only MANAGED
+   conversations can be bridged, with an explicit disclosure.
 
 ## 5. Capability matrix (A–G)
 
 | Capability | PRIVATE_E2EE | MANAGED |
 |---|---|---|
 | Conversation create / read / lifecycle | Yes | Yes (only where application policy enables it; regulated contexts require `managedDisclosureAcknowledged`) |
-| Message storage | Opaque MLS ciphertext + acceptance digest (Delivery Service checks public framing only) | Text sealed under the managed key ring (XChaCha20-Poly1305) + full-text index |
+| Message storage | Opaque MLS ciphertext + acceptance digest (Delivery Service checks public framing only) | Text sealed with per-environment data keys wrapped by the managed key provider (`src/messages/keys.rs`, Appendix J; XChaCha20-Poly1305) + full-text index; edits keep append-only revisions |
 | Realtime delivery (Part E) | Ciphertext from committed state; ephemeral typing / presence | Same |
 | Attachments (Part F) | Client-encrypted; never scanned, never claimed scanned | Content-type checks + fail-closed self-hosted ClamAV |
 | Server search | Never (`LOCAL_SEARCH_ONLY`; device-local index) | Membership-aware PostgreSQL full text |
 | Reports / moderation | Metadata + reporter's voluntary, unverifiable disclosure; tombstone / mute / remove / restrict without reading content | Message references; moderators see text only where policy allows |
 | Exports | Never (`E2EE_EXPORT_NOT_AVAILABLE`) | MANAGED-only, policy-gated, audited |
 | Retention / purge / legal hold | Yes — holds preserve ciphertext only, never create a decryption capability | Yes |
-| SMS Bridge | Never | Not implemented (`smsBridgeEligible` always `false`) |
+| SMS Bridge | Never (refused, never downgraded) | Yes, where the context allows it, with an explicit versioned disclosure |
 | Device keys | Public material only; private keys device-side | n/a |
 
 ## 6. Parts E–G security audit (§96)
@@ -130,4 +135,5 @@ key-transparency log UNWITNESSED; Web clients cannot be protected from a malicio
 server (AD-06); a grant issued before a revocation remains usable for its TTL (stated
 in the response, default 60 s); MANAGED content is readable by the operator by design;
 reporter disclosures are unverifiable; ClamAV coverage depends on the deployment's
-signature databases; no APNs / FCM adapters; no media processing (durations unverified).
+signature databases; APNs / FCM adapters exist but provider onboarding and physical-device
+delivery are external; media derivatives are produced for MANAGED attachments only.

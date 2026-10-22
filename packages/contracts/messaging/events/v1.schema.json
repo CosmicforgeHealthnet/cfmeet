@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/events/v1.schema.json",
   "title": "CF Meet Messaging events v1",
-  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only). 1.6.0: message events may carry conversation_id (the webhook relay to the platform webhook system).",
+  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only). 1.6.0: message events may carry conversation_id (the webhook relay to the platform webhook system). 1.8.0: messaging.pin.added carries expires_at (null without expiry). 1.9.0: messaging.device.key-packages-low. 1.10.0: messaging.conversation.successor-created. 1.11.0: messaging.member.invited, messaging.member.invitation-closed; member roles.",
   "$ref": "#/$defs/MessagingEvent",
   "$defs": {
     "DeviceRegistered": {
@@ -251,6 +251,22 @@
           ],
           "properties": {
             "event_type": {
+              "const": "messaging.device.key-packages-low"
+            },
+            "payload": {
+              "$ref": "#/$defs/KeyPackagesLow"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
               "const": "messaging.device.revoked"
             },
             "payload": {
@@ -303,6 +319,22 @@
             },
             "payload": {
               "$ref": "#/$defs/ConversationUpdated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.conversation.successor-created"
+            },
+            "payload": {
+              "$ref": "#/$defs/ConversationSuccessorCreated"
             }
           }
         },
@@ -415,6 +447,38 @@
             },
             "payload": {
               "$ref": "#/$defs/MemberAdded"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.member.invited"
+            },
+            "payload": {
+              "$ref": "#/$defs/MemberInvited"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.member.invitation-closed"
+            },
+            "payload": {
+              "$ref": "#/$defs/MemberInvitationClosed"
             }
           }
         },
@@ -559,6 +623,262 @@
             },
             "payload": {
               "$ref": "#/$defs/PinChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.attachment.ready"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttachmentStateChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.attachment.rejected"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttachmentStateChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.attachment.quarantined"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttachmentStateChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.attachment.deleted"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttachmentStateChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.attachment.derivative-ready"
+            },
+            "payload": {
+              "$ref": "#/$defs/AttachmentDerivativeReady"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.legal-hold.applied"
+            },
+            "payload": {
+              "$ref": "#/$defs/LegalHoldApplied"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.legal-hold.released"
+            },
+            "payload": {
+              "$ref": "#/$defs/LegalHoldReleased"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.report.created"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReportCreated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.moderation.actioned"
+            },
+            "payload": {
+              "$ref": "#/$defs/ModerationActioned"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.export.ready"
+            },
+            "payload": {
+              "$ref": "#/$defs/ExportChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.export.failed"
+            },
+            "payload": {
+              "$ref": "#/$defs/ExportChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.export.expired"
+            },
+            "payload": {
+              "$ref": "#/$defs/ExportChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.sms-transport-changed"
+            },
+            "payload": {
+              "$ref": "#/$defs/SmsTransportChanged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.message.purged"
+            },
+            "payload": {
+              "$ref": "#/$defs/MessagePurged"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.delivery-cursor.updated"
+            },
+            "payload": {
+              "$ref": "#/$defs/DeliveryCursorUpdated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.read-cursor.synced"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReadCursorSynced"
             }
           }
         }
@@ -760,7 +1080,10 @@
         "role": {
           "enum": [
             "MEMBER",
-            "ADMIN"
+            "ADMIN",
+            "MODERATOR",
+            "READ_ONLY",
+            "BOT_SERVICE"
           ]
         },
         "added_by_principal_id": {
@@ -849,7 +1172,10 @@
         "role": {
           "enum": [
             "MEMBER",
-            "ADMIN"
+            "ADMIN",
+            "MODERATOR",
+            "READ_ONLY",
+            "BOT_SERVICE"
           ]
         }
       },
@@ -956,6 +1282,17 @@
         },
         "principal_id": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -963,6 +1300,599 @@
         "message_id",
         "principal_id"
       ]
+    },
+    "AttachmentStateChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An attachment reached READY, REJECTED (incl. SCAN_UNAVAILABLE), QUARANTINED or DELETED. Ids and codes only: never a file name, object key or bytes.",
+      "properties": {
+        "attachment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "message_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "security_profile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "state": {
+          "enum": [
+            "READY",
+            "REJECTED",
+            "QUARANTINED",
+            "DELETED"
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "attachment_id",
+        "conversation_id",
+        "message_id",
+        "security_profile",
+        "state",
+        "reason"
+      ]
+    },
+    "AttachmentDerivativeReady": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A server derivative of a MANAGED attachment is ready; the attachment's identity is unchanged (§80).",
+      "properties": {
+        "attachment_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "derivative_kind": {
+          "enum": [
+            "THUMBNAIL",
+            "INSPECTION"
+          ]
+        },
+        "state": {
+          "const": "READY"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "conversation_id",
+        "derivative_kind",
+        "state"
+      ]
+    },
+    "LegalHoldApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A legal hold was applied (the case reference is never in the event).",
+      "properties": {
+        "hold_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope_kind": {
+          "enum": [
+            "ENVIRONMENT",
+            "CONVERSATION",
+            "PRINCIPAL"
+          ]
+        },
+        "conversation_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_category": {
+          "enum": [
+            "LITIGATION",
+            "REGULATORY",
+            "INVESTIGATION",
+            "INTERNAL_POLICY"
+          ]
+        }
+      },
+      "required": [
+        "hold_id",
+        "scope_kind",
+        "conversation_id",
+        "principal_id",
+        "reason_category"
+      ]
+    },
+    "LegalHoldReleased": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A legal hold was released.",
+      "properties": {
+        "hold_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope_kind": {
+          "enum": [
+            "ENVIRONMENT",
+            "CONVERSATION",
+            "PRINCIPAL"
+          ]
+        },
+        "conversation_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "required": [
+        "hold_id",
+        "scope_kind",
+        "conversation_id",
+        "principal_id",
+        "reason"
+      ]
+    },
+    "ReportCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A member reported content (§118 message.reported). The reporter and any evidence are never in the event.",
+      "properties": {
+        "report_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "security_profile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "evidence_kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "message_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "report_id",
+        "conversation_id",
+        "security_profile",
+        "category",
+        "evidence_kind",
+        "message_count"
+      ]
+    },
+    "ModerationActioned": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A moderation action was taken.",
+      "properties": {
+        "action_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "conversation_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action_id",
+        "kind",
+        "conversation_id",
+        "message_id",
+        "principal_id",
+        "report_id"
+      ]
+    },
+    "ExportChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A MANAGED compliance export became READY, FAILED or EXPIRED (§118 export.ready).",
+      "properties": {
+        "export_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "enum": [
+            "READY",
+            "FAILED",
+            "EXPIRED"
+          ]
+        },
+        "failure": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "export_id",
+        "conversation_id",
+        "status",
+        "failure"
+      ]
+    },
+    "SmsTransportChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The carrier transport of an SMS-bridged MANAGED message changed state (submitted, delivered, failed, blocked). Never the text or a telephone number.",
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "bridge_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "direction": {
+          "enum": [
+            "OUTBOUND",
+            "INBOUND"
+          ]
+        },
+        "previous_status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocked_reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message_id",
+        "conversation_id",
+        "bridge_id",
+        "direction",
+        "previous_status",
+        "status",
+        "failure_code",
+        "blocked_reason"
+      ]
+    },
+    "MessagePurged": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Retention purge completed for a message: its content (ciphertext or sealed text, revisions, attachments) is gone.",
+      "properties": {
+        "message_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "security_profile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "message_id",
+        "conversation_id",
+        "security_profile",
+        "sequence"
+      ]
+    },
+    "DeliveryCursorUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A member's DELIVERED position advanced (§52: a session acknowledged the message or the member synchronized past it). Only when the policy's privacy.deliveryReceipts is true.",
+      "properties": {
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "delivered_sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "principal_id",
+        "delivered_sequence"
+      ]
+    },
+    "ReadCursorSynced": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A principal's read cursor moved; delivered to that principal's own sessions only (never another member's stream).",
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "read_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "read_sequence"
+      ]
+    },
+    "KeyPackagesLow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "principal_id",
+        "available",
+        "threshold"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "available": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "§136 / Appendix G.4: an ACTIVE device's usable KeyPackages fell below the configured watermark (raised once until the device publishes enough again). Counts only."
+    },
+    "ConversationSuccessorCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "successor_conversation_id",
+        "from_security_profile",
+        "to_security_profile",
+        "version"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "successor_conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "from_security_profile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "to_security_profile": {
+          "enum": [
+            "PRIVATE_E2EE",
+            "MANAGED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 2
+        }
+      },
+      "description": "Appendix G: a deliberate successor of this conversation was created (provenance; ids and profiles only)."
+    },
+    "MemberInvited": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "role",
+        "invited_by_principal_id",
+        "expires_at"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "ADMIN",
+            "MODERATOR",
+            "READ_ONLY",
+            "BOT_SERVICE"
+          ]
+        },
+        "invited_by_principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "MemberInvitationClosed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "principal_id",
+        "outcome",
+        "closed_by_principal_id"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "outcome": {
+          "enum": [
+            "DECLINED",
+            "REVOKED",
+            "EXPIRED"
+          ]
+        },
+        "closed_by_principal_id": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }

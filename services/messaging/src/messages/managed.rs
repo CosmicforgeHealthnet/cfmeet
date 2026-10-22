@@ -17,18 +17,10 @@
 //! TLS and database encryption are not end-to-end encryption; MANAGED is never
 //! described as E2EE.
 
-use std::{collections::HashMap, fmt, path::Path};
-
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng, Payload},
-    AeadCore, XChaCha20Poly1305, XNonce,
-};
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, TransactionTrait};
+use sea_orm::{ConnectionTrait, FromQueryResult, TransactionTrait};
 use serde_json::Value;
 use uuid::Uuid;
-use zeroize::Zeroizing;
 
 use super::{load_by_client_id, load_message, render, MessageRow, SendRequest};
 use crate::{
@@ -50,182 +42,8 @@ use crate::{
     state::AppState,
 };
 
-const SEAL_LABEL: &str = "cfmeet-messaging-managed:v1";
-
-/// The managed-content key ring (server keys; MANAGED only).
-pub struct ManagedKeyring {
-    active: String,
-    keys: HashMap<String, Zeroizing<[u8; 32]>>,
-}
-
-impl fmt::Debug for ManagedKeyring {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ManagedKeyring")
-            .field("active", &self.active)
-            .field("keys", &self.keys.len())
-            .finish()
-    }
-}
-
-fn valid_key_id(id: &str) -> bool {
-    (1..=32).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-}
-
-impl ManagedKeyring {
-    /// Parses a key-ring file: one `<key id> <base64url 32-byte key>` per line; the
-    /// FIRST line is the active key. Errors never echo key material.
-    pub fn parse(text: &str) -> std::result::Result<Self, String> {
-        let mut keys = HashMap::new();
-        let mut active = None;
-        for line in text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        {
-            let (id, key) = line
-                .split_once(char::is_whitespace)
-                .ok_or("each line must be `<key id> <base64url key>`")?;
-            if !valid_key_id(id) {
-                return Err("invalid key id (1-32 of [A-Za-z0-9._-])".into());
-            }
-            let bytes = Zeroizing::new(
-                URL_SAFE_NO_PAD
-                    .decode(key.trim())
-                    .map_err(|_| "keys must be unpadded base64url")?,
-            );
-            let key: [u8; 32] = bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| "keys must be exactly 32 bytes")?;
-            if keys.insert(id.to_string(), Zeroizing::new(key)).is_some() {
-                return Err("duplicate key id".into());
-            }
-            active.get_or_insert_with(|| id.to_string());
-        }
-        Ok(Self {
-            active: active.ok_or("the key ring is empty")?,
-            keys,
-        })
-    }
-
-    pub fn load(path: &Path) -> std::result::Result<Self, String> {
-        let text = Zeroizing::new(
-            std::fs::read_to_string(path).map_err(|_| "cannot be read".to_string())?,
-        );
-        Self::parse(&text)
-    }
-
-    /// A random single-key ring (tests and local development only).
-    pub fn generate(id: &str) -> Self {
-        let mut keys = HashMap::new();
-        keys.insert(
-            id.to_string(),
-            Zeroizing::new(XChaCha20Poly1305::generate_key(&mut OsRng).into()),
-        );
-        Self {
-            active: id.to_string(),
-            keys,
-        }
-    }
-
-    fn aad(row_scope: &SealScope) -> Vec<u8> {
-        format!(
-            "{SEAL_LABEL}:{}:{}:{}:{}:{}",
-            row_scope.tenant_id,
-            row_scope.application_id,
-            row_scope.environment_id,
-            row_scope.conversation_id,
-            row_scope.message_id
-        )
-        .into_bytes()
-    }
-
-    fn seal(&self, scope: &SealScope, text: &str) -> Result<Sealed> {
-        let key = self
-            .keys
-            .get(&self.active)
-            .ok_or(Error::code(ErrorCode::InternalError))?;
-        let cipher = XChaCha20Poly1305::new(key.as_slice().into());
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-        let sealed = cipher
-            .encrypt(
-                &nonce,
-                Payload {
-                    msg: text.as_bytes(),
-                    aad: &Self::aad(scope),
-                },
-            )
-            .map_err(|_| Error::code(ErrorCode::InternalError))?;
-        Ok(Sealed {
-            sealed,
-            nonce: nonce.to_vec(),
-            key_id: self.active.clone(),
-        })
-    }
-
-    /// Seals a server-held record other than message text (e.g. evidence a reporter
-    /// voluntarily disclosed) under the active key, bound to `aad`.
-    /// Returns `(sealed, nonce, key id)`.
-    pub fn seal_record(&self, aad: &[u8], data: &[u8]) -> Result<(Vec<u8>, Vec<u8>, String)> {
-        let key = self
-            .keys
-            .get(&self.active)
-            .ok_or(Error::code(ErrorCode::InternalError))?;
-        let cipher = XChaCha20Poly1305::new(key.as_slice().into());
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-        let sealed = cipher
-            .encrypt(&nonce, Payload { msg: data, aad })
-            .map_err(|_| Error::code(ErrorCode::InternalError))?;
-        Ok((sealed, nonce.to_vec(), self.active.clone()))
-    }
-
-    pub fn open_record(
-        &self,
-        aad: &[u8],
-        sealed: &[u8],
-        nonce: &[u8],
-        key_id: &str,
-    ) -> Option<Vec<u8>> {
-        let key = self.keys.get(key_id)?;
-        let nonce: [u8; 24] = nonce.try_into().ok()?;
-        XChaCha20Poly1305::new(key.as_slice().into())
-            .decrypt(&XNonce::from(nonce), Payload { msg: sealed, aad })
-            .ok()
-    }
-
-    fn open(&self, scope: &SealScope, sealed: &[u8], nonce: &[u8], key_id: &str) -> Option<String> {
-        let key = self.keys.get(key_id)?;
-        let nonce: [u8; 24] = nonce.try_into().ok()?;
-        let cipher = XChaCha20Poly1305::new(key.as_slice().into());
-        let plain = cipher
-            .decrypt(
-                &XNonce::from(nonce),
-                Payload {
-                    msg: sealed,
-                    aad: &Self::aad(scope),
-                },
-            )
-            .ok()?;
-        String::from_utf8(plain).ok()
-    }
-}
-
-struct SealScope {
-    tenant_id: Uuid,
-    application_id: Uuid,
-    environment_id: Uuid,
-    conversation_id: Uuid,
-    message_id: Uuid,
-}
-
-struct Sealed {
-    sealed: Vec<u8>,
-    nonce: Vec<u8>,
-    key_id: String,
-}
+use super::keys::SealScope;
+pub use super::keys::{DecryptPurpose, ManagedKeyring};
 
 fn scope_of_row(row: &MessageRow) -> SealScope {
     SealScope {
@@ -238,32 +56,45 @@ fn scope_of_row(row: &MessageRow) -> SealScope {
 }
 
 /// The text of an ACTIVE MANAGED message (`None` for any other row or when the key ring
-/// cannot open it).
-pub fn text_of(state: &AppState, row: &MessageRow) -> Option<String> {
+/// cannot open it), opened for `purpose`.
+pub async fn text_of(
+    state: &AppState,
+    row: &MessageRow,
+    purpose: DecryptPurpose,
+) -> Option<String> {
     if row.profile() != SecurityProfile::Managed || !row.is_active() {
         return None;
     }
     let ring = state.managed_keys.as_ref()?;
     ring.open(
+        &state.db,
         &scope_of_row(row),
         row.managed_sealed.as_deref()?,
         row.managed_seal_nonce.as_deref()?,
         row.managed_seal_key_id.as_deref()?,
+        purpose,
     )
+    .await
 }
 
 /// The stored text of a MANAGED message whatever its lifecycle (moderation review of
 /// reported content; `None` once purged). Never used for member-facing reads.
-pub fn stored_text_of(state: &AppState, row: &MessageRow) -> Option<String> {
+pub async fn stored_text_of(state: &AppState, row: &MessageRow) -> Option<String> {
     if row.profile() != SecurityProfile::Managed {
         return None;
     }
-    state.managed_keys.as_ref()?.open(
-        &scope_of_row(row),
-        row.managed_sealed.as_deref()?,
-        row.managed_seal_nonce.as_deref()?,
-        row.managed_seal_key_id.as_deref()?,
-    )
+    state
+        .managed_keys
+        .as_ref()?
+        .open(
+            &state.db,
+            &scope_of_row(row),
+            row.managed_sealed.as_deref()?,
+            row.managed_seal_nonce.as_deref()?,
+            row.managed_seal_key_id.as_deref()?,
+            DecryptPurpose::ModerationReview,
+        )
+        .await
 }
 
 pub(crate) fn admit(text: String) -> Result<ManagedContent> {
@@ -313,6 +144,7 @@ async fn link_limit(
 async fn insert<C: ConnectionTrait>(
     db: &C,
     ring: &ManagedKeyring,
+    pool: &sea_orm::DatabaseConnection,
     ctx: &TrustedContext,
     conversation: &ConversationRow,
     sender: Uuid,
@@ -324,16 +156,19 @@ async fn insert<C: ConnectionTrait>(
 ) -> Result<MessageRow> {
     let sequence = allocate_sequence(db, conversation.id).await?;
     let id = Uuid::new_v4();
-    let sealed = ring.seal(
-        &SealScope {
-            tenant_id: ctx.scope.tenant_id,
-            application_id: ctx.scope.application_id,
-            environment_id: ctx.scope.environment_id,
-            conversation_id: conversation.id,
-            message_id: id,
-        },
-        content.text(),
-    )?;
+    let sealed = ring
+        .seal(
+            pool,
+            &SealScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+                conversation_id: conversation.id,
+                message_id: id,
+            },
+            content.text(),
+        )
+        .await?;
     db::exec(
         db,
         "INSERT INTO messaging_messages (id, conversation_id, tenant_id, application_id, environment_id, sequence, \
@@ -370,6 +205,7 @@ async fn insert<C: ConnectionTrait>(
 pub(crate) async fn insert_channel<C: ConnectionTrait>(
     db: &C,
     ring: &ManagedKeyring,
+    pool: &sea_orm::DatabaseConnection,
     ctx: &TrustedContext,
     conversation: &ConversationRow,
     sender: Uuid,
@@ -381,6 +217,7 @@ pub(crate) async fn insert_channel<C: ConnectionTrait>(
     let row = insert(
         db,
         ring,
+        pool,
         ctx,
         conversation,
         sender,
@@ -402,8 +239,8 @@ pub(crate) async fn insert_channel<C: ConnectionTrait>(
         .ok_or(Error::code(ErrorCode::InternalError))
 }
 
-fn same_text(state: &AppState, existing: &MessageRow, text: &str) -> Result<()> {
-    match text_of(state, existing) {
+async fn same_text(state: &AppState, existing: &MessageRow, text: &str) -> Result<()> {
+    match text_of(state, existing, DecryptPurpose::Idempotency).await {
         Some(t) if t == text => Ok(()),
         // A deleted / purged original cannot be compared: a retry of a deleted message
         // is answered with its tombstone.
@@ -420,12 +257,20 @@ pub async fn send(
     effective: &EffectivePolicy,
     request: SendRequest,
 ) -> Result<(u16, Value)> {
+    let threads = effective.messages.threads;
     crate::operations::require_open(
         &state.db,
         crate::operations::KillSwitch::MessageSend,
         ctx.scope.environment_id,
     )
     .await?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ManagedMessaging,
+        ctx.scope.environment_id,
+    )
+    .await?;
+
     if request.ciphertext.is_some() || request.device_id.is_some() || request.epoch.is_some() {
         return Err(Error::reason(
             ErrorCode::ContentRejected,
@@ -461,7 +306,7 @@ pub async fn send(
     )
     .await?
     {
-        same_text(state, &existing, content.text())?;
+        same_text(state, &existing, content.text()).await?;
         return Ok((200, render(state, &existing, false).await));
     }
     link_limit(
@@ -479,14 +324,22 @@ pub async fn send(
     let request_ctx = request_context();
     let attachments = request.attachment_ids.clone();
     let client_id = request.client_message_id;
-    let _ = ring;
+    ring.prepare(
+        &state.db,
+        &crate::messages::keys::KeyScope {
+            tenant_id: ctx.scope.tenant_id,
+            application_id: ctx.scope.application_id,
+            environment_id: ctx.scope.environment_id,
+        },
+    )
+    .await?;
     let (status, row) = state
         .db
         .transaction::<_, (u16, MessageRow), Error>(move |txn| {
             Box::pin(async move {
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 // Serialize senders of this conversation's sequence before the retry check.
                 db::exec(
                     txn,
@@ -500,6 +353,7 @@ pub async fn send(
                 let row = insert(
                     txn,
                     ring,
+                    &st.db,
                     &ctx2,
                     &conversation,
                     acting.principal_id,
@@ -512,7 +366,7 @@ pub async fn send(
                 .await?;
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
-                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to).await?;
+                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;
@@ -528,11 +382,16 @@ pub async fn send(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditRequest {
     pub text: String,
+    /// Optimistic version check (§155): the `editCount` the editor saw. A concurrent
+    /// edit that committed first makes this one `409 VERSION_CONFLICT`.
+    #[serde(default)]
+    pub expected_edit_count: Option<i32>,
 }
 
-/// Edits a MANAGED message in place (sender only, within the policy's window): the
-/// sealed text and the search index are replaced together, and `message.edited` is
-/// recorded in the same transaction.
+/// Edits a MANAGED message (sender only, within the policy's window). The superseded
+/// version is first kept as a sealed revision (§46: edits never overwrite evidence in
+/// place), then the current text and the search index are replaced together, and
+/// `message.edited` is recorded in the same transaction.
 pub async fn edit(
     state: &AppState,
     ctx: &TrustedContext,
@@ -557,8 +416,24 @@ pub async fn edit(
     crate::conversations::access::require_accepting(&conversation, state.now())?;
     let effective =
         crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::ManagedMessaging,
+        ctx.scope.environment_id,
+    )
+    .await?;
+    let expected_edit_count = request.expected_edit_count;
     let content = admit(request.text)?;
-    ring(state)?;
+    ring(state)?
+        .prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let acting = acting.clone();
@@ -569,7 +444,7 @@ pub async fn edit(
             Box::pin(async move {
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 let row = load_message(txn, conversation.id, message_id, true)
                     .await?
                     .filter(|r| r.sequence >= member.visible_from_sequence)
@@ -587,7 +462,12 @@ pub async fn edit(
                 {
                     return Err(Error::reason(ErrorCode::MessageNotModifiable, "WINDOW_CLOSED"));
                 }
-                let sealed = ring.seal(&scope_of_row(&row), content.text())?;
+                if expected_edit_count.is_some_and(|expected| expected != row.edit_count)
+                {
+                    return Err(Error::reason(ErrorCode::VersionConflict, "EDITED_CONCURRENTLY"));
+                }
+                keep_revision(txn, &row, acting.principal_id, now).await?;
+                let sealed = ring.seal(&st.db, &scope_of_row(&row), content.text()).await?;
                 db::exec(
                     txn,
                     "UPDATE messaging_messages SET managed_sealed = $2, managed_seal_nonce = $3, managed_seal_key_id = $4, \
@@ -632,6 +512,159 @@ pub async fn edit(
     Ok(render(state, &row, false).await)
 }
 
+/// Copies the version a MANAGED edit supersedes into `messaging_message_revisions`
+/// (still sealed under the message's own scope). Revision `n` is the text as it stood
+/// after `n` edits.
+async fn keep_revision<C: ConnectionTrait>(
+    db: &C,
+    row: &MessageRow,
+    edited_by: Uuid,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let (Some(sealed), Some(nonce), Some(key_id)) = (
+        row.managed_sealed.clone(),
+        row.managed_seal_nonce.clone(),
+        row.managed_seal_key_id.clone(),
+    ) else {
+        return Err(Error::code(ErrorCode::InternalError));
+    };
+    db::exec(
+        db,
+        "INSERT INTO messaging_message_revisions (message_id, revision, environment_id, conversation_id, \
+           edited_by_principal_id, managed_sealed, managed_seal_nonce, managed_seal_key_id, created_at, superseded_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        vec![
+            row.id.into(),
+            row.edit_count.into(),
+            row.environment_id.into(),
+            row.conversation_id.into(),
+            edited_by.into(),
+            sealed.into(),
+            nonce.into(),
+            key_id.into(),
+            row.edited_at.unwrap_or(row.created_at).into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// One kept revision of a MANAGED message, opened with the message's seal scope.
+#[derive(Debug, Clone)]
+pub struct Revision {
+    pub revision: i32,
+    pub text: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub superseded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct RevisionRow {
+    revision: i32,
+    managed_sealed: Vec<u8>,
+    managed_seal_nonce: Vec<u8>,
+    managed_seal_key_id: String,
+    created_at: DateTime<Utc>,
+    superseded_at: DateTime<Utc>,
+}
+
+/// The kept revisions of a MANAGED message, oldest first (empty for PRIVATE_E2EE).
+pub async fn revisions_of<C: ConnectionTrait>(
+    state: &AppState,
+    db: &C,
+    row: &MessageRow,
+    purpose: DecryptPurpose,
+) -> Result<Vec<Revision>> {
+    if row.profile() != SecurityProfile::Managed {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<RevisionRow> = db::all(
+        db,
+        "SELECT revision, managed_sealed, managed_seal_nonce, managed_seal_key_id, created_at, superseded_at \
+           FROM messaging_message_revisions WHERE message_id = $1 ORDER BY revision",
+        vec![row.id.into()],
+    )
+    .await?;
+    let scope = scope_of_row(row);
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let text = match state.managed_keys.as_ref() {
+            Some(ring) => {
+                ring.open(
+                    &state.db,
+                    &scope,
+                    &r.managed_sealed,
+                    &r.managed_seal_nonce,
+                    &r.managed_seal_key_id,
+                    purpose,
+                )
+                .await
+            }
+            None => None,
+        };
+        out.push(Revision {
+            revision: r.revision,
+            text,
+            created_at: r.created_at,
+            superseded_at: r.superseded_at,
+        });
+    }
+    Ok(out)
+}
+
+/// `GET /v1/conversations/{id}/messages/{messageId}/revisions` — the kept prior
+/// versions of a MANAGED message, for members, only when the tenant's policy makes
+/// revision history visible (§46). A deleted message shows no content.
+pub async fn list_revisions(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    message_id: Uuid,
+) -> Result<Value> {
+    let (conversation, member) = crate::conversations::access::as_member(
+        &state.db,
+        ctx,
+        conversation_id,
+        acting.principal_id,
+    )
+    .await?;
+    if conversation.profile() != SecurityProfile::Managed {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "E2EE_EDITS_ARE_CIPHERTEXT",
+        ));
+    }
+    let effective =
+        crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    if !effective.editing.revision_history_visible {
+        return Err(Error::reason(
+            ErrorCode::FeatureDisabled,
+            "REVISION_HISTORY_HIDDEN",
+        ));
+    }
+    let row = load_message(&state.db, conversation.id, message_id, false)
+        .await?
+        .filter(|r| r.sequence >= member.visible_from_sequence)
+        .ok_or(Error::code(ErrorCode::NotFound))?;
+    let revisions = if row.is_active() {
+        revisions_of(state, &state.db, &row, DecryptPurpose::RevisionHistory).await?
+    } else {
+        Vec::new()
+    };
+    Ok(serde_json::json!({
+        "messageId": row.id,
+        "editCount": row.edit_count,
+        "revisions": revisions.iter().map(|r| serde_json::json!({
+            "revision": r.revision,
+            "text": r.text,
+            "createdAt": crate::conversations::service::rfc3339(r.created_at),
+            "supersededAt": crate::conversations::service::rfc3339(r.superseded_at),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// Imports one legacy chat message (Part V H §101) inside the caller's transaction:
 /// provenance `LEGACY_MANAGED`, the ORIGINAL time kept, idempotent per (conversation,
 /// legacy source, legacy id) — `Ok(None)` for an already imported message. A legacy
@@ -640,6 +673,7 @@ pub async fn edit(
 pub(crate) async fn import_legacy<C: ConnectionTrait>(
     db: &C,
     ring: &ManagedKeyring,
+    pool: &sea_orm::DatabaseConnection,
     ctx: &TrustedContext,
     conversation: &ConversationRow,
     sender: Uuid,
@@ -666,16 +700,20 @@ pub(crate) async fn import_legacy<C: ConnectionTrait>(
     let sequence = allocate_sequence(db, conversation.id).await?;
     let id = Uuid::new_v4();
     let sealed = match &content {
-        Some(c) => Some(ring.seal(
-            &SealScope {
-                tenant_id: ctx.scope.tenant_id,
-                application_id: ctx.scope.application_id,
-                environment_id: ctx.scope.environment_id,
-                conversation_id: conversation.id,
-                message_id: id,
-            },
-            c.text(),
-        )?),
+        Some(c) => Some(
+            ring.seal(
+                pool,
+                &SealScope {
+                    tenant_id: ctx.scope.tenant_id,
+                    application_id: ctx.scope.application_id,
+                    environment_id: ctx.scope.environment_id,
+                    conversation_id: conversation.id,
+                    message_id: id,
+                },
+                c.text(),
+            )
+            .await?,
+        ),
         None => None,
     };
     db::exec(
@@ -720,50 +758,4 @@ pub(crate) async fn import_legacy<C: ConnectionTrait>(
 /// The managed key ring, or `FEATURE_DISABLED` (MANAGED storage not configured).
 pub(crate) fn require_ring(state: &AppState) -> Result<&ManagedKeyring> {
     ring(state)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_key_ring_parses_strictly_and_never_echoes_keys() {
-        let key = URL_SAFE_NO_PAD.encode([7u8; 32]);
-        let ring = ManagedKeyring::parse(&format!(
-            "# ring\nk2 {key}\nk1 {}\n",
-            URL_SAFE_NO_PAD.encode([8u8; 32])
-        ))
-        .unwrap();
-        assert_eq!(ring.active, "k2");
-        assert!(!format!("{ring:?}").contains(&key));
-        for bad in [
-            "",
-            "k1",
-            "k1 short",
-            "bad id! xx",
-            &format!("k1 {key}\nk1 {key}"),
-        ] {
-            let err = ManagedKeyring::parse(bad).unwrap_err();
-            assert!(!err.contains(&key));
-        }
-        let scope = SealScope {
-            tenant_id: Uuid::new_v4(),
-            application_id: Uuid::new_v4(),
-            environment_id: Uuid::new_v4(),
-            conversation_id: Uuid::new_v4(),
-            message_id: Uuid::new_v4(),
-        };
-        let s = ring.seal(&scope, "hello managed").unwrap();
-        assert!(!s.sealed.windows(5).any(|w| w == b"hello"));
-        assert_eq!(
-            ring.open(&scope, &s.sealed, &s.nonce, &s.key_id).as_deref(),
-            Some("hello managed")
-        );
-        // Bound to the message: another message id cannot open it.
-        let moved = SealScope {
-            message_id: Uuid::new_v4(),
-            ..scope
-        };
-        assert_eq!(ring.open(&moved, &s.sealed, &s.nonce, &s.key_id), None);
-    }
 }

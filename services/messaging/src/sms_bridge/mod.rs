@@ -266,6 +266,22 @@ pub async fn create(
             "E2EE_CONVERSATION_NOT_BRIDGEABLE",
         ));
     }
+    // §28 / §108: the context's policy decides whether its conversations may be bridged.
+    let effective =
+        crate::conversations::policy::current(&state.db, ctx.scope.environment_id).await?;
+    let eligible = crate::conversations::ContextClass::parse(&conversation.context_class)
+        .and_then(|c| effective.contexts.get(&c))
+        .is_some_and(|c| c.sms_bridge_eligible);
+    if !eligible {
+        crate::metrics::inc(
+            "messaging_sms_bridge_refusals_total",
+            &[("reason", "policy")],
+        );
+        return Err(Error::reason(
+            ErrorCode::FeatureDisabled,
+            "SMS_BRIDGE_NOT_ELIGIBLE",
+        ));
+    }
     if !request.sms_disclosure_acknowledged || request.disclosure_version != DISCLOSURE_VERSION {
         return Err(Error::reason(
             ErrorCode::ContentRejected,
@@ -503,6 +519,17 @@ pub async fn accept_inbound(
     }
     access::require_accepting(&conversation, state.now())?;
     let content = managed::admit(request.text)?;
+    if let Some(ring) = state.managed_keys.as_deref() {
+        ring.prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
+    }
     let st = state.clone();
     let ctx2 = ctx.clone();
     let rctx = crate::conversations::service::request_context();
@@ -527,6 +554,7 @@ pub async fn accept_inbound(
                 let row = managed::insert_channel(
                     txn,
                     ring,
+                    &st.db,
                     &ctx2,
                     &conversation,
                     bridge.external_principal_id,
@@ -616,6 +644,7 @@ pub async fn message_transport(
 struct DueTransport {
     message_id: Uuid,
     bridge_id: Uuid,
+    direction: String,
     sms_message_id: Option<Uuid>,
     status: String,
     attempt_count: i32,
@@ -641,7 +670,7 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
         let now = state.now();
         let due: Option<DueTransport> = db::one(
             &txn,
-            "SELECT t.message_id, t.bridge_id, t.sms_message_id, t.status, t.attempt_count, \
+            "SELECT t.message_id, t.bridge_id, t.direction, t.sms_message_id, t.status, t.attempt_count, \
                     b.tenant_id, b.application_id, b.environment_id, b.environment_kind, b.service_account_id, b.conversation_id \
                FROM messaging_sms_transports t JOIN messaging_sms_bridges b ON b.id = t.bridge_id \
               WHERE t.next_attempt_at IS NOT NULL AND t.next_attempt_at <= $1 \
@@ -681,7 +710,11 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
         .delegated();
         let result = if d.status == "QUEUED" {
             let row = messages::load_message(&txn, d.conversation_id, d.message_id, false).await?;
-            match row.as_ref().filter(|r| r.is_active()).and_then(|r| managed::text_of(state, r)) {
+            let text = match row.as_ref().filter(|r| r.is_active()) {
+                Some(r) => managed::text_of(state, r, managed::DecryptPurpose::SmsDelivery).await,
+                None => None,
+            };
+            match text {
                 // Deleted / moderated before it was sent: nothing goes to the carrier.
                 None => Ok(json!({ "status": "FAILED", "failureCode": "MESSAGE_WITHDRAWN" })),
                 Some(text) => state
@@ -787,6 +820,39 @@ pub async fn run_due(state: &AppState, limit: i64) -> Result<usize> {
                     gave_up.push(d.message_id);
                 }
             }
+        }
+        // §118 / Appendix D: a carrier transport state change is a domain event (ids and
+        // codes only; never the text or a telephone number).
+        #[derive(FromQueryResult)]
+        struct Now {
+            status: String,
+            failure_code: Option<String>,
+            blocked_reason: Option<String>,
+        }
+        if let Some(after) = db::one::<Now, _>(
+            &txn,
+            "SELECT status, failure_code, blocked_reason FROM messaging_sms_transports WHERE message_id = $1",
+            vec![d.message_id.into()],
+        )
+        .await?
+        .filter(|a| a.status != d.status)
+        {
+            crate::events::outbox::record(
+                &txn,
+                "messaging.message.sms-transport-changed",
+                "SMS_TRANSPORT",
+                d.message_id,
+                crate::events::outbox::EventScope {
+                    tenant_id: d.tenant_id,
+                    application_id: d.application_id,
+                    environment_id: d.environment_id,
+                },
+                json!({ "message_id": d.message_id, "conversation_id": d.conversation_id, "bridge_id": d.bridge_id,
+                        "direction": d.direction, "previous_status": d.status, "status": after.status,
+                        "failure_code": after.failure_code, "blocked_reason": after.blocked_reason }),
+                now,
+            )
+            .await?;
         }
         txn.commit().await?;
         changed += 1;

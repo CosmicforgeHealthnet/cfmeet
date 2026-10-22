@@ -295,6 +295,12 @@ pub enum Observed {
 }
 
 impl Ws {
+    /// Sends an arbitrary text frame (property tests of the frame parser).
+    #[allow(dead_code)]
+    pub async fn send_raw(&mut self, text: String) {
+        self.stream.send(Message::Text(text)).await.unwrap();
+    }
+
     pub async fn send(&mut self, v: Value) {
         self.stream
             .send(Message::Text(v.to_string()))
@@ -303,8 +309,11 @@ impl Ws {
     }
 
     pub async fn recv(&mut self, wait: Duration) -> Observed {
+        // One deadline for the whole call: control frames (the server's pings) must not
+        // restart the wait, or a frame that never comes hangs the test instead of failing.
+        let deadline = tokio::time::Instant::now() + wait;
         loop {
-            match tokio::time::timeout(wait, self.stream.next()).await {
+            match tokio::time::timeout_at(deadline, self.stream.next()).await {
                 Err(_) => return Observed::Timeout,
                 Ok(None) => return Observed::Closed(None, String::new()),
                 Ok(Some(Err(_))) => return Observed::Closed(None, String::new()),

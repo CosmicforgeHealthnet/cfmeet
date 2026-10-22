@@ -176,6 +176,8 @@ struct Fx {
     member2: Uuid,
     /// ACTIVE principal of A's environment, never a member.
     outsider: Uuid,
+    /// Principal with an open invitation to `conv`.
+    invitee: Uuid,
     removed: Uuid,
     banned: Uuid,
     blocked: Uuid,
@@ -214,6 +216,10 @@ struct Fx {
     transfer_download: String,
     transfer_complete: String,
     transfer_cancel: String,
+    /// Opt-in secure backups of the owner: an intent body, a READY and an uploaded PENDING one.
+    backup_create_body: Value,
+    backup_ready: String,
+    backup_pending: String,
 }
 
 impl Fx {
@@ -236,6 +242,8 @@ impl Fx {
             self.transfer_download.clone(),
             self.transfer_complete.clone(),
             self.transfer_cancel.clone(),
+            self.backup_ready.clone(),
+            self.backup_pending.clone(),
             self.owner.device_id().to_string(),
             self.member.principal.to_string(),
         ];
@@ -332,7 +340,9 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         &a,
         json!({
             "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "exportsEnabled": true } },
-            "attachments": { "enabled": true, "managedScanRequired": false }
+            "attachments": { "enabled": true, "managedScanRequired": false },
+            "editing": { "revisionHistoryVisible": true },
+            "backups": { "enabled": true }
         }),
     )
     .await;
@@ -360,6 +370,16 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let r = h.send_managed(&a, &conv_v, owner.principal, &canary).await;
     ok(&r, "owner message");
     let msg = s(&r.json, "messageId");
+    let invitee = h.principal(&a);
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/conversations/{conv}/members"),
+            json!({ "principalId": invitee, "invite": true }),
+        )
+        .await;
+    ok(&r, "invitation");
     let r = h
         .send_managed(&a, &conv_v, member.principal, "member says hi")
         .await;
@@ -689,7 +709,32 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         transfer_ids.push(id);
     }
     let (transfer_create_body, _, _, _) = transfer(4, false);
+    let owner_device = owner.device_id();
+    let (_, ready_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix backup")]);
+    let backup_ready = h
+        .upload_backup(&a, store, owner.principal, owner_device, &ready_bytes)
+        .await;
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/messaging/backups/{backup_ready}/finalize"),
+            json!({}),
+        )
+        .await;
+    ok(&r, "backup");
+    let (_, pending_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix pending")]);
+    let backup_pending = h
+        .upload_backup(&a, store, owner.principal, owner_device, &pending_bytes)
+        .await;
+    let (_, create_bytes) = encrypted_backup(owner.principal, &[("MESSAGES", b"matrix intent")]);
+    let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
+        "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        invitee,
+        backup_create_body,
+        backup_ready,
+        backup_pending,
         transfer_create_body,
         transfer_requested: transfer_ids[0].clone(),
         transfer_seal_body: seal_body,
@@ -858,6 +903,22 @@ fn ops() -> Vec<Op> {
              ok: 200, skip: NO_SKIP,
              expect: &[(Case::CrossTenantIds, 404, "NOT_FOUND")] },
         // ------------------------------------------------ history transfers (AD-07)
+        // ---------------------------------------------------------------- backups
+        Op { method: M::POST, template: "/v1/messaging/backups", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/backups".into(), Some(f.owner.principal), Some(f.backup_create_body.clone())),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/backups/latest", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r("/v1/messaging/backups/latest".into(), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/backups/{backupId}/finalize", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}/finalize", f.backup_pending), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/backups/{backupId}/download-grants", scopes: READ, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}/download-grants", f.backup_ready), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::DELETE, template: "/v1/messaging/backups/{backupId}", scopes: SEND, acting: AM, res: Res::Device,
+             req: |f| r(format!("/v1/messaging/backups/{}", f.backup_ready), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::POST, template: "/v1/messaging/history-transfers", scopes: SEND, acting: AM, res: Res::Device,
              req: |f| r("/v1/messaging/history-transfers".into(), Some(f.owner.principal), Some(f.transfer_create_body.clone())),
              ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
@@ -945,6 +1006,9 @@ fn ops() -> Vec<Op> {
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal),
                         Some(json!({ "text": "edited by the sender" }))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/revisions", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/revisions", f.conv, f.msg), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/messages/{messageId}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -976,6 +1040,15 @@ fn ops() -> Vec<Op> {
              req: |f| r(format!("/v1/messaging/devices/{}/welcomes/{}/consume", f.member.device_id(), f.welcome), Some(f.member.principal), Some(json!({}))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ----------------------------------------------------------------- blocks
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invitation/accept", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/invitation/accept", f.conv), Some(f.invitee), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invitation/decline", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/invitation/decline", f.conv), Some(f.invitee), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/invitations", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/invitations".into(), Some(f.invitee), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/messaging/blocks", scopes: READ, acting: AM, res: Res::Env,
              req: |f| r("/v1/messaging/blocks".into(), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -1106,6 +1179,9 @@ fn ops() -> Vec<Op> {
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/reactions", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}/reactions", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/thread", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/thread", f.conv, f.msg), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::PUT, template: "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}/reactions/:thumbsup:", f.conv, f.member_msg), Some(f.owner.principal), Some(json!({}))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -1202,7 +1278,15 @@ fn default_expect(op: &Op, case: Case) -> (u16, &'static str) {
         Case::NoCredential | Case::InvalidCredential | Case::RevokedCredential => {
             (401, "AUTHENTICATION_FAILED")
         }
-        Case::ClientTokenOnCustomerRoute => (401, "CLIENT_TOKENS_NOT_ENABLED"),
+        // §105: member operations accept a client token — a forged one is refused by its
+        // signature; every other operation refuses client tokens outright.
+        Case::ClientTokenOnCustomerRoute => {
+            if messaging::http::middleware::client_token_route(&op.method, op.template).is_some() {
+                (401, "AUTHENTICATION_FAILED")
+            } else {
+                (401, "CLIENT_TOKENS_NOT_ENABLED")
+            }
+        }
         Case::InsufficientScope => (403, "INSUFFICIENT_SCOPE"),
         Case::CrossTenantIds => (404, "NOT_FOUND"),
         Case::CrossTenantActingAsOurPrincipal

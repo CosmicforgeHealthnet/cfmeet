@@ -1,7 +1,8 @@
 //! Part V I §129 — usage metering.
 //!
 //! Messaging records usage FACTS of an application environment (accepted messages,
-//! stored attachment bytes, bridged SMS segments) in `messaging_usage_records`, in the
+//! stored attachment bytes, bridged SMS segments, realtime connection seconds, attachment
+//! egress bytes and search queries) in `messaging_usage_records`, in the
 //! same transaction as the fact itself and idempotently per key. It never prices or bills
 //! anything: there is no rate, price or cost here (SMS cost evidence stays with the SMS
 //! Gateway; billing is outside this service). Readers aggregate with
@@ -23,12 +24,57 @@ use crate::{
 pub const MESSAGE_ACCEPTED: &str = "MESSAGE_ACCEPTED";
 pub const ATTACHMENT_STORED: &str = "ATTACHMENT_STORED";
 pub const SMS_BRIDGED: &str = "SMS_BRIDGED";
+/// Seconds a realtime connection was open (recorded when it closes).
+pub const REALTIME_CONNECTION: &str = "REALTIME_CONNECTION";
+/// Attachment bytes authorized for download (a grant) or served (the proxied read).
+pub const ATTACHMENT_EGRESS: &str = "ATTACHMENT_EGRESS";
+/// One server-side (MANAGED) search query.
+pub const SEARCH_QUERY: &str = "SEARCH_QUERY";
 
 fn unit(usage_type: &str) -> &'static str {
     match usage_type {
         MESSAGE_ACCEPTED => "MESSAGES",
-        ATTACHMENT_STORED => "BYTES",
+        ATTACHMENT_STORED | ATTACHMENT_EGRESS => "BYTES",
+        REALTIME_CONNECTION => "SECONDS",
+        SEARCH_QUERY => "QUERIES",
         _ => "SEGMENTS",
+    }
+}
+
+/// Records a fact outside any business transaction (egress, search, connection time):
+/// a failure is counted and logged, never surfaced to the caller.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_best_effort<C: ConnectionTrait>(
+    db: &C,
+    owner: Owner,
+    usage_type: &'static str,
+    quantity: i64,
+    subject_id: Uuid,
+    security_profile: Option<&str>,
+    now: DateTime<Utc>,
+) {
+    let key = format!(
+        "{}:{}",
+        usage_type.to_ascii_lowercase(),
+        Uuid::new_v4().simple()
+    );
+    if let Err(e) = record(
+        db,
+        owner,
+        usage_type,
+        quantity,
+        subject_id,
+        security_profile,
+        &key,
+        now,
+    )
+    .await
+    {
+        crate::metrics::inc(
+            "messaging_usage_record_failures_total",
+            &[("type", usage_type)],
+        );
+        tracing::warn!(error = %e, usage_type, "usage fact could not be recorded");
     }
 }
 

@@ -90,6 +90,24 @@ pub(crate) fn resolution(err: PrincipalResolutionError, initiator: bool) -> Call
     }
 }
 
+/// A protected public party's TELEPHONE_ENDPOINT principal could not be ensured. Only an
+/// inactive principal makes the target unavailable; a directory or database outage is a
+/// retryable `SERVICE_UNAVAILABLE`, never reported as a property of the target.
+pub(crate) fn public_party(err: PrincipalResolutionError) -> CallError {
+    match err {
+        PrincipalResolutionError::Unavailable { summary } => {
+            tracing::warn!(%summary, "public party principal could not be ensured");
+            CallError::Database {
+                summary,
+                connectivity: true,
+            }
+        }
+        PrincipalResolutionError::NotFound
+        | PrincipalResolutionError::Inactive
+        | PrincipalResolutionError::InvalidReference => CallError::TargetUnavailable,
+    }
+}
+
 impl AppCallService {
     /// `POST /v1/calls`: create, authorize, resolve, route and ring an application call.
     pub async fn create_app_call(
@@ -909,5 +927,53 @@ impl AppCallService {
             .one(db)
             .await?;
         Ok(attempt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory or database outage while a public party's principal is ensured is a
+    /// retryable SERVICE_UNAVAILABLE; only an inactive / unknown party makes the target
+    /// unavailable. (Regression: the callback, inbound and DCN paths reported every error
+    /// of this step as TARGET_UNAVAILABLE / 409.)
+    #[test]
+    fn public_party_errors_keep_outages_retryable() {
+        let outage = public_party(PrincipalResolutionError::Unavailable {
+            summary: "connection unavailable".into(),
+        });
+        assert_eq!(outage.code(), "SERVICE_UNAVAILABLE");
+        assert_eq!(
+            outage.http_status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        for e in [
+            PrincipalResolutionError::Inactive,
+            PrincipalResolutionError::NotFound,
+            PrincipalResolutionError::InvalidReference,
+        ] {
+            let err = public_party(e);
+            assert_eq!(err.code(), "TARGET_UNAVAILABLE");
+            assert_eq!(err.http_status(), axum::http::StatusCode::CONFLICT);
+        }
+    }
+
+    /// Every public path maps the ensure step through `public_party` (never a blanket
+    /// TARGET_UNAVAILABLE that hides an outage).
+    #[test]
+    fn public_paths_never_blanket_map_the_ensure_step() {
+        for (file, source) in [
+            ("callback.rs", include_str!("public/callback.rs")),
+            ("inbound.rs", include_str!("public/inbound.rs")),
+            ("dcn.rs", include_str!("public/dcn.rs")),
+        ] {
+            let mut rest = source;
+            while let Some(i) = rest.find(".ensure_public_party_principal(") {
+                rest = &rest[i + 1..];
+                let call = &rest[..rest.find("?;").expect("the call ends with ?;")];
+                assert!(call.contains("create::public_party"), "{file}: {call}");
+            }
+        }
     }
 }

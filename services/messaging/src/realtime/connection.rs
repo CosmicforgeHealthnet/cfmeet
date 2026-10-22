@@ -23,7 +23,7 @@ use std::{
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::FromQueryResult;
+use sea_orm::{FromQueryResult, TransactionTrait};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -34,6 +34,7 @@ use super::{
     sessions::{self, SessionRow},
 };
 use crate::{
+    conversations::LifecycleState,
     conversations::{
         access::{self, Membership},
         policy::{self, EffectivePolicy},
@@ -99,6 +100,8 @@ pub struct Connection {
     last_presence_query: Option<Instant>,
     policy: EffectivePolicy,
     announced_online: bool,
+    /// When the connection opened (usage: connection seconds, recorded on close).
+    opened_at: chrono::DateTime<chrono::Utc>,
 }
 
 enum Flow {
@@ -134,6 +137,7 @@ impl Connection {
         };
         let (sink, stream) = socket.split();
         let rate = state.realtime.settings.inbound_frames_per_second.max(1) as f64;
+        let opened_at = state.now();
         let mut c = Self {
             state,
             session,
@@ -152,6 +156,7 @@ impl Connection {
             last_presence_query: None,
             policy,
             announced_online: false,
+            opened_at,
         };
         c.run(stream).await;
     }
@@ -285,6 +290,21 @@ impl Connection {
         }
         self.presence_offline().await;
         self.state.realtime.hub.unregister(self.handle.id);
+        let seconds = (self.state.now() - self.opened_at).num_seconds().max(0);
+        crate::usage::record_best_effort(
+            &self.state.db,
+            crate::usage::Owner {
+                tenant_id: self.session.tenant_id,
+                application_id: self.session.application_id,
+                environment_id: self.session.environment_id,
+            },
+            crate::usage::REALTIME_CONNECTION,
+            seconds,
+            self.session.device_id,
+            None,
+            self.state.now(),
+        )
+        .await;
     }
 
     // -----------------------------------------------------------------------------------
@@ -454,6 +474,20 @@ impl Connection {
         )
         .await
         {
+            // §37: a conversation whose context authority revoked it has no live
+            // subscription (its history stays readable over the API).
+            Ok((c, _))
+                if c.state() == LifecycleState::Closed
+                    && c.lifecycle_reason.as_deref() == Some("CONTEXT_REVOKED") =>
+            {
+                self.send(error_frame(
+                    "CONVERSATION_NOT_ACTIVE",
+                    "The conversation's context was revoked.",
+                    rid,
+                ))
+                .await;
+                return Flow::Continue;
+            }
             Ok((_, m)) => m,
             // Unknown, foreign and non-member conversations are indistinguishable.
             Err(e) => return self.api_error(e, rid).await,
@@ -530,6 +564,20 @@ impl Connection {
         }
     }
 
+    /// The event position of this principal's latest removal from `conversation`.
+    async fn own_removal(&self, conversation: Uuid) -> Option<i64> {
+        db::scalar_i64(
+            &self.state.db,
+            "SELECT COALESCE((SELECT conversation_event_sequence FROM messaging_outbox_events \
+                WHERE conversation_id = $1 AND event_type = 'messaging.member.removed' AND payload->>'principal_id' = $2 \
+                ORDER BY conversation_event_sequence DESC LIMIT 1), 0)",
+            vec![conversation.into(), self.session.principal_id.to_string().into()],
+        )
+        .await
+        .ok()
+        .filter(|s| *s > 0)
+    }
+
     async fn head(&self, conversation: Uuid) -> Option<i64> {
         db::scalar_i64(
             &self.state.db,
@@ -586,6 +634,16 @@ impl Connection {
                     s.last_delivered = seq;
                 }
                 crate::metrics::inc("messaging_realtime_events_delivered_total", &[]);
+                // §37: a context authority's revocation (e.g. Privacy Relay) ends every
+                // subscription right after the CLOSED event; history stays readable.
+                if row.event_type == "messaging.conversation.lifecycle-changed"
+                    && row.payload.get("lifecycle_state").and_then(Value::as_str) == Some("CLOSED")
+                    && row.payload.get("reason").and_then(Value::as_str) == Some("CONTEXT_REVOKED")
+                {
+                    self.revoke_subscription(conversation, "CONTEXT_REVOKED")
+                        .await;
+                    return Flow::Continue;
+                }
                 // The viewer's own removal ends the subscription right after the event.
                 if row.event_type == "messaging.member.removed"
                     && row.payload.get("principal_id").and_then(Value::as_str)
@@ -636,15 +694,38 @@ impl Connection {
             .await;
             return Flow::Continue;
         }
-        let r = db::exec(
-            &self.state.db,
-            "INSERT INTO messaging_ack_cursors (conversation_id, device_id, principal_id, acked_event_sequence, updated_at) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (conversation_id, device_id) DO UPDATE \
-               SET acked_event_sequence = GREATEST(messaging_ack_cursors.acked_event_sequence, EXCLUDED.acked_event_sequence), \
-                   updated_at = EXCLUDED.updated_at",
-            vec![conversation.into(), self.session.device_id.into(), self.session.principal_id.into(), seq.into(), self.state.now().into()],
-        )
-        .await;
+        // The acknowledgement and the DELIVERED state it implies (§52) commit together.
+        let (device, principal, now) = (
+            self.session.device_id,
+            self.session.principal_id,
+            self.state.now(),
+        );
+        let scope = crate::events::outbox::EventScope {
+            tenant_id: self.session.tenant_id,
+            application_id: self.session.application_id,
+            environment_id: self.session.environment_id,
+        };
+        let share = self.policy.privacy.delivery_receipts;
+        let r = self
+            .state
+            .db
+            .transaction::<_, (), crate::error::Error>(move |txn| {
+                Box::pin(async move {
+                    db::exec(
+                        txn,
+                        "INSERT INTO messaging_ack_cursors (conversation_id, device_id, principal_id, acked_event_sequence, updated_at) \
+                         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (conversation_id, device_id) DO UPDATE \
+                           SET acked_event_sequence = GREATEST(messaging_ack_cursors.acked_event_sequence, EXCLUDED.acked_event_sequence), \
+                               updated_at = EXCLUDED.updated_at",
+                        vec![conversation.into(), device.into(), principal.into(), seq.into(), now.into()],
+                    )
+                    .await?;
+                    let delivered = messages::message_sequence_at(txn, conversation, seq).await?;
+                    messages::advance_delivery(txn, scope, conversation, principal, delivered, share, now).await?;
+                    Ok(())
+                })
+            })
+            .await;
         if r.is_err() {
             self.send(error_frame(
                 "SERVICE_UNAVAILABLE",
@@ -845,6 +926,17 @@ impl Connection {
                     Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT")
                 }
             }
+            HubEvent::ReadCursor {
+                conversation_id,
+                read_sequence,
+            } => {
+                // Only this principal's own sessions get it (routed by the hub).
+                if self.send(json!({ "type": "read-cursor.synced", "conversationId": conversation_id, "readSequence": read_sequence })).await {
+                    Flow::Continue
+                } else {
+                    Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT")
+                }
+            }
             HubEvent::Typing {
                 conversation_id,
                 principal_id,
@@ -947,7 +1039,17 @@ impl Connection {
             {
                 for c in ids {
                     if !active.iter().any(|a| a.conversation_id == c) {
-                        self.revoke_subscription(c, "MEMBERSHIP_ENDED").await;
+                        // Events committed before the removal were authorized for this
+                        // member: deliver them, ending with its own removal (which revokes
+                        // the subscription), exactly as the live path does.
+                        if let Some(removed_at) = self.own_removal(c).await {
+                            if let Flow::Close(code, reason) = self.deliver_until(c, removed_at).await {
+                                return Flow::Close(code, reason);
+                            }
+                        }
+                        if self.subs.contains_key(&c) {
+                            self.revoke_subscription(c, "MEMBERSHIP_ENDED").await;
+                        }
                     }
                 }
             }

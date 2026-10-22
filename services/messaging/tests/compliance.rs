@@ -396,6 +396,21 @@ async fn e2ee_reports_carry_only_voluntary_disclosure_and_moderation_tombstones(
     );
     let list = h.get(&c, None, "/v1/messaging/moderation/actions").await;
     assert_eq!(list.json["actions"].as_array().unwrap().len(), 1);
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in [
+        "messaging.report.created",
+        "messaging.moderation.actioned",
+        "messaging.message.purged",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE payload::text LIKE '%unique-threat-7731%'").await,
+        0,
+        "no content in any event"
+    );
 }
 
 #[tokio::test]
@@ -620,6 +635,16 @@ async fn retention_expires_and_purges_but_legal_holds_preserve() {
         .await,
         1
     );
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in [
+        "messaging.legal-hold.applied",
+        "messaging.legal-hold.released",
+        "messaging.message.purged",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 #[tokio::test]
@@ -783,6 +808,12 @@ async fn exports_are_managed_only_authorized_and_expire() {
         )
         .await;
     assert_eq!(r.reason(), "EXPORTS_DISABLED", "{}", r.text);
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = h.conforming_event_types().await;
+    for t in ["messaging.export.ready", "messaging.export.expired"] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 #[tokio::test]
@@ -1060,5 +1091,294 @@ async fn a_legal_hold_is_never_overtaken_by_an_in_flight_purge() {
     println!(
         "EVIDENCE hold_vs_purge hold_acknowledged_after_ms={}",
         waited.as_millis()
+    );
+}
+
+/// §46 / §121 / §155: a MANAGED edit keeps the superseded version as a sealed revision
+/// (never overwritten in place); concurrent edits resolve with a version check; members
+/// see revisions only when the tenant's policy shows history; exports include them; a
+/// legal hold preserves them and the purge removes them with the message.
+#[tokio::test]
+async fn managed_edits_keep_sealed_revisions_that_holds_preserve_and_purge_removes() {
+    use sea_orm::ConnectionTrait;
+    let Some((h, store)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(
+        &h,
+        &c,
+        json!({ "exportsEnabled": true }),
+        json!({ "retention": { "messageDays": 30 } }),
+    )
+    .await;
+    let (conv, people) = managed_group(&h, &c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let id = cid(&conv);
+    let sent = h
+        .send_managed(&c, &conv, alice, "original wording zebra")
+        .await;
+    let mid = sent.json["messageId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{id}/messages/{mid}");
+
+    // Two editors saw editCount 0: the first wins, the second is a version conflict.
+    let first = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "middle wording yak", "expectedEditCount": 0 }),
+        )
+        .await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text);
+    let stale = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "lost update", "expectedEditCount": 0 }),
+        )
+        .await;
+    assert_eq!(stale.status, StatusCode::CONFLICT, "{}", stale.text);
+    assert_eq!(
+        (stale.code(), stale.reason()),
+        ("VERSION_CONFLICT", "EDITED_CONCURRENTLY")
+    );
+    let last = h
+        .patch(
+            &c,
+            Some(alice),
+            &path,
+            json!({ "text": "final wording xylophone", "expectedEditCount": 1 }),
+        )
+        .await;
+    assert_eq!(last.json["editCount"], 2, "{}", last.text);
+    assert_eq!(last.json["managed"]["text"], "final wording xylophone");
+
+    // Both superseded versions are kept, sealed (no plaintext in the row).
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        2
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}' \
+             AND (position(convert_to('zebra', 'UTF8') in managed_sealed) > 0 OR position(convert_to('yak', 'UTF8') in managed_sealed) > 0)")).await,
+        0,
+        "revisions are sealed at rest"
+    );
+    // Search follows the current text only.
+    let search = |q: &str| format!("/v1/conversations/{id}/search?q={q}");
+    let old = h.get(&c, Some(bob), &search("zebra")).await;
+    assert_eq!(old.status, StatusCode::OK, "{}", old.text);
+    assert!(
+        !old.text.contains(&mid),
+        "a superseded word is not searchable: {}",
+        old.text
+    );
+    assert!(h
+        .get(&c, Some(bob), &search("xylophone"))
+        .await
+        .text
+        .contains(&mid));
+
+    // Members see history only when the policy shows it.
+    let revisions = format!("{path}/revisions");
+    let hidden = h.get(&c, Some(bob), &revisions).await;
+    assert_eq!(
+        hidden.reason(),
+        "REVISION_HISTORY_HIDDEN",
+        "{}",
+        hidden.text
+    );
+    policy(
+        &h,
+        &c,
+        json!({ "exportsEnabled": true }),
+        json!({ "retention": { "messageDays": 30 }, "editing": { "revisionHistoryVisible": true } }),
+    )
+    .await;
+    let shown = h.get(&c, Some(bob), &revisions).await;
+    assert_eq!(shown.status, StatusCode::OK, "{}", shown.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/MessageRevisionPage",
+        &shown.json,
+    );
+    let texts: Vec<&str> = shown.json["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["original wording zebra", "middle wording yak"]);
+    let outsider = h.principal(&c);
+    assert_eq!(
+        h.get(&c, Some(outsider), &revisions).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    // Exports carry the revisions.
+    let r = h
+        .post(
+            &c,
+            None,
+            "/v1/messaging/exports",
+            json!({ "conversationId": conv["conversationId"] }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let eid = r.json["exportId"].as_str().unwrap().to_string();
+    messaging::compliance::run_once(&h.state).await.unwrap();
+    let key = format!(
+        "exp/{}/{}",
+        c.context.scope.environment_id.simple(),
+        Uuid::parse_str(&eid).unwrap().simple()
+    );
+    let doc: Value = serde_json::from_slice(&store.get_raw(&key).unwrap()).unwrap();
+    assert_eq!(doc["messages"][0]["text"], "final wording xylophone");
+    assert_eq!(
+        doc["messages"][0]["revisions"][0]["text"],
+        "original wording zebra"
+    );
+    assert_eq!(
+        doc["messages"][0]["revisions"][1]["text"],
+        "middle wording yak"
+    );
+
+    // The database keeps revisions immutable and bound to their message.
+    assert!(h
+        .state
+        .db
+        .execute_unprepared(&format!(
+            "UPDATE messaging_message_revisions SET revision = 9 WHERE message_id = '{mid}'"
+        ))
+        .await
+        .is_err());
+    assert!(
+        h.state
+            .db
+            .execute_unprepared(&format!(
+                "DELETE FROM messaging_message_revisions WHERE message_id = '{mid}'"
+            ))
+            .await
+            .is_err(),
+        "not removable while the message exists"
+    );
+
+    // Under a legal hold, expiry keeps every version; after release the purge removes them.
+    let hold = h
+        .post(&c, None, "/v1/messaging/legal-holds", json!({ "scopeKind": "CONVERSATION", "conversationId": conv["conversationId"], "reasonCategory": "LITIGATION" }))
+        .await;
+    assert_eq!(hold.status, StatusCode::CREATED, "{}", hold.text);
+    h.clock.advance(chrono::Duration::days(31));
+    let r = messaging::compliance::run_once(&h.state).await.unwrap();
+    assert!(r.held >= 1 && r.purged == 0, "{r:?}");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        2,
+        "held revisions are preserved"
+    );
+    let rel = h
+        .post(
+            &c,
+            None,
+            &format!(
+                "/v1/messaging/legal-holds/{}/release",
+                hold.json["holdId"].as_str().unwrap()
+            ),
+            json!({ "reason": "AUDIT_DONE" }),
+        )
+        .await;
+    assert_eq!(rel.status, StatusCode::OK, "{}", rel.text);
+    h.clock.advance(chrono::Duration::hours(2));
+    let r = messaging::compliance::run_once(&h.state).await.unwrap();
+    assert!(r.purged >= 1, "{r:?}");
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_message_revisions WHERE message_id = '{mid}'"
+        ))
+        .await,
+        0,
+        "revisions are purged with the message"
+    );
+}
+
+/// §88 / §133: sustained rejected sends are an abuse signal that eventually restricts the
+/// sender (a short burst does not); recipient complaints are recorded but never restrict
+/// a principal by themselves (no silencing by report-bombing).
+#[tokio::test]
+async fn rejected_sends_and_complaints_feed_abuse_scoring_without_report_bombing() {
+    let Some((h, _)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(
+        &h,
+        &c,
+        json!({}),
+        json!({ "abuse": { "reportsPerHour": 1000 } }),
+    )
+    .await;
+    let (conv, people) = managed_group(&h, &c, 3).await;
+    let (owner, target, other) = (people[0], people[1], people[2]);
+    let id = cid(&conv);
+    // 30 complaints about one member from two reporters: recorded, no restriction.
+    for i in 0..30 {
+        let reporter = if i % 2 == 0 { owner } else { other };
+        let r = h
+            .post(
+                &c,
+                Some(reporter),
+                &format!("/v1/conversations/{id}/reports"),
+                json!({ "category": "SPAM", "reportedPrincipalId": target }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_abuse_signals WHERE principal_id = '{target}' AND signal = 'REPORTED'")).await,
+        30
+    );
+    assert_eq!(
+        h.send_managed(&c, &conv, target, "still allowed")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+
+    // The owner mutes `other`; a burst of 10 refused sends does not restrict ...
+    let mute = h
+        .post(&c, None, "/v1/messaging/moderation/actions",
+              json!({ "kind": "MUTE_MEMBER", "conversationId": id, "principalId": other, "reason": "COOL_DOWN", "durationSeconds": 3600 }))
+        .await;
+    assert_eq!(mute.status, StatusCode::CREATED, "{}", mute.text);
+    for _ in 0..10 {
+        assert_eq!(
+            h.send_managed(&c, &conv, other, "x").await.code(),
+            "SEND_RESTRICTED"
+        );
+    }
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_principal_restrictions WHERE principal_id = '{other}'"
+        ))
+        .await,
+        0
+    );
+    // ... sustained retrying (five times the threshold within the hour) does.
+    for _ in 0..40 {
+        h.send_managed(&c, &conv, other, "x").await;
+    }
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_principal_restrictions WHERE principal_id = '{other}' AND source = 'AUTOMATIC' AND reason = 'REJECTED_SEND'"
+        ))
+        .await,
+        1
     );
 }

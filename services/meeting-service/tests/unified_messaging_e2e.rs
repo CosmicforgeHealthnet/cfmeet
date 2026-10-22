@@ -96,8 +96,12 @@ async fn wait_ready(http: &reqwest::Client, url: &str, child: &mut tokio::proces
             return false;
         }
         if let Ok(r) = http.get(format!("{url}/ready")).send().await {
+            // Only if the answer came from THIS child (not another test's process that
+            // took the probed port first).
             if r.status().is_success() {
-                return true;
+                return child
+                    .id()
+                    .is_some_and(|pid| common::process_owns_listener(pid, common::url_port(url)));
             }
         }
         tokio::time::sleep(Duration::from_millis(25)).await;

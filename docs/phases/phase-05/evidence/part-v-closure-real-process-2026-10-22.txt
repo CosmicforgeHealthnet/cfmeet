@@ -1,0 +1,28 @@
+Part V backend closure — real-process journeys (local, 2026-10-22)
+Branch part-v-backend-closure; binaries built from the branch (Platform Access, Messaging,
+Privacy Relay, SMS Gateway, Calling, Meeting Service); every service its own PostgreSQL
+database migrated by its own migrations; MinIO (S3) for objects; synthetic SMS carrier.
+
+services/messaging: CROSS_SERVICE_E2E_REQUIRED=1 cargo test --test cross_service_e2e --test platform_access_e2e -- --nocapture --test-threads=1
+  cross_service_e2e: 6 passed, 0 failed (87.4 s)
+    scenario_4  Privacy Relay authority → Messaging      activation_propagation_ms=241 revocation_propagation_ms=346
+    scenario_4b Privacy Relay outage + restart (NEW)     restart_to_revocation_ms=1569
+                - relay down: authorized conversation keeps working, unknown context refused
+                  (CONTEXT_AUTHORITY_UNKNOWN)
+                - revocation committed while Messaging is down, relay restarted from its
+                  persisted job: applied on recovery; sends denied; realtime subscription
+                  revoked (CONTEXT_REVOKED) and not re-openable; history readable
+                - re-delivered REVOKED version and an older ACTIVE version: STALE_VERSION,
+                  conversation version and lifecycle events unchanged
+    scenario_5  Managed SMS Bridge ↔ SMS Gateway          outbound_delivered_visible_ms=2397 unknown_outcome_reconciled_ms=30039
+    scenario_9  events → Calling → signed customer webhook first_webhook_visible_ms=1251 (ids only, no content)
+    postgresql_loss  messages=120 acknowledged=70 refused=40 indeterminate=10 retries_that_found_a_committed_message=0 outage_ms=1330
+    sms_gateway_death submissions=2 provider_submissions_each=1 duplicate_receipts_rejected=2
+  platform_access_e2e: 3 passed, 0 failed (44.1 s) — external developer journey with real S3,
+    staging-kit rehearsal (fan-out 40/40 deliveries, 0 missing / duplicated / out of order)
+
+services/meeting-service: cargo test --test unified_messaging_e2e
+  3 passed — meeting chat migration and breakout / private chat migration across real
+  Platform Access + Messaging; the third function is the web-client journey, which printed
+  "SKIPPED: web messaging journey (WEB_MESSAGING_E2E_APP not set)" (frontend; carried forward,
+  not counted as a pass).

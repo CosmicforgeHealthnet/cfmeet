@@ -581,7 +581,14 @@
           "createdAt",
           "updatedAt",
           "stateChangedAt",
-          "expiresAt"
+          "expiresAt",
+          "memberCount",
+          "membersTruncated",
+          "expiryGraceSeconds",
+          "retentionSeconds",
+          "predecessorConversationId",
+          "successorConversationId",
+          "readReceipts"
         ],
         "properties": {
           "conversationId": {
@@ -695,7 +702,7 @@
           },
           "members": {
             "type": "array",
-            "maxItems": 2,
+            "maxItems": 100,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -708,14 +715,11 @@
                   "$ref": "#/components/schemas/platform.common.v1.Uuid"
                 },
                 "role": {
-                  "type": "string",
-                  "enum": [
-                    "OWNER",
-                    "MEMBER"
-                  ]
+                  "$ref": "#/components/schemas/messaging.common.v1.MemberRole"
                 }
               }
-            }
+            },
+            "description": "The first 100 ACTIVE members (owner, administrators, then members); page through GET /v1/conversations/{id}/members for the rest (membersTruncated)."
           },
           "createdAt": {
             "type": "string",
@@ -739,6 +743,68 @@
                 "type": "null"
               }
             ]
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "membersTruncated": {
+            "type": "boolean"
+          },
+          "expiryGraceSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2592000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retentionSeconds": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "predecessorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "successorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readReceipts": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -1221,6 +1287,18 @@
             "type": "boolean"
           }
         }
+      },
+      "messaging.common.v1.MemberRole": {
+        "type": "string",
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "MODERATOR",
+          "MEMBER",
+          "READ_ONLY",
+          "BOT_SERVICE"
+        ],
+        "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
       },
       "messaging.common.v1.Protocol": {
         "type": "string",

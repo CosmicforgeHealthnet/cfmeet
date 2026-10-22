@@ -248,7 +248,7 @@ impl AppCallService {
                 offer.caller_contact_reference,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
         // CURRENT authority (not the offer's snapshot): the caller contact may reach the
         // targets over the CALLBACK_RELAY route of this relay session.
         let kind = match owner.kind.as_str() {
@@ -661,7 +661,7 @@ impl AppCallService {
                 offer.caller_contact_reference,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
         let callee = self
             .principals
             .ensure_public_party_principal(
@@ -672,7 +672,7 @@ impl AppCallService {
                 callee_contact,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
         let kind = match owner.kind.as_str() {
             "PRODUCTION" => ApplicationEnvironmentKind::Production,
             "TEST" => ApplicationEnvironmentKind::Test,

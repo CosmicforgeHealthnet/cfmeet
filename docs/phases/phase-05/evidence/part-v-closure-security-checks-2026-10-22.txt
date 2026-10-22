@@ -1,0 +1,28 @@
+Part V backend closure — dependency, licence, SBOM, secret, boundary and migration checks
+(local, 2026-10-22, branch part-v-backend-closure)
+
+cargo audit (advisory database commit of 2026-10-21), the 15 lockfiles of
+.github/workflows/dependency-security.yml, with exactly the CI ignores
+(RUSTSEC-2023-0071, RUSTSEC-2026-0381; RUSTSEC-2026-0330/0331 for the crypto core,
+Messaging and Meeting Service — each proven unreachable by a CI step):
+  vulnerabilities: 0 in every lockfile (exit 0 ×15)
+  informational warnings only: unmaintained proc-macro-error2 (crypto core, wasm,
+  web-harness, Messaging, Meeting), atomic-polyfill (Privacy Relay), async-std / instant /
+  proc-macro-error / yanked spin (Meeting Service)
+webpki-roots shim check: OK for every tracked Cargo.lock
+Licences (scripts/messaging/check_licenses.py; self-test OK):
+  packages/messaging-crypto --all-features   156 packages allowed
+  packages/messaging-crypto/web-harness       157 packages allowed
+  services/messaging --workspace --all-features 406 packages allowed
+SBOM (scripts/sbom/cargo_lock_sbom.py): CycloneDX 1.5, 884 components from 15 lockfiles
+Secret scan (scripts/secret-scan; self-test OK): tracked files clean
+Service boundaries (check_service_boundaries.py): OK — messaging 61 tables. The first run
+  failed on the branch's own new table `messaging_delivery_cursors` (product word
+  "delivery"); renamed `messaging_received_cursors` (6877ad6), then OK.
+Operations registry: OK — 59 responsibilities, messaging 13
+Database isolation (infra/deployment/postgres/verify-service-isolation.sh): OK
+Messaging migrations round trip on an empty database: up (28) → down 8 → up (28): OK
+Contracts validator: OK — 66 contracts, 238 examples, 319 counter-examples, 625 JSON files;
+  bundles current and self-contained (11 documents)
+Not run locally (CI runs them): container image builds / image secret scan / Debian
+  updates; the service-boundaries unit-test suite (walks the local 10 GB build tree).

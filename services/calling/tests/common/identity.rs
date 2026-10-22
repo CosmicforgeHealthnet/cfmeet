@@ -110,6 +110,26 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Whether the Platform Access at `url` is the one trusting `operator`: an operator-signed
+/// read of a tenant that does not exist is 404 there, and 401 at any other instance.
+async fn answers_to(http: &reqwest::Client, url: &str, operator: &ServiceTokenSigner) -> bool {
+    let signed = operator
+        .sign(&OutboundServiceRequest::new_operation(
+            ServiceId::platform_access(),
+        ))
+        .unwrap();
+    let mut request = http
+        .get(format!(
+            "{url}/internal/v1/admin/tenants/{}",
+            Uuid::new_v4()
+        ))
+        .header("x-cf-operator", TEST_OPERATOR);
+    for (name, value) in signed.headers().iter() {
+        request = request.header(name.as_str(), value.as_bytes());
+    }
+    matches!(request.send().await, Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND)
+}
+
 fn trust_bundle(calling: &ServiceSigningKey, operator: &ServiceSigningKey) -> String {
     super::trust_bundle_json(
         cf_service_auth::services::PLATFORM_ACCESS,
@@ -154,6 +174,20 @@ impl PlatformAccess {
 
     /// A Platform Access with extra environment (e.g. its failed-authentication policy).
     pub async fn start_with(admin_url: &str, extra_env: &[(&str, &str)]) -> Option<Self> {
+        Self::start_with_ports(admin_url, extra_env, &mut free_port).await
+    }
+
+    /// [`start_with`](Self::start_with) taking candidate ports from `next_port`. A probed
+    /// free port can be taken by another test's process before this one binds it; then
+    /// this process exits while `/ready` on that port is answered by the OTHER instance.
+    /// So an instance counts as started only once it authenticates a request signed with
+    /// THIS instance's operator key (another instance has its own trust bundle and answers
+    /// 401); otherwise it is stopped and the next port is tried.
+    pub async fn start_with_ports(
+        admin_url: &str,
+        extra_env: &[(&str, &str)],
+        next_port: &mut (dyn FnMut() -> u16 + Send),
+    ) -> Option<Self> {
         let bins = binaries()?;
         let tmpl = template(admin_url, &bins).await;
         let db_name = format!("clg_t_{}_pa{}", std::process::id(), Uuid::new_v4().simple());
@@ -191,8 +225,15 @@ impl PlatformAccess {
         let http = reqwest::Client::builder().no_proxy().build().unwrap();
         let mut started = None;
         // A free port can be taken between probing and binding: retry on a new one.
+        let operator = Arc::new(ServiceTokenSigner::new(
+            ServiceId::operator_console(),
+            ENV,
+            operator_key,
+            TokenTtl::default(),
+            Arc::new(SystemClock),
+        ));
         for _ in 0..5 {
-            let port = free_port();
+            let port = next_port();
             let mut command = tokio::process::Command::new(&bins.server);
             command.env_clear();
             for (k, v) in extra_env {
@@ -231,7 +272,7 @@ impl PlatformAccess {
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            if ready {
+            if ready && answers_to(&http, &url, &operator).await {
                 started = Some((child, url));
                 break;
             }
@@ -252,13 +293,6 @@ impl PlatformAccess {
             .unwrap();
         let calling_client =
             Arc::new(InternalServiceClient::new(signer, targets, Duration::from_secs(10)).unwrap());
-        let operator = Arc::new(ServiceTokenSigner::new(
-            ServiceId::operator_console(),
-            ENV,
-            operator_key,
-            TokenTtl::default(),
-            clock,
-        ));
         Some(Self {
             child: std::sync::Mutex::new(Some(child)),
             base_url,
