@@ -97,9 +97,10 @@ re-seal after a key compromise is a documented runbook procedure, not an automat
 
 | Suite (local, this branch) | Result |
 |---|---|
-| Messaging, full (`cargo test --no-fail-fast`, 35 binaries, real PostgreSQL, Redis, MinIO; `CROSS_SERVICE_E2E_REQUIRED=1`) | 241 passed, 0 failed, 9 ignored (opt-in load / 100-device tests) — before the final load-suite and rename commits; the affected suites (realtime, migrations, architecture, disaster recovery) were re-run green after them |
+| Messaging, full (`cargo test --no-fail-fast`, 35 binaries, real PostgreSQL, Redis, MinIO; `CROSS_SERVICE_E2E_REQUIRED=1`) | **242 passed, 0 failed**, 11 ignored (the opt-in load tests and the 100-device MLS test) — on `72ab156` (after the D-12 fix), with real clamd |
 | Authorization / IDOR matrix | every customer operation (incl. the 3 new ones) × 15 cases: passed |
-| Real-process journeys (section `evidence/part-v-closure-real-process-2026-10-22.txt`) | cross-service 6/6 (incl. new 4b), platform-access e2e 3/3, Meeting unified messaging 2/2 + 1 web journey SKIPPED (frontend) |
+| Release load suite (`evidence/load-measurements-2026-10-22.txt`) | 11 / 11 passed (first run on the branch failed and exposed D-12) |
+| Real-process journeys (`evidence/part-v-closure-real-process-2026-10-22.txt`) | cross-service 6/6 (incl. new 4b), platform-access e2e 3/3, Meeting unified messaging 2/2 + 1 web journey SKIPPED (frontend) |
 | Crypto core (`--features client`) | parser properties 4/4, safety-code vectors 1/1, verification unit 3/3; clippy `--all-features` clean |
 | Object storage against MinIO | `s3_live` 2/2 |
 | Calling (Part B stability) | 691 passed, 0 failed, 91 binaries |
