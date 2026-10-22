@@ -120,11 +120,12 @@ image security, SBOM, secret scan, database roles and the service-boundary guard
 (head `1f1e620`) was red on D-13…D-15. The only non-green status is the third-party `Vercel`
 preview deploy of the web app: the account's daily free-plan deployment quota was exhausted
 (`api-deployments-free-per-day`). That is not a build failure and not a backend check; it is
-listed in §9.
+listed in §9. A re-run on the docs-only head `2382871` failed `Enterprise SIP` once on a
+test race present on `main` (D-16); fixed in this branch and re-certified.
 
 ## 4. Defects found and fixed
 
-Fifteen defects (beyond the 35 gaps), each with a regression test or guard:
+Sixteen defects (beyond the 35 gaps), each with a regression test or guard:
 
 | # | Defect | Origin | Fix | Regression proof |
 |---|---|---|---|---|
@@ -143,6 +144,7 @@ Fifteen defects (beyond the 35 gaps), each with a regression test or guard:
 | D-13 | rustfmt drift in two test files added on the branch (Calling `identity_projection`, Meeting `tests/common`) — caught by CI | this branch (`5323d63`, `1c54b05`) | `5bbc129` | CI `fmt / check / clippy` (Calling, Meeting) |
 | D-14 | Crypto parser property helper `Rng::mutate` unused without feature `client` (dead code under `-D warnings`) — caught by CI | this branch (`879ade4`) | `5bbc129` — gated on the same feature as its callers | CI `crypto core` (default and `client` clippy) |
 | D-15 | Committed browser crypto artifact not rebuilt after the safety-code module was added to the crypto core — caught by CI | this branch (`879ade4`) | `051bba1` — regenerated with `scripts/messaging/build-web-crypto.sh` (rustc 1.97.0, wasm-bindgen 0.2.129) | CI `rebuild and verify the committed browser crypto artifact` (byte-for-byte) |
+| D-16 | Enterprise SIP certification read Telephony's capture status once, right after Calling's voicemail / recording became READY; Telephony records DELIVERED only after Calling's acknowledgement returns (`capture.rs`), so the read could see FINISHED — failed once in CI on `2382871` | main (test unchanged by this branch) | this commit — the test waits for `DELIVERED` and the spool deletion (bounded `eventually`, no sleep), in both the voicemail and the recording paths | `enterprise_sip_certification` 3 / 3 local runs against real Asterisk 20.6 + SIPp, all six certified scenarios |
 
 ## 5. API inventory and Swagger
 
@@ -216,8 +218,9 @@ no hosted-staging or production-hardware measurement.
 ## 8. Status
 
 **BACKEND SOFTWARE COMPLETE: YES** — every mandatory backend requirement of §§1–166 and
-Appendices G–N is implemented and tested (0 PARTIAL / ABSENT / UNTESTED rows); 35 gaps and 15
-defects found, 50 resolved, 0 open; CI on `051bba1` green (74 / 75 success, 1 skipped by design).
+Appendices G–N is implemented and tested (0 PARTIAL / ABSENT / UNTESTED rows); 35 gaps and 16
+defects found, 51 resolved, 0 open; CI on `051bba1` green (74 / 75 success, 1 skipped by design)
+and re-run on the D-16 fix.
 
 **BACKEND INTEGRATION READY: YES** — the backend integrates end to end across real service
 processes (Platform Access, Messaging, Privacy Relay, SMS Gateway with a synthetic carrier,

@@ -1257,15 +1257,23 @@ async fn voicemail_scenario(
             .await,
         "VOICEMAIL_RECEIVED,VOICEMAIL_READY"
     );
-    // Telephony delivered it and deleted its transient spool copy.
-    assert_eq!(
-        stack
-            .ttext(&format!(
-                "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{message}'"
-            ))
-            .await,
-        "DELIVERED:true"
-    );
+    // Telephony delivered it and deleted its transient spool copy. It records DELIVERED only
+    // after Calling's acknowledgement returns, so it can trail the READY state Calling
+    // commits while handling that same delivery.
+    stack
+        .eventually(
+            "Telephony recorded the delivery and deleted its spool copy",
+            Duration::from_secs(15),
+            || async {
+                stack
+                    .ttext(&format!(
+                        "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{message}'"
+                    ))
+                    .await
+                    == "DELIVERED:true"
+            },
+        )
+        .await;
     let spool = stack.asterisk.run.join("spool/recording");
     let leftovers: Vec<String> = std::fs::read_dir(&spool)
         .map(|d| {
@@ -1643,14 +1651,22 @@ async fn recording_scenario(
             .await,
         "CAPTURE_STOP:SUCCEEDED"
     );
-    assert_eq!(
-        stack
-            .ttext(&format!(
-                "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{recording}'"
-            ))
-            .await,
-        "DELIVERED:true"
-    );
+    // Telephony records DELIVERED only after Calling's acknowledgement returns, so it can
+    // trail the READY state Calling commits while handling that same delivery.
+    stack
+        .eventually(
+            "Telephony recorded the delivery and deleted its spool copy",
+            Duration::from_secs(15),
+            || async {
+                stack
+                    .ttext(&format!(
+                        "SELECT status || ':' || (spool_deleted_at IS NOT NULL)::text FROM telephony_captures WHERE id = '{recording}'"
+                    ))
+                    .await
+                    == "DELIVERED:true"
+            },
+        )
+        .await;
     let duration: i64 = stack
         .text(&format!(
             "SELECT duration_ms::text FROM call_recordings WHERE id = '{recording}'"
