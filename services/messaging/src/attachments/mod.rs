@@ -270,6 +270,12 @@ pub async fn create_intent(
     if !member.may_send(now) {
         return Err(Error::reason(ErrorCode::SendRestricted, "MUTED"));
     }
+    if member.is_read_only() {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "READ_ONLY_MEMBER",
+        ));
+    }
     let effective = policy::current(&state.db, ctx.scope.environment_id).await?;
     if !attachments_enabled(&effective, &conversation) {
         return Err(Error::reason(

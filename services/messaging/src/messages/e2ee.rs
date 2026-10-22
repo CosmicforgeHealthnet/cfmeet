@@ -287,7 +287,7 @@ pub async fn send(
         .transaction::<_, (u16, MessageRow), Error>(move |txn| {
             Box::pin(async move {
                 let now = st.now();
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 let group = lock_group(txn, conversation.id).await?;
                 if let Some(existing) = load_by_client_id(
                     txn,

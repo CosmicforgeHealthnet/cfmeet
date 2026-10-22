@@ -176,6 +176,8 @@ struct Fx {
     member2: Uuid,
     /// ACTIVE principal of A's environment, never a member.
     outsider: Uuid,
+    /// Principal with an open invitation to `conv`.
+    invitee: Uuid,
     removed: Uuid,
     banned: Uuid,
     blocked: Uuid,
@@ -368,6 +370,16 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let r = h.send_managed(&a, &conv_v, owner.principal, &canary).await;
     ok(&r, "owner message");
     let msg = s(&r.json, "messageId");
+    let invitee = h.principal(&a);
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/conversations/{conv}/members"),
+            json!({ "principalId": invitee, "invite": true }),
+        )
+        .await;
+    ok(&r, "invitation");
     let r = h
         .send_managed(&a, &conv_v, member.principal, "member says hi")
         .await;
@@ -719,6 +731,7 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
         "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        invitee,
         backup_create_body,
         backup_ready,
         backup_pending,
@@ -1027,6 +1040,15 @@ fn ops() -> Vec<Op> {
              req: |f| r(format!("/v1/messaging/devices/{}/welcomes/{}/consume", f.member.device_id(), f.welcome), Some(f.member.principal), Some(json!({}))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ----------------------------------------------------------------- blocks
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invitation/accept", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/invitation/accept", f.conv), Some(f.invitee), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invitation/decline", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/invitation/decline", f.conv), Some(f.invitee), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/invitations", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/invitations".into(), Some(f.invitee), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/messaging/blocks", scopes: READ, acting: AM, res: Res::Env,
              req: |f| r("/v1/messaging/blocks".into(), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },

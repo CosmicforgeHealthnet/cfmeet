@@ -3,8 +3,14 @@
 //! * Members are ACTIVE, REMOVED or LEFT; re-admission reactivates the row with a NEW
 //!   history window (`visible_from_sequence` / `visible_from_event`): a member sees only
 //!   what is committed after (re)joining (AD-07: no server-granted history).
-//! * Roles: OWNER (exactly the conversation owner), ADMIN, MEMBER. Administration needs
-//!   `conversations.manage`; with an acting principal it must be an OWNER / ADMIN.
+//! * Roles: OWNER (exactly the conversation owner), ADMIN, MODERATOR, MEMBER, READ_ONLY
+//!   (reads its window, sends no messages) and BOT_SERVICE (BOT_OR_SERVICE principals
+//!   only). Administration needs `conversations.manage`; with an acting principal it must
+//!   be an OWNER / ADMIN, except member moderation (remove, ban, unban, list bans), which a
+//!   MODERATOR may also do to MEMBER / READ_ONLY / BOT_SERVICE members.
+//! * Invitations (§35): an INVITED principal is not a member (no history, no events, no
+//!   sends) until it accepts; invitations expire ([`INVITATION_TTL`]) and can be declined
+//!   or revoked. `authority_source` records how a membership came to be.
 //! * Every change commits with its durable conversation event (`member.added`,
 //!   `member.removed`, `member.updated`) so realtime fanout and replay see it in order.
 //! * PRIVATE_E2EE: removing a member is an AUTHORIZATION change only. Every ACTIVE device
@@ -62,7 +68,14 @@ struct MemberViewRow {
     joined_at: DateTime<Utc>,
     send_restricted_until: Option<DateTime<Utc>>,
     version: i64,
+    authority_source: String,
+    invited_by_principal_id: Option<Uuid>,
+    invitation_expires_at: Option<DateTime<Utc>>,
 }
+
+const MEMBER_VIEW_COLUMNS: &str =
+    "principal_id, role, state, joined_at, send_restricted_until, version, \
+     authority_source, invited_by_principal_id, invitation_expires_at";
 
 fn member_view(m: &MemberViewRow) -> Value {
     json!({
@@ -72,7 +85,91 @@ fn member_view(m: &MemberViewRow) -> Value {
         "joinedAt": rfc3339(m.joined_at),
         "sendRestrictedUntil": m.send_restricted_until.map(rfc3339),
         "version": m.version,
+        "authoritySource": m.authority_source,
+        "invitedByPrincipalId": m.invited_by_principal_id,
+        "invitationExpiresAt": m.invitation_expires_at.filter(|_| m.state == "INVITED").map(rfc3339),
     })
+}
+
+/// How long an invitation stays open.
+pub const INVITATION_TTL: chrono::Duration = chrono::Duration::days(7);
+
+/// Roles an administrator may give (the OWNER is the conversation's owner, never given).
+pub fn assignable_role(role: Option<&str>) -> Result<&'static str> {
+    Ok(match role {
+        None | Some("MEMBER") => "MEMBER",
+        Some("ADMIN") => "ADMIN",
+        Some("MODERATOR") => "MODERATOR",
+        Some("READ_ONLY") => "READ_ONLY",
+        Some("BOT_SERVICE") => "BOT_SERVICE",
+        Some(_) => {
+            return Err(Error::validation(
+                "role must be MEMBER, ADMIN, MODERATOR, READ_ONLY or BOT_SERVICE",
+            ))
+        }
+    })
+}
+
+/// BOT_SERVICE is only for BOT_OR_SERVICE principals, and they only get BOT_SERVICE or
+/// READ_ONLY (a bot never administers or moderates).
+fn role_fits_principal(role: &str, kind: &str) -> Result<()> {
+    let bot = kind == "BOT_OR_SERVICE";
+    match (role, bot) {
+        ("BOT_SERVICE", false) => Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "BOT_SERVICE_REQUIRES_BOT_PRINCIPAL",
+        )),
+        ("ADMIN" | "MODERATOR", true) => Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "BOT_CANNOT_ADMINISTER",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The principal's kind (ACTIVE and messaging-capable), else a clear refusal.
+async fn principal_kind(state: &AppState, ctx: &TrustedContext, principal: Uuid) -> Result<String> {
+    match state.principals.resolve(&ctx.scope, principal).await {
+        Ok(s @ PrincipalStatus::Active { .. }) if s.is_messaging_capable() => match s {
+            PrincipalStatus::Active { kind } => Ok(kind),
+            _ => unreachable!(),
+        },
+        Ok(_) => Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "PRINCIPAL_NOT_AVAILABLE",
+        )),
+        Err(e) => {
+            tracing::warn!(error = %e, "principal directory unavailable");
+            Err(Error::code(ErrorCode::ServiceUnavailable))
+        }
+    }
+}
+
+/// Authorizes a moderator of `conversation` acting on a member of `target_role`: OWNER /
+/// ADMIN always; a MODERATOR only on MEMBER / READ_ONLY / BOT_SERVICE members (or a
+/// principal that is not a member). NOT_FOUND for a non-member principal.
+async fn require_moderator<C: ConnectionTrait>(
+    db: &C,
+    conversation: &ConversationRow,
+    admin: &Administrator,
+    target_role: Option<&str>,
+) -> Result<()> {
+    if let Administrator::Principal(a) = admin {
+        match access::membership(db, conversation.id, a.principal_id, false).await? {
+            Some(m) if m.is_admin() => {}
+            Some(m)
+                if m.is_moderator()
+                    && !matches!(target_role, Some("OWNER" | "ADMIN" | "MODERATOR")) => {}
+            Some(m) if m.is_active() => {
+                return Err(Error::reason(
+                    ErrorCode::PrincipalNotAuthorized,
+                    "NOT_ADMIN",
+                ))
+            }
+            _ => return Err(Error::code(ErrorCode::NotFound)),
+        }
+    }
+    Ok(())
 }
 
 /// Authorizes an administrator of `conversation` (NOT_FOUND for a non-member principal).
@@ -151,10 +248,12 @@ pub async fn list(
     };
     let rows: Vec<MemberViewRow> = db::all(
         &state.db,
-        "SELECT principal_id, role, state, joined_at, send_restricted_until, version FROM messaging_conversation_members \
+        &format!(
+            "SELECT {MEMBER_VIEW_COLUMNS} FROM messaging_conversation_members \
          WHERE conversation_id = $1 AND state = 'ACTIVE' \
            AND ($2::timestamptz IS NULL OR (joined_at, principal_id) > ($2, $3)) \
-         ORDER BY joined_at, principal_id LIMIT $4",
+         ORDER BY joined_at, principal_id LIMIT $4"
+        ),
         vec![
             conversation_id.into(),
             after.map(|a| a.0).into(),
@@ -180,6 +279,9 @@ pub struct AddRequest {
     pub principal_id: Uuid,
     #[serde(default)]
     pub role: Option<String>,
+    /// §35: invite instead of adding; the principal becomes a member when it accepts.
+    #[serde(default)]
+    pub invite: bool,
 }
 
 /// Next message / event positions: the history window of a member joining now.
@@ -206,29 +308,10 @@ pub async fn add(
     conversation_id: Uuid,
     request: AddRequest,
 ) -> Result<(u16, Value)> {
-    let role = match request.role.as_deref() {
-        None | Some("MEMBER") => "MEMBER",
-        Some("ADMIN") => "ADMIN",
-        Some(_) => return Err(Error::validation("role must be MEMBER or ADMIN")),
-    };
+    let role = assignable_role(request.role.as_deref())?;
     // The new member must be an ACTIVE messaging principal of the SAME environment.
-    match state
-        .principals
-        .resolve(&ctx.scope, request.principal_id)
-        .await
-    {
-        Ok(s @ PrincipalStatus::Active { .. }) if s.is_messaging_capable() => {}
-        Ok(_) => {
-            return Err(Error::reason(
-                ErrorCode::PrincipalNotAuthorized,
-                "PRINCIPAL_NOT_AVAILABLE",
-            ))
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "principal directory unavailable");
-            return Err(Error::code(ErrorCode::ServiceUnavailable));
-        }
-    }
+    let kind = principal_kind(state, ctx, request.principal_id).await?;
+    role_fits_principal(role, &kind)?;
     let st = state.clone();
     let ctx = ctx.clone();
     let admin = admin.clone();
@@ -241,6 +324,20 @@ pub async fn add(
                 let conversation = load(txn, &ctx, conversation_id, true)
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
+                if request.invite {
+                    return invite_in(
+                        txn,
+                        &st,
+                        &ctx,
+                        &admin,
+                        &conversation,
+                        request.principal_id,
+                        role,
+                        &request_ctx,
+                        now,
+                    )
+                    .await;
+                }
                 add_in(
                     txn,
                     &st,
@@ -288,9 +385,39 @@ pub async fn add_in<C: ConnectionTrait>(
     request_ctx: &RequestContext,
     now: DateTime<Utc>,
 ) -> Result<(u16, Value)> {
+    require_admin(txn, conversation, admin).await?;
+    activate(
+        txn,
+        st,
+        ctx,
+        admin,
+        conversation,
+        principal_id,
+        role,
+        "API",
+        request_ctx,
+        now,
+    )
+    .await
+}
+
+/// Makes `principal_id` an ACTIVE member with a fresh history window (new, re-admitted or
+/// an accepted invitation), inside the caller's transaction holding the conversation lock.
+#[allow(clippy::too_many_arguments)]
+async fn activate<C: ConnectionTrait>(
+    txn: &C,
+    st: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation: &ConversationRow,
+    principal_id: Uuid,
+    role: &str,
+    source: &str,
+    request_ctx: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<(u16, Value)> {
     let conversation_id = conversation.id;
     let request = AddRequestRef { principal_id };
-    require_admin(txn, conversation, admin).await?;
     access::require_accepting(conversation, now)?;
     let class = ContextClass::parse(&conversation.context_class)
         .ok_or(Error::code(ErrorCode::InternalError))?;
@@ -318,8 +445,9 @@ pub async fn add_in<C: ConnectionTrait>(
         .unwrap_or(st.conversations.max_members);
     let count = db::scalar_i64(
         txn,
-        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 AND state = 'ACTIVE'",
-        vec![conversation_id.into()],
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 \
+           AND (state = 'ACTIVE' OR (state = 'INVITED' AND principal_id <> $2))",
+        vec![conversation_id.into(), request.principal_id.into()],
     )
     .await?;
     if count >= max.min(st.conversations.max_members) {
@@ -352,7 +480,8 @@ pub async fn add_in<C: ConnectionTrait>(
             txn,
             "UPDATE messaging_conversation_members SET state = 'ACTIVE', role = $3, removed_at = NULL, \
                removed_reason = NULL, send_restricted_until = NULL, visible_from_sequence = $4, \
-               visible_from_event = $5, joined_at = $6, updated_at = $6, version = version + 1 \
+               visible_from_event = $5, joined_at = $6, updated_at = $6, version = version + 1, \
+               authority_source = $7, invitation_expires_at = NULL \
              WHERE conversation_id = $1 AND principal_id = $2",
             vec![
                 conversation_id.into(),
@@ -361,6 +490,7 @@ pub async fn add_in<C: ConnectionTrait>(
                 next_sequence.into(),
                 visible_event.into(),
                 now.into(),
+                source.into(),
             ],
         )
         .await?;
@@ -368,8 +498,8 @@ pub async fn add_in<C: ConnectionTrait>(
         db::exec(
             txn,
             "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, \
-               joined_at, updated_at, visible_from_sequence, visible_from_event) \
-             VALUES ($1, $2, $3, $4, $5, $5, $6, $7)",
+               joined_at, updated_at, visible_from_sequence, visible_from_event, authority_source) \
+             VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)",
             vec![
                 conversation_id.into(),
                 request.principal_id.into(),
@@ -378,6 +508,7 @@ pub async fn add_in<C: ConnectionTrait>(
                 now.into(),
                 next_sequence.into(),
                 visible_event.into(),
+                source.into(),
             ],
         )
         .await?;
@@ -394,9 +525,9 @@ pub async fn add_in<C: ConnectionTrait>(
         txn,
         ctx,
         admin,
-        "MEMBER_ADDED",
+        if source == "INVITATION" { "MEMBER_INVITATION_ACCEPTED" } else { "MEMBER_ADDED" },
         conversation_id,
-        json!({ "member_principal_id": request.principal_id, "role": role }),
+        json!({ "member_principal_id": request.principal_id, "role": role, "authority_source": source }),
         request_ctx,
         now,
     )
@@ -419,8 +550,10 @@ async fn member_row<C: ConnectionTrait>(
 ) -> Result<Value> {
     let row: MemberViewRow = db::one(
         db,
-        "SELECT principal_id, role, state, joined_at, send_restricted_until, version FROM messaging_conversation_members \
-         WHERE conversation_id = $1 AND principal_id = $2",
+        &format!(
+            "SELECT {MEMBER_VIEW_COLUMNS} FROM messaging_conversation_members \
+         WHERE conversation_id = $1 AND principal_id = $2"
+        ),
         vec![conversation_id.into(), principal.into()],
     )
     .await?
@@ -567,12 +700,46 @@ pub async fn remove(
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
                 let leaving = admin.principal_id() == Some(principal);
+                let target = access::membership(txn, conversation_id, principal, true).await?;
+                if target.as_ref().is_some_and(Membership::is_invited) {
+                    // Revoking an invitation (or the invitee declining it).
+                    if !leaving {
+                        require_admin(txn, &conversation, &admin).await?;
+                    }
+                    let outcome = if leaving { "DECLINED" } else { "REVOKED" };
+                    close_invitation(
+                        txn,
+                        &ctx,
+                        &conversation,
+                        principal,
+                        outcome,
+                        admin.principal_id(),
+                        &request_ctx,
+                        now,
+                    )
+                    .await?;
+                    record_audit(
+                        txn,
+                        &ctx,
+                        &admin,
+                        "MEMBER_INVITATION_CLOSED",
+                        conversation_id,
+                        json!({ "member_principal_id": principal, "outcome": outcome }),
+                        &request_ctx,
+                        now,
+                    )
+                    .await?;
+                    return member_row(txn, conversation_id, principal).await;
+                }
                 if !leaving {
-                    require_admin(txn, &conversation, &admin).await?;
-                } else if !access::membership(txn, conversation_id, principal, false)
-                    .await?
-                    .is_some_and(|m| m.is_active())
-                {
+                    require_moderator(
+                        txn,
+                        &conversation,
+                        &admin,
+                        target.as_ref().map(|m| m.role.as_str()),
+                    )
+                    .await?;
+                } else if !target.as_ref().is_some_and(|m| m.is_active()) {
                     return Err(Error::code(ErrorCode::NotFound));
                 }
                 if conversation.context_class == "DIRECT" {
@@ -671,9 +838,7 @@ pub async fn set_role_in<C: ConnectionTrait>(
     request: &RequestContext,
     now: DateTime<Utc>,
 ) -> Result<bool> {
-    if !matches!(role, "MEMBER" | "ADMIN") {
-        return Err(Error::validation("role must be MEMBER or ADMIN"));
-    }
+    assignable_role(Some(role))?;
     #[derive(sea_orm::FromQueryResult)]
     struct Updated {
         send_restricted_until: Option<DateTime<Utc>>,
@@ -725,10 +890,21 @@ pub async fn ban_in<C: ConnectionTrait>(
     request: &RequestContext,
     now: DateTime<Utc>,
 ) -> Result<()> {
-    if access::membership(db, conversation.id, principal, true)
-        .await?
-        .is_some_and(|m| m.is_active() && m.role != "OWNER")
-    {
+    let current = access::membership(db, conversation.id, principal, true).await?;
+    if current.as_ref().is_some_and(Membership::is_invited) {
+        close_invitation(
+            db,
+            ctx,
+            conversation,
+            principal,
+            "REVOKED",
+            actor,
+            request,
+            now,
+        )
+        .await?;
+    }
+    if current.is_some_and(|m| m.is_active() && m.role != "OWNER") {
         remove_in(
             db,
             ctx,
@@ -786,7 +962,8 @@ pub struct RoleChange {
     pub role: String,
 }
 
-/// `PATCH /v1/conversations/{id}/members/{principalId}`: MEMBER ↔ ADMIN (never the owner).
+/// `PATCH /v1/conversations/{id}/members/{principalId}`: ADMIN, MODERATOR, MEMBER,
+/// READ_ONLY or BOT_SERVICE (never the owner; bots only BOT_SERVICE / READ_ONLY).
 pub async fn change_role(
     state: &AppState,
     ctx: &TrustedContext,
@@ -795,9 +972,7 @@ pub async fn change_role(
     principal: Uuid,
     request: RoleChange,
 ) -> Result<Value> {
-    if !matches!(request.role.as_str(), "MEMBER" | "ADMIN") {
-        return Err(Error::validation("role must be MEMBER or ADMIN"));
-    }
+    let role = assignable_role(Some(request.role.as_str()))?;
     let st = state.clone();
     let ctx = ctx.clone();
     let admin = admin.clone();
@@ -818,6 +993,8 @@ pub async fn change_role(
                 if member.role == "OWNER" {
                     return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "OWNER_ROLE_FIXED"));
                 }
+                // Checked only once the conversation and the member are known (no oracle).
+                role_fits_principal(role, &principal_kind(&st, &ctx, principal).await?)?;
                 let changed = if member.role != request.role {
                     set_role_in(txn, &ctx, &conversation, principal, &request.role, &request_ctx, now).await?
                 } else {
@@ -882,11 +1059,11 @@ pub async fn ban(
                 let conversation = load(txn, &ctx, conversation_id, true)
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
-                require_admin(txn, &conversation, &admin).await?;
+                let current = access::membership(txn, conversation_id, request.principal_id, true).await?;
+                require_moderator(txn, &conversation, &admin, current.as_ref().filter(|m| m.is_active()).map(|m| m.role.as_str())).await?;
                 if admin.principal_id() == Some(request.principal_id) {
                     return Err(Error::validation("an administrator cannot ban themselves"));
                 }
-                let current = access::membership(txn, conversation_id, request.principal_id, true).await?;
                 if current.as_ref().is_some_and(|m| m.role == "OWNER") {
                     return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "OWNER_ROLE_FIXED"));
                 }
@@ -939,7 +1116,7 @@ pub async fn unban(
                 let conversation = load(txn, &ctx, conversation_id, true)
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
-                require_admin(txn, &conversation, &admin).await?;
+                require_moderator(txn, &conversation, &admin, None).await?;
                 let lifted = unban_in(txn, conversation_id, principal, now).await?;
                 if lifted {
                     record_audit(
@@ -978,7 +1155,7 @@ pub async fn bans(
     let conversation = load(&state.db, ctx, conversation_id, false)
         .await?
         .ok_or(Error::code(ErrorCode::NotFound))?;
-    require_admin(&state.db, &conversation, admin).await?;
+    require_moderator(&state.db, &conversation, admin, None).await?;
     let rows: Vec<BanRow> = db::all(
         &state.db,
         "SELECT principal_id, reason, created_at FROM messaging_conversation_bans \
@@ -989,4 +1166,265 @@ pub async fn bans(
     Ok(
         json!({ "bans": rows.iter().map(|b| json!({ "principalId": b.principal_id, "reason": b.reason, "bannedAt": rfc3339(b.created_at) })).collect::<Vec<_>>() }),
     )
+}
+
+// ---------------------------------------------------------------------------------------
+// Invitations (§35)
+// ---------------------------------------------------------------------------------------
+
+/// Invites `principal_id` (an OWNER / ADMIN or the application backend): an INVITED row
+/// with no history window, counted toward the member limit, announced on the conversation
+/// stream (`messaging.member.invited`). An ACTIVE member is returned unchanged (200).
+#[allow(clippy::too_many_arguments)]
+pub async fn invite_in<C: ConnectionTrait>(
+    txn: &C,
+    st: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation: &ConversationRow,
+    principal_id: Uuid,
+    role: &str,
+    request_ctx: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<(u16, Value)> {
+    require_admin(txn, conversation, admin).await?;
+    access::require_accepting(conversation, now)?;
+    let class = ContextClass::parse(&conversation.context_class)
+        .ok_or(Error::code(ErrorCode::InternalError))?;
+    if class == ContextClass::Direct {
+        return Err(Error::reason(
+            ErrorCode::InvalidTransition,
+            "DIRECT_MEMBERSHIP_FIXED",
+        ));
+    }
+    let existing = access::membership(txn, conversation.id, principal_id, true).await?;
+    if existing.as_ref().is_some_and(Membership::is_active) {
+        return Ok((200, member_row(txn, conversation.id, principal_id).await?));
+    }
+    if banned(txn, conversation.id, principal_id).await? {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "PRINCIPAL_BANNED",
+        ));
+    }
+    let effective = policy::current(txn, ctx.scope.environment_id).await?;
+    let max = effective
+        .context(class)
+        .max_members
+        .unwrap_or(st.conversations.max_members);
+    let count = db::scalar_i64(
+        txn,
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 \
+           AND state IN ('ACTIVE', 'INVITED') AND principal_id <> $2",
+        vec![conversation.id.into(), principal_id.into()],
+    )
+    .await?;
+    if count >= max.min(st.conversations.max_members) {
+        return Err(Error::reason(ErrorCode::Conflict, "MEMBER_LIMIT_REACHED"));
+    }
+    let expires = now + INVITATION_TTL;
+    let inviter = admin.principal_id();
+    if existing.is_some() {
+        db::exec(
+            txn,
+            "UPDATE messaging_conversation_members SET state = 'INVITED', role = $3, removed_at = NULL, removed_reason = NULL, \
+               invited_by_principal_id = $4, invited_at = $5, invitation_expires_at = $6, updated_at = $5, \
+               version = version + 1 WHERE conversation_id = $1 AND principal_id = $2",
+            vec![conversation.id.into(), principal_id.into(), role.into(), inviter.into(), now.into(), expires.into()],
+        )
+        .await?;
+    } else {
+        db::exec(
+            txn,
+            "INSERT INTO messaging_conversation_members (conversation_id, principal_id, environment_id, role, state, \
+               joined_at, updated_at, invited_by_principal_id, invited_at, invitation_expires_at) \
+             VALUES ($1, $2, $3, $4, 'INVITED', $5, $5, $6, $5, $7)",
+            vec![conversation.id.into(), principal_id.into(), ctx.scope.environment_id.into(), role.into(),
+                 now.into(), inviter.into(), expires.into()],
+        )
+        .await?;
+    }
+    outbox::enqueue_conversation(
+        txn,
+        conversation.id,
+        NewEvent {
+            event_type: "messaging.member.invited",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: conversation.id,
+            scope: scope_of(ctx),
+            payload: json!({
+                "conversation_id": conversation.id,
+                "principal_id": principal_id,
+                "role": role,
+                "invited_by_principal_id": inviter,
+                "expires_at": rfc3339(expires),
+            }),
+        },
+        request_ctx,
+        now,
+    )
+    .await?;
+    record_audit(
+        txn,
+        ctx,
+        admin,
+        "MEMBER_INVITED",
+        conversation.id,
+        json!({ "member_principal_id": principal_id, "role": role }),
+        request_ctx,
+        now,
+    )
+    .await?;
+    crate::metrics::inc("messaging_members_invited_total", &[]);
+    Ok((201, member_row(txn, conversation.id, principal_id).await?))
+}
+
+/// Closes an open invitation (DECLINED by the invitee, REVOKED by an administrator, or
+/// EXPIRED): state LEFT / REMOVED, announced as `messaging.member.invitation-closed`.
+#[allow(clippy::too_many_arguments)]
+async fn close_invitation<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    principal: Uuid,
+    outcome: &str,
+    actor: Option<Uuid>,
+    request: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let n = db::exec(
+        db,
+        "UPDATE messaging_conversation_members SET state = $3, removed_at = $4, removed_reason = $5, updated_at = $4, \
+           invitation_expires_at = NULL, version = version + 1 \
+         WHERE conversation_id = $1 AND principal_id = $2 AND state = 'INVITED'",
+        vec![
+            conversation.id.into(),
+            principal.into(),
+            (if outcome == "DECLINED" { "LEFT" } else { "REMOVED" }).into(),
+            now.into(),
+            format!("INVITATION_{outcome}").into(),
+        ],
+    )
+    .await?;
+    if n != 1 {
+        return Err(Error::code(ErrorCode::NotFound));
+    }
+    outbox::enqueue_conversation(
+        db,
+        conversation.id,
+        NewEvent {
+            event_type: "messaging.member.invitation-closed",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: conversation.id,
+            scope: scope_of(ctx),
+            payload: json!({ "conversation_id": conversation.id, "principal_id": principal,
+                             "outcome": outcome, "closed_by_principal_id": actor }),
+        },
+        request,
+        now,
+    )
+    .await?;
+    Ok(())
+}
+
+/// `POST /v1/conversations/{id}/invitation/accept` | `.../decline` — the invitee itself.
+/// Accepting makes it an ACTIVE member with the invited role and a history window that
+/// starts now (`authoritySource` INVITATION); an expired invitation is closed instead.
+pub async fn answer_invitation(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    accept: bool,
+) -> Result<Value> {
+    let st = state.clone();
+    let ctx = ctx.clone();
+    let acting = acting.clone();
+    let request_ctx = request_context();
+    let outcome = state
+        .db
+        .transaction::<_, std::result::Result<Value, Error>, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let conversation = load(txn, &ctx, conversation_id, true)
+                    .await?
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                let invitee = Administrator::Principal(acting.clone());
+                let row: Option<(String, Option<DateTime<Utc>>)> = {
+                    #[derive(sea_orm::FromQueryResult)]
+                    struct Inv {
+                        role: String,
+                        invitation_expires_at: Option<DateTime<Utc>>,
+                    }
+                    db::one::<Inv, _>(
+                        txn,
+                        "SELECT role, invitation_expires_at FROM messaging_conversation_members \
+                         WHERE conversation_id = $1 AND principal_id = $2 AND state = 'INVITED' FOR UPDATE",
+                        vec![conversation_id.into(), acting.principal_id.into()],
+                    )
+                    .await?
+                    .map(|i| (i.role, i.invitation_expires_at))
+                };
+                // No open invitation looks like an unknown conversation.
+                let Some((role, expires)) = row else {
+                    return Err(Error::code(ErrorCode::NotFound));
+                };
+                if expires.is_some_and(|t| t <= now) {
+                    close_invitation(txn, &ctx, &conversation, acting.principal_id, "EXPIRED", None, &request_ctx, now).await?;
+                    // Committed (the expiry is recorded), then refused.
+                    return Ok(Err(Error::reason(ErrorCode::Conflict, "INVITATION_EXPIRED")));
+                }
+                if !accept {
+                    close_invitation(txn, &ctx, &conversation, acting.principal_id, "DECLINED", Some(acting.principal_id), &request_ctx, now).await?;
+                    record_audit(txn, &ctx, &invitee, "MEMBER_INVITATION_CLOSED", conversation_id,
+                        json!({ "member_principal_id": acting.principal_id, "outcome": "DECLINED" }), &request_ctx, now).await?;
+                    return Ok(Ok(member_row(txn, conversation_id, acting.principal_id).await?));
+                }
+                if banned(txn, conversation_id, acting.principal_id).await? {
+                    return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "PRINCIPAL_BANNED"));
+                }
+                let (_, view) = activate(txn, &st, &ctx, &invitee, &conversation, acting.principal_id, &role,
+                    "INVITATION", &request_ctx, now).await?;
+                Ok(Ok(view))
+            })
+        })
+        .await
+        .map_err(Error::from)?;
+    outcome
+}
+
+#[derive(sea_orm::FromQueryResult)]
+struct InvitationRow {
+    conversation_id: Uuid,
+    role: String,
+    invited_by_principal_id: Option<Uuid>,
+    invited_at: Option<DateTime<Utc>>,
+    invitation_expires_at: Option<DateTime<Utc>>,
+    context_class: String,
+    security_profile: String,
+}
+
+/// `GET /v1/messaging/invitations` — the acting principal's open invitations.
+pub async fn invitations(state: &AppState, ctx: &TrustedContext, acting: &Acting) -> Result<Value> {
+    let rows: Vec<InvitationRow> = db::all(
+        &state.db,
+        "SELECT m.conversation_id, m.role, m.invited_by_principal_id, m.invited_at, m.invitation_expires_at, \
+                c.context_class, c.security_profile \
+           FROM messaging_conversation_members m JOIN messaging_conversations c ON c.id = m.conversation_id \
+          WHERE m.environment_id = $1 AND m.principal_id = $2 AND m.state = 'INVITED' AND m.invitation_expires_at > $3 \
+            AND c.tenant_id = $4 AND c.application_id = $5 AND c.lifecycle_state = 'ACTIVE' \
+          ORDER BY m.invited_at DESC LIMIT 200",
+        vec![ctx.scope.environment_id.into(), acting.principal_id.into(), state.now().into(),
+             ctx.scope.tenant_id.into(), ctx.scope.application_id.into()],
+    )
+    .await?;
+    Ok(json!({ "invitations": rows.iter().map(|r| json!({
+        "conversationId": r.conversation_id,
+        "role": r.role,
+        "invitedByPrincipalId": r.invited_by_principal_id,
+        "invitedAt": r.invited_at.map(rfc3339),
+        "expiresAt": r.invitation_expires_at.map(rfc3339),
+        "contextClass": r.context_class,
+        "securityProfile": r.security_profile,
+    })).collect::<Vec<_>>() }))
 }

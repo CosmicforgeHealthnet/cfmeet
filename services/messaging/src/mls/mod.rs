@@ -244,7 +244,7 @@ pub async fn submit_commit(
         .transaction::<_, (u16, crate::messages::MessageRow), Error>(move |txn| {
             Box::pin(async move {
                 let now = st.now();
-                crate::messages::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                crate::messages::lock_sender(txn, &conversation, acting.principal_id, now, false).await?;
                 let group = lock_group(txn, conversation.id).await?;
                 if let Some(existing) =
                     load_by_client_id(txn, conversation.id, acting.principal_id, request.client_message_id).await?

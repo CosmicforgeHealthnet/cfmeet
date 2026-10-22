@@ -3,7 +3,7 @@
   "info": {
     "title": "CF Meet Messaging API",
     "version": "1.13.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds."
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations)."
   },
   "paths": {
     "/health": {
@@ -940,7 +940,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). The principal must be ACTIVE and messaging-capable in the same environment; re-admission opens a NEW history window (no server-granted history, AD-07). DIRECT membership is fixed.",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). The principal must be ACTIVE and messaging-capable in the same environment; re-admission opens a NEW history window (no server-granted history, AD-07). DIRECT membership is fixed. With invite: true the principal is INVITED (201, state INVITED) and becomes a member only when it accepts.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1023,7 +1023,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Leaving (acting = the member): messages.send. Removing another member: conversations.manage (+ OWNER / ADMIN). PRIVATE_E2EE: the member's devices become pending MLS removals; the group accepts only a removal commit until one is accepted (mlsRekeyRequired).",
+        "description": "Leaving (acting = the member): messages.send. Removing another member: conversations.manage (+ OWNER / ADMIN). PRIVATE_E2EE: the member's devices become pending MLS removals; the group accepts only a removal commit until one is accepted (mlsRekeyRequired). On an INVITED principal this revokes the invitation (or, by the invitee itself, declines it) and returns the Member view (state REMOVED / LEFT). A MODERATOR may remove MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1066,7 +1066,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/messaging.common.v1.MemberRemoval"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/messaging.common.v1.MemberRemoval"
+                    },
+                    {
+                      "$ref": "#/components/schemas/messaging.common.v1.Member"
+                    }
+                  ]
                 }
               }
             }
@@ -1101,7 +1108,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated.",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -4733,7 +4740,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN).",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -4797,7 +4804,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Removes the member (PRIVATE_E2EE: pending MLS removal) and refuses re-adding until unbanned. Audited.",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Removes the member (PRIVATE_E2EE: pending MLS removal) and refuses re-adding until unbanned. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -4873,7 +4880,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Lifts the ban; does not re-add. Audited.",
+        "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Lifts the ban; does not re-add. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -6496,6 +6503,205 @@
           }
         }
       }
+    },
+    "/v1/conversations/{conversationId}/invitation/accept": {
+      "post": {
+        "operationId": "acceptInvitation",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "description": "Scope messages.send. The acting principal accepts its open invitation: it becomes an ACTIVE member with the invited role and a history window starting now (authoritySource INVITATION). No open invitation: NOT_FOUND; expired: CONFLICT / INVITATION_EXPIRED (the invitation is closed); banned meanwhile: PRINCIPAL_BANNED.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/invitation/decline": {
+      "post": {
+        "operationId": "declineInvitation",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "description": "Scope messages.send. The acting principal declines its open invitation (state LEFT, reason INVITATION_DECLINED).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/invitations": {
+      "get": {
+        "operationId": "listInvitations",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "description": "Scope messages.read. The acting principal's open invitations.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.InvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6547,8 +6753,16 @@
           "role": {
             "enum": [
               "MEMBER",
-              "ADMIN"
-            ]
+              "ADMIN",
+              "MODERATOR",
+              "READ_ONLY",
+              "BOT_SERVICE"
+            ],
+            "description": "BOT_SERVICE only for BOT_OR_SERVICE principals (BOT_SERVICE_REQUIRES_BOT_PRINCIPAL); bots are never ADMIN / MODERATOR (BOT_CANNOT_ADMINISTER)."
+          },
+          "invite": {
+            "type": "boolean",
+            "description": "§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit."
           }
         },
         "required": [
@@ -8324,12 +8538,7 @@
                   "$ref": "#/components/schemas/platform.common.v1.Uuid"
                 },
                 "role": {
-                  "type": "string",
-                  "enum": [
-                    "OWNER",
-                    "ADMIN",
-                    "MEMBER"
-                  ]
+                  "$ref": "#/components/schemas/messaging.common.v1.MemberRole"
                 }
               }
             },
@@ -9775,6 +9984,65 @@
         },
         "description": "A new device's request for the history its existing device holds (ADR 0052 AD-07)."
       },
+      "messaging.common.v1.InvitationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitations"
+        ],
+        "properties": {
+          "invitations": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "conversationId",
+                "role",
+                "invitedByPrincipalId",
+                "invitedAt",
+                "expiresAt",
+                "contextClass",
+                "securityProfile"
+              ],
+              "properties": {
+                "conversationId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "role": {
+                  "$ref": "#/components/schemas/messaging.common.v1.MemberRole"
+                },
+                "invitedByPrincipalId": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "invitedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "contextClass": {
+                  "$ref": "#/components/schemas/messaging.common.v1.ContextClass"
+                },
+                "securityProfile": {
+                  "$ref": "#/components/schemas/messaging.common.v1.SecurityProfile"
+                }
+              }
+            }
+          }
+        },
+        "description": "The acting principal's open (unexpired) invitations to ACTIVE conversations, newest first."
+      },
       "messaging.common.v1.KeyPackageClaim": {
         "type": "object",
         "additionalProperties": false,
@@ -10125,7 +10393,12 @@
             "$ref": "#/components/schemas/messaging.common.v1.MemberRole"
           },
           "state": {
-            "const": "ACTIVE"
+            "enum": [
+              "ACTIVE",
+              "INVITED",
+              "REMOVED",
+              "LEFT"
+            ]
           },
           "joinedAt": {
             "type": "string",
@@ -10145,6 +10418,35 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "authoritySource": {
+            "enum": [
+              "API",
+              "INVITATION",
+              "MEETING"
+            ],
+            "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration."
+          },
+          "invitedByPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invitationExpiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10153,7 +10455,10 @@
           "state",
           "joinedAt",
           "sendRestrictedUntil",
-          "version"
+          "version",
+          "authoritySource",
+          "invitedByPrincipalId",
+          "invitationExpiresAt"
         ]
       },
       "messaging.common.v1.MemberPage": {
@@ -10225,8 +10530,12 @@
         "enum": [
           "OWNER",
           "ADMIN",
-          "MEMBER"
-        ]
+          "MODERATOR",
+          "MEMBER",
+          "READ_ONLY",
+          "BOT_SERVICE"
+        ],
+        "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
       },
       "messaging.common.v1.Message": {
         "type": "object",
@@ -11989,7 +12298,10 @@
           "role": {
             "enum": [
               "MEMBER",
-              "ADMIN"
+              "ADMIN",
+              "MODERATOR",
+              "READ_ONLY",
+              "BOT_SERVICE"
             ]
           },
           "changed": {
@@ -12010,7 +12322,10 @@
           "role": {
             "enum": [
               "MEMBER",
-              "ADMIN"
+              "ADMIN",
+              "MODERATOR",
+              "READ_ONLY",
+              "BOT_SERVICE"
             ]
           }
         },

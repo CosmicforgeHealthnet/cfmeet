@@ -299,6 +299,12 @@ pub(crate) async fn send_prelude(
     if !member.may_send(now) {
         return Err(Error::reason(ErrorCode::SendRestricted, "MUTED"));
     }
+    if member.is_read_only() {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "READ_ONLY_MEMBER",
+        ));
+    }
     crate::safety::abuse::require_not_restricted(state, ctx, acting.principal_id).await?;
     // Tenant fairness first (one environment cannot monopolize shared capacity), then
     // the principal's own velocity.
@@ -348,11 +354,14 @@ pub(crate) async fn send_prelude(
 /// since the prelude: the member row (shared lock: a removal / mute waits for us or we
 /// see it), the conversation row (shared lock against lock / close) and, for DIRECT
 /// conversations, blocks (the pair's advisory lock serializes with block creation).
+/// Locks the sender's membership for the send. `application`: an application message
+/// (READ_ONLY members send none); MLS handshake messages pass `false`.
 pub(crate) async fn lock_sender<C: ConnectionTrait>(
     db: &C,
     conversation: &ConversationRow,
     principal: Uuid,
     now: DateTime<Utc>,
+    application: bool,
 ) -> Result<()> {
     #[derive(FromQueryResult)]
     struct L {
@@ -376,6 +385,12 @@ pub(crate) async fn lock_sender<C: ConnectionTrait>(
     )
     .await?;
     match m {
+        Some(m) if application && m.may_send(now) && m.is_read_only() => {
+            return Err(Error::reason(
+                ErrorCode::PrincipalNotAuthorized,
+                "READ_ONLY_MEMBER",
+            ))
+        }
         Some(m) if m.may_send(now) => {}
         Some(m) if m.is_active() => return Err(Error::reason(ErrorCode::SendRestricted, "MUTED")),
         _ => return Err(Error::code(ErrorCode::NotFound)),

@@ -714,12 +714,7 @@
                   "$ref": "#/components/schemas/platform.common.v1.Uuid"
                 },
                 "role": {
-                  "type": "string",
-                  "enum": [
-                    "OWNER",
-                    "ADMIN",
-                    "MEMBER"
-                  ]
+                  "$ref": "#/components/schemas/messaging.common.v1.MemberRole"
                 }
               }
             },
@@ -1280,6 +1275,18 @@
             "type": "boolean"
           }
         }
+      },
+      "messaging.common.v1.MemberRole": {
+        "type": "string",
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "MODERATOR",
+          "MEMBER",
+          "READ_ONLY",
+          "BOT_SERVICE"
+        ],
+        "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
       },
       "messaging.common.v1.Protocol": {
         "type": "string",

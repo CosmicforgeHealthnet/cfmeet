@@ -210,6 +210,14 @@ pub async fn sync_member(
                                 now,
                             )
                             .await?;
+                            // The meeting is this membership's source of authority.
+                            crate::db::exec(
+                                txn,
+                                "UPDATE messaging_conversation_members SET authority_source = 'MEETING' \
+                                 WHERE conversation_id = $1 AND principal_id = $2",
+                                vec![conversation.id.into(), principal.into()],
+                            )
+                            .await?;
                         }
                     }
                     "BANNED" if !owner => {

@@ -331,7 +331,7 @@ pub async fn send(
             Box::pin(async move {
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 // Serialize senders of this conversation's sequence before the retry check.
                 db::exec(
                     txn,
@@ -427,7 +427,7 @@ pub async fn edit(
             Box::pin(async move {
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 let row = load_message(txn, conversation.id, message_id, true)
                     .await?
                     .filter(|r| r.sequence >= member.visible_from_sequence)

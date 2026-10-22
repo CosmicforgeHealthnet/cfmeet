@@ -50,6 +50,7 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::sms_bridge::http::messaging_routes())
         .merge(crate::usage::http::routes())
         .merge(crate::backups::routes())
+        .merge(crate::membership::http::customer_routes())
 }
 
 /// Routes nested under `/v1/conversations`.

@@ -40,6 +40,20 @@ impl Membership {
     pub fn may_send(&self, now: DateTime<Utc>) -> bool {
         self.is_active() && self.send_restricted_until.is_none_or(|t| t <= now)
     }
+
+    /// OWNER, ADMIN or MODERATOR: may moderate members (§30).
+    pub fn is_moderator(&self) -> bool {
+        self.is_active() && matches!(self.role.as_str(), "OWNER" | "ADMIN" | "MODERATOR")
+    }
+
+    /// READ_ONLY members read their history window but send no messages (§30).
+    pub fn is_read_only(&self) -> bool {
+        self.role == "READ_ONLY"
+    }
+
+    pub fn is_invited(&self) -> bool {
+        self.state == "INVITED"
+    }
 }
 
 const MEMBER_COLUMNS: &str =
