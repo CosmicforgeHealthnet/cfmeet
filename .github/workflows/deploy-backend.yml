@@ -12,6 +12,7 @@ name: Deploy Backend
 
 on:
   # One-time Part V Swagger documentation deployment; normal future merges stay manual.
+  # Re-run once after fixing Swagger API selector and default-document initialization.
   push:
     branches: [main]
     paths:
