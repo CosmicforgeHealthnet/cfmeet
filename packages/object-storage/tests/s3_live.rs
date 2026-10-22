@@ -1,8 +1,8 @@
 //! Against a real S3-compatible server (MinIO in CI, any S3 locally) when
 //! `OBJECT_STORAGE_TEST_ENDPOINT` is set: private writes (with server-side encryption
 //! unless `OBJECT_STORAGE_TEST_SSE` is empty),
-//! integrity metadata, a signed read that works while an unsigned read is refused, and an
-//! idempotent delete. Skipped otherwise (`OBJECT_STORAGE_TEST_REQUIRED=1` makes it fail).
+//! integrity metadata, a signed read that works while an unsigned read is refused, an
+//! expired signed read refused by the store, and an idempotent delete. Skipped otherwise (`OBJECT_STORAGE_TEST_REQUIRED=1` makes it fail).
 
 use std::time::Duration;
 
@@ -80,6 +80,25 @@ async fn protected_objects_on_a_real_s3_compatible_server() {
             .status()
             .is_client_error());
     }
+
+    // Signed-read expiry (Part V §150): a grant signed ten minutes ago with a one-second
+    // lifetime is refused by the store itself as expired (no waiting needed: the signature
+    // carries its own issue time), while a fresh grant for the same object still works.
+    let stale = store
+        .signed_read(
+            &key,
+            Duration::from_secs(1),
+            chrono::Utc::now() - chrono::Duration::minutes(10),
+        )
+        .unwrap();
+    let refused = reqwest::get(&stale.url).await.unwrap();
+    assert_eq!(refused.status(), 403);
+    let why = refused.text().await.unwrap();
+    assert!(why.contains("xpired"), "refused as expired: {why}");
+    let fresh = store
+        .signed_read(&key, Duration::from_secs(60), chrono::Utc::now())
+        .unwrap();
+    assert_eq!(reqwest::get(&fresh.url).await.unwrap().status(), 200);
 
     store.delete(&key).await.unwrap();
     store.delete(&key).await.unwrap();
