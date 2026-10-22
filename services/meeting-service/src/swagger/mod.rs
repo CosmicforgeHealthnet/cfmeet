@@ -1004,7 +1004,7 @@ mod tests {
             "SRI on CSS and JS"
         );
         assert!(page.contains(&format!("swagger-ui-dist@{SWAGGER_UI_VERSION}/")));
-        assert!(page.contains("id=\\"swagger-service\\""));
+        assert!(page.contains(r#"id="swagger-service""#));
         assert!(SWAGGER_INIT.contains("supportedSubmitMethods: []"));
         assert!(SWAGGER_INIT.contains("url: url"));
         assert!(SWAGGER_INIT.contains("selector.addEventListener"));
