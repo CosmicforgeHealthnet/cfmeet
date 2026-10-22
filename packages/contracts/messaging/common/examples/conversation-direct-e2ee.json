@@ -37,5 +37,7 @@
   "memberCount": 2,
   "membersTruncated": false,
   "expiryGraceSeconds": null,
-  "retentionSeconds": null
+  "retentionSeconds": null,
+  "predecessorConversationId": null,
+  "successorConversationId": null
 }

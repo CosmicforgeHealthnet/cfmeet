@@ -78,6 +78,10 @@ pub struct ConversationRow {
     pub retention_seconds: Option<i64>,
     /// Read-only grace after `expires_at` before EXPIRED (§38).
     pub expiry_grace_seconds: Option<i64>,
+    /// Appendix G: the conversation this one deliberately succeeds (provenance).
+    pub predecessor_conversation_id: Option<Uuid>,
+    /// The conversation that succeeded this one (set once).
+    pub successor_conversation_id: Option<Uuid>,
 }
 
 impl ConversationRow {
@@ -92,7 +96,8 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.security_profile, c.protocol, c.ciphersuite, c.mls_group_id, c.security_policy_version, \
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
-     c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds";
+     c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
+     c.predecessor_conversation_id, c.successor_conversation_id";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -149,6 +154,8 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "expiresAt": c.expires_at.map(rfc3339),
         "expiryGraceSeconds": c.expiry_grace_seconds,
         "retentionSeconds": c.retention_seconds,
+        "predecessorConversationId": c.predecessor_conversation_id,
+        "successorConversationId": c.successor_conversation_id,
     })
 }
 
@@ -238,6 +245,13 @@ pub struct CreateRequest {
     /// §90: a conversation-specific retention, only ever stricter than the context's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_seconds: Option<i64>,
+    /// Appendix G: this conversation deliberately succeeds another (e.g. to change the
+    /// security profile). Never copies content or members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predecessor_conversation_id: Option<Uuid>,
+    /// Required when the successor's security profile differs from the predecessor's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub profile_change_disclosure_acknowledged: bool,
     /// Optional optimistic guard: the application policy version the caller decided on.
     #[serde(default)]
     pub expected_policy_version: Option<i64>,
@@ -578,6 +592,12 @@ async fn create_in(
     if let Some(seconds) = request.retention_seconds {
         check_retention(&snapshot.policy, request.context_class, seconds, None)?;
     }
+    let predecessor = match request.predecessor_conversation_id {
+        Some(p) => {
+            Some(check_predecessor(txn, ctx, acting, &request, counterpart, profile, p).await?)
+        }
+        None => None,
+    };
 
     let id = Uuid::new_v4();
     let mls_group_id = (profile == SecurityProfile::PrivateE2ee).then(|| {
@@ -592,8 +612,8 @@ async fn create_in(
            context_namespace, context_ref, context_ref_version, security_profile, protocol, ciphersuite, mls_group_id, \
            security_policy_version, lifecycle_state, policy_snapshot_id, policy_version, created_by_principal_id, \
            created_by_credential_id, owner_principal_id, direct_pair_key, created_at, updated_at, state_changed_at, expires_at, \
-           expiry_grace_seconds, retention_seconds) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22) \
+           expiry_grace_seconds, retention_seconds, predecessor_conversation_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23) \
          ON CONFLICT DO NOTHING",
         vec![
             id.into(),
@@ -618,9 +638,21 @@ async fn create_in(
             expires_at.into(),
             request.expiry_grace_seconds.into(),
             request.retention_seconds.into(),
+            request.predecessor_conversation_id.into(),
         ],
     )
     .await?;
+    if inserted == 0 && predecessor.is_some() {
+        // A live conversation of the target profile already holds this pair: a successor
+        // is always a NEW conversation, never an existing one relabelled.
+        return Err(Error::reason(
+            ErrorCode::Conflict,
+            "SUCCESSOR_TARGET_EXISTS",
+        ));
+    }
+    if let Some(p) = &predecessor {
+        link_successor(txn, ctx, p, id, profile, now, request_ctx).await?;
+    }
     let (row, status) = if inserted == 1 {
         db::exec(
             txn,
@@ -1054,6 +1086,124 @@ pub async fn patch(
         PatchOutcome::Updated(v) => Ok(v),
         PatchOutcome::Expired => Err(Error::reason(ErrorCode::ConversationNotActive, "EXPIRED")),
     }
+}
+
+/// Appendix G: a successor keeps the predecessor's context class (and, for DIRECT, its
+/// pair), is created by an ACTIVE OWNER / ADMIN of the predecessor, never succeeds a
+/// context-bound conversation (its context authority owns that) and needs an explicit
+/// disclosure acknowledgement whenever the security profile changes. One successor each.
+#[allow(clippy::too_many_arguments)]
+async fn check_predecessor<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    request: &CreateRequest,
+    counterpart: Option<Uuid>,
+    profile: SecurityProfile,
+    predecessor_id: Uuid,
+) -> Result<ConversationRow> {
+    let p = load(db, ctx, predecessor_id, true)
+        .await?
+        .ok_or(Error::reason(ErrorCode::NotFound, "PREDECESSOR_NOT_FOUND"))?;
+    let member = super::access::membership(db, p.id, acting.principal_id, false).await?;
+    if !member.is_some_and(|m| m.is_admin()) {
+        // Same answer as an unknown conversation for non-members.
+        return Err(Error::reason(ErrorCode::NotFound, "PREDECESSOR_NOT_FOUND"));
+    }
+    if p.context_class != request.context_class.as_str() {
+        return Err(Error::validation(
+            "a successor keeps its predecessor's context class",
+        ));
+    }
+    if p.context_ref.is_some() || request.context.is_some() {
+        return Err(Error::reason(
+            ErrorCode::Conflict,
+            "SUCCESSOR_CONTEXT_BOUND",
+        ));
+    }
+    if p.successor_conversation_id.is_some() {
+        return Err(Error::reason(ErrorCode::Conflict, "SUCCESSOR_EXISTS"));
+    }
+    if let Some(other) = counterpart {
+        let pair = db::scalar_i64(
+            db,
+            "SELECT count(*) FROM messaging_conversations WHERE id = $1 AND direct_pair_key = $2",
+            vec![p.id.into(), direct_pair(acting.principal_id, other).into()],
+        )
+        .await?;
+        if pair != 1 {
+            return Err(Error::validation(
+                "a DIRECT successor keeps its predecessor's two principals",
+            ));
+        }
+    }
+    if p.profile() != profile && !request.profile_change_disclosure_acknowledged {
+        return Err(Error::reason(
+            ErrorCode::SecurityProfileNotAllowed,
+            "PROFILE_CHANGE_DISCLOSURE_REQUIRED",
+        ));
+    }
+    Ok(p)
+}
+
+/// Records the successor on its predecessor (version + 1), audits it and tells the
+/// predecessor's members (`messaging.conversation.successor-created`).
+async fn link_successor<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    p: &ConversationRow,
+    successor: Uuid,
+    profile: SecurityProfile,
+    now: DateTime<Utc>,
+    request: &RequestContext,
+) -> Result<()> {
+    let n = db::exec(
+        db,
+        "UPDATE messaging_conversations SET successor_conversation_id = $2, version = version + 1, updated_at = $3 \
+         WHERE id = $1 AND version = $4 AND successor_conversation_id IS NULL",
+        vec![p.id.into(), successor.into(), now.into(), p.version.into()],
+    )
+    .await
+    .map_err(map_trigger)?;
+    if n != 1 {
+        return Err(Error::reason(ErrorCode::Conflict, "SUCCESSOR_EXISTS"));
+    }
+    crate::audit::record(
+        db,
+        crate::audit::AuditEntry {
+            ctx,
+            principal_id: None,
+            action: "CONVERSATION_SUCCESSOR_CREATED",
+            target_kind: "CONVERSATION",
+            target_id: p.id,
+            detail: json!({ "successor_conversation_id": successor,
+                            "from_security_profile": p.security_profile, "to_security_profile": profile.as_str() }),
+        },
+        request,
+        now,
+    )
+    .await?;
+    outbox::enqueue_conversation(
+        db,
+        p.id,
+        NewEvent {
+            event_type: "messaging.conversation.successor-created",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: p.id,
+            scope: scope_of(ctx),
+            payload: json!({
+                "conversation_id": p.id,
+                "successor_conversation_id": successor,
+                "from_security_profile": p.security_profile,
+                "to_security_profile": profile.as_str(),
+                "version": p.version + 1,
+            }),
+        },
+        request,
+        now,
+    )
+    .await?;
+    Ok(())
 }
 
 /// The longest read-only grace a transactional conversation may have (30 days).

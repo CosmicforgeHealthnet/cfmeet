@@ -94,6 +94,8 @@ pub async fn resolve(
             expires_at: None,
             expiry_grace_seconds: None,
             retention_seconds: None,
+            predecessor_conversation_id: None,
+            profile_change_disclosure_acknowledged: false,
             expected_policy_version: None,
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
         },

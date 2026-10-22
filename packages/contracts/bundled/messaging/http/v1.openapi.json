@@ -8195,7 +8195,9 @@
           "memberCount",
           "membersTruncated",
           "expiryGraceSeconds",
-          "retentionSeconds"
+          "retentionSeconds",
+          "predecessorConversationId",
+          "successorConversationId"
         ],
         "properties": {
           "conversationId": {
@@ -8386,6 +8388,26 @@
                 "type": "null"
               }
             ]
+          },
+          "predecessorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "successorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -8560,6 +8582,14 @@
             "minimum": 60,
             "maximum": 3153600000,
             "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited."
+          },
+          "predecessorConversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "Appendix G: create a deliberate SUCCESSOR of this conversation (the only way to move to another security profile). The caller must be an ACTIVE OWNER / ADMIN of it; same context class (DIRECT: the same two principals); never a context-bound conversation (SUCCESSOR_CONTEXT_BOUND); one successor each (SUCCESSOR_EXISTS). No content and no members are copied."
+          },
+          "profileChangeDisclosureAcknowledged": {
+            "type": "boolean",
+            "description": "Required (true) when the successor's security profile differs from its predecessor's; refused otherwise with SECURITY_PROFILE_NOT_ALLOWED / PROFILE_CHANGE_DISCLOSURE_REQUIRED. Clients show the change (e.g. end-to-end encrypted to server-readable) before acknowledging."
           }
         },
         "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."

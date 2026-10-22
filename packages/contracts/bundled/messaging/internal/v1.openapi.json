@@ -585,7 +585,9 @@
           "memberCount",
           "membersTruncated",
           "expiryGraceSeconds",
-          "retentionSeconds"
+          "retentionSeconds",
+          "predecessorConversationId",
+          "successorConversationId"
         ],
         "properties": {
           "conversationId": {
@@ -771,6 +773,26 @@
                 "type": "integer",
                 "minimum": 60,
                 "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "predecessorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "successorConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
               },
               {
                 "type": "null"

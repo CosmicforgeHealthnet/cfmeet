@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
   "title": "CF Meet Messaging common v1",
-  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES).",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged).",
   "oneOf": [
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
@@ -896,6 +896,14 @@
           "minimum": 60,
           "maximum": 3153600000,
           "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited."
+        },
+        "predecessorConversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "Appendix G: create a deliberate SUCCESSOR of this conversation (the only way to move to another security profile). The caller must be an ACTIVE OWNER / ADMIN of it; same context class (DIRECT: the same two principals); never a context-bound conversation (SUCCESSOR_CONTEXT_BOUND); one successor each (SUCCESSOR_EXISTS). No content and no members are copied."
+        },
+        "profileChangeDisclosureAcknowledged": {
+          "type": "boolean",
+          "description": "Required (true) when the successor's security profile differs from its predecessor's; refused otherwise with SECURITY_PROFILE_NOT_ALLOWED / PROFILE_CHANGE_DISCLOSURE_REQUIRED. Clients show the change (e.g. end-to-end encrypted to server-readable) before acknowledging."
         }
       },
       "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
@@ -923,7 +931,9 @@
         "memberCount",
         "membersTruncated",
         "expiryGraceSeconds",
-        "retentionSeconds"
+        "retentionSeconds",
+        "predecessorConversationId",
+        "successorConversationId"
       ],
       "properties": {
         "conversationId": {
@@ -1109,6 +1119,26 @@
               "type": "integer",
               "minimum": 60,
               "maximum": 3153600000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "predecessorConversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "successorConversationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             },
             {
               "type": "null"
