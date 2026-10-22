@@ -99,6 +99,8 @@ pub struct Connection {
     last_presence_query: Option<Instant>,
     policy: EffectivePolicy,
     announced_online: bool,
+    /// When the connection opened (usage: connection seconds, recorded on close).
+    opened_at: chrono::DateTime<chrono::Utc>,
 }
 
 enum Flow {
@@ -134,6 +136,7 @@ impl Connection {
         };
         let (sink, stream) = socket.split();
         let rate = state.realtime.settings.inbound_frames_per_second.max(1) as f64;
+        let opened_at = state.now();
         let mut c = Self {
             state,
             session,
@@ -152,6 +155,7 @@ impl Connection {
             last_presence_query: None,
             policy,
             announced_online: false,
+            opened_at,
         };
         c.run(stream).await;
     }
@@ -285,6 +289,21 @@ impl Connection {
         }
         self.presence_offline().await;
         self.state.realtime.hub.unregister(self.handle.id);
+        let seconds = (self.state.now() - self.opened_at).num_seconds().max(0);
+        crate::usage::record_best_effort(
+            &self.state.db,
+            crate::usage::Owner {
+                tenant_id: self.session.tenant_id,
+                application_id: self.session.application_id,
+                environment_id: self.session.environment_id,
+            },
+            crate::usage::REALTIME_CONNECTION,
+            seconds,
+            self.session.device_id,
+            None,
+            self.state.now(),
+        )
+        .await;
     }
 
     // -----------------------------------------------------------------------------------

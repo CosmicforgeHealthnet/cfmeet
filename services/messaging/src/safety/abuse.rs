@@ -66,6 +66,35 @@ pub async fn restricted_until(
     .map(|r| r.ends_at))
 }
 
+/// Automatic restrictions of one environment within an hour that raise ABUSE_WAVE (§141).
+pub const ABUSE_WAVE_RESTRICTIONS: i64 = 5;
+
+/// Raises ABUSE_WAVE when the environment's automatic restrictions of the last hour
+/// reach [`ABUSE_WAVE_RESTRICTIONS`]. Returns whether it did.
+pub async fn check_abuse_wave(
+    db: &sea_orm::DatabaseConnection,
+    env: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let wave = db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_principal_restrictions WHERE environment_id = $1 AND source = 'AUTOMATIC' AND starts_at > $2",
+        vec![env.into(), (now - chrono::Duration::hours(1)).into()],
+    )
+    .await?;
+    let raised = wave >= ABUSE_WAVE_RESTRICTIONS;
+    if raised {
+        crate::operations::raise(
+            db,
+            crate::operations::IncidentCategory::AbuseWave,
+            &env.to_string(),
+            now,
+        )
+        .await;
+    }
+    Ok(raised)
+}
+
 /// Records one abuse signal and applies the automatic restriction when the threshold is
 /// crossed. Never fails the caller's request (a failure is logged).
 pub async fn signal(state: &AppState, ctx: &TrustedContext, principal: Uuid, kind: &'static str) {
@@ -155,6 +184,7 @@ async fn record(
             now,
         )
         .await?;
+        check_abuse_wave(&state.db, env, now).await?;
         crate::metrics::inc(
             "messaging_abuse_restrictions_total",
             &[("source", "automatic")],

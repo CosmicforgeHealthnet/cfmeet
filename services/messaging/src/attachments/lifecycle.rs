@@ -254,6 +254,13 @@ pub async fn rescan_due(state: &AppState, batch: i64) -> Result<usize> {
                 })
                 .await
                 .map_err(Error::from)?;
+            crate::operations::raise(
+                &state.db,
+                crate::operations::IncidentCategory::ScannerUnavailable,
+                "scanner",
+                state.now(),
+            )
+            .await;
             continue;
         }
         let bytes = match state
@@ -512,10 +519,21 @@ pub async fn run(state: AppState, interval: std::time::Duration) {
         }
         if ticks.is_multiple_of(60) {
             match super::quota::audit_all(&state.db).await {
-                Ok(drifted) => crate::metrics::gauge(
-                    "messaging_storage_accounting_drift_environments",
-                    drifted.len() as i64,
-                ),
+                Ok(drifted) => {
+                    crate::metrics::gauge(
+                        "messaging_storage_accounting_drift_environments",
+                        drifted.len() as i64,
+                    );
+                    for d in &drifted {
+                        crate::operations::raise(
+                            &state.db,
+                            crate::operations::IncidentCategory::StorageAccountingDrift,
+                            &d.environment_id.to_string(),
+                            state.now(),
+                        )
+                        .await;
+                    }
+                }
                 Err(e) => tracing::warn!(error = %e, "storage accounting audit failed"),
             }
         }

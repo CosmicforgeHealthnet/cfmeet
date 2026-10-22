@@ -295,6 +295,12 @@ pub enum Observed {
 }
 
 impl Ws {
+    /// Sends an arbitrary text frame (property tests of the frame parser).
+    #[allow(dead_code)]
+    pub async fn send_raw(&mut self, text: String) {
+        self.stream.send(Message::Text(text)).await.unwrap();
+    }
+
     pub async fn send(&mut self, v: Value) {
         self.stream
             .send(Message::Text(v.to_string()))

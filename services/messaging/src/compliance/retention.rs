@@ -245,9 +245,43 @@ async fn expire_class(
         .map_err(Error::from)
 }
 
+/// Due purges older than this raise a RETENTION_BACKLOG incident (§141).
+pub const RETENTION_BACKLOG_THRESHOLD: chrono::Duration = chrono::Duration::hours(1);
+
 pub async fn run_once(state: &AppState) -> Result<RetentionReport> {
     let mut r = RetentionReport::default();
     expire_due(state, 500, &mut r).await?;
     purge_due(state, 500, &mut r).await?;
+    check_backlog(state).await?;
     Ok(r)
+}
+
+/// How long the oldest due (not held) purge has waited; raises RETENTION_BACKLOG past
+/// [`RETENTION_BACKLOG_THRESHOLD`]. Held purges are rescheduled, so never count.
+pub async fn check_backlog(state: &AppState) -> Result<chrono::Duration> {
+    #[derive(FromQueryResult)]
+    struct Oldest {
+        oldest: Option<DateTime<Utc>>,
+    }
+    let now = state.now();
+    let oldest = db::one::<Oldest, _>(
+        &state.db,
+        "SELECT min(purge_after) AS oldest FROM messaging_messages WHERE purge_after <= $1 AND lifecycle NOT IN ('ACTIVE', 'PURGED')",
+        vec![now.into()],
+    )
+    .await?
+    .and_then(|o| o.oldest);
+    let waited = oldest
+        .map(|t| now - t)
+        .unwrap_or_else(chrono::Duration::zero);
+    if waited > RETENTION_BACKLOG_THRESHOLD {
+        crate::operations::raise(
+            &state.db,
+            crate::operations::IncidentCategory::RetentionBacklog,
+            "purge",
+            now,
+        )
+        .await;
+    }
+    Ok(waited)
 }

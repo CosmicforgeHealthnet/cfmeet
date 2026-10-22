@@ -388,6 +388,32 @@ async fn usage_is_metered_as_facts_without_prices_and_scoped_to_the_environment(
             u.text
         );
     }
+    // §129 (G-18): a MANAGED search query is metered as one QUERIES fact.
+    let s = h
+        .get(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/search?q=metered"),
+        )
+        .await;
+    assert_eq!(s.status, StatusCode::OK, "{}", s.text);
+    let u = h
+        .get(&c, None, &format!("/v1/messaging/usage?{range}"))
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/UsageSummary",
+        &u.json,
+    );
+    let search = u.json["totals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["usageType"] == "SEARCH_QUERY")
+        .unwrap_or_else(|| panic!("{}", u.text));
+    assert_eq!(
+        (search["quantity"].as_i64(), search["unit"].as_str()),
+        (Some(1), Some("QUERIES"))
+    );
     // Empty window; bad windows refused.
     let empty = h
         .get(&c, None, &format!("/v1/messaging/usage?{window}"))

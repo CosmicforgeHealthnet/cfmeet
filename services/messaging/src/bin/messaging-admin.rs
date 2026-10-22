@@ -7,6 +7,8 @@
 //! messaging-admin kill-switch release --switch NAME [--environment UUID] --reason CODE [--operator ID]
 //! messaging-admin incidents list [--all true]
 //! messaging-admin incidents resolve --id UUID [--operator ID]
+//! messaging-admin dead-letters list
+//! messaging-admin dead-letters replay --kind outbox|webhook-relay|object-deletion [--id UUID] [--operator ID]
 //! messaging-admin kt checkpoint --out FILE        (writes the current tree head, mode 0600)
 //! messaging-admin kt verify --checkpoint FILE     (exit 3 on rollback / fork)
 //! ```
@@ -25,7 +27,7 @@ use sea_orm::Database;
 use uuid::Uuid;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: messaging-admin kill-switch list|engage|release … | incidents list|resolve … | kt checkpoint|verify … (see the source header)");
+    eprintln!("usage: messaging-admin kill-switch list|engage|release … | incidents list|resolve … | dead-letters list|replay … | kt checkpoint|verify … (see the source header)");
     ExitCode::from(2)
 }
 
@@ -134,6 +136,45 @@ async fn main() -> ExitCode {
                     } else {
                         ExitCode::from(1)
                     }
+                })
+        }
+        ("dead-letters", "list") => operations::dead_letters(&db)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|rows| {
+                for (kind, n) in rows {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "kind": kind.as_str(), "deadLetters": n })
+                    );
+                }
+                ExitCode::SUCCESS
+            }),
+        ("dead-letters", "replay") => {
+            let kind = f
+                .get("kind")
+                .and_then(|k| operations::DeadLetterKind::parse(k));
+            let id = match f.get("id").map(|i| Uuid::parse_str(i)) {
+                None => None,
+                Some(Ok(id)) => Some(id),
+                Some(Err(_)) => {
+                    eprintln!("messaging-admin: --id must be a UUID");
+                    return ExitCode::from(2);
+                }
+            };
+            let (Some(kind), Some(op)) = (kind, operator(&f)) else {
+                eprintln!("messaging-admin: --kind outbox|webhook-relay|object-deletion and an operator (--operator or CF_OPERATOR_ID) are required");
+                return ExitCode::from(2);
+            };
+            operations::replay_dead_letters(&db, kind, id, &op, now)
+                .await
+                .map_err(|e| e.to_string())
+                .map(|n| {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "kind": kind.as_str(), "replayed": n })
+                    );
+                    ExitCode::SUCCESS
                 })
         }
         ("kt", "checkpoint") => {

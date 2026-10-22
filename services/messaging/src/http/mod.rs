@@ -118,7 +118,10 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(32 * 1024))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
-    public.merge(customer).merge(internal)
+    public
+        .merge(customer)
+        .merge(internal)
+        .layer(from_fn(crate::metrics::http_layer))
 }
 
 /// The served API description: exactly the checked-in contract

@@ -143,6 +143,16 @@ pub async fn conversation(
         .then(|| rows.last().map(|r| r.sequence))
         .flatten();
     crate::metrics::inc("messaging_searches_total", &[("scope", "conversation")]);
+    crate::usage::record_best_effort(
+        &state.db,
+        ctx.into(),
+        crate::usage::SEARCH_QUERY,
+        1,
+        conversation.id,
+        Some("MANAGED"),
+        state.now(),
+    )
+    .await;
     Ok(
         json!({ "results": rendered(state, acting, rows).await?, "nextBeforeSequence": next, "searchedProfile": "MANAGED" }),
     )
@@ -201,6 +211,16 @@ pub async fn across(
     )
     .await?;
     crate::metrics::inc("messaging_searches_total", &[("scope", "principal")]);
+    crate::usage::record_best_effort(
+        &state.db,
+        ctx.into(),
+        crate::usage::SEARCH_QUERY,
+        1,
+        acting.principal_id,
+        Some("MANAGED"),
+        state.now(),
+    )
+    .await;
     Ok(json!({
         "results": rendered(state, acting, rows).await?,
         "searchedProfile": "MANAGED",

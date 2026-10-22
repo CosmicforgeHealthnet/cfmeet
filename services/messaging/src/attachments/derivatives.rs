@@ -880,6 +880,20 @@ pub async fn thumbnail_grant(
             },
         )
         .map_err(super::storage_error)?;
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        d.bytes.unwrap_or(0),
+        row.id,
+        Some(&row.security_profile),
+        now,
+    )
+    .await;
     Ok(json!({
         "attachmentId": row.id,
         "kind": "THUMBNAIL",

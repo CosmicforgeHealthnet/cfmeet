@@ -1022,3 +1022,117 @@ async fn websocket_compression_is_never_negotiated() {
         resp.headers()
     );
 }
+
+/// §129 (G-18): a closed realtime connection is metered as connection seconds of its
+/// device (a fact recorded when the connection ends).
+#[tokio::test]
+async fn realtime_connection_time_is_metered_when_the_connection_closes() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let alice = h.member(&c, 0).await;
+    let mut ws = rt.connect(&c, &alice).await;
+    h.clock.advance(chrono::Duration::seconds(90));
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/messaging/devices/{}/revoke", alice.device_id()),
+            json!({ "reason": "LOST_OR_STOLEN" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    ws.closed().await;
+    // The fact is written as the server finishes the connection: wait for that condition.
+    let sql = format!(
+        "SELECT count(*) FROM messaging_usage_records WHERE usage_type = 'REALTIME_CONNECTION' AND unit = 'SECONDS' \
+           AND subject_id = '{}' AND quantity >= 90",
+        alice.device_id()
+    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.scalar(&sql).await == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "connection time never metered"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(h.scalar(&sql).await, 1);
+}
+
+/// §144 / §158 (G-25): seeded property test of the realtime frame parser over a live
+/// connection — random text, random JSON and mutated valid frames never crash or wedge the
+/// connection: each gets at most an error frame and the connection keeps serving.
+#[tokio::test]
+async fn malformed_and_mutated_frames_never_break_a_connection() {
+    let settings = RealtimeSettings {
+        inbound_frames_per_second: 100_000,
+        ..test_settings()
+    };
+    let Some(rt) = Rt::with(settings).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let m = Member {
+        principal: people[0],
+        device: h.active_device(&c, people[0]).await,
+        group: None,
+        cursor: 0,
+    };
+    let mut ws = rt.connect(&c, &m).await;
+    let mut x: u64 = 0x5eed_0ff4_a3e5 | 1;
+    let mut next = move || {
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        x.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    };
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let valid = [
+        json!({ "type": "subscribe", "conversationId": cid, "requestId": "s" }).to_string(),
+        json!({ "type": "typing", "conversationId": cid, "state": "started" }).to_string(),
+        json!({ "type": "ack", "conversationId": cid, "eventSequence": 1 }).to_string(),
+        json!({ "type": "presence.query", "principalIds": [people[1]] }).to_string(),
+    ];
+    for round in 0..30 {
+        for _ in 0..10 {
+            let frame = match next() % 4 {
+                0 => {
+                    let len = (next() % 512) as usize;
+                    String::from_utf8_lossy(&(0..len).map(|_| next() as u8).collect::<Vec<_>>())
+                        .into_owned()
+                }
+                1 => [
+                    "null",
+                    "[]",
+                    "{}",
+                    "1e999",
+                    "\"x\"",
+                    "{\"type\":7}",
+                    "{\"type\":\"\"}",
+                    "{\"type\":\"subscribe\"}",
+                ][(next() % 8) as usize]
+                    .to_string(),
+                _ => {
+                    let mut b = valid[(next() % 4) as usize].clone().into_bytes();
+                    let at = (next() as usize) % b.len();
+                    match next() % 3 {
+                        0 => b[at] = b' ' + (next() % 95) as u8,
+                        1 => b.truncate(at),
+                        _ => b.insert(at, b'{'),
+                    }
+                    String::from_utf8_lossy(&b).into_owned()
+                }
+            };
+            ws.send_raw(frame).await;
+        }
+        let rid = format!("p{round}");
+        ws.send(json!({ "type": "ping", "requestId": rid })).await;
+        assert_eq!(ws.next_of("pong").await["requestId"], rid, "round {round}");
+    }
+    for f in &ws.seen {
+        assert!(f["type"].is_string(), "every server frame is typed: {f}");
+    }
+}

@@ -434,6 +434,16 @@ async fn managed_attachment_lifecycle_and_authorized_downloads() {
         .to_str()
         .unwrap()
         .starts_with("attachment; filename=\"Holiday.png\""));
+    // §129 (G-18): the grant and the proxied read are metered as egress bytes (facts).
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT COALESCE(sum(quantity), 0)::bigint FROM messaging_usage_records WHERE usage_type = 'ATTACHMENT_EGRESS' \
+               AND unit = 'BYTES' AND subject_id = '{}'",
+            aid.as_str().unwrap()
+        ))
+        .await,
+        2 * bytes.len() as i64
+    );
 
     // A non-member, another tenant, a missing scope: no access, no existence oracle.
     let outsider = e.h.principal(&c);

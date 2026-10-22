@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/events/v1.schema.json",
   "title": "CF Meet Messaging events v1",
-  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only). 1.6.0: message events may carry conversation_id (the webhook relay to the platform webhook system). 1.8.0: messaging.pin.added carries expires_at (null without expiry).",
+  "description": "Messaging domain events in the platform envelope (transactional outbox committed with the state change, at least once, per-aggregate order): messaging.device.registered, messaging.device.key-packages-published, messaging.device.revoked, messaging.conversation.created, messaging.conversation.lifecycle-changed, messaging.conversation.updated, messaging.policy.updated. 1.2.0 (Parts E-G): messaging.message.created / edited / deleted / moderated / expired, messaging.member.added / removed / updated, messaging.read-cursor.updated, messaging.mls.welcome-available; conversation-scoped events also carry a per-conversation event cursor in the outbox (the replay log). Ids, states and versions only — never key material, ciphertext, content or a credential. 1.5.0 (Part V I): messaging.reaction.added / removed, messaging.pin.added / removed (ids and the reaction only). 1.6.0: message events may carry conversation_id (the webhook relay to the platform webhook system). 1.8.0: messaging.pin.added carries expires_at (null without expiry). 1.9.0: messaging.device.key-packages-low.",
   "$ref": "#/$defs/MessagingEvent",
   "$defs": {
     "DeviceRegistered": {
@@ -239,6 +239,22 @@
             },
             "payload": {
               "$ref": "#/$defs/KeyPackagesPublished"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event_type",
+            "payload"
+          ],
+          "properties": {
+            "event_type": {
+              "const": "messaging.device.key-packages-low"
+            },
+            "payload": {
+              "$ref": "#/$defs/KeyPackagesLow"
             }
           }
         },
@@ -1683,6 +1699,33 @@
         "principal_id",
         "read_sequence"
       ]
+    },
+    "KeyPackagesLow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "principal_id",
+        "available",
+        "threshold"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "principal_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "available": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "§136 / Appendix G.4: an ACTIVE device's usable KeyPackages fell below the configured watermark (raised once until the device publishes enough again). Counts only."
     }
   }
 }

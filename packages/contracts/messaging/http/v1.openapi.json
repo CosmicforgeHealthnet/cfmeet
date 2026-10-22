@@ -5492,7 +5492,7 @@
             "customerCredential": []
           }
         ],
-        "description": "Scope usage.read. Totals per usage type and security profile in [from, to) (at most 93 days). Facts only: Messaging does not price or bill.",
+        "description": "Scope usage.read. Totals per usage type and security profile in [from, to) (at most 93 days): accepted messages, stored attachment bytes, bridged SMS segments, realtime connection seconds (recorded when a connection closes), attachment egress bytes (authorized by a grant or served by the proxied read) and MANAGED search queries. Facts only: Messaging does not price or bill.",
         "parameters": [
           {
             "name": "from",

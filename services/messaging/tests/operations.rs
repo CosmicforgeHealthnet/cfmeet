@@ -556,3 +556,248 @@ async fn every_capability_has_an_independent_kill_switch() {
         assert_eq!(KillSwitch::parse(s.as_str()), Some(s));
     }
 }
+
+/// §136 (G-20): dead letters are listed and replayed by a named operator (audited); a
+/// replayed relay entry is delivered by the normal worker exactly once.
+#[tokio::test]
+async fn dead_letters_are_replayed_by_a_named_operator_and_delivered_once() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    h.send_managed(&c, &conv, people[0], "x").await;
+    h.sql("UPDATE messaging_webhook_relay SET next_attempt_at = now() - interval '1 hour'")
+        .await
+        .unwrap();
+    let dead = webhook_relay::relay_due(&h.state, &Refusing, 50)
+        .await
+        .unwrap()
+        .dead_lettered;
+    assert!(dead >= 1);
+    let bin = env!("CARGO_BIN_EXE_messaging-admin");
+    let run = |args: &[&str], operator: Option<&str>| {
+        let mut cmd = std::process::Command::new(bin);
+        cmd.args(args)
+            .env("DATABASE_URL", &h.db.url)
+            .env_remove("CF_OPERATOR_ID");
+        if let Some(o) = operator {
+            cmd.env("CF_OPERATOR_ID", o);
+        }
+        cmd.output().unwrap()
+    };
+    let o = run(&["dead-letters", "list"], None);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.contains(&format!(
+            "{{\"deadLetters\":{dead},\"kind\":\"webhook-relay\"}}"
+        )),
+        "{out}"
+    );
+    // No operator, or an unknown queue: refused, nothing changed.
+    let o = run(&["dead-letters", "replay", "--kind", "webhook-relay"], None);
+    assert_eq!(o.status.code(), Some(2));
+    let o = run(&["dead-letters", "replay", "--kind", "sms"], Some("ops-7"));
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_webhook_relay WHERE status = 'DEAD_LETTER'")
+            .await,
+        dead as i64
+    );
+    let o = run(
+        &["dead-letters", "replay", "--kind", "webhook-relay"],
+        Some("ops-7"),
+    );
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains(&format!("\"replayed\":{dead}")));
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_operator_audit WHERE action = 'DEAD_LETTERS_REPLAYED' AND operator_id = 'ops-7'").await,
+        1
+    );
+    let r = webhook_relay::relay_due(&h.state, &Accepting, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.relayed,
+        dead + 1,
+        "the replayed entries and the one never sent"
+    );
+    let again = webhook_relay::relay_due(&h.state, &Accepting, 50)
+        .await
+        .unwrap();
+    assert_eq!(again.relayed, 0, "delivered once");
+    // Replaying an empty queue is a no-op (and not audited).
+    assert_eq!(
+        operations::replay_dead_letters(
+            h.conn(),
+            operations::DeadLetterKind::Outbox,
+            None,
+            "ops-7",
+            chrono::Utc::now()
+        )
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        h.scalar(
+            "SELECT count(*) FROM messaging_operator_audit WHERE action = 'DEAD_LETTERS_REPLAYED'"
+        )
+        .await,
+        1
+    );
+}
+
+/// §136 / Appendix G.4 (G-20): expired KeyPackages are closed; a device below the low
+/// watermark gets exactly one alert event until it publishes enough again.
+#[tokio::test]
+async fn expired_key_packages_are_closed_and_low_stock_alerts_once() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let m = h.member(&c, 3).await;
+    let alerts = || {
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.device.key-packages-low'")
+    };
+    let r = messaging::devices::key_package_maintenance(&h.state)
+        .await
+        .unwrap();
+    assert_eq!(
+        (r.expired, r.alerted),
+        (0, 1),
+        "3 < the default watermark of 10"
+    );
+    assert_eq!(alerts().await, 1);
+    let types = h.conforming_event_types().await;
+    assert!(
+        types.contains("messaging.device.key-packages-low"),
+        "{types:?}"
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.device.key-packages-low' \
+                  AND (payload->>'available')::int = 3 AND (payload->>'threshold')::int = 10").await,
+        1
+    );
+    let r = messaging::devices::key_package_maintenance(&h.state)
+        .await
+        .unwrap();
+    assert_eq!(r.alerted, 0, "one alert until replenished");
+    // Replenishing clears the alert.
+    let kps: Vec<Vec<u8>> = (0..10).map(|_| m.device.key_package().unwrap()).collect();
+    let p = h.publish(&c, m.principal, m.device_id(), &kps).await;
+    assert_eq!(p.status, StatusCode::CREATED, "{}", p.text);
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_key_package_alerts")
+            .await,
+        0
+    );
+    // Past their lifetime every package is closed as EXPIRED, and the device alerts again.
+    h.clock.advance(chrono::Duration::days(120));
+    let r = messaging::devices::key_package_maintenance(&h.state)
+        .await
+        .unwrap();
+    assert_eq!((r.expired, r.alerted), (13, 1));
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_key_packages WHERE status = 'EXPIRED' AND closed_at IS NOT NULL").await,
+        13
+    );
+    assert_eq!(alerts().await, 2);
+}
+
+/// §141 (G-24): retention backlogs and abuse waves raise incidents; request latency is a
+/// histogram by route template (never an id); lag and pool gauges are exported.
+#[tokio::test]
+async fn backlogs_and_abuse_waves_raise_incidents_and_latency_is_a_histogram() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let m = h.send_managed(&c, &conv, people[0], "to purge").await;
+    let cid = conv["conversationId"].as_str().unwrap();
+    let mid = m.json["messageId"].as_str().unwrap();
+    let d = h
+        .delete(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/messages/{mid}"),
+        )
+        .await;
+    assert_eq!(d.status, StatusCode::OK, "{}", d.text);
+    // Nothing due yet: no backlog.
+    let waited = messaging::compliance::retention::check_backlog(&h.state)
+        .await
+        .unwrap();
+    assert!(waited <= messaging::compliance::retention::RETENTION_BACKLOG_THRESHOLD);
+    assert!(
+        !operations::open(h.conn(), IncidentCategory::RetentionBacklog)
+            .await
+            .unwrap()
+    );
+    // The purge worker falls far behind: one incident.
+    h.clock.advance(chrono::Duration::days(400));
+    messaging::compliance::retention::check_backlog(&h.state)
+        .await
+        .unwrap();
+    assert!(
+        operations::open(h.conn(), IncidentCategory::RetentionBacklog)
+            .await
+            .unwrap()
+    );
+    // After the purge catches up, a check finds nothing waiting.
+    messaging::compliance::retention::run_once(&h.state)
+        .await
+        .unwrap();
+    assert_eq!(
+        messaging::compliance::retention::check_backlog(&h.state)
+            .await
+            .unwrap(),
+        chrono::Duration::zero()
+    );
+
+    // Abuse wave: five automatic restrictions in one environment within an hour.
+    let env = c.context.scope.environment_id;
+    let now = h.now();
+    assert!(
+        !messaging::safety::abuse::check_abuse_wave(h.conn(), env, now)
+            .await
+            .unwrap()
+    );
+    for _ in 0..messaging::safety::abuse::ABUSE_WAVE_RESTRICTIONS {
+        h.sql(&format!(
+            "INSERT INTO messaging_principal_restrictions (id, tenant_id, application_id, environment_id, principal_id, reason, source, starts_at, ends_at) \
+             VALUES (gen_random_uuid(), '{}', '{}', '{env}', gen_random_uuid(), 'SPAM', 'AUTOMATIC', '{}', '{}')",
+            c.context.scope.tenant_id, c.context.scope.application_id, now.to_rfc3339(), (now + chrono::Duration::minutes(15)).to_rfc3339()
+        ))
+        .await
+        .unwrap();
+    }
+    assert!(
+        messaging::safety::abuse::check_abuse_wave(h.conn(), env, now)
+            .await
+            .unwrap()
+    );
+    assert!(operations::open(h.conn(), IncidentCategory::AbuseWave)
+        .await
+        .unwrap());
+
+    let text = messaging::metrics::render(&h.state).await;
+    assert!(
+        text.contains("# TYPE messaging_http_request_duration_seconds histogram"),
+        "{text}"
+    );
+    assert!(
+        text.contains("route=\"/v1/conversations/{id}/messages\""),
+        "{text}"
+    );
+    assert!(!text.contains(cid), "no id in any label");
+    for gauge in [
+        "messaging_outbox_oldest_pending_seconds",
+        "messaging_purge_lag_seconds",
+        "messaging_webhook_relay_oldest_pending_seconds",
+        "messaging_db_pool_connections{state=\"idle\"}",
+    ] {
+        assert!(text.contains(gauge), "{gauge}: {text}");
+    }
+}

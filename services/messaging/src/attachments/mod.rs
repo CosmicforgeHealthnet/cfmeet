@@ -1112,6 +1112,20 @@ pub async fn grant(
         )
         .map_err(storage_error)?;
     crate::metrics::inc("messaging_attachment_grants_total", &[]);
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        row.verified_size.unwrap_or(row.declared_size),
+        row.id,
+        Some(&row.security_profile),
+        now,
+    )
+    .await;
     Ok(json!({
         "attachmentId": row.id,
         "method": "GET",
@@ -1154,6 +1168,20 @@ pub async fn proxied(
         tracing::error!(attachment = %row.id, "stored object no longer matches its digest");
         return Err(Error::code(ErrorCode::IntegrityCheckFailed));
     }
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        bytes.len() as i64,
+        row.id,
+        Some(&row.security_profile),
+        state.now(),
+    )
+    .await;
     Ok((row, bytes))
 }
 
