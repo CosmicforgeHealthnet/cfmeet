@@ -270,7 +270,8 @@ async fn concurrent_first_authentications_of_a_new_credential_all_succeed() {
             tokio::spawn(async move { h.authenticate(&secret).await.map(|_| ()) })
         });
         for r in futures_util::future::join_all(attempts).await {
-            r.unwrap().expect("every concurrent first authentication succeeds");
+            r.unwrap()
+                .expect("every concurrent first authentication succeeds");
         }
     }
 }

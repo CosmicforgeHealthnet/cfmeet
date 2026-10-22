@@ -31,6 +31,8 @@ impl Rng {
         (0..len).map(|_| self.next() as u8).collect()
     }
     /// One of: flip a bit, overwrite a byte, truncate, insert a byte, delete a byte.
+    /// Only the `client` properties build valid inputs to mutate.
+    #[cfg(feature = "client")]
     fn mutate(&mut self, valid: &[u8]) -> Vec<u8> {
         let mut m = valid.to_vec();
         let at = self.below(m.len().max(1));

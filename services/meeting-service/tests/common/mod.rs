@@ -1084,5 +1084,9 @@ pub fn process_owns_listener(pid: u32, port: u16) -> bool {
 /// The port of a `http://host:port` URL.
 #[allow(dead_code)]
 pub fn url_port(url: &str) -> u16 {
-    url.rsplit(':').next().and_then(|p| p.split('/').next()).and_then(|p| p.parse().ok()).expect("url with a port")
+    url.rsplit(':')
+        .next()
+        .and_then(|p| p.split('/').next())
+        .and_then(|p| p.parse().ok())
+        .expect("url with a port")
 }
