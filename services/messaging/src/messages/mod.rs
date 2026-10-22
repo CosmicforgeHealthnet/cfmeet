@@ -953,10 +953,10 @@ pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     }
     let moved: Option<i64> = db::one::<DeliveredRow, _>(
         txn,
-        "INSERT INTO messaging_delivery_cursors (conversation_id, principal_id, delivered_sequence, updated_at) \
+        "INSERT INTO messaging_received_cursors (conversation_id, principal_id, delivered_sequence, updated_at) \
          VALUES ($1, $2, $3, $4) ON CONFLICT (conversation_id, principal_id) DO UPDATE \
            SET delivered_sequence = EXCLUDED.delivered_sequence, updated_at = EXCLUDED.updated_at \
-           WHERE messaging_delivery_cursors.delivered_sequence < EXCLUDED.delivered_sequence \
+           WHERE messaging_received_cursors.delivered_sequence < EXCLUDED.delivered_sequence \
          RETURNING delivered_sequence",
         vec![conversation_id.into(), principal_id.into(), sequence.into(), now.into()],
     )

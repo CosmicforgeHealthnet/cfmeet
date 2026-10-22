@@ -30,7 +30,7 @@ mod m20261119_000017_attachment_inspection;
 mod m20261120_000018_derivative_quota_accounting;
 mod m20261121_000019_derivative_reservations;
 mod m20261122_000020_message_revisions;
-mod m20261123_000021_delivery_cursors;
+mod m20261123_000021_received_cursors;
 mod m20261124_000022_backups_and_switches;
 mod m20261125_000023_managed_envelope_keys;
 mod m20261126_000024_conversation_retention_grace_pins;
@@ -68,7 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261120_000018_derivative_quota_accounting::Migration),
             Box::new(m20261121_000019_derivative_reservations::Migration),
             Box::new(m20261122_000020_message_revisions::Migration),
-            Box::new(m20261123_000021_delivery_cursors::Migration),
+            Box::new(m20261123_000021_received_cursors::Migration),
             Box::new(m20261124_000022_backups_and_switches::Migration),
             Box::new(m20261125_000023_managed_envelope_keys::Migration),
             Box::new(m20261126_000024_conversation_retention_grace_pins::Migration),

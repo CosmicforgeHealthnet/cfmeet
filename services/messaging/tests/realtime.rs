@@ -867,7 +867,7 @@ async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy()
     let created = wb1.events(1).await.remove(0);
     let event_seq = created["eventSequence"].as_i64().unwrap();
     assert_eq!(
-        h.scalar("SELECT count(*) FROM messaging_delivery_cursors")
+        h.scalar("SELECT count(*) FROM messaging_received_cursors")
             .await,
         0,
         "nothing is DELIVERED before a session acknowledges it"
@@ -881,7 +881,7 @@ async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy()
     assert_eq!(receipt["data"]["principalId"], json!(bob));
     assert_eq!(receipt["data"]["deliveredSequence"], seq);
     assert_eq!(
-        h.scalar(&format!("SELECT delivered_sequence FROM messaging_delivery_cursors WHERE principal_id = '{bob}'")).await,
+        h.scalar(&format!("SELECT delivered_sequence FROM messaging_received_cursors WHERE principal_id = '{bob}'")).await,
         seq
     );
     // A second acknowledgement of the same position records nothing new.
@@ -916,7 +916,7 @@ async fn delivery_receipts_and_own_device_read_sync_respect_the_privacy_policy()
     wa.quiet("event", Duration::from_millis(300)).await;
     assert_eq!(
         h.scalar("SELECT count(*) FROM messaging_outbox_events WHERE event_type IN ('messaging.read-cursor.updated', 'messaging.delivery-cursor.updated') \
-                  AND payload->>'principal_id' = (SELECT principal_id::text FROM messaging_delivery_cursors LIMIT 1) AND event_type = 'messaging.read-cursor.updated'").await,
+                  AND payload->>'principal_id' = (SELECT principal_id::text FROM messaging_received_cursors LIMIT 1) AND event_type = 'messaging.read-cursor.updated'").await,
         0,
         "read receipts are off: no member-visible read event"
     );
