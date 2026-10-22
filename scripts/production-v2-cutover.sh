@@ -206,6 +206,51 @@ print("LIVE_SWAGGER_NOTE Entries shown in bundled specs do not prove peer servic
 PY
 }
 
+
+# Read-only Swagger UI diagnostics: the old Nginx Swagger injection and the new
+# Meeting Service initializer can differ even when every OpenAPI URL returns 200.
+report_swagger_initializer_diagnostics() {
+  python3 - <<'PY'
+import hashlib, json, urllib.request, urllib.error
+urls = [
+  ("backend_ui", "http://127.0.0.1:18081/swagger-ui/"),
+  ("public_ui", "https://api.cfmeet.com/swagger-ui/"),
+  ("backend_config", "http://127.0.0.1:18081/api-docs/swagger-config.json"),
+  ("public_config", "https://api.cfmeet.com/api-docs/swagger-config.json"),
+  ("public_messaging", "https://api.cfmeet.com/api-docs/messaging.json"),
+]
+for label, url in urls:
+  try:
+    req=urllib.request.Request(url,headers={"Cache-Control":"no-cache","User-Agent":"CFMeet-Swagger-ReadOnly-Audit"})
+    with urllib.request.urlopen(req,timeout=12) as response:
+      body=response.read(1048576)
+      status=response.status
+      content_type=response.headers.get("Content-Type","")
+      csp=response.headers.get("Content-Security-Policy","")
+    if label.endswith("_ui"):
+      page=body.decode("utf-8","replace")
+      print(f"SWAGGER_UI_AUDIT label={label} http={status} bytes={len(body)} sha256={hashlib.sha256(body).hexdigest()[:16]} "
+            f"initializer_inline={('fetch(\\'/api-docs/swagger-config.json\\')' in page)} "
+            f"swagger_bundle={('swagger-ui-bundle.js' in page)} "
+            f"inline_bundle_call={('SwaggerUIBundle({' in page)} "
+            f"html_csp_present={bool(csp)} csp_script_hash={('sha256-' in csp)} "
+            f"csp_unsafe_inline={('unsafe-inline' in csp)}",flush=True)
+    else:
+      data=json.loads(body)
+      if label.endswith("_config"):
+        entries=data.get("urls",[])
+        print(f"SWAGGER_UI_AUDIT label={label} http={status} content_type={content_type} "
+              f"entries={len(entries)} primary={json.dumps(data.get('primaryName'))} "
+              f"messaging_listed={any(item.get('url')=='/api-docs/messaging.json' for item in entries)}",flush=True)
+      else:
+        print(f"SWAGGER_UI_AUDIT label={label} http={status} content_type={content_type} "
+              f"paths={len(data.get('paths',{}))}",flush=True)
+  except Exception as ex:
+    print(f"SWAGGER_UI_AUDIT label={label} failure={type(ex).__name__} "
+          f"http={getattr(ex,'code','unknown')}",flush=True)
+PY
+}
+
 verify_public() {
   # nginx -t and systemctl reload nginx returning 0 does not prove that the
   # new workers already serve every connection. Observe both local TLS and
@@ -259,6 +304,7 @@ case "$MODE" in
     nginx -t
     verify_backend
     report_live_swagger
+    report_swagger_initializer_diagnostics
     local_code="$(local_tls_status)"
     public_code="$(curl --noproxy '*' -sS --max-time 15 -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC/api/v2/meeting-spaces" || true)"
     log "VPS-local TLS GET /api/v2/meeting-spaces returned HTTP $local_code (SNI api.cfmeet.com)"
