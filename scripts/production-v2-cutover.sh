@@ -229,10 +229,13 @@ for label, url in urls:
       csp=response.headers.get("Content-Security-Policy","")
     if label.endswith("_ui"):
       page=body.decode("utf-8","replace")
+      initializer_inline = "fetch('/api-docs/swagger-config.json')" in page
+      swagger_bundle = "swagger-ui-bundle.js" in page
+      inline_bundle_call = "SwaggerUIBundle({" in page
       print(f"SWAGGER_UI_AUDIT label={label} http={status} bytes={len(body)} sha256={hashlib.sha256(body).hexdigest()[:16]} "
-            f"initializer_inline={('fetch(\\'/api-docs/swagger-config.json\\')' in page)} "
-            f"swagger_bundle={('swagger-ui-bundle.js' in page)} "
-            f"inline_bundle_call={('SwaggerUIBundle({' in page)} "
+            f"initializer_inline={initializer_inline} "
+            f"swagger_bundle={swagger_bundle} "
+            f"inline_bundle_call={inline_bundle_call} "
             f"html_csp_present={bool(csp)} csp_script_hash={('sha256-' in csp)} "
             f"csp_unsafe_inline={('unsafe-inline' in csp)}",flush=True)
     else:
