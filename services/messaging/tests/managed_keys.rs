@@ -87,3 +87,37 @@ async fn managed_content_is_sealed_under_wrapped_per_environment_keys() {
         .await
         .is_err());
 }
+
+/// Regression (found by the load suite): the first MANAGED sends of an environment
+/// resolved its data key on a SECOND pooled connection while each request already held its
+/// transaction's connection; a burst larger than the pool starved it and requests failed
+/// with SERVICE_UNAVAILABLE. The key is now resolved before the transaction opens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_burst_of_first_sends_never_starves_the_connection_pool() {
+    let Some(h) = Harness::build(|s| {
+        s.managed_keys = Some(Arc::new(ManagedKeyring::parse(&ring_text(1)).unwrap()));
+        s.conversations.environment_messages_per_minute = 1_000_000;
+    })
+    .await
+    else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    h.set_policy(&c, serde_json::json!({
+        "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "abuse": { "messagesPerMinute": 100000 } }))
+        .await;
+    // Far more concurrent first sends than the pool has connections (10).
+    let sends = (0..40).map(|i| h.send_managed(&c, &conv, people[i % 2], "burst"));
+    let results = futures_util::future::join_all(sends).await;
+    for r in &results {
+        assert_eq!(r.status, axum::http::StatusCode::CREATED, "{}", r.text);
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_managed_deks WHERE status = 'ACTIVE'")
+            .await,
+        1,
+        "one data key for the environment"
+    );
+}

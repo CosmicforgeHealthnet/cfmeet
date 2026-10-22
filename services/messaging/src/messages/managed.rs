@@ -324,7 +324,15 @@ pub async fn send(
     let request_ctx = request_context();
     let attachments = request.attachment_ids.clone();
     let client_id = request.client_message_id;
-    let _ = ring;
+    ring.prepare(
+        &state.db,
+        &crate::messages::keys::KeyScope {
+            tenant_id: ctx.scope.tenant_id,
+            application_id: ctx.scope.application_id,
+            environment_id: ctx.scope.environment_id,
+        },
+    )
+    .await?;
     let (status, row) = state
         .db
         .transaction::<_, (u16, MessageRow), Error>(move |txn| {
@@ -416,7 +424,16 @@ pub async fn edit(
     .await?;
     let expected_edit_count = request.expected_edit_count;
     let content = admit(request.text)?;
-    ring(state)?;
+    ring(state)?
+        .prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let acting = acting.clone();

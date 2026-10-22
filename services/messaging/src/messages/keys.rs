@@ -366,6 +366,15 @@ impl ManagedKeyring {
         Ok((row.id, key))
     }
 
+    /// Resolves — creating it on first use — the environment's ACTIVE DEK on the pool,
+    /// BEFORE the caller opens its transaction. Every sealing path calls this first, so the
+    /// `seal` inside the transaction is served from the cache: a request that holds a pooled
+    /// connection never waits for a second one (under concurrency that starved the pool and
+    /// failed requests with SERVICE_UNAVAILABLE).
+    pub async fn prepare(&self, pool: &DatabaseConnection, scope: &KeyScope) -> Result<()> {
+        self.active_dek(pool, scope).await.map(|_| ())
+    }
+
     /// A DEK by id (any status), for opening content.
     async fn dek(&self, pool: &DatabaseConnection, id: Uuid) -> Option<Arc<Zeroizing<[u8; 32]>>> {
         if let Some(k) = self.cache.read().await.deks.get(&id) {

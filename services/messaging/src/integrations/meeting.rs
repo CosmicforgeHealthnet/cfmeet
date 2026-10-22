@@ -547,7 +547,16 @@ pub async fn import_legacy(
             ));
         }
     }
-    managed::require_ring(state)?;
+    managed::require_ring(state)?
+        .prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
     let st = state.clone();
     let ctx = ctx.clone();
     state

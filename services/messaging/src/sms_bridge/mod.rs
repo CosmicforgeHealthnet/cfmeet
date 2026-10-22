@@ -519,6 +519,17 @@ pub async fn accept_inbound(
     }
     access::require_accepting(&conversation, state.now())?;
     let content = managed::admit(request.text)?;
+    if let Some(ring) = state.managed_keys.as_deref() {
+        ring.prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
+    }
     let st = state.clone();
     let ctx2 = ctx.clone();
     let rctx = crate::conversations::service::request_context();
