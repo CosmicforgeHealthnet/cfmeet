@@ -2,6 +2,10 @@
 *
 !packages/service-auth
 !services/api-gateway
+# Embedded at compile time (generated, checked by CI): the route manifest and the
+# public OpenAPI documents.
+!infra/api-gateway/route-manifest.json
+!packages/contracts/bundled/public
 
 **/target
 **/.env

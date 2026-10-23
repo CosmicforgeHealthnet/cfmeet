@@ -647,7 +647,7 @@ mod tests {
 
     /// Fails the first `fail` record calls; remembers every batch id it saw.
     struct Flaky {
-        fail: std::sync::atomic::AtomicUsize,
+        fail: Mutex<usize>,
         seen: Mutex<Vec<(Uuid, u64)>>,
         durable: u64,
     }
@@ -675,20 +675,22 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((b, u.entries.iter().map(|x| x.2).sum()));
-            self.fail
-                .fetch_update(
-                    std::sync::atomic::Ordering::SeqCst,
-                    std::sync::atomic::Ordering::SeqCst,
-                    |n| n.checked_sub(1),
-                )
-                .is_err()
+            // Fail while the remaining-failures counter is positive.
+            let mut remaining = self.fail.lock().unwrap();
+            match remaining.checked_sub(1) {
+                Some(n) => {
+                    *remaining = n;
+                    false
+                }
+                None => true,
+            }
         }
     }
 
     #[tokio::test]
     async fn an_unacknowledged_batch_is_retried_under_the_same_id() {
         let a = Arc::new(Flaky {
-            fail: 2.into(),
+            fail: Mutex::new(2),
             seen: Mutex::new(vec![]),
             durable: 0,
         });
@@ -726,7 +728,7 @@ mod tests {
                 Some(conn.clone()),
                 prefix.clone(),
                 Arc::new(Flaky {
-                    fail: 0.into(),
+                    fail: Mutex::new(0),
                     seen: Mutex::new(vec![]),
                     durable,
                 }),

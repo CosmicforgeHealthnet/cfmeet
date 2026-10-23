@@ -1114,7 +1114,7 @@ async fn untransferable_secrets_require_rotation_and_are_never_substituted() {
         &w.rx.url,
         &["call.requested"],
         "ACTIVE",
-        Some("whsec_wrongkeyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        Some("whsec_test-only-fixture-wrong-transfer-key-AAAAAAAA"),
         &other_transfer,
     );
     let (bad_fp, mut c) = calling_subscription(
@@ -1122,7 +1122,7 @@ async fn untransferable_secrets_require_rotation_and_are_never_substituted() {
         &w.rx.url,
         &["call.requested"],
         "DISABLED",
-        Some("whsec_fingerprintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        Some("whsec_test-only-fixture-bad-fingerprint-AAAAAAAAAAA"),
         &transfer(),
     );
     c["secret"]["fingerprint"] = json!(fingerprint("whsec_somethingelse", bad_fp));

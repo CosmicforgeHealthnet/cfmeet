@@ -8,8 +8,8 @@
 
 use cf_webhooks::signing::{self, VerifyError, DEFAULT_TOLERANCE_SECONDS};
 
-const SECRET: &str = "whsec_sdk-test-vector-secret-not-a-real-secret";
-const OTHER: &str = "whsec_another-secret-for-the-mismatch-vector";
+const SECRET: &str = "whsec_test-only-sdk-vector-fixture-secret";
+const OTHER: &str = "whsec_test-only-mismatch-vector-fixture-secret";
 
 fn esc(s: &str) -> String {
     let mut o = String::new();

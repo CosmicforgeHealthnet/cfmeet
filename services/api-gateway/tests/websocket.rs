@@ -21,14 +21,16 @@ async fn connect(
         >,
         Option<String>,
     ),
-    Error,
+    Box<Error>,
 > {
     let mut req = format!("ws://{addr}/v1/test/realtime")
         .into_client_request()
         .unwrap();
     req.headers_mut()
         .insert("sec-websocket-protocol", protocols.parse().unwrap());
-    let (ws, resp) = tokio_tungstenite::connect_async(req).await?;
+    let (ws, resp) = tokio_tungstenite::connect_async(req)
+        .await
+        .map_err(Box::new)?;
     let selected = resp
         .headers()
         .get("sec-websocket-protocol")
@@ -43,7 +45,12 @@ async fn realtime_channels_are_forwarded_with_their_own_security_model() {
     let addr = g.serve().await;
     // A bad ticket: the owning service's refusal is relayed as HTTP 401.
     match connect(&addr, "cfmeet.messaging.v1, cfmeet.ticket.bad").await {
-        Err(Error::Http(resp)) => assert_eq!(resp.status(), 401),
+        Err(e) if matches!(*e, Error::Http(_)) => {
+            let Error::Http(resp) = *e else {
+                unreachable!()
+            };
+            assert_eq!(resp.status(), 401)
+        }
         other => panic!("expected a refused upgrade, got {:?}", other.map(|_| ())),
     }
     // A good ticket: negotiated subprotocol, ordered echo, ping / pong.
