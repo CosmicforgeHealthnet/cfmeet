@@ -5,12 +5,13 @@
 mod common;
 
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
-use cf_service_auth::OutboundServiceRequest;
+use cf_service_auth::{DelegatedPlatformContext, OutboundServiceRequest};
 use common::*;
 use developer_platform::config::FeatureFlags;
 use developer_platform_migration::{Migrator, MigratorTrait};
 use sea_orm::{ConnectionTrait, Statement};
 use serde_json::Value;
+use uuid::Uuid;
 
 const CONTEXT: &str = "/internal/v1/gateway/context";
 
@@ -359,6 +360,28 @@ async fn a_context_platform_access_refuses_or_contradicts_is_rejected() {
         assert_eq!(r.status, StatusCode::FORBIDDEN);
         assert_eq!(r.json["error"]["code"], "DELEGATED_CONTEXT_INVALID");
     }
+    // A correctly signed hop naming a credential revoked since the gateway's check
+    // (or naming none) is refused: the credential must still authenticate now.
+    *h.pa.answer.lock().unwrap() = Some(Answer::Echo);
+    let revoked = delegated();
+    h.pa.revoked
+        .lock()
+        .unwrap()
+        .push(revoked.initiating_credential_id().unwrap());
+    for ctx in [
+        revoked,
+        DelegatedPlatformContext::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+            Uuid::new_v4(),
+        ),
+    ] {
+        let r = h.signed_get(&h.peers.gateway, CONTEXT, Some(ctx)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN);
+        assert_eq!(r.json["error"]["code"], "DELEGATED_CONTEXT_INVALID");
+    }
     assert_eq!(
         h.count("SELECT count(*) FROM devplat_environment_refs")
             .await,
@@ -420,8 +443,15 @@ async fn the_served_openapi_is_the_contract_and_every_listed_route_exists() {
     let r = h.get("/v1/anything").await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     assert_eq!(r.json["error"]["code"], "INTERNAL_AUTHENTICATION_FAILED");
+    let without_credential = DelegatedPlatformContext::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+        Uuid::new_v4(),
+    );
     let r = h
-        .signed_get(&h.peers.gateway, "/v1/anything", Some(delegated()))
+        .signed_get(&h.peers.gateway, "/v1/anything", Some(without_credential))
         .await;
     assert_eq!(
         r.status,

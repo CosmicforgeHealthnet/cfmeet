@@ -1055,6 +1055,18 @@ async fn machine_credentials_use_platform_access_scopes_within_their_own_tenant_
         last,
         format!("s-{}", manager.initiating_service_account_id().simple())
     );
+    // A credential revoked after the gateway's check stops working on EVERY route at
+    // once, even those whose handler would need no scope evaluation.
+    let doomed =
+        c.pa.machine(env_id, &["organizations.read", "projects.read"]);
+    let path = format!("/v1/organizations/{o}/projects");
+    let r = c.req(As::Machine(&doomed), Method::GET, &path, None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    c.pa.revoke(&doomed);
+    for path in ["/v1/organizations".to_string(), path] {
+        let r = c.req(As::Machine(&doomed), Method::GET, &path, None).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{path}");
+    }
     // Another tenant's organization: NOT_FOUND.
     let (other, _) = c.sessions.sign_in("o@other.example");
     let ob = org(&c, &other, "Other").await;

@@ -115,6 +115,22 @@ async fn gateway_context(
         .cloned()
         .ok_or(ApiError(ErrorCode::DelegatedContextRequired))?;
     let correlation = caller.context().correlation_id().clone();
+    // The gateway always names the credential it authenticated; it must still
+    // authenticate now (a replayed hop of a revoked credential is refused).
+    let Some(credential_id) = delegated.initiating_credential_id() else {
+        return Err(ApiError(ErrorCode::DelegatedContextInvalid));
+    };
+    match super::public::live_credential(&state, &delegated, credential_id, &correlation).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!("delegated credential no longer authenticates");
+            return Err(ApiError(ErrorCode::DelegatedContextInvalid));
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "identity authority unavailable");
+            return Err(ApiError(ErrorCode::ServiceUnavailable));
+        }
+    }
     let confirmed = match state
         .platform_access
         .trusted_context(&delegated, &correlation)

@@ -262,6 +262,8 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
 pub struct FakePlatformAccess {
     /// None: the authority is down.
     pub answer: StdMutex<Option<Answer>>,
+    /// Credentials that no longer authenticate.
+    pub revoked: StdMutex<Vec<Uuid>>,
     pub calls: StdMutex<Vec<DelegatedPlatformContext>>,
 }
 
@@ -301,6 +303,21 @@ impl PlatformAccessPort for FakePlatformAccess {
         }
     }
 
+    async fn credential_allows(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation: &CorrelationId,
+        credential_id: Uuid,
+        scopes: &[&str],
+    ) -> Result<bool, AuthorityUnavailable> {
+        match self.answer.lock().unwrap().clone() {
+            None => Err(AuthorityUnavailable("down".into())),
+            Some(_) => {
+                Ok(scopes.is_empty() && !self.revoked.lock().unwrap().contains(&credential_id))
+            }
+        }
+    }
+
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable> {
         Ok(vec![])
     }
@@ -327,6 +344,7 @@ pub fn delegated() -> DelegatedPlatformContext {
         cf_service_auth::ApplicationEnvironmentKind::Sandbox,
         Uuid::new_v4(),
     )
+    .with_initiating_credential(Uuid::new_v4())
 }
 
 impl Harness {
@@ -510,6 +528,13 @@ impl MemoryPlatformAccess {
     }
 
     /// A machine credential of `env` holding `scopes`; returns its delegated context.
+    /// Revokes the credential of a machine context (it stops authenticating).
+    pub fn revoke(&self, machine: &DelegatedPlatformContext) {
+        if let Some(c) = machine.initiating_credential_id() {
+            self.credential_scopes.lock().unwrap().remove(&c);
+        }
+    }
+
     pub fn machine(&self, env: Uuid, scopes: &[&str]) -> DelegatedPlatformContext {
         let e = self.envs.lock().unwrap()[&env].clone();
         let credential = Uuid::new_v4();
@@ -573,7 +598,10 @@ impl PlatformAccessPort for MemoryPlatformAccess {
         scopes: &[&str],
     ) -> Result<bool, AuthorityUnavailable> {
         let map = self.credential_scopes.lock().unwrap();
-        let held = map.get(&credential_id).cloned().unwrap_or_default();
+        // An unknown (or revoked) credential never authenticates.
+        let Some(held) = map.get(&credential_id).cloned() else {
+            return Ok(false);
+        };
         Ok(scopes.iter().all(|s| held.iter().any(|h| h == s)))
     }
 

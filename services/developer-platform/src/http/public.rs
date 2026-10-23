@@ -187,6 +187,23 @@ pub async fn require_gateway_caller(
                     Ok(ContextOutcome::Confirmed(c))
                         if c.matches(&delegated) && c.authority_mode == "FULL" =>
                     {
+                        // The credential itself must still authenticate NOW (revoked,
+                        // expired or superseded since the gateway's check: refused).
+                        match live_credential(
+                            &state,
+                            &delegated,
+                            credential_id,
+                            &context.correlation_id,
+                        )
+                        .await
+                        {
+                            Ok(true) => {}
+                            Ok(false) => return Err(ApiError(ErrorCode::AuthenticationRequired)),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "identity authority unavailable");
+                                return Err(ApiError(ErrorCode::ServiceUnavailable));
+                            }
+                        }
                         Principal::Machine(MachineCaller {
                             context: c,
                             delegated,
@@ -612,3 +629,17 @@ async fn list_plans(State(s): State<AppState>, c: Caller) -> ApiResult<Json<Valu
 }
 
 use sea_orm::ConnectionTrait;
+
+/// Whether the gateway-forwarded credential still authenticates (Platform Access
+/// `/authorization/evaluate` with no required scope checks the credential's live state).
+pub(crate) async fn live_credential(
+    state: &AppState,
+    delegated: &cf_service_auth::DelegatedPlatformContext,
+    credential_id: uuid::Uuid,
+    correlation: &cf_service_auth::CorrelationId,
+) -> Result<bool, crate::platform_access::AuthorityUnavailable> {
+    state
+        .platform_access
+        .credential_allows(delegated, correlation, credential_id, &[])
+        .await
+}
