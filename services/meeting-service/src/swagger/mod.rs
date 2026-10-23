@@ -907,7 +907,10 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
     openapi.servers = Some(vec![current_server, public_server]);
-    let meeting_doc = public_doc("Meetings", &openapi.to_json().expect("OpenAPI document serializes"));
+    let meeting_doc = public_doc(
+        "Meetings",
+        &openapi.to_json().expect("OpenAPI document serializes"),
+    );
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
