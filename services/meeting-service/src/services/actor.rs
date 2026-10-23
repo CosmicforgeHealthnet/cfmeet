@@ -48,6 +48,29 @@ impl RegisteredActor {
     }
 }
 
+/// A machine caller (Part VI §51): the service account of a Platform Access application
+/// environment whose platform credential the API Gateway authenticated and forwarded,
+/// re-verified LIVE by Platform Access (`delegated-authority`). Every field comes from
+/// the authority chain Platform Access returned — never from the request. Only FULL
+/// authority chains become a platform actor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformActor {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    /// `SANDBOX`, `TEST` or `PRODUCTION`.
+    pub environment_kind: String,
+    pub service_account_id: Uuid,
+    pub credential_id: Uuid,
+    pub scopes: std::collections::BTreeSet<String>,
+}
+
+impl PlatformActor {
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scopes.contains(scope)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActorKind {
     /// Authenticated CF Meet account.
@@ -62,6 +85,10 @@ pub enum ActorKind {
     LegacyGuest(Uuid),
     /// Internal scheduler/worker.
     System(&'static str),
+    /// Machine caller of a Platform Access application environment (Part VI §51). It
+    /// manages ONLY meetings owned by that environment and is never a registered user,
+    /// a participant or a meeting member.
+    Platform(PlatformActor),
 }
 
 /// Trusted, server-resolved actor.
@@ -104,6 +131,13 @@ impl ActorContext {
         self.registered().map(|r| r.user_id)
     }
 
+    pub fn platform(&self) -> Option<&PlatformActor> {
+        match &self.kind {
+            ActorKind::Platform(p) => Some(p),
+            _ => None,
+        }
+    }
+
     pub fn participant_credential(&self) -> Option<&str> {
         match &self.kind {
             ActorKind::ParticipantCredential(c) => Some(c),
@@ -132,6 +166,10 @@ impl ActorContext {
                 Some(format!("legacy_participant:{p}")),
             ),
             ActorKind::System(name) => ("SYSTEM".into(), Some(format!("system:{name}"))),
+            ActorKind::Platform(p) => (
+                "PLATFORM".into(),
+                Some(format!("service_account:{}", p.service_account_id)),
+            ),
         }
     }
 }
@@ -175,6 +213,27 @@ pub type SharedOrganizationDirectory = Arc<dyn OrganizationDirectory>;
 /// - `X-Participant-Token` → participant credential, resolved later in conference scope.
 pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorContext> {
     let request_id = current_request_id();
+    // Part VI §51: a gateway-forwarded machine caller, authenticated by the platform
+    // middleware (`middleware::platform_auth`) — the ONLY source of a platform actor.
+    if let Some(platform) = parts.extensions.get::<PlatformActor>() {
+        return Ok(ActorContext {
+            kind: ActorKind::Platform(platform.clone()),
+            verified_organizations: vec![],
+            request_id,
+            client_kind: None,
+        });
+    }
+    // An internal service token is never a user, guest or anonymous identity: without
+    // the platform middleware's verified actor it is refused (no fall-through).
+    if parts
+        .headers
+        .contains_key(cf_service_auth::headers::SERVICE_AUTHORIZATION)
+    {
+        return Err(ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Authentication failed",
+        ));
+    }
     let client_kind = parts
         .headers
         .get(&CLIENT_KIND_HEADER)

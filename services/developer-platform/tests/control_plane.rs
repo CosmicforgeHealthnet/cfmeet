@@ -1630,3 +1630,559 @@ async fn reference_only_environments_never_receive_production_limits_by_default(
     assert_eq!(get("?kind=STAGING").await.status, StatusCode::BAD_REQUEST);
     assert_eq!(get("?other=1").await.status, StatusCode::BAD_REQUEST);
 }
+
+// ---------------------------------------------------------------------------
+// Service accounts (Section 50: delegated create / suspend to Platform Access)
+// ---------------------------------------------------------------------------
+
+/// An organization of `owner` with one project and one SANDBOX environment.
+async fn sandbox(c: &Control, owner: &str, name: &str) -> (Uuid, Uuid, Uuid) {
+    let o = org(c, owner, name).await;
+    let p = c
+        .req(
+            As::User(owner),
+            Method::POST,
+            &format!("/v1/organizations/{o}/projects"),
+            Some(json!({ "displayName": "Backend" })),
+        )
+        .await;
+    assert_eq!(p.status, StatusCode::CREATED, "{}", p.json);
+    let pid = id(&p.json);
+    let e = c
+        .req(
+            As::User(owner),
+            Method::POST,
+            &format!("/v1/projects/{pid}/environments"),
+            Some(json!({ "kind": "SANDBOX" })),
+        )
+        .await;
+    assert_eq!(e.status, StatusCode::CREATED, "{}", e.json);
+    (o, pid, id(&e.json))
+}
+
+fn activity_of(act: &Value, action: &str) -> Vec<Value> {
+    act["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == action)
+        .cloned()
+        .collect()
+}
+
+#[tokio::test]
+async fn service_accounts_are_delegated_to_platform_access_under_the_section_50_matrix() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let (owner, owner_id) = c.sessions.sign_in("owner@acme.example");
+    let (o, pid, env) = sandbox(&c, &owner, "Acme").await;
+    let (admin, _) = join(&c, &owner, o, "admin@acme.example", "ADMIN").await;
+    let (dev, _) = join(&c, &owner, o, "dev@acme.example", "DEVELOPER").await;
+    let (analyst, _) = join(&c, &owner, o, "an@acme.example", "ANALYST").await;
+    let (billing, _) = join(&c, &owner, o, "bill@acme.example", "BILLING").await;
+    let base = format!("/v1/environments/{env}/service-accounts");
+    // OWNER creates: Platform Access holds it, the human actor is named.
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &base,
+            Some(json!({ "name": "ci-runner", "description": "CI pipeline" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    conforms(&format!("{CTRL}ServiceAccount"), &r.json);
+    assert_eq!(r.json["status"], "ACTIVE");
+    assert_eq!(r.json["organizationId"], json!(o));
+    assert_eq!(r.json["projectId"], json!(pid));
+    assert_eq!(r.json["environmentId"], json!(env));
+    let ci = id(&r.json);
+    let held = c.pa.service_accounts.lock().unwrap()[&ci].clone();
+    assert_eq!((held.tenant, held.env), (o, env));
+    let (actor, call) = c.pa.audit.lock().unwrap().last().unwrap().clone();
+    assert_eq!(actor, format!("u-{}", owner_id.simple()));
+    assert!(matches!(
+        call,
+        developer_platform::platform_access::DelegationCall::CreateServiceAccount { .. }
+    ));
+    // ADMIN creates, idempotently: the replay returns the original, marked.
+    let body = json!({ "name": "billing-sync" });
+    let k = [("idempotency-key", "sa-create-1")];
+    let a = c
+        .req_with(
+            As::User(&admin),
+            Method::POST,
+            &base,
+            Some(body.clone()),
+            &k,
+        )
+        .await;
+    let b = c
+        .req_with(
+            As::User(&admin),
+            Method::POST,
+            &base,
+            Some(body.clone()),
+            &k,
+        )
+        .await;
+    assert_eq!(a.status, StatusCode::CREATED, "{}", a.json);
+    assert_eq!(b.status, StatusCode::CREATED, "{}", b.json);
+    assert_eq!(a.json["id"], b.json["id"]);
+    assert!(a.headers.get("idempotent-replayed").is_none());
+    assert_eq!(b.headers["idempotent-replayed"], "true");
+    assert_eq!(c.pa.service_accounts.lock().unwrap().len(), 2);
+    let reused = c
+        .req_with(
+            As::User(&admin),
+            Method::POST,
+            &base,
+            Some(json!({ "name": "other" })),
+            &k,
+        )
+        .await;
+    assert_eq!(reused.json["error"]["code"], "IDEMPOTENCY_KEY_REUSED");
+    // Duplicate names are Platform Access conflicts; inputs are validated first.
+    let dup = c
+        .req(As::User(&admin), Method::POST, &base, Some(body))
+        .await;
+    assert_eq!(dup.json["error"]["code"], "INVALID_STATE", "{}", dup.json);
+    for bad in [
+        json!({ "name": "Not A Slug" }),
+        json!({ "name": "" }),
+        json!({ "name": "x", "description": "d".repeat(501) }),
+        json!({ "name": "x", "secret": "s" }),
+        json!({ "name": "x", "scopes": ["sms.send"] }),
+    ] {
+        let r = c
+            .req(As::User(&owner), Method::POST, &base, Some(bad.clone()))
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}: {}", r.json);
+        conforms(ERR, &r.json);
+    }
+    // DEVELOPER reads the allowed service accounts, never manages them.
+    let list = c.req(As::User(&dev), Method::GET, &base, None).await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.json);
+    conforms(&format!("{CTRL}ServiceAccountList"), &list.json);
+    assert_eq!(list.json["items"].as_array().unwrap().len(), 2);
+    let one = c
+        .req(As::User(&dev), Method::GET, &format!("{base}/{ci}"), None)
+        .await;
+    assert_eq!(one.json["name"], "ci-runner");
+    for (path, body) in [
+        (base.clone(), Some(json!({ "name": "dev-made" }))),
+        (format!("{base}/{ci}/suspend"), None),
+        (format!("{base}/{ci}/resume"), None),
+    ] {
+        let r = c.req(As::User(&dev), Method::POST, &path, body).await;
+        assert_eq!(r.json["error"]["code"], "PERMISSION_DENIED", "{path}");
+    }
+    // ANALYST / BILLING: no service-account authority at all.
+    for who in [&analyst, &billing] {
+        for path in [base.clone(), format!("{base}/{ci}")] {
+            let r = c.req(As::User(who), Method::GET, &path, None).await;
+            assert_eq!(r.json["error"]["code"], "PERMISSION_DENIED", "{path}");
+        }
+        let r = c
+            .req(
+                As::User(who),
+                Method::POST,
+                &format!("{base}/{ci}/suspend"),
+                None,
+            )
+            .await;
+        assert_eq!(r.json["error"]["code"], "PERMISSION_DENIED");
+    }
+    // Pagination over Platform Access's list.
+    let p1 = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("{base}?limit=1"),
+            None,
+        )
+        .await;
+    assert_eq!(p1.json["items"].as_array().unwrap().len(), 1);
+    let cursor = p1.json["nextCursor"].as_str().unwrap().to_string();
+    let p2 = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("{base}?limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(p2.json["items"].as_array().unwrap().len(), 1);
+    assert_ne!(p1.json["items"][0]["id"], p2.json["items"][0]["id"]);
+    assert_eq!(p2.json["nextCursor"], Value::Null);
+    let bad = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("{base}?cursor=%%%"),
+            None,
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    // Suspend / resume through Platform Access; no-op transitions are INVALID_STATE.
+    let s = c
+        .req(
+            As::User(&admin),
+            Method::POST,
+            &format!("{base}/{ci}/suspend"),
+            None,
+        )
+        .await;
+    assert_eq!(s.status, StatusCode::OK, "{}", s.json);
+    conforms(&format!("{CTRL}ServiceAccount"), &s.json);
+    assert_eq!(s.json["status"], "SUSPENDED");
+    assert_eq!(c.pa.sa_status(ci), "SUSPENDED");
+    let again = c
+        .req(
+            As::User(&admin),
+            Method::POST,
+            &format!("{base}/{ci}/suspend"),
+            None,
+        )
+        .await;
+    assert_eq!(again.json["error"]["code"], "INVALID_STATE");
+    let s = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/{ci}/resume"),
+            None,
+        )
+        .await;
+    assert_eq!(s.json["status"], "ACTIVE");
+    assert_eq!(c.pa.sa_status(ci), "ACTIVE");
+    // Never deleted (no such operation), unknown ones are NOT_FOUND.
+    let del = c
+        .req(
+            As::User(&owner),
+            Method::DELETE,
+            &format!("{base}/{ci}"),
+            None,
+        )
+        .await;
+    assert_eq!(del.status, StatusCode::METHOD_NOT_ALLOWED);
+    for path in [
+        format!("{base}/{}", Uuid::new_v4()),
+        format!("/v1/environments/{}/service-accounts", Uuid::new_v4()),
+    ] {
+        let r = c.req(As::User(&owner), Method::GET, &path, None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
+    }
+    // Activity: every mutation, no secret, denied attempts recorded.
+    let act = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/organizations/{o}/activity?limit=100"),
+            None,
+        )
+        .await;
+    conforms(&format!("{CTRL}ActivityList"), &act.json);
+    let created = activity_of(&act.json, "service_account.created");
+    assert_eq!(
+        created.len(),
+        2,
+        "the idempotent replay is not a second event"
+    );
+    assert_eq!(created.last().unwrap()["targetId"], json!(ci));
+    assert_eq!(created.last().unwrap()["summary"]["name"], "ci-runner");
+    assert_eq!(created.last().unwrap()["targetType"], "SERVICE_ACCOUNT");
+    assert_eq!(activity_of(&act.json, "service_account.suspended").len(), 1);
+    assert_eq!(activity_of(&act.json, "service_account.resumed").len(), 1);
+    let denied = activity_of(&act.json, "service_account.manage");
+    assert!(denied.iter().all(|e| e["outcome"] == "DENIED"));
+    assert_eq!(denied.len(), 2, "developer create + resume");
+    assert_eq!(activity_of(&act.json, "service_account.suspend").len(), 3);
+}
+
+#[tokio::test]
+async fn service_accounts_stay_inside_their_tenant_and_machines_need_service_accounts_manage() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let (alice, _) = c.sessions.sign_in("alice@acme.example");
+    let (bob, _) = c.sessions.sign_in("bob@other.example");
+    let (_, _, env_a) = sandbox(&c, &alice, "Acme").await;
+    let (_, _, env_b) = sandbox(&c, &bob, "Other").await;
+    let base_a = format!("/v1/environments/{env_a}/service-accounts");
+    let base_b = format!("/v1/environments/{env_b}/service-accounts");
+    let sa_a = id(&c
+        .req(
+            As::User(&alice),
+            Method::POST,
+            &base_a,
+            Some(json!({ "name": "worker" })),
+        )
+        .await
+        .json);
+    // Another tenant's environment: NOT_FOUND (never a hint), nothing delegated.
+    let before = c.pa.audit.lock().unwrap().len();
+    for (method, path, body) in [
+        (Method::GET, base_a.clone(), None),
+        (
+            Method::POST,
+            base_a.clone(),
+            Some(json!({ "name": "evil" })),
+        ),
+        (Method::GET, format!("{base_a}/{sa_a}"), None),
+        (Method::POST, format!("{base_a}/{sa_a}/suspend"), None),
+    ] {
+        let r = c.req(As::User(&bob), method, &path, body).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}: {}", r.json);
+    }
+    // A's service account addressed through B's own environment: Platform Access scopes it.
+    for (method, path) in [
+        (Method::GET, format!("{base_b}/{sa_a}")),
+        (Method::POST, format!("{base_b}/{sa_a}/suspend")),
+    ] {
+        let r = c.req(As::User(&bob), method, &path, None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}: {}", r.json);
+    }
+    assert_eq!(c.pa.audit.lock().unwrap().len(), before);
+    assert_eq!(c.pa.sa_status(sa_a), "ACTIVE");
+    // Machines: `service_accounts.manage` within their own tenant only.
+    let manager = c.pa.machine(env_a, &["service_accounts.manage"]);
+    let r = c
+        .req(
+            As::Machine(&manager),
+            Method::POST,
+            &base_a,
+            Some(json!({ "name": "automation" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let auto = id(&r.json);
+    let (actor, _) = c.pa.audit.lock().unwrap().last().unwrap().clone();
+    assert_eq!(
+        actor,
+        format!("s-{}", manager.initiating_service_account_id().simple())
+    );
+    let r = c
+        .req(
+            As::Machine(&manager),
+            Method::POST,
+            &format!("{base_a}/{auto}/suspend"),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["status"], "SUSPENDED", "{}", r.json);
+    assert_eq!(
+        c.req(As::Machine(&manager), Method::GET, &base_a, None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let reader = c.pa.machine(env_a, &["projects.read", "projects.manage"]);
+    for (method, path, body) in [
+        (Method::GET, base_a.clone(), None),
+        (
+            Method::POST,
+            base_a.clone(),
+            Some(json!({ "name": "nope" })),
+        ),
+        (Method::POST, format!("{base_a}/{sa_a}/suspend"), None),
+    ] {
+        let r = c.req(As::Machine(&reader), method, &path, body).await;
+        assert_eq!(r.json["error"]["code"], "INSUFFICIENT_SCOPE", "{path}");
+    }
+    let r = c
+        .req(As::Machine(&manager), Method::GET, &base_b, None)
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let act = c
+        .req(
+            As::User(&alice),
+            Method::GET,
+            &format!(
+                "/v1/organizations/{}/activity",
+                c.pa.envs.lock().unwrap()[&env_a].tenant
+            ),
+            None,
+        )
+        .await;
+    let created = activity_of(&act.json, "service_account.created");
+    assert_eq!(
+        created[0]["actorRef"],
+        format!(
+            "service_account:{}",
+            manager.initiating_service_account_id()
+        )
+    );
+    assert_eq!(created[0]["actorKind"], "SERVICE");
+}
+
+#[tokio::test]
+async fn service_accounts_follow_organization_state_and_the_production_rule() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@acme.example");
+    let (o, pid, env) = sandbox(&c, &owner, "Acme").await;
+    let base = format!("/v1/environments/{env}/service-accounts");
+    let mut sas = Vec::new();
+    for name in ["one", "two"] {
+        let r = c
+            .req(
+                As::User(&owner),
+                Method::POST,
+                &base,
+                Some(json!({ "name": name })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+        sas.push(id(&r.json));
+    }
+    let state_path = format!("/internal/v1/operator/organizations/{o}/state");
+    let set_state = |s: &'static str| {
+        c.operator(
+            Method::POST,
+            &state_path,
+            Some(json!({ "state": s, "reason": "BILLING_REVIEW" })),
+        )
+    };
+    // RESTRICTED: no creation, no resume; suspending (withdrawing access) stays possible.
+    assert_eq!(set_state("RESTRICTED").await.status, StatusCode::OK);
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &base,
+            Some(json!({ "name": "three" })),
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "ORGANIZATION_RESTRICTED");
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/{}/suspend", sas[0]),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["status"], "SUSPENDED", "{}", r.json);
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/{}/resume", sas[0]),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "ORGANIZATION_RESTRICTED");
+    assert_eq!(
+        c.req(As::User(&owner), Method::GET, &base, None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    // SUSPENDED: reads only.
+    assert_eq!(set_state("SUSPENDED").await.status, StatusCode::OK);
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/{}/suspend", sas[1]),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "ORGANIZATION_SUSPENDED");
+    assert_eq!(c.pa.sa_status(sas[1]), "ACTIVE");
+    assert_eq!(
+        c.req(As::User(&owner), Method::GET, &base, None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    // A suspended environment / project takes no new service account.
+    assert_eq!(set_state("ACTIVE").await.status, StatusCode::OK);
+    c.req(
+        As::User(&owner),
+        Method::POST,
+        &format!("/v1/environments/{env}/suspend"),
+        None,
+    )
+    .await;
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &base,
+            Some(json!({ "name": "three" })),
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "INVALID_STATE");
+    // PRODUCTION: like the environment itself, an operator / production-access decision.
+    let prod = Uuid::new_v4();
+    c.pa.envs.lock().unwrap().insert(
+        prod,
+        MemEnv {
+            tenant: o,
+            app: pid,
+            kind: "PRODUCTION".into(),
+            status: "ACTIVE".into(),
+        },
+    );
+    c.db.conn
+        .execute_unprepared(&format!(
+            "INSERT INTO devplat_environment_profiles \
+               (environment_id, application_id, tenant_id, kind, display_name, status, \
+                production_access_state, created_by, created_at, updated_at) \
+             VALUES ('{prod}', '{pid}', '{o}', 'PRODUCTION', 'Production', 'ACTIVE', 'APPROVED', \
+                     'operator:test', now(), now())"
+        ))
+        .await
+        .unwrap();
+    let prod_base = format!("/v1/environments/{prod}/service-accounts");
+    let before = c.pa.audit.lock().unwrap().len();
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &prod_base,
+            Some(json!({ "name": "prod-bot" })),
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "POLICY_VIOLATION", "{}", r.json);
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{prod_base}/{}/suspend", Uuid::new_v4()),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "POLICY_VIOLATION");
+    assert_eq!(c.pa.audit.lock().unwrap().len(), before);
+    assert_eq!(
+        c.req(As::User(&owner), Method::GET, &prod_base, None)
+            .await
+            .status,
+        StatusCode::OK,
+        "reads stay available"
+    );
+    // CLOSED: nothing changes any more.
+    let cl = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/organizations/{o}/close"),
+            None,
+        )
+        .await;
+    assert_eq!(cl.json["state"], "CLOSED");
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{base}/{}/suspend", sas[1]),
+            None,
+        )
+        .await;
+    assert_eq!(r.json["error"]["code"], "ORGANIZATION_CLOSED");
+}

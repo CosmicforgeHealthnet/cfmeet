@@ -124,6 +124,7 @@
         "messaging-request.forward",
         "numbering-request.forward",
         "sms-request.forward",
+        "meeting-request.forward",
         "user-session.verify",
         "developer-entitlement.read",
         "developer-usage.record",

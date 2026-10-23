@@ -4,7 +4,7 @@
   "contracts": [
     {
       "id": "cfmeet.meeting-service.http-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "openapi/meeting-service.json",
       "owner": "meeting-service",
@@ -12,7 +12,7 @@
       "lifecycle": "stable",
       "authority": "generated",
       "generated_by": "services/meeting-service: cargo run --bin export_openapi (checked by .github/workflows/backend.yml)",
-      "description": "Meeting & Conference Platform HTTP API (/api/v1, /api/v2)."
+      "description": "Meeting & Conference Platform HTTP API (/api/v1, /api/v2). 1.2.0 (Part VI §51): platformCredential (meetings.read / meetings.write, x-cfmeet-required-scope) on the machine-callable /api/v2 operations — meeting spaces, instant meetings, conference scheduling and lifecycle, participants and waiting room, invitations, attendance — for meetings owned by the caller's application environment."
     },
     {
       "id": "cfmeet.calling.http-api",
@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.11.0",
+      "version": "1.12.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -203,14 +203,14 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited)."
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials)."
     },
     {
       "id": "cfmeet.numbering.common",
@@ -658,7 +658,7 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api-bundled",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "bundled/platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
@@ -764,36 +764,36 @@
     },
     {
       "id": "cfmeet.developer-platform.control",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform-developer/control/v1.schema.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (applications), environments, commercial plans / assignments / billing-account references, immutable activity events and effective entitlements. No identity attribute, credential, scope grant, price or payment data."
+      "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (applications), environments, commercial plans / assignments / billing-account references, immutable activity events and effective entitlements. No identity attribute, credential, scope grant, price or payment data. 1.1.0: Section 50 service accounts (ServiceAccount, ServiceAccountList, CreateServiceAccountRequest): Platform Access machine identities read and suspended / resumed through delegation; never a credential or secret."
     },
     {
       "id": "cfmeet.developer-platform.webhooks",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform-developer/webhooks/v1.schema.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 53 central customer webhooks: subscription requests and views (Calling's Part G §68 customer shapes, unchanged, plus the Developer Console view with environment, origin and endpoint health), the public event catalog (Part G families plus meeting, participant, artifact, number, credential and production-access), delivery records (FAILED dead letter, SHADOW in shadow mode), attempt history (status / error class only), the signed event body and the internal ingestion acknowledgement. Never a signing secret after create / rotation, never a provider, storage or content field."
+      "description": "Section 53 central customer webhooks: subscription requests and views (Calling's Part G §68 customer shapes, unchanged, plus the Developer Console view with environment, origin and endpoint health), the public event catalog (Part G families plus meeting, participant, artifact, number, credential and production-access), delivery records (FAILED dead letter, SHADOW in shadow mode), attempt history (status / error class only), the signed event body and the internal ingestion acknowledgement. Never a signing secret after create / rotation, never a provider, storage or content field. 1.1.0: meeting.created, conferenceId (meeting events read by meetings.read)."
     },
     {
       "id": "cfmeet.developer-platform.http-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "platform-developer/http/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted. 1.1.0: Section 53 Developer Console webhook operations under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/* (subscriptions with a once-shown signing secret, secret rotation, delivery and attempt history, replay; OWNER / ADMIN / DEVELOPER manage, ANALYST reads)."
+      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted. 1.1.0: Section 53 Developer Console webhook operations under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/* (subscriptions with a once-shown signing secret, secret rotation, delivery and attempt history, replay; OWNER / ADMIN / DEVELOPER manage, ANALYST reads). 1.3.0: Section 50 service accounts under /v1/environments/{environmentId}/service-accounts* (list / create / get / suspend / resume, delegated to Platform Access; OWNER / ADMIN manage, DEVELOPER reads; machine credentials need service_accounts.manage; never a credential)."
     },
     {
       "id": "cfmeet.api-gateway.common",
@@ -819,7 +819,7 @@
     },
     {
       "id": "cfmeet.meeting-service.public-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "bundled/public/meetings/v1.openapi.json",
       "owner": "meeting-service",
@@ -891,7 +891,7 @@
     },
     {
       "id": "cfmeet.developer-platform.public-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/public/developer-platform/v1.openapi.json",
       "owner": "developer-platform",

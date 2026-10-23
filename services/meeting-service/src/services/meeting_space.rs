@@ -23,12 +23,12 @@ use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     models::{conference_sessions, meeting_members, meeting_spaces, users},
     services::{
-        actor::{ActorContext, RegisteredActor},
+        actor::ActorContext,
         collaboration::policy::CollaborationPolicyPatch,
         conference::{insert_conference, NewConference},
         meeting_core::{
-            find_space, is_unique_violation, lock_space, permission_denied, space_role,
-            state_conflict, validation, Core,
+            actor_space_role, find_space, is_unique_violation, lock_space, permission_denied,
+            state_conflict, validation, Core, SpaceOwner,
         },
         meeting_events::{self, action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
         meeting_permissions::{space_allows, PermissionContext, RolePolicy, SpacePermission},
@@ -317,7 +317,7 @@ impl MeetingSpaceService {
     async fn insert_space<C: ConnectionTrait + TransactionTrait>(
         &self,
         conn: &C,
-        owner: Uuid,
+        owner: SpaceOwner,
         draft: &SpaceDraft,
         passcode_hash: Option<String>,
     ) -> ApiResult<meeting_spaces::Model> {
@@ -327,7 +327,7 @@ impl MeetingSpaceService {
                 id: Set(Uuid::new_v4()),
                 legacy_meeting_id: Set(None),
                 organization_id: Set(draft.organization_id),
-                owner_user_id: Set(owner),
+                owner_user_id: Set(owner.user_id()),
                 meeting_code: Set(secrets::generate_meeting_code()),
                 title: Set(draft.title.trim().to_string()),
                 description: Set(draft.description.clone()),
@@ -361,7 +361,24 @@ impl MeetingSpaceService {
                 collaboration_policy: Set(draft.collaboration_policy.to_json()),
                 profile_policy: Set(serde_json::json!({})),
                 profile_policy_version: Set(1),
+                platform_tenant_id: Set(None),
+                platform_application_id: Set(None),
+                platform_environment_id: Set(None),
+                created_by_service_account_id: Set(None),
             };
+            let mut model = model;
+            if let SpaceOwner::Environment {
+                tenant_id,
+                application_id,
+                environment_id,
+                service_account_id,
+            } = owner
+            {
+                model.platform_tenant_id = Set(Some(tenant_id));
+                model.platform_application_id = Set(Some(application_id));
+                model.platform_environment_id = Set(Some(environment_id));
+                model.created_by_service_account_id = Set(Some(service_account_id));
+            }
             let savepoint = conn.begin().await?;
             match model.insert(&savepoint).await {
                 Ok(m) => {
@@ -426,8 +443,7 @@ impl MeetingSpaceService {
         ctx: &ActorContext,
         req: CreateMeetingSpaceRequest,
     ) -> ApiResult<meeting_spaces::Model> {
-        let actor = ctx.require_registered()?;
-        self.core.require_v2_write(actor)?;
+        let owner = self.core.require_v2_writer(ctx)?;
         let draft = SpaceDraft::from_create(&req);
         if let Some(p) = &req.passcode {
             validate_passcode(p)?;
@@ -443,7 +459,7 @@ impl MeetingSpaceService {
         };
         let txn = self.core.db.begin().await?;
         let space = self
-            .insert_space(&txn, actor.user_id, &draft, passcode_hash)
+            .insert_space(&txn, owner, &draft, passcode_hash)
             .await?;
         self.record_created(&txn, &AuditActor::from(ctx), &space, json!({}))
             .await?;
@@ -457,8 +473,7 @@ impl MeetingSpaceService {
         ctx: &ActorContext,
         req: InstantMeetingRequest,
     ) -> ApiResult<(meeting_spaces::Model, conference_sessions::Model)> {
-        let actor = ctx.require_registered()?;
-        self.core.require_v2_write(actor)?;
+        let owner = self.core.require_v2_writer(ctx)?;
         let create = CreateMeetingSpaceRequest {
             title: req
                 .title
@@ -485,7 +500,7 @@ impl MeetingSpaceService {
         let audit_actor = AuditActor::from(ctx);
         let txn = self.core.db.begin().await?;
         let space = self
-            .insert_space(&txn, actor.user_id, &draft, passcode_hash)
+            .insert_space(&txn, owner, &draft, passcode_hash)
             .await?;
         self.record_created(&txn, &audit_actor, &space, json!({ "instant": true }))
             .await?;
@@ -531,10 +546,9 @@ impl MeetingSpaceService {
         space: &meeting_spaces::Model,
         ctx: &ActorContext,
     ) -> ApiResult<Option<Role>> {
-        Ok(match ctx.registered() {
-            Some(r) => space_role(conn, space, r).await?.map(|(role, _)| role),
-            None => None,
-        })
+        Ok(actor_space_role(conn, space, ctx)
+            .await?
+            .map(|(role, _)| role))
     }
 
     pub async fn view_of(
@@ -600,6 +614,27 @@ impl MeetingSpaceService {
 
     /// Spaces the actor owns or is an active member of.
     pub async fn list_for_actor(&self, ctx: &ActorContext) -> ApiResult<Vec<SpaceView>> {
+        if let Some(p) = ctx.platform() {
+            // A machine caller lists exactly its own environment's spaces (the whole live
+            // chain must match); user-owned spaces never appear.
+            let spaces = meeting_spaces::Entity::find()
+                .filter(meeting_spaces::Column::PlatformEnvironmentId.eq(p.environment_id))
+                .filter(meeting_spaces::Column::PlatformApplicationId.eq(p.application_id))
+                .filter(meeting_spaces::Column::PlatformTenantId.eq(p.tenant_id))
+                .filter(meeting_spaces::Column::OwnerUserId.is_null())
+                .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
+                .order_by_desc(meeting_spaces::Column::CreatedAt)
+                .all(&self.core.db)
+                .await?;
+            let mut out = Vec::with_capacity(spaces.len());
+            for s in spaces
+                .into_iter()
+                .filter(crate::services::meeting_core::space_is_visible)
+            {
+                out.push(self.view_of(ctx, s).await?);
+            }
+            return Ok(out);
+        }
         let actor = ctx.require_registered()?;
         let member_space_ids: Vec<Uuid> = meeting_members::Entity::find()
             .filter(meeting_members::Column::UserId.eq(actor.user_id))
@@ -633,10 +668,10 @@ impl MeetingSpaceService {
         &self,
         conn: &C,
         space: &meeting_spaces::Model,
-        actor: &RegisteredActor,
+        actor: &ActorContext,
         permission: SpacePermission,
     ) -> ApiResult<Role> {
-        let role = space_role(conn, space, actor).await?.map(|(r, _)| r);
+        let role = actor_space_role(conn, space, actor).await?.map(|(r, _)| r);
         let pctx = PermissionContext::for_space(space);
         match role {
             Some(r) if space_allows(r, permission, &pctx) => Ok(r),
@@ -653,14 +688,13 @@ impl MeetingSpaceService {
         id: Uuid,
         req: UpdateMeetingSpaceRequest,
     ) -> ApiResult<meeting_spaces::Model> {
-        let actor = ctx.require_registered()?;
-        self.core.require_v2_write(actor)?;
+        self.core.require_v2_writer(ctx)?;
         if let Some(p) = &req.passcode {
             validate_passcode(p)?;
         }
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, id).await?;
-        self.require_space_permission(&txn, &space, actor, SpacePermission::Configure)
+        self.require_space_permission(&txn, &space, ctx, SpacePermission::Configure)
             .await?;
         if space.version != req.version {
             return Err(ApiError::domain(
@@ -851,11 +885,14 @@ impl MeetingSpaceService {
         id: Uuid,
         version: Option<i32>,
     ) -> ApiResult<meeting_spaces::Model> {
-        let actor = ctx.require_registered()?;
+        let platform_admin = match ctx.platform() {
+            Some(_) => false,
+            None => ctx.require_registered()?.platform_admin,
+        };
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, id).await?;
-        if !actor.platform_admin {
-            self.require_space_permission(&txn, &space, actor, SpacePermission::Archive)
+        if !platform_admin {
+            self.require_space_permission(&txn, &space, ctx, SpacePermission::Archive)
                 .await?;
         }
         if let Some(v) = version {
@@ -919,7 +956,7 @@ impl MeetingSpaceService {
         let actor = ctx.require_registered()?;
         self.core.require_v2_write(actor)?;
         let source = find_space(&self.core.db, id).await?;
-        self.require_space_permission(&self.core.db, &source, actor, SpacePermission::Duplicate)
+        self.require_space_permission(&self.core.db, &source, ctx, SpacePermission::Duplicate)
             .await?;
         let mut draft = SpaceDraft::from_model(&source);
         draft.title = req.title.map(|t| t.trim().to_string()).unwrap_or_else(|| {
@@ -936,7 +973,12 @@ impl MeetingSpaceService {
         draft.validate(&self.core.flags)?;
         let txn = self.core.db.begin().await?;
         let space = self
-            .insert_space(&txn, actor.user_id, &draft, source.passcode_hash.clone())
+            .insert_space(
+                &txn,
+                SpaceOwner::User(actor.user_id),
+                &draft,
+                source.passcode_hash.clone(),
+            )
             .await?;
         let audit_actor = AuditActor::from(ctx);
         self.record_created(
@@ -974,9 +1016,16 @@ impl MeetingSpaceService {
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, id).await?;
         if !actor.platform_admin {
-            self.require_space_permission(&txn, &space, actor, SpacePermission::TransferOwnership)
+            self.require_space_permission(&txn, &space, ctx, SpacePermission::TransferOwnership)
                 .await?;
         }
+        // An environment-owned meeting belongs to its Platform Access application
+        // environment; it never moves to a CF Meet account (nor back).
+        let Some(previous_owner) = space.owner_user_id else {
+            return Err(state_conflict(
+                "Meetings owned by an application environment cannot change owner",
+            ));
+        };
         if space.version != req.version {
             return Err(ApiError::domain(
                 ErrorCode::MeetingVersionConflict,
@@ -988,7 +1037,7 @@ impl MeetingSpaceService {
                 "Archived meeting spaces cannot change owner",
             ));
         }
-        if req.new_owner_user_id == space.owner_user_id {
+        if req.new_owner_user_id == previous_owner {
             return Err(validation("That user already owns this meeting"));
         }
         let target = users::Entity::find_by_id(req.new_owner_user_id)
@@ -998,7 +1047,6 @@ impl MeetingSpaceService {
             .ok_or_else(|| validation("New owner must be an active registered user"))?;
 
         let now = Utc::now();
-        let previous_owner = space.owner_user_id;
         // The new owner's membership is superseded by ownership.
         meeting_members::Entity::update_many()
             .col_expr(
@@ -1038,7 +1086,7 @@ impl MeetingSpaceService {
             .await?;
         }
         let mut am: meeting_spaces::ActiveModel = space.clone().into();
-        am.owner_user_id = Set(target.id);
+        am.owner_user_id = Set(Some(target.id));
         am.version = Set(space.version + 1);
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;

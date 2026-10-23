@@ -505,6 +505,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             put(organizations::upsert_organization_member),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::platform_auth::platform_credential,
+        ))
         .route_layer(middleware::from_fn_with_state(state, require_meeting_v2))
         // Part J: unknown paths / methods keep the standard error envelope + requestId.
         .method_not_allowed_fallback(method_not_allowed)

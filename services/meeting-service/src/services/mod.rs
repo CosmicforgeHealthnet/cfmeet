@@ -25,6 +25,7 @@ pub mod membership;
 pub mod ops_metrics;
 pub mod organizations;
 pub mod outbox;
+pub mod platform;
 pub mod profiles;
 pub mod quality;
 pub mod realtime;

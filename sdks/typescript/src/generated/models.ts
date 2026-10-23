@@ -2272,6 +2272,12 @@ export namespace DeveloperPlatform {
     supportEmail?: string;
     labels?: { [key: string]: string };
   };
+  /** Creates a service account in a SANDBOX / TEST environment (PRODUCTION is refused: production-access workflow). No credential is issued (Section 54). */
+  export type CreateServiceAccountRequest = {
+    /** Stable key: 1-63 lowercase letters, digits or '-', starting with a letter or digit; unique within the environment. */
+    name: string;
+    description?: string;
+  };
   export type CreateWebhookRequest = {
     /** Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed. */
     url: string;
@@ -2484,6 +2490,27 @@ export namespace DeveloperPlatform {
   export type RotateWebhookSecretRequest = {
     expectedVersion: number;
   };
+  /** A Platform Access service account (machine identity) of one environment, read through the Developer Platform. Platform Access is its only store; API credentials (secrets) are never part of it (Section 54). */
+  export type ServiceAccount = {
+    /** The canonical Platform Access service account id. */
+    id: Uuid;
+    organizationId: Uuid;
+    projectId: Uuid;
+    environmentId: Uuid;
+    /** Stable key, unique within the environment. */
+    name: string;
+    description: string | null;
+    status: ServiceAccountStatus;
+    createdAt: string;
+    updatedAt: string;
+  };
+  /** A page of results; pass `nextCursor` as `cursor` for the next page (null: last page). */
+  export type ServiceAccountList = {
+    items: Array<ServiceAccount>;
+    nextCursor: string | null;
+  };
+  /** Platform Access service-account status. The Developer Platform suspends / resumes (ACTIVE ⇄ SUSPENDED); REVOKED is terminal and an operator decision. A non-ACTIVE service account's API credentials do not authenticate. */
+  export type ServiceAccountStatus = "ACTIVE" | "SUSPENDED" | "REVOKED";
   export type TransferOwnershipRequest = {
     memberId: Uuid;
   };
@@ -2537,7 +2564,7 @@ export namespace DeveloperPlatform {
     completedAt: string | null;
   };
   /** The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. */
-  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired" | "meeting.started" | "meeting.ended" | "participant.joined" | "participant.left" | "artifact.ready" | "artifact.deleted" | "number.reservation_changed" | "number.assignment_changed" | "number.binding_changed" | "number.port_changed" | "number.release_changed" | "number.lifecycle_changed" | "number.suspended" | "number.restored" | "credential.created" | "credential.rotated" | "credential.revoked" | "production_access.requested" | "production_access.approved" | "production_access.rejected";
+  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired" | "meeting.created" | "meeting.started" | "meeting.ended" | "participant.joined" | "participant.left" | "artifact.ready" | "artifact.deleted" | "number.reservation_changed" | "number.assignment_changed" | "number.binding_changed" | "number.port_changed" | "number.release_changed" | "number.lifecycle_changed" | "number.suspended" | "number.restored" | "credential.created" | "credential.rotated" | "credential.revoked" | "production_access.requested" | "production_access.approved" | "production_access.rejected";
 
   /** Typed parameters and response of every REST operation of this domain. */
   export interface Operations {
@@ -2586,6 +2613,11 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid }; body: CreateProjectRequest; idempotencyKey?: string };
       response: Project;
     };
+    /** POST /v1/environments/{environmentId}/service-accounts — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    createServiceAccount: {
+      params: { path: { environmentId: Uuid }; body: CreateServiceAccountRequest; idempotencyKey?: string };
+      response: ServiceAccount;
+    };
     /** DELETE /v1/environments/{environmentId}/webhooks/{webhookId}; auth DEVELOPER_SESSION; retry IDEMPOTENT */
     deleteEnvironmentWebhook: {
       params: { path: { environmentId: Uuid; webhookId: Uuid }; query: { expectedVersion: number } };
@@ -2620,6 +2652,11 @@ export namespace DeveloperPlatform {
     getProject: {
       params: { path: { projectId: Uuid } };
       response: Project;
+    };
+    /** GET /v1/environments/{environmentId}/service-accounts/{serviceAccountId} — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getServiceAccount: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
+      response: ServiceAccount;
     };
     /** GET /v1/organizations/{organizationId}/activity — scope audit.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listActivity: {
@@ -2685,6 +2722,12 @@ export namespace DeveloperPlatform {
       response: ProjectList;
       item: NonNullable<(ProjectList)["items"]>[number];
     };
+    /** GET /v1/environments/{environmentId}/service-accounts — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listServiceAccounts: {
+      params: { path: { environmentId: Uuid }; query?: { limit?: number; cursor?: string } };
+      response: ServiceAccountList;
+      item: NonNullable<(ServiceAccountList)["items"]>[number];
+    };
     /** GET /v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts; auth DEVELOPER_SESSION; retry SAFE */
     listWebhookDeliveryAttempts: {
       params: { path: { environmentId: Uuid; deliveryId: Uuid }; query?: { limit?: number; cursor?: string } };
@@ -2716,6 +2759,11 @@ export namespace DeveloperPlatform {
       params: { path: { projectId: Uuid } };
       response: Project;
     };
+    /** POST /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    resumeServiceAccount: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
+      response: ServiceAccount;
+    };
     /** POST /v1/organizations/{organizationId}/invitations/{invitationId}/revoke; auth DEVELOPER_SESSION; retry NO_RETRY */
     revokeInvitation: {
       params: { path: { organizationId: Uuid; invitationId: Uuid } };
@@ -2735,6 +2783,11 @@ export namespace DeveloperPlatform {
     suspendProject: {
       params: { path: { projectId: Uuid } };
       response: Project;
+    };
+    /** POST /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    suspendServiceAccount: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
+      response: ServiceAccount;
     };
     /** POST /v1/organizations/{organizationId}/ownership-transfer; auth DEVELOPER_SESSION; retry NO_RETRY */
     transferOwnership: {
@@ -4233,7 +4286,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: AddMemberRequest };
       response: MemberResponse;
     };
-    /** POST /api/v2/conferences/{id}/waiting-room/admit; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/waiting-room/admit — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Admit: {
       params: { path: { id: string }; body: AdmitRequest };
       response: BulkAdmissionResponse;
@@ -4243,7 +4296,7 @@ export namespace Meetings {
       params: { path: { id: string; questionId: string }; body: AnswerQuestionRequest };
       response: QuestionActionResponse;
     };
-    /** POST /api/v2/meeting-spaces/{id}/archive; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces/{id}/archive — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2ArchiveMeetingSpace: {
       params: { path: { id: string }; body: VersionedRequest };
       response: MeetingSpaceResponse;
@@ -4293,7 +4346,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: BreakoutAnnouncementRequest };
       response: AnnouncementResponse;
     };
-    /** POST /api/v2/conferences/{id}/cancel; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/cancel — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CancelConference: {
       params: { path: { id: string } };
       response: ConferenceActionResponse;
@@ -4328,7 +4381,7 @@ export namespace Meetings {
       params: { path: { id: string } };
       response: CollaborationStateResponse;
     };
-    /** GET /api/v2/conferences/{id}/attendance; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    /** GET /api/v2/conferences/{id}/attendance — scope meetings.read; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry SAFE */
     v2ConferenceAttendance: {
       params: { path: { id: string } };
       response: AttendanceReport;
@@ -4348,22 +4401,22 @@ export namespace Meetings {
       params: { path: { id: string }; body: CreateBreakoutsRequest };
       response: BreakoutListCreatedResponse;
     };
-    /** POST /api/v2/meeting-spaces/{id}/conferences; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces/{id}/conferences — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateConference: {
       params: { path: { id: string }; body: CreateConferenceRequest };
       response: ConferenceResponse;
     };
-    /** POST /api/v2/instant-meetings; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/instant-meetings — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateInstantMeeting: {
       params: { body: InstantMeetingRequest };
       response: InstantMeetingResponse;
     };
-    /** POST /api/v2/meeting-spaces/{id}/invitations; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces/{id}/invitations — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateInvitation: {
       params: { path: { id: string }; body: CreateInvitationRequest };
       response: CreateInvitationResponse;
     };
-    /** POST /api/v2/meeting-spaces; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateMeetingSpace: {
       params: { body: CreateMeetingSpaceRequest };
       response: MeetingSpaceResponse;
@@ -4383,7 +4436,7 @@ export namespace Meetings {
       params: { path: { id: string; messageId: string } };
       response: ChangedResponse;
     };
-    /** POST /api/v2/conferences/{id}/waiting-room/deny; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/waiting-room/deny — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Deny: {
       params: { path: { id: string }; body: DenyRequest };
       response: BulkAdmissionResponse;
@@ -4398,7 +4451,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: DuplicateMeetingSpaceRequest };
       response: MeetingSpaceResponse;
     };
-    /** POST /api/v2/conferences/{id}/end; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/end — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2EndConference: {
       params: { path: { id: string } };
       response: ConferenceActionResponse;
@@ -4428,7 +4481,7 @@ export namespace Meetings {
       params: { path: { id: string; artifactId: string } };
       response: ArtifactView;
     };
-    /** GET /api/v2/conferences/{id}; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    /** GET /api/v2/conferences/{id} — scope meetings.read; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry SAFE */
     v2GetConference: {
       params: { path: { id: string } };
       response: ConferenceResponse;
@@ -4438,7 +4491,7 @@ export namespace Meetings {
       params: { path: { id: string } };
       response: ParticipantResponse;
     };
-    /** GET /api/v2/meeting-spaces/{id}; auth MEETING_SESSION; retry SAFE */
+    /** GET /api/v2/meeting-spaces/{id} — scope meetings.read; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     v2GetMeetingSpace: {
       params: { path: { id: string } };
       response: MeetingSpaceResponse;
@@ -4473,7 +4526,7 @@ export namespace Meetings {
       params: { path: { id: string; artifactId: string }; query?: { after?: number | null; limit?: number | null } };
       response: TranscriptView;
     };
-    /** GET /api/v2/conferences/{id}/waiting-room; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    /** GET /api/v2/conferences/{id}/waiting-room — scope meetings.read; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry SAFE */
     v2GetWaitingRoom: {
       params: { path: { id: string } };
       response: WaitingRoomResponse;
@@ -4508,17 +4561,17 @@ export namespace Meetings {
       params: { path: { id: string } };
       response: BreakoutListResponse;
     };
-    /** GET /api/v2/meeting-spaces/{id}/conferences; auth MEETING_SESSION; retry SAFE */
+    /** GET /api/v2/meeting-spaces/{id}/conferences — scope meetings.read; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     v2ListConferences: {
       params: { path: { id: string }; query?: { from?: string | null; to?: string | null } };
       response: ConferenceListResponse;
     };
-    /** GET /api/v2/meeting-spaces/{id}/invitations; auth MEETING_SESSION; retry SAFE */
+    /** GET /api/v2/meeting-spaces/{id}/invitations — scope meetings.read; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     v2ListInvitations: {
       params: { path: { id: string } };
       response: Array<InvitationResponse>;
     };
-    /** GET /api/v2/meeting-spaces; auth MEETING_SESSION; retry SAFE */
+    /** GET /api/v2/meeting-spaces — scope meetings.read; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     v2ListMeetingSpaces: {
       params: {};
       response: MeetingSpaceListResponse;
@@ -4533,7 +4586,7 @@ export namespace Meetings {
       params: { path: { id: string }; query?: { scope?: string | null; breakoutId?: string | null; peerId?: string | null; before?: string | null; limit?: number | null } };
       response: MessagePage;
     };
-    /** GET /api/v2/conferences/{id}/participants; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    /** GET /api/v2/conferences/{id}/participants — scope meetings.read; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry SAFE */
     v2ListParticipants: {
       params: { path: { id: string } };
       response: Array<ParticipantResponse>;
@@ -4663,7 +4716,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: RegistrationRequest };
       response: RegistrationCreated;
     };
-    /** POST /api/v2/conferences/{id}/participants/{participantId}/remove; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/participants/{participantId}/remove — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Remove: {
       params: { path: { id: string; participantId: string }; body: RemoveParticipantRequest };
       response: ModerationResponse;
@@ -4708,7 +4761,7 @@ export namespace Meetings {
       params: { path: { id: string; participantId: string } };
       response: ModerationResponse;
     };
-    /** POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke; auth MEETING_SESSION; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2RevokeInvitation: {
       params: { path: { id: string; invitationId: string } };
       response: InvitationResponse;
@@ -4753,7 +4806,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: SpotlightRequest };
       response: SpotlightListResponse;
     };
-    /** POST /api/v2/conferences/{id}/start; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    /** POST /api/v2/conferences/{id}/start — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2StartConference: {
       params: { path: { id: string } };
       response: ConferenceActionResponse;
@@ -4838,7 +4891,7 @@ export namespace Meetings {
       params: { path: { id: string }; body: CollaborationPolicyUpdateRequest };
       response: CollaborationPolicyResponse;
     };
-    /** PATCH /api/v2/meeting-spaces/{id}; auth MEETING_SESSION; retry NO_RETRY */
+    /** PATCH /api/v2/meeting-spaces/{id} — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2UpdateMeetingSpace: {
       params: { path: { id: string }; body: UpdateMeetingSpaceRequest };
       response: MeetingSpaceResponse;

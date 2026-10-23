@@ -11,7 +11,9 @@ pub mod artifacts;
 pub mod collab;
 pub mod contract;
 pub mod livekit_mock;
+pub mod platform;
 pub mod proxy;
+pub mod receiver;
 pub mod route_coverage;
 pub mod rtc;
 pub mod ws;
@@ -419,6 +421,8 @@ pub struct TestOptions {
     pub reuse_storage: Option<Arc<backend::services::artifacts::storage::MemoryArtifactStorage>>,
     /// Part V H: the signed gateway to real Platform Access / Messaging processes.
     pub unified_messaging: Option<backend::services::unified_messaging::SharedGateway>,
+    /// Part VI §51: the platform credential receiver (gateway-forwarded machine callers).
+    pub platform: Option<backend::services::platform::PlatformReceiver>,
 }
 
 impl Default for TestOptions {
@@ -441,6 +445,7 @@ impl Default for TestOptions {
             config: None,
             reuse_storage: None,
             unified_messaging: None,
+            platform: None,
         }
     }
 }
@@ -722,7 +727,7 @@ impl TestApp {
             }),
             unified_messaging: opts.unified_messaging.clone(),
         };
-        let state = AppState::with_meeting_deps(
+        let mut state = AppState::with_meeting_deps(
             db.conn.clone(),
             redis,
             &app_config,
@@ -730,6 +735,9 @@ impl TestApp {
             &livekit,
             deps,
         );
+        if let Some(platform) = opts.platform.clone() {
+            state = state.with_platform(platform);
+        }
         let router = routes::create_routes(state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));
         Self {

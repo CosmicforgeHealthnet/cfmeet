@@ -33,8 +33,8 @@ use crate::{
     services::{
         actor::ActorContext,
         meeting_core::{
-            conference_authority, find_conference, find_space, is_unique_violation,
-            lock_conference, permission_denied, space_role, state_conflict, validation,
+            actor_space_role, conference_authority, find_conference, find_space,
+            is_unique_violation, lock_conference, permission_denied, state_conflict, validation,
             ConferenceAuthority, Core,
         },
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
@@ -300,8 +300,7 @@ impl ConferenceService {
         space_id: Uuid,
         req: CreateConferenceRequest,
     ) -> ApiResult<conference_sessions::Model> {
-        let actor = ctx.require_registered()?;
-        self.core.require_v2_write(actor)?;
+        self.core.require_v2_writer(ctx)?;
         if let (Some(s), Some(e)) = (req.scheduled_start_at, req.scheduled_end_at) {
             if e <= s {
                 return Err(validation("scheduledEndAt must be after scheduledStartAt"));
@@ -322,7 +321,7 @@ impl ConferenceService {
                 "Archived meeting spaces cannot schedule conferences",
             ));
         }
-        let role = space_role(&txn, &space, actor).await?.map(|(r, _)| r);
+        let role = actor_space_role(&txn, &space, ctx).await?.map(|(r, _)| r);
         let pctx = PermissionContext::for_space(&space);
         if !role
             .map(|r| space_allows(r, SpacePermission::ScheduleConferences, &pctx))
@@ -374,9 +373,11 @@ impl ConferenceService {
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
     ) -> ApiResult<Vec<conference_sessions::Model>> {
-        let actor = ctx.require_registered()?;
+        if ctx.platform().is_none() {
+            ctx.require_registered()?;
+        }
         let space = find_space(&self.core.db, space_id).await?;
-        let role = space_role(&self.core.db, &space, actor).await?;
+        let role = actor_space_role(&self.core.db, &space, ctx).await?;
         if role.is_none() {
             return Err(permission_denied("You are not a member of this meeting"));
         }

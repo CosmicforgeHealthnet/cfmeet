@@ -389,6 +389,11 @@ pub async fn emit_to<C: ConnectionTrait>(
     record: OutboxRecord<'_>,
     audience: Option<Audience>,
 ) -> ApiResult<()> {
+    // Part VI §53: the platform envelope of an environment-scoped meeting's lifecycle fact
+    // commits with the fact (no-op for user-owned meetings and internal facts).
+    if crate::services::platform::events::staging_enabled() {
+        crate::services::platform::events::stage(conn, &record).await?;
+    }
     let audience = audience.map(|a| serde_json::to_value(a).unwrap_or(Value::Null));
     let now = Utc::now();
     let channel = if event::is_provider_command(record.event_type) {

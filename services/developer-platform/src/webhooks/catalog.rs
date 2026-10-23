@@ -62,6 +62,7 @@ pub mod scopes {
     pub const SMS_READ: &str = "sms.read";
     pub const MESSAGES_READ: &str = "messages.read";
     pub const NUMBERS_READ: &str = "numbers.read";
+    pub const MEETINGS_READ: &str = "meetings.read";
     pub const CREDENTIALS_MANAGE: &str = "credentials.manage";
     pub const PRODUCTION_ACCESS_REQUEST: &str = "production_access.request";
 }
@@ -132,12 +133,16 @@ catalog! {
     "message.moderated" => Some(scopes::MESSAGES_READ),
     "message.expired" => Some(scopes::MESSAGES_READ),
     // Section 53 families.
-    "meeting.started" => None,
-    "meeting.ended" => None,
-    "participant.joined" => None,
-    "participant.left" => None,
-    "artifact.ready" => Some(scopes::ENTERPRISE_RECORDING_READ),
-    "artifact.deleted" => Some(scopes::ENTERPRISE_RECORDING_READ),
+    // Meetings of an application environment (Meeting Service, platform credentials):
+    // read by `meetings.read`. `recording.*` is shared with Calling and keeps its
+    // enterprise recording scope.
+    "meeting.created" => Some(scopes::MEETINGS_READ),
+    "meeting.started" => Some(scopes::MEETINGS_READ),
+    "meeting.ended" => Some(scopes::MEETINGS_READ),
+    "participant.joined" => Some(scopes::MEETINGS_READ),
+    "participant.left" => Some(scopes::MEETINGS_READ),
+    "artifact.ready" => Some(scopes::MEETINGS_READ),
+    "artifact.deleted" => Some(scopes::MEETINGS_READ),
     "number.reservation_changed" => Some(scopes::NUMBERS_READ),
     "number.assignment_changed" => Some(scopes::NUMBERS_READ),
     "number.binding_changed" => Some(scopes::NUMBERS_READ),
@@ -499,6 +504,7 @@ pub fn project_numbering(envelope: &Value) -> Option<PublicEvent> {
 /// storage keys and URLs, transcripts, chat, media / E2EE keys.
 const MEETING_KEYS: &[(&str, &str, bool)] = &[
     ("meeting_id", "meetingId", false),
+    ("conference_id", "conferenceId", false),
     ("participant_id", "participantId", false),
     ("recording_id", "recordingId", false),
     ("artifact_id", "artifactId", false),
@@ -516,6 +522,7 @@ pub fn project_meeting(envelope: &Value) -> Option<PublicEvent> {
     let internal = envelope.get("event_type")?.as_str()?;
     let payload = envelope.get("payload")?;
     let event_type = match internal {
+        "meeting-service.meeting.created" => "meeting.created",
         "meeting-service.meeting.started" => "meeting.started",
         "meeting-service.meeting.ended" => "meeting.ended",
         "meeting-service.participant.joined" => "participant.joined",

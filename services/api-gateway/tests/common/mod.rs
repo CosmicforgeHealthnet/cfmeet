@@ -400,10 +400,11 @@ pub fn route(
         upstream_path: pattern.into(),
         auth: auth.to_vec(),
         required_scope: scope.map(str::to_string),
-        forward_headers: if domain == "messaging" {
-            vec!["cf-acting-principal".into()]
-        } else {
-            vec![]
+        // As scripts/contracts/public_api.py EXTRA_FORWARDED.
+        forward_headers: match domain {
+            "messaging" => vec!["cf-acting-principal".into()],
+            "meetings" => vec!["x-client-kind".into()],
+            _ => vec![],
         },
         timeout: None,
     }
@@ -526,6 +527,15 @@ pub fn test_routes() -> Vec<RouteDefinition> {
             None,
         ),
         route(
+            "meetings.platform",
+            "meetings",
+            Method::POST,
+            "/api/v2/test-instant-meetings",
+            services::MEETING_SERVICE,
+            &[MeetingSession, PlatformCredential],
+            Some("meetings.write"),
+        ),
+        route(
             "developer-platform.orgs",
             "developer-platform",
             Method::GET,
@@ -611,7 +621,16 @@ impl Gateway {
                     Upstream::start(&k, Some((services::MESSAGING, "messaging-request.forward")))
                         .await,
                 ),
-                Some(Upstream::start(&k, None).await),
+                // End-user tokens are transported (no gateway token); platform
+                // credential requests arrive with a gateway token granted
+                // meeting-request.forward (Part VI §51).
+                Some(
+                    Upstream::start(
+                        &k,
+                        Some((services::MEETING_SERVICE, "meeting-request.forward")),
+                    )
+                    .await,
+                ),
                 Some(
                     Upstream::start(
                         &k,

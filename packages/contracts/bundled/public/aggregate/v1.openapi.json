@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.1.0"
+      "description": "cfmeet.meeting-service.http-api 1.2.0"
     },
     {
       "name": "calling",
@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.2.0"
+      "description": "cfmeet.developer-platform.http-api 1.3.0"
     },
     {
       "name": "gateway",
@@ -94,13 +94,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_get_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -585,13 +592,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_conference_attendance",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -1766,13 +1780,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_cancel_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -2266,13 +2287,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_end_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -3324,13 +3352,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_list_participants",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -4042,13 +4077,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_remove",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7107,13 +7149,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_start_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7613,13 +7662,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_get_waiting_room",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7700,13 +7756,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_admit",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7767,13 +7830,20 @@
           },
           {
             "meetings.participant_token": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_deny",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7819,12 +7889,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_create_instant_meeting",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -7954,12 +8031,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_list_meeting_spaces",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       },
       "post": {
@@ -8023,12 +8107,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_create_meeting_space",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -8077,12 +8168,19 @@
           {},
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_get_meeting_space",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       },
       "patch": {
@@ -8148,12 +8246,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_update_meeting_space",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -8212,12 +8317,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_archive_meeting_space",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -8289,12 +8401,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_list_conferences",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       },
       "post": {
@@ -8350,12 +8469,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_create_conference",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -8469,12 +8595,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.read"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.read",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_list_invitations",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       },
       "post": {
@@ -8530,12 +8663,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_create_invitation",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -8593,12 +8733,19 @@
         "security": [
           {
             "meetings.bearer_auth": []
+          },
+          {
+            "meetings.platformCredential": [
+              "meetings.write"
+            ]
           }
         ],
+        "x-cfmeet-required-scope": "meetings.write",
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_revoke_invitation",
         "x-cfmeet-auth": [
-          "MEETING_SESSION"
+          "MEETING_SESSION",
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },
@@ -23082,6 +23229,397 @@
         "x-cfmeet-required-scope": "projects.manage",
         "x-cfmeet-service": "developer-platform",
         "x-cfmeet-route-id": "developer-platform.resumeEnvironment",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/service-accounts": {
+      "get": {
+        "operationId": "listServiceAccounts",
+        "summary": "List the environment's service accounts (Platform Access machine identities; never credentials)",
+        "description": "List the environment's service accounts (Platform Access machine identities; never credentials). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `service_accounts.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/developer_platform.Limit"
+          },
+          {
+            "$ref": "#/components/parameters/developer_platform.Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccountList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-required-scope": "service_accounts.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listServiceAccounts",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "post": {
+        "operationId": "createServiceAccount",
+        "summary": "Create a service account in a SANDBOX or TEST environment (delegated to Platform Access; no credential is issued, PRODUCTION is refused with POLICY_VIOLATION, a RESTRICTED organization cannot create)",
+        "description": "Create a service account in a SANDBOX or TEST environment (delegated to Platform Access; no credential is issued, PRODUCTION is refused with POLICY_VIOLATION, a RESTRICTED organization cannot create). Roles: OWNER, ADMIN. Machine credentials need `service_accounts.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/developer_platform.IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.CreateServiceAccountRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "service_accounts.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.createServiceAccount",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}": {
+      "get": {
+        "operationId": "getServiceAccount",
+        "summary": "Get one service account of the environment (a service account of another environment or organization is NOT_FOUND)",
+        "description": "Get one service account of the environment (a service account of another environment or organization is NOT_FOUND). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `service_accounts.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-required-scope": "service_accounts.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getServiceAccount",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume": {
+      "post": {
+        "operationId": "resumeServiceAccount",
+        "summary": "Resume a SUSPENDED service account of a non-production environment (delegated to Platform Access): its API credentials authenticate again",
+        "description": "Resume a SUSPENDED service account of a non-production environment (delegated to Platform Access): its API credentials authenticate again. Roles: OWNER, ADMIN. Machine credentials need `service_accounts.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-required-scope": "service_accounts.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.resumeServiceAccount",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend": {
+      "post": {
+        "operationId": "suspendServiceAccount",
+        "summary": "Suspend an ACTIVE service account of a non-production environment (delegated to Platform Access): its API credentials stop authenticating at once; nothing is deleted. Allowed in a RESTRICTED organization",
+        "description": "Suspend an ACTIVE service account of a non-production environment (delegated to Platform Access): its API credentials stop authenticating at once; nothing is deleted. Allowed in a RESTRICTED organization. Roles: OWNER, ADMIN. Machine credentials need `service_accounts.manage`.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          },
+          {
+            "developer_platform.platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-required-scope": "service_accounts.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.suspendServiceAccount",
         "x-cfmeet-auth": [
           "DEVELOPER_SESSION",
           "PLATFORM_CREDENTIAL"
@@ -43779,6 +44317,25 @@
           }
         }
       },
+      "developer_platform.platform-developer.control.v1.CreateServiceAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Stable key: 1-63 lowercase letters, digits or '-', starting with a letter or digit; unique within the environment."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "description": "Creates a service account in a SANDBOX / TEST environment (PRODUCTION is refused: production-access workflow). No credential is issued (Section 54)."
+      },
       "developer_platform.platform-developer.control.v1.EntitlementValues": {
         "type": "object",
         "additionalProperties": false,
@@ -44792,6 +45349,101 @@
         ],
         "description": "Part VI workspace role (Section 50 permission matrix)."
       },
+      "developer_platform.platform-developer.control.v1.ServiceAccount": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A Platform Access service account (machine identity) of one environment, read through the Developer Platform. Platform Access is its only store; API credentials (secrets) are never part of it (Section 54).",
+        "required": [
+          "id",
+          "organizationId",
+          "projectId",
+          "environmentId",
+          "name",
+          "description",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid",
+            "description": "The canonical Platform Access service account id."
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "projectId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Stable key, unique within the environment."
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccountStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "developer_platform.platform-developer.control.v1.ServiceAccountList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/developer_platform.platform-developer.control.v1.ServiceAccount"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "developer_platform.platform-developer.control.v1.ServiceAccountStatus": {
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED"
+        ],
+        "description": "Platform Access service-account status. The Developer Platform suspends / resumes (ACTIVE ⇄ SUSPENDED); REVOKED is terminal and an operator decision. A non-ACTIVE service account's API credentials do not authenticate."
+      },
       "developer_platform.platform-developer.control.v1.TransferOwnershipRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -45401,6 +46053,7 @@
           "message.deleted",
           "message.moderated",
           "message.expired",
+          "meeting.created",
           "meeting.started",
           "meeting.ended",
           "participant.joined",
@@ -65964,6 +66617,12 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Participant-Token"
+      },
+      "meetings.platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes."
       },
       "messaging.clientToken": {
         "type": "apiKey",

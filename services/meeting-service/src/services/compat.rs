@@ -215,7 +215,7 @@ impl CompatService {
                 space.meeting_code, legacy.meeting_identifier
             ));
         }
-        if space.owner_user_id != legacy.host_id {
+        if space.owner_user_id != Some(legacy.host_id) {
             diffs.push("owner differs from legacy host".into());
         }
         if space.title != legacy.title {

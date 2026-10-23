@@ -207,7 +207,7 @@ impl UnifiedMessaging {
         if let Some(l) = self.link_of(db, conference_id).await? {
             return Ok(l);
         }
-        let owner_user: Uuid = one(
+        let owner_user: Option<Uuid> = one(
             db,
             "SELECT s.owner_user_id FROM conference_sessions c JOIN meeting_spaces s ON s.id = c.meeting_space_id \
              WHERE c.id = $1",
@@ -216,6 +216,14 @@ impl UnifiedMessaging {
         .await?
         .ok_or_else(|| ApiError::domain(ErrorCode::ConferenceNotFound, "Conference not found"))?
         .try_get_by_index(0)?;
+        // An environment-owned meeting (Part VI §51) has no CF Meet owner principal to own
+        // its Unified Messaging conversation: its chat is unavailable (fail closed).
+        let owner_user = owner_user.ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::ChatUnavailable,
+                "Meeting chat is not available for meetings owned by an application environment",
+            )
+        })?;
         let owner = self.principal_for_user(owner_user).await?;
         // Meeting chat is server-readable by design and disclosed as such in CF Meet:
         // the conversation is MANAGED (never relabelled as end-to-end encrypted).

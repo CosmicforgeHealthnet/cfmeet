@@ -624,6 +624,8 @@ pub const SANDBOX_SCOPES: &[&str] = &[
     "attachments.read",
     "moderation.manage",
     "messaging.export",
+    "meetings.read",
+    "meetings.write",
     "organizations.read",
     "organizations.manage",
     "projects.read",

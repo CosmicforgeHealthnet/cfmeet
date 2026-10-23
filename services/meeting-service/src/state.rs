@@ -38,6 +38,9 @@ pub struct AppState {
     pub organization_directory: SharedOrganizationDirectory,
     /// Part E conference realtime (subscription authorization, tickets, replay)
     pub realtime: Arc<RealtimeService>,
+    /// Part VI §51: receiver of API Gateway–forwarded platform credential requests
+    /// (`None`: platform access off — every service token on `/api/v2` is refused).
+    pub platform: Option<crate::services::platform::PlatformReceiver>,
 }
 
 impl AppState {
@@ -92,7 +95,14 @@ impl AppState {
             meeting,
             organization_directory,
             realtime,
+            platform: None,
         }
+    }
+
+    /// Enables the platform credential receiver (Part VI §51).
+    pub fn with_platform(mut self, receiver: crate::services::platform::PlatformReceiver) -> Self {
+        self.platform = Some(receiver);
+        self
     }
 
     /// Generate join URL for a meeting

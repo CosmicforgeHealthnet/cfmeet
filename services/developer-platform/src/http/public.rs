@@ -29,7 +29,7 @@ use crate::{
     control::{
         self, activity, commercial, entitlements, idempotency, members, organizations,
         pagination::{Page, PageQuery},
-        projects, Caller, MachineCaller, Principal,
+        projects, service_accounts, Caller, MachineCaller, Principal,
     },
     domain::{rbac::Action, scoped, CausationId, RequestContext},
     platform_access::ContextOutcome,
@@ -111,6 +111,22 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/environments/:environment_id/entitlements",
             get(environment_entitlements),
+        )
+        .route(
+            "/environments/:environment_id/service-accounts",
+            get(list_service_accounts).post(create_service_account),
+        )
+        .route(
+            "/environments/:environment_id/service-accounts/:service_account_id",
+            get(get_service_account),
+        )
+        .route(
+            "/environments/:environment_id/service-accounts/:service_account_id/suspend",
+            post(suspend_service_account),
+        )
+        .route(
+            "/environments/:environment_id/service-accounts/:service_account_id/resume",
+            post(resume_service_account),
         )
 }
 
@@ -572,6 +588,67 @@ async fn resume_environment(
 ) -> ApiResult<Json<Value>> {
     Ok(Json(
         projects::set_environment_status(&s, &c, id, false).await?,
+    ))
+}
+
+async fn list_service_accounts(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    Query(q): Query<PageQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(service_accounts::list(&s, &c, id, &page(&q)?).await?))
+}
+
+async fn create_service_account(
+    State(s): State<AppState>,
+    c: Caller,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let parsed: service_accounts::CreateServiceAccount =
+        serde_json::from_value(body.clone()).map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    let scope = format!("{}:{id}:service_accounts.create", c.actor_ref());
+    let digest = body_digest(&scope, &body);
+    let key = idem_key(&headers);
+    let out = idempotency::run(
+        &s.db,
+        &scope,
+        key.as_deref(),
+        &digest,
+        idempotency::keep,
+        || service_accounts::create(&s, &c, id, parsed),
+    )
+    .await?;
+    Ok(reply(out))
+}
+
+async fn get_service_account(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((id, sa)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(service_accounts::get(&s, &c, id, sa).await?))
+}
+
+async fn suspend_service_account(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((id, sa)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        service_accounts::set_status(&s, &c, id, sa, true).await?,
+    ))
+}
+
+async fn resume_service_account(
+    State(s): State<AppState>,
+    c: Caller,
+    Path((id, sa)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        service_accounts::set_status(&s, &c, id, sa, false).await?,
     ))
 }
 

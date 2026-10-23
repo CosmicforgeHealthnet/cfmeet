@@ -169,6 +169,8 @@ fn vocabularies_equal_the_contract() {
         "numbers.admin",
         "sms.send",
         "sms.read",
+        "meetings.read",
+        "meetings.write",
     ] {
         assert!(
             registry.definition(name).is_some(),

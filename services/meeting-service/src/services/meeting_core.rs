@@ -20,7 +20,9 @@ use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     models::{conference_participants, conference_sessions, meeting_members, meeting_spaces},
     services::{
-        actor::{ActorContext, ActorKind, RegisteredActor, SharedOrganizationDirectory},
+        actor::{
+            ActorContext, ActorKind, PlatformActor, RegisteredActor, SharedOrganizationDirectory,
+        },
         meeting_events::AuditActor,
         rtc_provider::RtcProvider,
         secrets, RedisService,
@@ -176,7 +178,53 @@ pub struct DomainCore {
 
 pub type Core = Arc<DomainCore>;
 
+/// Who a new meeting space belongs to (exactly one kind; see
+/// `m20261101_000001_platform_environment_meetings`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpaceOwner {
+    /// A CF Meet account.
+    User(Uuid),
+    /// A Platform Access application environment, created by `service_account_id`.
+    Environment {
+        tenant_id: Uuid,
+        application_id: Uuid,
+        environment_id: Uuid,
+        service_account_id: Uuid,
+    },
+}
+
+impl SpaceOwner {
+    pub fn user_id(&self) -> Option<Uuid> {
+        match self {
+            SpaceOwner::User(u) => Some(*u),
+            SpaceOwner::Environment { .. } => None,
+        }
+    }
+}
+
 impl DomainCore {
+    /// The owner of a space the actor creates, after the v2 write gate. A machine caller
+    /// writes only when v2 writes are not restricted to an account cohort.
+    pub fn require_v2_writer(&self, ctx: &ActorContext) -> ApiResult<SpaceOwner> {
+        if let Some(p) = ctx.platform() {
+            if self.flags.v2_write_allowlist.is_some() {
+                return Err(ApiError::domain(
+                    ErrorCode::FeatureDisabled,
+                    "Meeting v2 writes are restricted to an account cohort",
+                ));
+            }
+            return Ok(SpaceOwner::Environment {
+                tenant_id: p.tenant_id,
+                application_id: p.application_id,
+                environment_id: p.environment_id,
+                service_account_id: p.service_account_id,
+            });
+        }
+        let actor = ctx.require_registered()?;
+        self.require_v2_write(actor)?;
+        Ok(SpaceOwner::User(actor.user_id))
+    }
+
     pub fn require_v2_write(&self, actor: &RegisteredActor) -> ApiResult<()> {
         if self.flags.may_write_v2(actor.user_id) {
             Ok(())
@@ -340,6 +388,31 @@ pub fn enforce_revocation_policy(
     Ok(())
 }
 
+/// Whether `space` is owned by the platform actor's application environment (the whole
+/// live chain: tenant, application AND environment). User-owned spaces never are.
+pub fn platform_owns(space: &meeting_spaces::Model, actor: &PlatformActor) -> bool {
+    space.owner_user_id.is_none()
+        && space.platform_environment_id == Some(actor.environment_id)
+        && space.platform_application_id == Some(actor.application_id)
+        && space.platform_tenant_id == Some(actor.tenant_id)
+}
+
+/// Persistent (space-level) role of any actor: a registered user's owner / membership
+/// role, OWNER for the machine caller of the owning environment, nothing otherwise.
+pub async fn actor_space_role<C: ConnectionTrait>(
+    conn: &C,
+    space: &meeting_spaces::Model,
+    actor: &ActorContext,
+) -> ApiResult<Option<(Role, RoleSource)>> {
+    match &actor.kind {
+        ActorKind::RegisteredUser(r) => space_role(conn, space, r).await,
+        ActorKind::Platform(p) if platform_owns(space, p) => {
+            Ok(Some((Role::Owner, RoleSource::Owner)))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Persistent (space-level) role of a registered actor: owner, or membership role.
 pub async fn space_role<C: ConnectionTrait>(
     conn: &C,
@@ -347,7 +420,7 @@ pub async fn space_role<C: ConnectionTrait>(
     actor: &RegisteredActor,
 ) -> ApiResult<Option<(Role, RoleSource)>> {
     enforce_revocation_policy(space, actor)?;
-    if space.owner_user_id == actor.user_id {
+    if space.owner_user_id == Some(actor.user_id) {
         return Ok(Some((Role::Owner, RoleSource::Owner)));
     }
     Ok(active_membership(conn, space.id, actor)
@@ -419,6 +492,15 @@ pub async fn conference_authority<C: ConnectionTrait>(
             role: Role::Owner,
             participant: None,
             audit: AuditActor::system(name),
+        }));
+    }
+    // A machine caller manages only its own environment's meetings (owner authority, no
+    // participant row); any other meeting is as if it did not exist for it.
+    if let ActorKind::Platform(p) = &actor.kind {
+        return Ok(platform_owns(space, p).then(|| ConferenceAuthority {
+            role: Role::Owner,
+            participant: None,
+            audit: AuditActor::from_ctx(actor),
         }));
     }
     let participant = own_participant(conn, conference_id, actor, false).await?;

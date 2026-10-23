@@ -490,11 +490,23 @@ pub struct MemEnv {
     pub status: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct MemServiceAccount {
+    pub tenant: Uuid,
+    pub app: Uuid,
+    pub env: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Default)]
 pub struct MemoryPlatformAccess {
     pub tenants: StdMutex<std::collections::HashMap<Uuid, MemTenant>>,
     pub apps: StdMutex<std::collections::HashMap<Uuid, MemApp>>,
     pub envs: StdMutex<std::collections::HashMap<Uuid, MemEnv>>,
+    pub service_accounts: StdMutex<std::collections::HashMap<Uuid, MemServiceAccount>>,
     /// credential id -> scopes (machine callers).
     pub credential_scopes: StdMutex<std::collections::HashMap<Uuid, Vec<String>>>,
     /// Delegated mutations: (actor header, call).
@@ -525,6 +537,19 @@ impl MemoryPlatformAccess {
 
     pub fn env_status(&self, id: Uuid) -> String {
         self.envs.lock().unwrap()[&id].status.clone()
+    }
+
+    pub fn sa_status(&self, id: Uuid) -> String {
+        self.service_accounts.lock().unwrap()[&id].status.clone()
+    }
+
+    fn view_sa(id: Uuid, sa: &MemServiceAccount) -> Value {
+        json!({
+            "id": id, "tenantId": sa.tenant, "applicationId": sa.app, "environmentId": sa.env,
+            "name": sa.name, "description": sa.description, "status": sa.status,
+            "revokedAt": null, "revision": 1,
+            "createdAt": sa.created_at.to_rfc3339(), "updatedAt": sa.created_at.to_rfc3339(),
+        })
     }
 
     /// A machine credential of `env` holding `scopes`; returns its delegated context.
@@ -743,6 +768,92 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             }
             DelegationCall::ListApplicationScopes { .. } => {
                 Ok(Delegated::Ok(json!({ "scopes": [] })))
+            }
+            // Platform Access's rules: the environment's own tenant / application, unique
+            // names, PRODUCTION refused, scoped to the environment, never revoked here.
+            DelegationCall::CreateServiceAccount {
+                environment_id,
+                name,
+                description,
+                ..
+            } => {
+                let Some(env) = self.envs.lock().unwrap().get(&environment_id).cloned() else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if env.kind == "PRODUCTION" {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                let mut sas = self.service_accounts.lock().unwrap();
+                if sas
+                    .values()
+                    .any(|s| s.env == environment_id && s.name == name)
+                {
+                    return refused(409, "CONFLICT");
+                }
+                let id = Uuid::new_v4();
+                let sa = MemServiceAccount {
+                    tenant: env.tenant,
+                    app: env.app,
+                    env: environment_id,
+                    name,
+                    description,
+                    status: "ACTIVE".into(),
+                    created_at: chrono::Utc::now(),
+                };
+                let v = Self::view_sa(id, &sa);
+                sas.insert(id, sa);
+                Ok(Delegated::Ok(v))
+            }
+            DelegationCall::ListServiceAccounts { environment_id } => {
+                if !self.envs.lock().unwrap().contains_key(&environment_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                let sas = self.service_accounts.lock().unwrap();
+                let list: Vec<Value> = sas
+                    .iter()
+                    .filter(|(_, s)| s.env == environment_id)
+                    .map(|(id, s)| Self::view_sa(*id, s))
+                    .collect();
+                Ok(Delegated::Ok(json!({ "serviceAccounts": list })))
+            }
+            DelegationCall::GetServiceAccount {
+                environment_id,
+                service_account_id,
+            } => match self
+                .service_accounts
+                .lock()
+                .unwrap()
+                .get(&service_account_id)
+            {
+                Some(s) if s.env == environment_id => {
+                    Ok(Delegated::Ok(Self::view_sa(service_account_id, s)))
+                }
+                _ => refused(404, "NOT_FOUND"),
+            },
+            DelegationCall::SetServiceAccountStatus {
+                environment_id,
+                service_account_id,
+                suspended,
+                ..
+            } => {
+                let kind = self
+                    .envs
+                    .lock()
+                    .unwrap()
+                    .get(&environment_id)
+                    .map(|e| e.kind.clone());
+                let mut sas = self.service_accounts.lock().unwrap();
+                let Some(s) = sas
+                    .get_mut(&service_account_id)
+                    .filter(|s| s.env == environment_id)
+                else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if kind.as_deref() == Some("PRODUCTION") {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                s.status = status(suspended);
+                Ok(Delegated::Ok(Self::view_sa(service_account_id, s)))
             }
         }
     }

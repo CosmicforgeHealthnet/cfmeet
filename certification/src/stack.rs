@@ -462,6 +462,16 @@ impl Stack {
             kv("FEATURE_MEETING_V2_ENABLED", "true".into()),
             kv("FEATURE_CONFERENCE_REALTIME_ENABLED", "true".into()),
             kv("DEVELOPER_SESSION_BRIDGE_ENABLED", "true".into()),
+            // Part VI §51: gateway-forwarded platform credentials (re-verified live by
+            // Platform Access). Public meeting events stay off (`none`, the default)
+            // unless a journey sets MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION.
+            kv("MEETING_PLATFORM_ACCESS_ENABLED", "true".into()),
+            kv("CF_PLATFORM_ACCESS_BASE_URL", url(self, PLATFORM_ACCESS)),
+            kv(
+                "CF_DEVELOPER_PLATFORM_BASE_URL",
+                url(self, DEVELOPER_PLATFORM),
+            ),
+            kv("MEETING_SERVICE_PUBLIC_EVENTS_INTERVAL_MS", "200".into()),
         ]);
         let ready = format!("{}/health", url(self, MEETING_SERVICE));
         self.launch(MEETING_SERVICE, "backend", env, Some(ready))

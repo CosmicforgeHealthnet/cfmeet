@@ -180,6 +180,29 @@ pub enum DelegationCall {
     ListApplicationScopes {
         application_id: Uuid,
     },
+    /// A service account in a non-production environment (Platform Access takes tenant
+    /// and application from the persisted environment). Never a credential.
+    CreateServiceAccount {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        name: String,
+        description: Option<String>,
+    },
+    ListServiceAccounts {
+        environment_id: Uuid,
+    },
+    /// One service account of exactly `environment_id` (any other: NOT_FOUND).
+    GetServiceAccount {
+        environment_id: Uuid,
+        service_account_id: Uuid,
+    },
+    /// ACTIVE / SUSPENDED only: revocation is never delegated, nothing is deleted.
+    SetServiceAccountStatus {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        service_account_id: Uuid,
+        suspended: bool,
+    },
 }
 
 impl DelegationCall {
@@ -280,6 +303,47 @@ impl DelegationCall {
                 format!("/internal/v1/delegation/applications/{application_id}/scopes"),
                 None,
                 None,
+            ),
+            DelegationCall::CreateServiceAccount {
+                actor,
+                environment_id,
+                name,
+                description,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/environments/{environment_id}/service-accounts"),
+                Some(json!({ "name": name, "description": description })),
+                Some(*actor),
+            ),
+            DelegationCall::ListServiceAccounts { environment_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}/service-accounts"),
+                None,
+                None,
+            ),
+            DelegationCall::GetServiceAccount {
+                environment_id,
+                service_account_id,
+            } => (
+                Method::GET,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/service-accounts/{service_account_id}"
+                ),
+                None,
+                None,
+            ),
+            DelegationCall::SetServiceAccountStatus {
+                actor,
+                environment_id,
+                service_account_id,
+                suspended,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/service-accounts/{service_account_id}/status"
+                ),
+                Some(status(*suspended)),
+                Some(*actor),
             ),
         }
     }

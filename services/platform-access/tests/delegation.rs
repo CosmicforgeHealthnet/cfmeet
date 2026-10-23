@@ -286,3 +286,194 @@ async fn receivers_re_verify_the_gateway_credential_live() {
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn the_developer_platform_delegates_service_account_create_and_suspend_only() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("sacust", "EXTERNAL", &["sms.read"]).await;
+    let other = h.consumer("saother", "EXTERNAL", &[]).await;
+    let sandbox = c.env("SANDBOX");
+    let base = format!("/internal/v1/delegation/environments/{sandbox}/service-accounts");
+    // Creation names the human actor and is scoped to the persisted environment.
+    let created = dp(
+        &h,
+        Method::POST,
+        &base,
+        Some(json!({ "name": "ci-runner", "description": "CI" })),
+        true,
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    assert_eq!(created.body["status"], "ACTIVE");
+    assert_eq!(created.body["environmentId"], json!(sandbox));
+    assert_eq!(created.body["tenantId"], json!(c.tenant_id));
+    let sa = uuid(&created.body["id"]);
+    let anon = dp(
+        &h,
+        Method::POST,
+        &base,
+        Some(json!({ "name": "anon" })),
+        false,
+    )
+    .await;
+    assert_eq!(anon.code(), "OPERATOR_REQUIRED");
+    let dup = dp(
+        &h,
+        Method::POST,
+        &base,
+        Some(json!({ "name": "ci-runner" })),
+        true,
+    )
+    .await;
+    assert_eq!(dup.status, StatusCode::CONFLICT, "{}", dup.body);
+    let bad = dp(
+        &h,
+        Method::POST,
+        &base,
+        Some(json!({ "name": "x", "tenantId": other.tenant_id })),
+        true,
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "unknown field refused");
+    // List / get within the environment.
+    let list = dp(&h, Method::GET, &base, None, false).await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.body);
+    let names: Vec<&str> = list.body["serviceAccounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["backend", "ci-runner"]);
+    let one = dp(&h, Method::GET, &format!("{base}/{sa}"), None, false).await;
+    assert_eq!(one.body["id"], json!(sa));
+    // Another tenant's service account (or environment) is NOT_FOUND through this path.
+    for path in [
+        format!("{base}/{}", other.sa("SANDBOX")),
+        format!(
+            "/internal/v1/delegation/environments/{}/service-accounts/{sa}",
+            other.env("SANDBOX")
+        ),
+    ] {
+        let r = dp(&h, Method::GET, &path, None, false).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}: {}", r.body);
+        let r = dp(
+            &h,
+            Method::POST,
+            &format!("{path}/status"),
+            Some(json!({ "status": "SUSPENDED" })),
+            true,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}: {}", r.body);
+    }
+    assert_eq!(
+        dp(
+            &h,
+            Method::GET,
+            &format!(
+                "/internal/v1/delegation/environments/{}/service-accounts",
+                uuid::Uuid::new_v4()
+            ),
+            None,
+            false
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    // Suspension stops the service account's credentials authenticating; resume restores.
+    let (_cred, secret) = h.issue(sa, &["sms.read"]).await;
+    assert_eq!(
+        h.authenticate(&secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
+    let status = |s: &str| Some(json!({ "status": s }));
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!("{base}/{sa}/status"),
+        status("SUSPENDED"),
+        true,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["status"], "SUSPENDED");
+    let refused = h.authenticate(&secret).await;
+    assert_eq!(refused.body["outcome"], "REJECTED", "{}", refused.body);
+    assert_eq!(refused.body["reason"], "service_account_inactive");
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!("{base}/{sa}/status"),
+        status("ACTIVE"),
+        true,
+    )
+    .await;
+    assert_eq!(r.body["status"], "ACTIVE");
+    assert_eq!(
+        h.authenticate(&secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
+    // Revocation is never delegated (and nothing is ever deleted).
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!("{base}/{sa}/status"),
+        status("REVOKED"),
+        true,
+    )
+    .await;
+    assert_eq!(r.code(), "POLICY_VIOLATION", "{}", r.body);
+    let r = dp(&h, Method::DELETE, &format!("{base}/{sa}"), None, true).await;
+    assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
+    // PRODUCTION: same rule as the environment itself.
+    let prod = c.env("PRODUCTION");
+    let prod_base = format!("/internal/v1/delegation/environments/{prod}/service-accounts");
+    let r = dp(
+        &h,
+        Method::POST,
+        &prod_base,
+        Some(json!({ "name": "prod-bot" })),
+        true,
+    )
+    .await;
+    assert_eq!(r.code(), "POLICY_VIOLATION", "{}", r.body);
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!("{prod_base}/{}/status", c.sa("PRODUCTION")),
+        status("SUSPENDED"),
+        true,
+    )
+    .await;
+    assert_eq!(r.code(), "POLICY_VIOLATION", "{}", r.body);
+    assert_eq!(
+        dp(&h, Method::GET, &prod_base, None, false).await.status,
+        StatusCode::OK,
+        "reads stay available"
+    );
+    // Audited under the delegated actor: create + suspend + resume.
+    let audited = h
+        .conn()
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            format!(
+                "SELECT count(*) AS n FROM platform_access_audit \
+                 WHERE actor = 'devplat.{ACTOR}' AND target_id = '{sa}'"
+            ),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "n")
+        .unwrap();
+    assert_eq!(audited, 3);
+    // Only the Developer Platform holds the delegation permission.
+    let calling = h
+        .as_calling(Method::POST, &base, Some(json!({ "name": "evil" })), None)
+        .await;
+    assert_eq!(calling.status, StatusCode::FORBIDDEN);
+}

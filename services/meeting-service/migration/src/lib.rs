@@ -25,6 +25,7 @@ mod m20261005_000005_artifacts_profiles_operations;
 mod m20261005_000006_message_main_cursor_index;
 mod m20261019_000001_unified_messaging_integration;
 mod m20261020_000001_unified_messaging_scoped_chat;
+mod m20261101_000001_platform_environment_meetings;
 
 pub mod phase2_backfill;
 
@@ -58,6 +59,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261005_000006_message_main_cursor_index::Migration),
             Box::new(m20261019_000001_unified_messaging_integration::Migration),
             Box::new(m20261020_000001_unified_messaging_scoped_chat::Migration),
+            Box::new(m20261101_000001_platform_environment_meetings::Migration),
         ]
     }
 }

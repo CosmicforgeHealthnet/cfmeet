@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json",
   "title": "CF Meet Developer Platform control plane v1",
-  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's.",
+  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's.",
   "anyOf": [
     {
       "$ref": "#/$defs/Organization"
@@ -21,6 +21,9 @@
     },
     {
       "$ref": "#/$defs/Environment"
+    },
+    {
+      "$ref": "#/$defs/ServiceAccount"
     },
     {
       "$ref": "#/$defs/ActivityEvent"
@@ -900,6 +903,120 @@
           "maxLength": 120
         }
       }
+    },
+    "ServiceAccountStatus": {
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "REVOKED"
+      ],
+      "description": "Platform Access service-account status. The Developer Platform suspends / resumes (ACTIVE ⇄ SUSPENDED); REVOKED is terminal and an operator decision. A non-ACTIVE service account's API credentials do not authenticate."
+    },
+    "ServiceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A Platform Access service account (machine identity) of one environment, read through the Developer Platform. Platform Access is its only store; API credentials (secrets) are never part of it (Section 54).",
+      "required": [
+        "id",
+        "organizationId",
+        "projectId",
+        "environmentId",
+        "name",
+        "description",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The canonical Platform Access service account id."
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "description": "Stable key, unique within the environment."
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ServiceAccountStatus"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ServiceAccountList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ServiceAccount"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+    },
+    "CreateServiceAccountRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "description": "Stable key: 1-63 lowercase letters, digits or '-', starting with a letter or digit; unique within the environment."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "description": "Creates a service account in a SANDBOX / TEST environment (PRODUCTION is refused: production-access workflow). No credential is issued (Section 54)."
     },
     "ActivityEvent": {
       "type": "object",

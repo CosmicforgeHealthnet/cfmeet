@@ -565,7 +565,7 @@ use utoipa::OpenApi;
             // deliberately NOT part of the public consumer contract.
         )
     ),
-    modifiers(&SecurityAddon),
+    modifiers(&SecurityAddon, &PlatformCredentialAddon),
     tags(
         (name = "General", description = "Application information and health endpoints"),
         (name = "Authentication", description = "User authentication endpoints"),
@@ -608,7 +608,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.1.0",
+        version = "1.2.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",
@@ -647,6 +647,60 @@ impl utoipa::Modify for SecurityAddon {
                     ),
                 ),
             );
+        }
+    }
+}
+
+/// Part VI §51: the machine-callable operations
+/// ([`crate::services::platform::operations::OPERATIONS`], the single source of truth)
+/// additionally accept a platform credential through the API Gateway. Each gets the
+/// `platformCredential` security alternative (its role is the required scope) and
+/// `x-cfmeet-required-scope`, from which the gateway's route manifest is generated.
+struct PlatformCredentialAddon;
+
+impl utoipa::Modify for PlatformCredentialAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{
+            security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme},
+            PathItemType,
+        };
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "platformCredential",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("cfmk_<sbx|test|live>_<public id>_<secret>")
+                        .description(Some(
+                            "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes.",
+                        ))
+                        .build(),
+                ),
+            );
+        }
+        for op in crate::services::platform::operations::OPERATIONS {
+            let Some(item) = openapi.paths.paths.get_mut(op.path) else {
+                continue;
+            };
+            let kind = match op.method {
+                "GET" => PathItemType::Get,
+                "POST" => PathItemType::Post,
+                "PATCH" => PathItemType::Patch,
+                "PUT" => PathItemType::Put,
+                "DELETE" => PathItemType::Delete,
+                _ => continue,
+            };
+            let Some(operation) = item.operations.get_mut(&kind) else {
+                continue;
+            };
+            operation
+                .security
+                .get_or_insert_with(Vec::new)
+                .push(SecurityRequirement::new("platformCredential", [op.scope]));
+            operation
+                .extensions
+                .get_or_insert_with(Default::default)
+                .insert("x-cfmeet-required-scope".into(), op.scope.into());
         }
     }
 }

@@ -2319,7 +2319,7 @@ mod tests {
             id: Uuid::new_v4(),
             meeting_space_id: Uuid::new_v4(),
             conference_id: None,
-            inviter_user_id: Uuid::new_v4(),
+            inviter_user_id: Some(Uuid::new_v4()),
             invitee_email: None,
             requested_role: Role::Presenter,
             token_hash: "h".into(),

@@ -30,6 +30,12 @@ implemented.
   `/v1/environments/{environmentId}/webhooks*`. Behind `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED`
   (default off) and `DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE` (default `shadow`: nothing is
   sent). Signing secrets are stored sealed only (`DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY*`).
+* **Service accounts (Section 50):** `/v1/environments/{environmentId}/service-accounts*`
+  (list / create / get / suspend / resume) are delegated to Platform Access
+  (`/internal/v1/delegation/environments/{id}/service-accounts*`, the only store): OWNER /
+  ADMIN manage, DEVELOPER reads, machine credentials need `service_accounts.manage`;
+  SANDBOX / TEST only (PRODUCTION: `POLICY_VIOLATION`), never deleted or revoked here, and
+  no credential is issued (Section 54).
 * **Developer Console:** `apps/web/src/app/dashboard/developers/` stays the future console
   UI; it will call the published gateway API with the same contracts as every customer
   (see `docs/phases/phase-06/developer-console-boundary.md`).

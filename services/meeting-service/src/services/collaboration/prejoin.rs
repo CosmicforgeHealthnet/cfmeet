@@ -228,15 +228,15 @@ impl PreJoinService {
                         | AccessPolicy::PublicPasscode
                         | AccessPolicy::Authenticated
                 ));
-        let organizer = if organizer_visible {
-            users::Entity::find_by_id(space.owner_user_id)
+        // An environment-owned meeting has no CF Meet organizer account to show.
+        let organizer = match space.owner_user_id.filter(|_| organizer_visible) {
+            Some(owner) => users::Entity::find_by_id(owner)
                 .one(&self.core.db)
                 .await?
                 .map(|u| PreJoinOrganizer {
                     display_name: u.username,
-                })
-        } else {
-            None
+                }),
+            None => None,
         };
         let organization = match (space.organization_id, hide) {
             (Some(id), false) => organizations::Entity::find_by_id(id)

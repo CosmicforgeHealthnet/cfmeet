@@ -262,6 +262,7 @@ const ALL: &[&str] = &[
     "calls.read",
     "numbers.read",
     "messages.read",
+    "meetings.read",
 ];
 
 /// A harness with webhooks, one sandbox environment and a credential holding [`ALL`].
@@ -528,7 +529,8 @@ async fn scopes_are_enforced_per_operation_and_event_type() {
         )
         .await;
     assert_eq!(r.json["error"]["code"], "INSUFFICIENT_SCOPE");
-    let ok = c
+    // Meeting events are read with `meetings.read`.
+    let r = c
         .req(
             As::Machine(&manage_only),
             Method::POST,
@@ -536,11 +538,21 @@ async fn scopes_are_enforced_per_operation_and_event_type() {
             body(&["meeting.started"]),
         )
         .await;
+    assert_eq!(r.json["error"]["code"], "INSUFFICIENT_SCOPE");
+    let manage_meetings = c.pa.machine(scope.2, &["webhooks.manage", "meetings.read"]);
+    let ok = c
+        .req(
+            As::Machine(&manage_meetings),
+            Method::POST,
+            "/v1/webhooks",
+            body(&["meeting.started", "meeting.created"]),
+        )
+        .await;
     assert_eq!(ok.status, StatusCode::CREATED, "{}", ok.json);
     let id = ok.json["webhook"]["webhookId"].as_str().unwrap();
     let r = c
         .req(
-            As::Machine(&manage_only),
+            As::Machine(&manage_meetings),
             Method::PATCH,
             &format!("/v1/webhooks/{id}"),
             Some(json!({ "expectedVersion": 1, "eventTypes": ["number.assignment_changed"] })),

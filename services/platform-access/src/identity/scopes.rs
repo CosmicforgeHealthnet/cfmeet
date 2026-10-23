@@ -123,6 +123,12 @@ pub mod names {
     pub const MESSAGING_EXPORT: &str = "messaging.export";
     /// Messaging: privileged internal operator authority. Never an ordinary grant.
     pub const MESSAGING_ADMIN: &str = "messaging.admin";
+    /// Meetings (Part VI §51): read the environment's own meetings (meeting spaces,
+    /// conferences, participants, invitations, attendance).
+    pub const MEETINGS_READ: &str = "meetings.read";
+    /// Meetings: create, update, archive and run the environment's own meetings
+    /// (conference lifecycle, invitations, waiting room and participant removal).
+    pub const MEETINGS_WRITE: &str = "meetings.write";
     // Part VI §54 / Appendix B: developer control-plane scopes.
     pub const ORGANIZATIONS_READ: &str = "organizations.read";
     pub const ORGANIZATIONS_MANAGE: &str = "organizations.manage";
@@ -134,6 +140,11 @@ pub mod names {
     pub const AUDIT_READ: &str = "audit.read";
     pub const DEVELOPER_PLATFORM_ADMIN: &str = "developer_platform.admin";
 }
+
+/// The Part VI meetings scopes (least privilege: `meetings.write` never implies
+/// `meetings.read`). Recordings and artefacts are not exposed to machine callers, so no
+/// recordings scope exists yet.
+pub const MEETING_SCOPES: &[&str] = &[names::MEETINGS_READ, names::MEETINGS_WRITE];
 
 /// The Part V Messaging scopes (least privilege: none implies another).
 pub const MESSAGING_SCOPES: &[&str] = &[
@@ -372,6 +383,16 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
         name: names::MESSAGING_ADMIN,
         description: "Privileged internal operator authority over Messaging (platform operations); never an ordinary customer grant",
         trust: ScopeTrust::PrivilegedOperator,
+    },
+    ScopeDefinition {
+        name: names::MEETINGS_READ,
+        description: "Read meetings owned by the credential's application environment (meeting spaces, conferences, participants, invitations and attendance); never another environment's or a CF Meet user's meetings",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::MEETINGS_WRITE,
+        description: "Create, update and archive meetings owned by the credential's application environment and control them (conference lifecycle, invitations, waiting room, participant removal); never implies meetings.read",
+        trust: ScopeTrust::Standard,
     },
     ScopeDefinition {
         name: names::ORGANIZATIONS_READ,
@@ -967,6 +988,30 @@ mod tests {
             }
         }
         assert!(registry.definition(names::NUMBERS_ADMIN).is_some());
+    }
+
+    #[test]
+    fn meeting_scopes_are_standard_and_independent() {
+        let registry = ScopeRegistry::standard();
+        assert_eq!(MEETING_SCOPES, &["meetings.read", "meetings.write"]);
+        for scope in MEETING_SCOPES {
+            let def = registry.definition(scope).expect("registered");
+            assert_eq!(def.trust, ScopeTrust::Standard, "{scope}");
+            for classification in TenantClassification::ALL {
+                assert!(
+                    registry.grantable(scope, *classification).is_ok(),
+                    "{scope}"
+                );
+            }
+        }
+        // No recordings scope: recordings / artefacts are not exposed to machine callers.
+        assert!(registry.definition("meetings.recordings.read").is_none());
+        // meetings.write never implies meetings.read.
+        let set = registry.effective(
+            vec![grant(names::MEETINGS_WRITE, GrantBasis::Standard, true)],
+            TenantClassification::External,
+        );
+        assert_eq!(set.names(), vec![names::MEETINGS_WRITE.to_string()]);
     }
 
     #[test]

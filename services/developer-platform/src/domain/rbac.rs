@@ -75,6 +75,13 @@ pub enum Action {
     BillingAccountManage,
     ProductionAccessRequest,
     CredentialsManage,
+    /// Read the service accounts of an environment (OWNER, ADMIN, DEVELOPER).
+    ServiceAccountsRead,
+    /// Create / resume a service account (OWNER, ADMIN; delegated to Platform Access).
+    ServiceAccountsManage,
+    /// Suspend a service account (OWNER, ADMIN): withdrawing machine access stays
+    /// possible in a RESTRICTED organization.
+    ServiceAccountsSuspend,
 }
 
 impl Action {
@@ -98,6 +105,9 @@ impl Action {
         Action::BillingAccountManage,
         Action::ProductionAccessRequest,
         Action::CredentialsManage,
+        Action::ServiceAccountsRead,
+        Action::ServiceAccountsManage,
+        Action::ServiceAccountsSuspend,
     ];
 
     /// Whether the action changes state (refused for RESTRICTED organizations unless
@@ -114,18 +124,23 @@ impl Action {
                 | Action::LimitsRead
                 | Action::ActivityRead
                 | Action::CommercialRead
+                | Action::ServiceAccountsRead
         )
     }
 
     /// Mutations that stay available in a RESTRICTED organization: membership hygiene
     /// (removing access is always safe), billing reference updates (to resolve the
-    /// restriction) and pausing integrations. Creating projects / environments,
-    /// production requests and new webhooks are disabled.
+    /// restriction), suspending service accounts (withdrawing machine access) and pausing
+    /// integrations. Creating projects / environments / service accounts, resuming
+    /// service accounts, production requests and new webhooks are disabled.
     pub fn allowed_while_restricted(&self) -> bool {
         !self.is_mutation()
             || matches!(
                 self,
-                Action::MembersManage | Action::BillingAccountManage | Action::OrganizationClose
+                Action::MembersManage
+                    | Action::BillingAccountManage
+                    | Action::OrganizationClose
+                    | Action::ServiceAccountsSuspend
             )
     }
 }
@@ -141,6 +156,9 @@ pub fn allows(role: Role, action: Action) -> bool {
             role == Owner
         }
         ProjectsManage | EnvironmentsManage => matches!(role, Owner | Admin),
+        // Section 50 §6.1: ADMIN manages service accounts, DEVELOPER sees the allowed ones.
+        ServiceAccountsManage | ServiceAccountsSuspend => matches!(role, Owner | Admin),
+        ServiceAccountsRead => matches!(role, Owner | Admin | Developer),
         CredentialsManage | WebhooksManage => matches!(role, Owner | Admin | Developer),
         WebhooksRead | LimitsRead => matches!(role, Owner | Admin | Developer | Analyst),
         UsageRead | UsageExport => true,
@@ -254,6 +272,28 @@ mod tests {
             assert!(allows(Admin, a));
         }
         assert!(!allows(Admin, BillingAccountManage));
+        // Service accounts: OWNER / ADMIN manage, DEVELOPER reads, ANALYST / BILLING nothing.
+        for r in [Owner, Admin] {
+            for a in [
+                ServiceAccountsRead,
+                ServiceAccountsManage,
+                ServiceAccountsSuspend,
+            ] {
+                assert!(allows(r, a), "{r:?} {a:?}");
+            }
+        }
+        assert!(allows(Developer, ServiceAccountsRead));
+        assert!(!allows(Developer, ServiceAccountsManage));
+        assert!(!allows(Developer, ServiceAccountsSuspend));
+        for r in [Analyst, Billing] {
+            for a in [
+                ServiceAccountsRead,
+                ServiceAccountsManage,
+                ServiceAccountsSuspend,
+            ] {
+                assert!(!allows(r, a), "{r:?} {a:?}");
+            }
+        }
         // DEVELOPER integrates but never creates projects.
         assert!(allows(Developer, WebhooksManage) && allows(Developer, CredentialsManage));
         assert!(!allows(Developer, ProjectsManage) && !allows(Developer, ActivityRead));
@@ -283,6 +323,11 @@ mod tests {
         assert!(!Restricted.permits(Action::WebhooksManage));
         assert!(Restricted.permits(Action::MembersManage));
         assert!(Restricted.permits(Action::ActivityRead));
+        assert!(!Restricted.permits(Action::ServiceAccountsManage));
+        assert!(Restricted.permits(Action::ServiceAccountsSuspend));
+        assert!(Restricted.permits(Action::ServiceAccountsRead));
+        assert!(!Suspended.permits(Action::ServiceAccountsSuspend));
+        assert!(Closed.permits(Action::ServiceAccountsRead));
         assert!(!Suspended.permits(Action::MembersManage));
         assert!(Suspended.permits(Action::ActivityRead));
         assert!(!Closed.permits(Action::OrganizationUpdate));

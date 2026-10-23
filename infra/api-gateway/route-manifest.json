@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 36,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 465,
+    "PUBLIC_CUSTOMER": 470,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -20,11 +20,13 @@
       "upstreamPath": "/api/v2/conferences/{id}",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_list_artifacts",
@@ -116,11 +118,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/attendance",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_leave_backstage",
@@ -356,11 +360,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/cancel",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_update_chat_policy",
@@ -468,11 +474,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/end",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_replay_events",
@@ -676,11 +684,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/participants",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_get_me",
@@ -820,11 +830,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/participants/{participantId}/remove",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_return_to_waiting",
@@ -1443,11 +1455,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/start",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_start_transcription",
@@ -1555,11 +1569,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/waiting-room",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_admit",
@@ -1571,11 +1587,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/waiting-room/admit",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_deny",
@@ -1587,11 +1605,13 @@
       "upstreamPath": "/api/v2/conferences/{id}/waiting-room/deny",
       "auth": [
         "MEETING_SESSION",
-        "PARTICIPANT_TOKEN"
+        "PARTICIPANT_TOKEN",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_create_instant_meeting",
@@ -1602,11 +1622,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/instant-meetings",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_resolve_invitation",
@@ -1647,11 +1669,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_create_meeting_space",
@@ -1662,11 +1686,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_get_meeting_space",
@@ -1677,11 +1703,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_update_meeting_space",
@@ -1692,11 +1720,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_archive_meeting_space",
@@ -1707,11 +1737,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/archive",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_list_conferences",
@@ -1722,11 +1754,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/conferences",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_create_conference",
@@ -1737,11 +1771,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/conferences",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_duplicate_meeting_space",
@@ -1767,11 +1803,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/invitations",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.read"
     },
     {
       "id": "meetings.v2_create_invitation",
@@ -1782,11 +1820,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/invitations",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_revoke_invitation",
@@ -1797,11 +1837,13 @@
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke",
       "auth": [
-        "MEETING_SESSION"
+        "MEETING_SESSION",
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "x-client-kind"
-      ]
+      ],
+      "requiredScope": "meetings.write"
     },
     {
       "id": "meetings.v2_list_members",
@@ -4381,6 +4423,81 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "projects.manage"
+    },
+    {
+      "id": "developer-platform.listServiceAccounts",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/service-accounts",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "service_accounts.manage"
+    },
+    {
+      "id": "developer-platform.createServiceAccount",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/service-accounts",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "service_accounts.manage"
+    },
+    {
+      "id": "developer-platform.getServiceAccount",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "service_accounts.manage"
+    },
+    {
+      "id": "developer-platform.resumeServiceAccount",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "service_accounts.manage"
+    },
+    {
+      "id": "developer-platform.suspendServiceAccount",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "service_accounts.manage"
     },
     {
       "id": "developer-platform.suspendEnvironment",
@@ -8021,6 +8138,46 @@
       "operationId": "resumeEnvironment",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listServiceAccounts",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "createServiceAccount",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getServiceAccount",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "resumeServiceAccount",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "suspendServiceAccount",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend",
       "class": "PUBLIC_CUSTOMER"
     },
     {

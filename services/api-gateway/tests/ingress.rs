@@ -350,6 +350,77 @@ async fn end_user_tokens_are_transported_and_platform_credentials_never_are() {
 }
 
 #[tokio::test]
+async fn platform_credential_meetings_requests_are_forwarded_with_the_signed_delegated_context() {
+    let g = Gateway::new().await;
+    let c = customer(&["meetings.write"]);
+    g.authority.add(CRED, c.clone());
+    let r = g
+        .call(
+            Method::POST,
+            "/api/v2/test-instant-meetings",
+            &[
+                ("authorization", &format!("Bearer {CRED}")),
+                ("x-participant-token", "pt_forged"),
+                ("x-client-kind", "server"),
+            ],
+            Some(r#"{"title":"Support call"}"#),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["auth"], "service", "{}", r.json);
+    let got = g.meeting().last();
+    // The Meeting Service receives the gateway's signed hop (it re-verifies the credential
+    // named in the delegated context with Platform Access) — never the credential, never
+    // a client-supplied participant token.
+    assert_eq!(got.issuer.as_deref(), Some("cfmeet.api-gateway"));
+    let d = got.delegated.expect("delegated context");
+    assert_eq!(d.tenant_id(), c.tenant_id);
+    assert_eq!(d.application_id(), c.application_id);
+    assert_eq!(d.application_environment_id(), c.environment_id);
+    assert_eq!(d.initiating_service_account_id(), c.service_account_id);
+    assert_eq!(d.initiating_credential_id(), Some(c.credential_id));
+    assert!(got.expires_in <= 60);
+    assert_eq!(
+        got.correlation_id.as_deref(),
+        r.headers
+            .get("x-correlation-id")
+            .and_then(|v| v.to_str().ok())
+    );
+    assert!(!got.headers.contains_key("authorization"));
+    assert!(!got.headers.contains_key("x-participant-token"));
+    assert_eq!(got.headers.get("x-client-kind").unwrap(), "server");
+    assert_eq!(got.body, json!({ "title": "Support call" }));
+    // The route scope is pre-checked at the edge.
+    let reader = customer(&["meetings.read"]);
+    g.authority.add("cfmk_sbx_reader_secret", reader);
+    let before = g.meeting().count();
+    let r = g
+        .call(
+            Method::POST,
+            "/api/v2/test-instant-meetings",
+            &[("authorization", "Bearer cfmk_sbx_reader_secret")],
+            Some("{}"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.json);
+    assert_eq!(r.code(), "INSUFFICIENT_SCOPE");
+    assert_eq!(g.meeting().count(), before);
+    // A CF Meet session on the same route is still transported verbatim, unsigned.
+    let r = g
+        .call(
+            Method::POST,
+            "/api/v2/test-instant-meetings",
+            &[("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.session.sig")],
+            Some("{}"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["auth"], "passthrough");
+    let got = g.meeting().last();
+    assert!(got.issuer.is_none() && got.delegated.is_none());
+}
+
+#[tokio::test]
 async fn upstream_decisions_errors_and_streams_are_relayed_faithfully() {
     let g = Gateway::new().await;
     g.authority.add(CRED, customer(&[]));

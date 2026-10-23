@@ -70,13 +70,43 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("✅ Redis connected successfully");
 
     // Create application state
-    let state = AppState::new(
+    let mut state = AppState::new(
         db.clone(),
         redis_service,
         &app_config,
         &email_config,
         &livekit_config,
     );
+
+    // Part VI §51 / §53: platform credential access (MEETING_PLATFORM_ACCESS_ENABLED) and
+    // environment-scoped public events (MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION).
+    // Enabled but misconfigured stops startup (fail closed).
+    let platform = backend::services::platform::PlatformConfig::from_env()
+        .unwrap_or_else(|e| panic!("platform access configuration error: {e}"));
+    let mut _public_event_publisher = None;
+    if let Some(config) = platform {
+        let client = config
+            .client()
+            .unwrap_or_else(|e| panic!("platform access configuration error: {e}"));
+        if let Some(receiver) = config
+            .receiver(client.clone())
+            .unwrap_or_else(|e| panic!("platform access configuration error: {e}"))
+        {
+            state = state.with_platform(receiver);
+            tracing::info!("Part VI: platform credential access to /api/v2 enabled");
+        }
+        if config.destination
+            == backend::services::platform::PublicEventsDestination::DeveloperPlatform
+        {
+            use backend::services::platform::events;
+            events::set_staging(true);
+            _public_event_publisher = Some(events::spawn_public_event_publisher(
+                events::PublicEventPublisher::new(db.clone(), client, config.runtime),
+                config.publish_interval,
+            ));
+            tracing::info!("Part VI: environment-scoped meeting events -> Developer Platform");
+        }
+    }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
     // Start email worker (only if SMTP is configured)

@@ -798,6 +798,36 @@
     },
     {
       "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/suspend",
       "class": "PUBLIC_CUSTOMER"

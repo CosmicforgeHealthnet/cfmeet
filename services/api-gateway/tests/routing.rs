@@ -264,3 +264,46 @@ fn the_generated_catalogue_is_in_parity_with_the_contracts() {
     let rest = catalogue::table_for(true, false, &RoutingControls::default()).unwrap();
     assert_eq!(rest.len(), table.len() - 3);
 }
+
+#[test]
+fn meetings_platform_routes_take_platform_credentials_with_meetings_scopes() {
+    let table = catalogue::table_for(true, true, &RoutingControls::default()).unwrap();
+    let find = |m: Method, p: &str| {
+        table
+            .definitions()
+            .find(|d| d.method == m && d.pattern == p)
+            .unwrap_or_else(|| panic!("{m} {p}"))
+            .clone()
+    };
+    for (m, p, scope) in [
+        (Method::POST, "/api/v2/instant-meetings", "meetings.write"),
+        (Method::GET, "/api/v2/meeting-spaces", "meetings.read"),
+        (Method::POST, "/api/v2/meeting-spaces", "meetings.write"),
+        (
+            Method::POST,
+            "/api/v2/conferences/{id}/end",
+            "meetings.write",
+        ),
+        (
+            Method::GET,
+            "/api/v2/conferences/{id}/participants",
+            "meetings.read",
+        ),
+    ] {
+        let d = find(m.clone(), p);
+        assert!(d.auth.contains(&AuthMode::PlatformCredential), "{m} {p}");
+        assert!(d.auth.contains(&AuthMode::MeetingSession), "{m} {p}");
+        assert_eq!(d.required_scope.as_deref(), Some(scope), "{m} {p}");
+        assert_eq!(d.upstream, services::MEETING_SERVICE);
+    }
+    // Human / participant-only meeting operations never take a platform credential.
+    for (m, p) in [
+        (Method::POST, "/api/v2/conferences/{id}/join"),
+        (Method::POST, "/api/v2/conferences/{id}/media-credential"),
+        (Method::GET, "/api/v2/conferences/{id}/recordings"),
+    ] {
+        let d = find(m.clone(), p);
+        assert!(!d.auth.contains(&AuthMode::PlatformCredential), "{m} {p}");
+        assert!(d.required_scope.is_none(), "{m} {p}");
+    }
+}

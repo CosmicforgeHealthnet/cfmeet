@@ -122,6 +122,9 @@ fn action_name(action: Action) -> &'static str {
         Action::BillingAccountManage => "billing_account.manage",
         Action::ProductionAccessRequest => "production_access.request",
         Action::CredentialsManage => "credential.manage",
+        Action::ServiceAccountsRead => "service_account.read",
+        Action::ServiceAccountsManage => "service_account.manage",
+        Action::ServiceAccountsSuspend => "service_account.suspend",
     }
 }
 

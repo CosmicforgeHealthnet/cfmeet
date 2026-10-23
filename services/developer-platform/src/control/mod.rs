@@ -24,6 +24,7 @@ pub mod operator;
 pub mod organizations;
 pub mod pagination;
 pub mod projects;
+pub mod service_accounts;
 pub mod usage;
 
 use cf_service_auth::DelegatedPlatformContext;
@@ -113,6 +114,11 @@ pub fn machine_scope(action: Action) -> Option<&'static str> {
         WebhooksRead => Some("webhooks.read"),
         WebhooksManage => Some("webhooks.manage"),
         UsageRead | LimitsRead => Some("usage.read"),
+        // Section 50 / Appendix B: one scope for the machine identities of the tenant
+        // (reading them included); credentials themselves stay Section 54.
+        ServiceAccountsRead | ServiceAccountsManage | ServiceAccountsSuspend => {
+            Some("service_accounts.manage")
+        }
         // Membership, ownership, closure, billing, credentials and production access are
         // role-gated human operations (or Section 54 / 55).
         OrganizationClose
@@ -342,6 +348,13 @@ mod tests {
             Some("projects.manage")
         );
         assert_eq!(machine_scope(Action::ActivityRead), Some("audit.read"));
+        for a in [
+            Action::ServiceAccountsRead,
+            Action::ServiceAccountsManage,
+            Action::ServiceAccountsSuspend,
+        ] {
+            assert_eq!(machine_scope(a), Some("service_accounts.manage"));
+        }
     }
 
     #[test]

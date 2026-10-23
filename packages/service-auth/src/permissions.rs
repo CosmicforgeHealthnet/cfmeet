@@ -231,6 +231,10 @@ pub enum InternalPermission {
     /// authenticated through Platform Access.
     #[serde(rename = "sms-request.forward")]
     SmsRequestForward,
+    /// Meeting Service (Part VI §51): receive a customer `/api/v2` meetings request the
+    /// API Gateway authenticated through Platform Access (credential re-verified live).
+    #[serde(rename = "meeting-request.forward")]
+    MeetingRequestForward,
     /// Meeting Service (Part VI §50): verify a presented CF Meet human session (the
     /// session-to-organization authorization bridge of the Developer Console).
     #[serde(rename = "user-session.verify")]
@@ -482,7 +486,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformCredentialAuthenticate,
         name: "platform-credential.authenticate",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING, services::API_GATEWAY],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING, services::API_GATEWAY, services::MEETING_SERVICE],
         sensitive: false,
         description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
     },
@@ -695,6 +699,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Receive a customer /v1/sms request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
     },
     PermissionDefinition {
+        permission: InternalPermission::MeetingRequestForward,
+        name: "meeting-request.forward",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer meetings request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access; environment-scoped meetings only)",
+    },
+    PermissionDefinition {
         permission: InternalPermission::UserSessionVerify,
         name: "user-session.verify",
         receiver: services::MEETING_SERVICE,
@@ -816,6 +828,7 @@ impl InternalPermission {
         InternalPermission::MessagingRequestForward,
         InternalPermission::NumberingRequestForward,
         InternalPermission::SmsRequestForward,
+        InternalPermission::MeetingRequestForward,
         InternalPermission::UserSessionVerify,
         InternalPermission::DeveloperEntitlementRead,
         InternalPermission::DeveloperUsageRecord,
@@ -1171,6 +1184,7 @@ mod tests {
                 "messaging-request.forward",
                 "numbering-request.forward",
                 "sms-request.forward",
+                "meeting-request.forward",
                 "developer-entitlement.read",
                 "developer-usage.record",
             ]
@@ -1218,6 +1232,52 @@ mod tests {
         {
             assert_ne!(d.receiver, services::TELEPHONY, "{}", d.name);
             assert_ne!(d.permission, InternalPermission::PlatformIdentityAdminister);
+        }
+    }
+
+    #[test]
+    fn meeting_service_platform_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Part VI §51: only the API Gateway forwards authenticated customer meetings
+        // requests; the Meeting Service re-verifies the credential with Platform Access
+        // and publishes its own environment-scoped events to the Developer Platform.
+        let d = MeetingRequestForward.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to, d.sensitive),
+            (
+                services::MEETING_SERVICE,
+                &[services::API_GATEWAY][..],
+                false
+            )
+        );
+        for p in [PlatformCredentialAuthenticate, DeveloperEventPublish] {
+            assert!(
+                p.definition()
+                    .grantable_to
+                    .contains(&services::MEETING_SERVICE),
+                "{}",
+                p.as_str()
+            );
+        }
+        let received: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::MEETING_SERVICE)
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(received, ["meeting-request.forward", "user-session.verify"]);
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            assert!(
+                !d.grantable_to.contains(&services::MEETING_SERVICE),
+                "{}",
+                d.name
+            );
+        }
+        // Identity administration and delegation stay out of reach.
+        for p in [PlatformIdentityAdminister, PlatformIdentityDelegate] {
+            assert!(!p
+                .definition()
+                .grantable_to
+                .contains(&services::MEETING_SERVICE));
         }
     }
 

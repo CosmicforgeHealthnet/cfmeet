@@ -18,11 +18,11 @@ const List<ContractRef> contracts = <ContractRef>[
   ContractRef('cfmeet.developer-platform.common', '1.2.0', 'json-schema', 'platform-developer/common/v1.schema.json', 'experimental'),
   ContractRef('cfmeet.api-gateway.public-api', '1.0.0', 'openapi', 'bundled/public/aggregate/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.api-gateway.public-http-api', '1.1.0', 'openapi', 'bundled/public/gateway/v1.openapi.json', 'beta'),
-  ContractRef('cfmeet.meeting-service.public-api', '1.1.0', 'openapi', 'bundled/public/meetings/v1.openapi.json', 'beta'),
+  ContractRef('cfmeet.meeting-service.public-api', '1.2.0', 'openapi', 'bundled/public/meetings/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.calling.public-api', '1.12.0', 'openapi', 'bundled/public/calling/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.privacy-relay.public-api', '1.2.0', 'openapi', 'bundled/public/privacy-relay/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.messaging.public-api', '1.13.0', 'openapi', 'bundled/public/messaging/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.numbering.public-api', '1.12.0', 'openapi', 'bundled/public/numbering/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.sms-gateway.public-api', '1.2.0', 'openapi', 'bundled/public/sms/v1.openapi.json', 'beta'),
-  ContractRef('cfmeet.developer-platform.public-api', '1.2.0', 'openapi', 'bundled/public/developer-platform/v1.openapi.json', 'beta'),
+  ContractRef('cfmeet.developer-platform.public-api', '1.3.0', 'openapi', 'bundled/public/developer-platform/v1.openapi.json', 'beta'),
 ];
