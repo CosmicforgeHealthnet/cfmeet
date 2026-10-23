@@ -285,13 +285,24 @@ void main() {
   test('meetings: ticket in the query, resume after the last sequence',
       () async {
     server.onSocket = (ws, n) async {
+      // Frames as the Meeting Service sends them: durable events wrap the envelope
+      // (`{"type":"event","event":{...,"sequence":n}}`); transient ones have no sequence.
+      Map<String, Object?> event(String id, int? sequence,
+              {bool transient = false}) =>
+          {
+            'type': 'event',
+            if (transient) 'transient': true,
+            'event': {'eventId': id, 'eventType': 'x', 'sequence': sequence},
+          };
       if (n == 1) {
-        ws.add(jsonEncode({'eventId': 'e1', 'eventType': 'x', 'sequence': 8}));
-        ws.add(jsonEncode({'eventId': 'e2', 'eventType': 'x', 'sequence': 9}));
+        ws.add(jsonEncode({'type': 'subscribed', 'cursor': 7}));
+        ws.add(jsonEncode(event('e1', 8)));
+        ws.add(jsonEncode(event('e2', 9)));
+        ws.add(jsonEncode(event('t1', null, transient: true)));
         await Future<void>.delayed(const Duration(milliseconds: 50));
         await ws.close(1011, 'restart');
       } else {
-        ws.add(jsonEncode({'eventId': 'e3', 'eventType': 'x', 'sequence': 10}));
+        ws.add(jsonEncode(event('e3', 10)));
       }
     };
     final conn = realtime(CfMeetAuth.participantToken('pt'))
@@ -299,7 +310,9 @@ void main() {
     final seqs = <int>[];
     final done = Completer<void>();
     conn.messages.listen((m) {
-      seqs.add((m as Map)['sequence'] as int);
+      final sequence = meetingResumeCursor(m);
+      if ((m as Map)['type'] != 'event' || sequence == null) return;
+      seqs.add(sequence);
       if (seqs.length == 3) done.complete();
     });
     await done.future.timeout(const Duration(seconds: 10));
@@ -315,7 +328,28 @@ void main() {
     expect(server.upgradeUris[1].queryParameters, {
       'ticket': server.minted[1],
       'cursor': '9'
-    }); // then the last sequence seen
+    }); // then the last durable event's sequence
+  });
+
+  test('meetingResumeCursor reads the contract frames', () {
+    expect(
+        meetingResumeCursor({
+          'type': 'event',
+          'event': {'sequence': 12}
+        }),
+        12);
+    expect(
+        meetingResumeCursor({
+          'type': 'event',
+          'transient': true,
+          'event': {'sequence': null}
+        }),
+        isNull);
+    expect(meetingResumeCursor({'type': 'resync_required', 'cursor': 40}), 40);
+    expect(meetingResumeCursor({'type': 'subscribed', 'cursor': 3}), isNull);
+    expect(meetingResumeCursor({'sequence': 5}), isNull,
+        reason: 'not a contract frame');
+    expect(meetingResumeCursor('pong'), isNull);
   });
 
   test('calling signaling: credential header, subprotocol, stop on 4001',

@@ -1,7 +1,7 @@
 //! `cfmeet-cert-stack up --env-out <path>`: starts the certification stack, provisions a
-//! developer sandbox, a second tenant and a user session, writes the environment file the
-//! TypeScript / Dart SDK integration tests read (`CFMEET_STACK_ENV`), and serves until
-//! SIGINT / SIGTERM, then tears everything down.
+//! developer sandbox (plus a limited-scope credential of it), a second tenant and a user
+//! session, writes the environment file the TypeScript / Dart SDK integration tests read
+//! (`CFMEET_STACK_ENV`), and serves until SIGINT / SIGTERM, then tears everything down.
 
 use std::path::PathBuf;
 
@@ -12,6 +12,12 @@ use cfmeet_certification::{
 };
 use serde_json::json;
 use uuid::Uuid;
+
+/// Principals per SDK in `tenants.sandbox.sdkPrincipals`.
+const SDK_PRINCIPALS: usize = 5;
+
+/// Scopes of `credentials.sandboxLimited` (deliberately without `calls.read`).
+const LIMITED_SCOPES: &[&str] = &["organizations.read"];
 
 fn usage() -> ! {
     eprintln!(
@@ -73,6 +79,33 @@ async fn provision_and_serve(stack: &Stack, env_out: &PathBuf) -> anyhow::Result
         operator.principal(sandbox.environment_id).await?,
     ];
     let other_principal = operator.principal(other.environment_id).await?;
+    // Principals reserved for each SDK's parity suite (Messaging devices: Messaging allows a
+    // principal a bounded number of device-registration challenges per hour, so every
+    // E2EE / realtime role of a suite gets its own principal).
+    let mut sdk_principals = serde_json::Map::new();
+    for sdk in ["typescript", "dart"] {
+        let mut ids = Vec::new();
+        for _ in 0..SDK_PRINCIPALS {
+            ids.push(operator.principal(sandbox.environment_id).await?);
+        }
+        sdk_principals.insert(sdk.to_string(), json!(ids));
+    }
+    // A second credential of the SANDBOX environment holding only LIMITED_SCOPES: the SDK
+    // parity suites prove a missing scope is refused (403 INSUFFICIENT_SCOPE) by the gateway.
+    let limited_sa = operator
+        .pa(
+            reqwest::Method::POST,
+            &format!(
+                "/admin/environments/{}/service-accounts",
+                sandbox.environment_id
+            ),
+            Some(json!({ "name": "sdk-limited", "description": "certification (limited scopes)" })),
+        )
+        .await?
+        .expect(201, "limited service account")?
+        .uuid("/id");
+    let (limited_credential_id, limited_secret) =
+        operator.credential(limited_sa, LIMITED_SCOPES).await?;
     let services: serde_json::Map<String, serde_json::Value> = stack
         .urls
         .iter()
@@ -80,7 +113,11 @@ async fn provision_and_serve(stack: &Stack, env_out: &PathBuf) -> anyhow::Result
         .collect();
     let env = json!({
         "gatewayUrl": stack.gateway_url(),
-        "credentials": { "sandbox": sandbox.customer.secret, "otherTenant": other.secret },
+        "credentials": {
+            "sandbox": sandbox.customer.secret,
+            "otherTenant": other.secret,
+            "sandboxLimited": limited_secret,
+        },
         "userSession": sandbox.user.session,
         "user": { "id": sandbox.user.id, "email": sandbox.user.email },
         "tenants": {
@@ -95,6 +132,12 @@ async fn provision_and_serve(stack: &Stack, env_out: &PathBuf) -> anyhow::Result
                 "credentialId": sandbox.customer.credential_id,
                 "scopes": sandbox.customer.scopes,
                 "principals": principals,
+                "sdkPrincipals": sdk_principals,
+                "limited": {
+                    "serviceAccountId": limited_sa,
+                    "credentialId": limited_credential_id,
+                    "scopes": LIMITED_SCOPES,
+                },
             },
             "otherTenant": {
                 "tenantId": other.tenant_id,

@@ -283,6 +283,25 @@ class RealtimeConnection {
   }
 }
 
+/// The conference cursor a Meeting realtime frame moves the resume point to: the
+/// `sequence` of a durable `event` frame (`{"type": "event", "event": {"sequence": n}}`;
+/// transient events carry none) or the `cursor` of a `resync_required` frame. Null for
+/// every other frame.
+int? meetingResumeCursor(Object? frame) {
+  if (frame is! Map) return null;
+  switch (frame['type']) {
+    case 'event':
+      final event = frame['event'];
+      if (frame['transient'] == true || event is! Map) return null;
+      final sequence = event['sequence'];
+      return sequence is int ? sequence : null;
+    case 'resync_required':
+      final cursor = frame['cursor'];
+      return cursor is int ? cursor : null;
+  }
+  return null;
+}
+
 /// Mints tickets and opens the three realtime channels through a [CfMeetClient].
 class RealtimeClient {
   RealtimeClient(this.client,
@@ -369,7 +388,7 @@ class RealtimeClient {
       connector: connector,
       options: options,
       onMessage: (m) {
-        if (m is Map && m['sequence'] is int) last = m['sequence'] as int;
+        last = meetingResumeCursor(m) ?? last;
         onMessage?.call(m);
       },
       prepare: () async {
