@@ -235,6 +235,10 @@ pub struct Peers {
     pub operator: Arc<ServiceTokenSigner>,
     /// Part V H: the Meeting Service (first-party login authority).
     pub meeting: Arc<ServiceTokenSigner>,
+    /// Part VI §50: the Developer Platform (workspace delegation and identity reads).
+    pub developer_platform: Arc<ServiceTokenSigner>,
+    /// Part VI §51: the API Gateway (credential authentication only).
+    pub gateway: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but signing with a key the bundle does not list.
@@ -275,6 +279,9 @@ pub const MESSAGING_PERMISSIONS: &[&str] = &[
 /// Part V H §104: the Meeting Service (first-party login authority) ensures the
 /// principals of the accounts it authenticated (nothing else).
 pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
+/// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity.
+pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] =
+    &["platform-identity.read", "platform-identity.delegate"];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -291,6 +298,8 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
     let meeting = key("meeting-test-1");
+    let developer_platform = key("developer-platform-test-1");
+    let gateway = key("api-gateway-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
@@ -314,6 +323,16 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                     cf_service_auth::services::MEETING_SERVICE,
                     vec![meeting.public_jwk()],
                     MEETING_PERMISSIONS,
+                ),
+                (
+                    cf_service_auth::services::DEVELOPER_PLATFORM,
+                    vec![developer_platform.public_jwk()],
+                    DEVELOPER_PLATFORM_PERMISSIONS,
+                ),
+                (
+                    cf_service_auth::services::API_GATEWAY,
+                    vec![gateway.public_jwk()],
+                    &["platform-credential.authenticate"],
                 ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
@@ -347,6 +366,8 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
         rogue_messaging: signer(ServiceId::messaging(), key("messaging-rogue-1")),
         operator: signer(ServiceId::operator_console(), operator),
         meeting: signer(ServiceId::meeting_service(), meeting),
+        developer_platform: signer(ServiceId::developer_platform(), developer_platform),
+        gateway: signer(ServiceId::api_gateway(), gateway),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         clock,

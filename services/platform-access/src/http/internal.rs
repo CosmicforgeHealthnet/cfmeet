@@ -57,6 +57,10 @@ use crate::{
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/credentials/authenticate", post(authenticate))
+        .route(
+            "/credentials/delegated-authority",
+            post(delegated_authority),
+        )
         .route("/credentials/:credential_id", get(credential_status))
         .route("/authorization/evaluate", post(evaluate))
         .route("/identity/context", get(trusted_context))
@@ -116,6 +120,56 @@ enum AuthenticateResponse {
 
 /// Credential presented values are bounded before any work.
 const MAX_PRESENTED: usize = 256;
+
+/// Part VI §51: the CURRENT authority chain of the credential the API Gateway
+/// authenticated, for a receiving domain service. The credential id comes ONLY from the
+/// signed delegated context (never a request body), and the chain must be exactly the
+/// delegated tenant / application / environment / service account: anything else is
+/// reported like an unknown credential. Revocation, expiry, supersession, suspension
+/// (SAFETY_ONLY) and effective scopes are evaluated now, exactly as at authentication.
+async fn delegated_authority(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+) -> AccessResult<impl IntoResponse> {
+    caller.require_permission(InternalPermission::PlatformCredentialAuthenticate)?;
+    let delegated = caller
+        .context()
+        .delegated_platform_context()
+        .cloned()
+        .ok_or(AccessError::Refused(ErrorCode::DelegatedContextRequired))?;
+    let Some(credential_id) = delegated.initiating_credential_id() else {
+        return Err(AccessError::Refused(ErrorCode::DelegatedContextRequired));
+    };
+    let rejected = |reason: &'static str| AuthenticateResponse::Rejected {
+        reason,
+        public_id: None,
+        throttle: None,
+    };
+    match state.authenticator.authority_of(credential_id).await {
+        Ok(chain)
+            if chain.tenant.id == delegated.tenant_id()
+                && chain.application.id == delegated.application_id()
+                && chain.environment.id == delegated.application_environment_id()
+                && chain.service_account.id == delegated.initiating_service_account_id() =>
+        {
+            Ok(Json(AuthenticateResponse::Authenticated {
+                authority: Box::new(chain),
+            }))
+        }
+        Ok(_) => {
+            tracing::warn!(
+                caller = caller.service(),
+                "delegated credential does not belong to the delegated scope"
+            );
+            Ok(Json(rejected("unknown_credential")))
+        }
+        Err(AuthenticationError::Rejected { reason, .. }) => Ok(Json(rejected(reason.as_str()))),
+        Err(AuthenticationError::Unavailable { summary }) => {
+            tracing::error!(%summary, "credential authority unavailable");
+            Err(AccessError::Refused(ErrorCode::ServiceUnavailable))
+        }
+    }
+}
 
 async fn authenticate(
     State(state): State<AppState>,

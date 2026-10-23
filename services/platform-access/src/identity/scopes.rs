@@ -123,6 +123,16 @@ pub mod names {
     pub const MESSAGING_EXPORT: &str = "messaging.export";
     /// Messaging: privileged internal operator authority. Never an ordinary grant.
     pub const MESSAGING_ADMIN: &str = "messaging.admin";
+    // Part VI §54 / Appendix B: developer control-plane scopes.
+    pub const ORGANIZATIONS_READ: &str = "organizations.read";
+    pub const ORGANIZATIONS_MANAGE: &str = "organizations.manage";
+    pub const PROJECTS_READ: &str = "projects.read";
+    pub const PROJECTS_MANAGE: &str = "projects.manage";
+    pub const SERVICE_ACCOUNTS_MANAGE: &str = "service_accounts.manage";
+    pub const CREDENTIALS_MANAGE: &str = "credentials.manage";
+    pub const PRODUCTION_ACCESS_REQUEST: &str = "production_access.request";
+    pub const AUDIT_READ: &str = "audit.read";
+    pub const DEVELOPER_PLATFORM_ADMIN: &str = "developer_platform.admin";
 }
 
 /// The Part V Messaging scopes (least privilege: none implies another).
@@ -361,6 +371,51 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
     ScopeDefinition {
         name: names::MESSAGING_ADMIN,
         description: "Privileged internal operator authority over Messaging (platform operations); never an ordinary customer grant",
+        trust: ScopeTrust::PrivilegedOperator,
+    },
+    ScopeDefinition {
+        name: names::ORGANIZATIONS_READ,
+        description: "Read the developer organization profile and memberships of the credential's own tenant",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::ORGANIZATIONS_MANAGE,
+        description: "Manage developer memberships, invitations and organization settings permitted by role (human control plane)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PROJECTS_READ,
+        description: "Read the tenant's developer projects and their environments",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PROJECTS_MANAGE,
+        description: "Create, update and archive the tenant's developer projects and non-production environments",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::SERVICE_ACCOUNTS_MANAGE,
+        description: "Create and suspend service accounts of the tenant's own projects through delegated Platform Access calls",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::CREDENTIALS_MANAGE,
+        description: "Create, rotate and revoke API credentials of the tenant's own service accounts through Platform Access",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::PRODUCTION_ACCESS_REQUEST,
+        description: "Submit production-access requests (approval remains operator-controlled)",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::AUDIT_READ,
+        description: "Read the tenant's safe developer-platform activity history",
+        trust: ScopeTrust::Standard,
+    },
+    ScopeDefinition {
+        name: names::DEVELOPER_PLATFORM_ADMIN,
+        description: "Privileged CosmicForge operator authority over the developer control plane (approval, restriction, plan overrides); never an ordinary customer grant",
         trust: ScopeTrust::PrivilegedOperator,
     },
     ScopeDefinition {

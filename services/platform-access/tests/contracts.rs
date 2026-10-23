@@ -80,6 +80,7 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
         ("mod.rs", ""),
         ("internal.rs", "/internal/v1"),
         ("admin.rs", "/internal/v1"),
+        ("delegation.rs", "/internal/v1"),
     ] {
         let code = std::fs::read_to_string(src.join(file)).unwrap();
         let code: String = code.split_whitespace().collect::<Vec<_>>().join(" ");

@@ -209,6 +209,53 @@ pub enum InternalPermission {
     /// gateway derived from the authority chain. API Gateway only.
     #[serde(rename = "developer-request.forward")]
     DeveloperRequestForward,
+    /// Platform Access (Part VI §50): create and change the lifecycle of the canonical
+    /// tenant / application / non-production environment behind a developer workspace,
+    /// on behalf of an authorized human member. EXTERNAL tenants and STANDARD scopes only;
+    /// never credentials, verifiers, privileged scopes or PRODUCTION environments.
+    #[serde(rename = "platform-identity.delegate")]
+    PlatformIdentityDelegate,
+    /// Calling (Part VI §51): receive a customer request (Calling and the Privacy Relay
+    /// customer proxy) the API Gateway authenticated through Platform Access.
+    #[serde(rename = "calling-request.forward")]
+    CallingRequestForward,
+    /// Messaging (Part VI §51): receive a customer request the API Gateway authenticated
+    /// through Platform Access.
+    #[serde(rename = "messaging-request.forward")]
+    MessagingRequestForward,
+    /// Numbering (Part VI §51): receive a customer `/v1/numbers` request the API Gateway
+    /// authenticated through Platform Access (never `/v1/admin`).
+    #[serde(rename = "numbering-request.forward")]
+    NumberingRequestForward,
+    /// SMS Gateway (Part VI §51): receive a customer `/v1/sms` request the API Gateway
+    /// authenticated through Platform Access.
+    #[serde(rename = "sms-request.forward")]
+    SmsRequestForward,
+    /// Meeting Service (Part VI §50): verify a presented CF Meet human session (the
+    /// session-to-organization authorization bridge of the Developer Console).
+    #[serde(rename = "user-session.verify")]
+    UserSessionVerify,
+    /// Developer Platform (Part VI §51): read the effective platform entitlements (API
+    /// request quotas) of an application environment.
+    #[serde(rename = "developer-entitlement.read")]
+    DeveloperEntitlementRead,
+    /// Developer Platform (Part VI §51): record durable daily API request accounting.
+    #[serde(rename = "developer-usage.record")]
+    DeveloperUsageRecord,
+    /// Developer Platform (Part VI §53): publish a committed domain event (platform
+    /// envelope, the publisher's own events only) for central customer webhooks.
+    #[serde(rename = "developer-event.publish")]
+    DeveloperEventPublish,
+    /// Calling (Part VI §53): export Calling-owned webhook records for the controlled
+    /// migration to the Developer Platform (signing secrets only re-sealed under the
+    /// migration transfer key; never plaintext).
+    #[serde(rename = "webhook-migration.export")]
+    WebhookMigrationExport,
+    /// Developer Platform (Part VI §50): operator administration of the control plane
+    /// (organization restriction / suspension, plan versions and assignments, explicit
+    /// first-party registration). Operator tooling only.
+    #[serde(rename = "developer-platform.administer")]
+    DeveloperPlatformAdminister,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -601,6 +648,101 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Forward a customer request the API Gateway authenticated through Platform Access (signed delegated context derived from the authority chain only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityDelegate,
+        name: "platform-identity.delegate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Create and change the lifecycle of the canonical tenant / application / non-production environment of a developer workspace for an authorized human member (EXTERNAL tenants, STANDARD scopes; no credentials, verifiers or production)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingRequestForward,
+        name: "calling-request.forward",
+        receiver: services::CALLING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingRequestForward,
+        name: "messaging-request.forward",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberingRequestForward,
+        name: "numbering-request.forward",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer /v1/numbers request the API Gateway authenticated through Platform Access (never /v1/admin)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::SmsRequestForward,
+        name: "sms-request.forward",
+        receiver: services::SMS_GATEWAY,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer /v1/sms request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::UserSessionVerify,
+        name: "user-session.verify",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Verify a presented CF Meet human session (revocation and account status checked) and return the user id and verified email",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperEntitlementRead,
+        name: "developer-entitlement.read",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Read the effective platform entitlements (API request quotas) of an application environment",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperUsageRecord,
+        name: "developer-usage.record",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Record durable daily API request accounting of application environments",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperEventPublish,
+        name: "developer-event.publish",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::CALLING,
+            services::PRIVACY_RELAY,
+            services::MESSAGING,
+            services::NUMBERING,
+            services::SMS_GATEWAY,
+        ],
+        sensitive: false,
+        description: "Publish a committed domain event (platform envelope, the publisher's own events only) for central customer webhooks",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::WebhookMigrationExport,
+        name: "webhook-migration.export",
+        receiver: services::CALLING,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Export Calling-owned webhook subscriptions, events, deliveries and attempts for the controlled migration (secrets re-sealed under the migration transfer key only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperPlatformAdminister,
+        name: "developer-platform.administer",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Administer the developer control plane (organization restriction / suspension, plan versions and assignments, first-party registration); operator tooling only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -655,6 +797,17 @@ impl InternalPermission {
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
         InternalPermission::DeveloperRequestForward,
+        InternalPermission::PlatformIdentityDelegate,
+        InternalPermission::CallingRequestForward,
+        InternalPermission::MessagingRequestForward,
+        InternalPermission::NumberingRequestForward,
+        InternalPermission::SmsRequestForward,
+        InternalPermission::UserSessionVerify,
+        InternalPermission::DeveloperEntitlementRead,
+        InternalPermission::DeveloperUsageRecord,
+        InternalPermission::DeveloperEventPublish,
+        InternalPermission::WebhookMigrationExport,
+        InternalPermission::DeveloperPlatformAdminister,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -899,8 +1052,12 @@ mod tests {
             .collect();
         assert_eq!(
             receiving,
-            ["sms-bridge.submit"],
-            "only Messaging's SMS Bridge submissions are received by the SMS Gateway"
+            ["sms-bridge.submit", "sms-request.forward"],
+            "only Messaging's SMS Bridge submissions and the API Gateway's authenticated customer requests are received by the SMS Gateway"
+        );
+        assert_eq!(
+            SmsRequestForward.definition().grantable_to,
+            &[services::API_GATEWAY]
         );
         assert_eq!(
             SmsBridgeSubmit.definition().grantable_to,
@@ -931,6 +1088,7 @@ mod tests {
                     &[services::PRIVACY_RELAY][..]
                 ),
                 ("messaging-sms-bridge.deliver", &[services::SMS_GATEWAY][..]),
+                ("messaging-request.forward", &[services::API_GATEWAY][..]),
             ]
         );
         // Principal creation is the Meeting Service's (first-party login authority) only.
@@ -967,6 +1125,7 @@ mod tests {
         "platform-principal.resolve",
         "platform-identity.read",
         "sms-bridge.submit",
+        "developer-event.publish",
     ];
 
     #[test]
@@ -986,24 +1145,47 @@ mod tests {
                 .collect()
         };
         // The gateway authenticates customers through Platform Access and forwards to the
-        // Developer Platform; it receives nothing (customer ingress only, no internal API).
+        // owning customer services and the Developer Platform; it receives nothing
+        // (customer ingress only, no internal API).
         assert_eq!(
             granted(services::API_GATEWAY),
             [
                 "platform-credential.authenticate",
-                "developer-request.forward"
+                "developer-request.forward",
+                "calling-request.forward",
+                "messaging-request.forward",
+                "numbering-request.forward",
+                "sms-request.forward",
+                "developer-entitlement.read",
+                "developer-usage.record",
             ]
         );
         assert!(received(services::API_GATEWAY).is_empty());
-        // The Developer Platform only READS identity; it never administers, registers or
-        // authenticates credentials (Platform Access stays the only authority).
+        // The Developer Platform reads identity and delegates the canonical workspace
+        // hierarchy; it never administers, registers principals or authenticates
+        // credentials (Platform Access stays the only authority).
         assert_eq!(
             granted(services::DEVELOPER_PLATFORM),
-            ["platform-identity.read"]
+            [
+                "platform-identity.read",
+                "platform-identity.delegate",
+                "user-session.verify",
+                "webhook-migration.export",
+            ]
         );
         assert_eq!(
             received(services::DEVELOPER_PLATFORM),
-            ["developer-request.forward"]
+            [
+                "developer-request.forward",
+                "developer-entitlement.read",
+                "developer-usage.record",
+                "developer-event.publish",
+                "developer-platform.administer",
+            ]
+        );
+        assert_eq!(
+            InternalPermission::DeveloperPlatformAdminister.definition().grantable_to,
+            &[services::OPERATOR_CONSOLE]
         );
         for d in REGISTRY.iter().filter(|d| d.sensitive) {
             for s in [services::API_GATEWAY, services::DEVELOPER_PLATFORM] {

@@ -118,7 +118,18 @@
         "messaging-context-authority.apply",
         "messaging-sms-bridge.deliver",
         "sms-bridge.submit",
-        "developer-request.forward"
+        "developer-request.forward",
+        "platform-identity.delegate",
+        "calling-request.forward",
+        "messaging-request.forward",
+        "numbering-request.forward",
+        "sms-request.forward",
+        "user-session.verify",
+        "developer-entitlement.read",
+        "developer-usage.record",
+        "developer-event.publish",
+        "webhook-migration.export",
+        "developer-platform.administer"
       ]
     }
   }

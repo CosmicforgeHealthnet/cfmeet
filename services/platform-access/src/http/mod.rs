@@ -6,6 +6,7 @@
 //!   authentication BY CONSTRUCTION, including unknown paths.
 
 pub mod admin;
+pub mod delegation;
 pub mod error;
 pub mod internal;
 pub mod middleware;
@@ -46,6 +47,7 @@ pub fn app(state: AppState) -> Router {
             INTERNAL_PREFIX,
             internal::routes()
                 .merge(admin::routes())
+                .merge(delegation::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

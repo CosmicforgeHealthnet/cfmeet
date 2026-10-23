@@ -93,7 +93,7 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.10.0",
+      "version": "1.11.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
@@ -126,7 +126,7 @@
     },
     {
       "id": "cfmeet.platform.delegated-platform-context",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform/service-auth/delegated-platform-context/v1.schema.json",
       "owner": "platform",
@@ -203,7 +203,7 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",

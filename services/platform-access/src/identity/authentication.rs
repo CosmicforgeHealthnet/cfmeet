@@ -173,6 +173,11 @@ impl AuthenticationError {
     }
 }
 
+/// [`AUTHORITY_CHAIN_SQL`] keyed by the credential id instead of its public id.
+static AUTHORITY_CHAIN_BY_ID_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    AUTHORITY_CHAIN_SQL.replace("WHERE c.public_id = $1", "WHERE c.id = $1")
+});
+
 const AUTHORITY_CHAIN_SQL: &str = r#"
 SELECT
     c.verifier                 AS verifier,
@@ -430,6 +435,38 @@ impl CredentialAuthenticator {
 
         evaluate(row, presented.tag_kind, self.clock.now(), &self.registry)
             .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))
+    }
+
+    /// The CURRENT authority chain of a credential identified by its Platform Access id,
+    /// for a receiver re-verifying the credential the API Gateway authenticated (Part VI
+    /// §51). No secret is involved: the caller proves only that a trusted gateway already
+    /// verified the secret; revocation, expiry, supersession, suspension and effective
+    /// scopes are evaluated here, now, exactly as at authentication.
+    pub async fn authority_of(
+        &self,
+        credential_id: uuid::Uuid,
+    ) -> Result<AuthorityChain, AuthenticationError> {
+        let row = AuthorityRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            AUTHORITY_CHAIN_BY_ID_SQL.as_str(),
+            [credential_id.into()],
+        ))
+        .one(&self.db)
+        .await
+        .map_err(|e| AuthenticationError::Unavailable {
+            summary: summarize_db_error(&e),
+        })?
+        .ok_or_else(|| AuthenticationError::rejected(AuthFailureReason::UnknownCredential, None))?;
+        let kind = row
+            .environment
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .and_then(EnvironmentKind::parse)
+            .ok_or_else(|| {
+                AuthenticationError::rejected(AuthFailureReason::CorruptAuthorityChain, None)
+            })?;
+        evaluate(row, kind, self.clock.now(), &self.registry)
+            .map_err(|reason| AuthenticationError::rejected(reason, None))
     }
 
     async fn load(&self, public_id: &str) -> Result<Option<AuthorityRow>, DbErr> {

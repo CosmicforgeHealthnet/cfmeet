@@ -19,7 +19,11 @@
     "application_environment_kind": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ApplicationEnvironmentKind" },
     "initiating_service_account_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
     "initiating_principal_id": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid" },
-    "initiating_principal_kind": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind" }
+    "initiating_principal_kind": { "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/PrincipalKind" },
+    "initiating_credential_id": {
+      "description": "Platform Access id (never a secret) of the API credential the API Gateway authenticated. Receivers re-verify it with Platform Access so revocation, expiry and effective scopes are evaluated live.",
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+    }
   },
   "dependentRequired": {
     "initiating_principal_id": ["initiating_principal_kind"],
