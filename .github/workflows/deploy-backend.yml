@@ -17,6 +17,12 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/deploy-backend.yml"
+  # One-time public docs cutover only after the private Swagger VPS bootstrap
+  # successfully verified loopback + HTTP Basic authentication.
+  workflow_run:
+    workflows: ["Provision Private Swagger on VPS"]
+    branches: [main]
+    types: [completed]
   pull_request:
     paths:
       - "services/meeting-service/**"
@@ -89,7 +95,7 @@ jobs:
 
   deploy:
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(ops): one-time Part V Swagger VPS deployment') }}
+      ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(ops): one-time Part V Swagger VPS deployment') || (github.event_name == 'workflow_run' && github.event.workflow_run.head_sha == 'ba272d3cffb572b5d92c05eb0b22f755914d5d55' && github.event.workflow_run.conclusion == 'success') }}
     name: Deploy to VPS
     needs: test
     runs-on: ubuntu-latest
