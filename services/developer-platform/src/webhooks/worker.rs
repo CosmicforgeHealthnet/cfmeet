@@ -46,9 +46,22 @@ pub struct ClaimedDelivery {
 struct Target {
     url: String,
     status: String,
-    secret_sealed: String,
+    /// `None` only for a migrated subscription awaiting a secret rotation (never ACTIVE).
+    secret_sealed: Option<String>,
     payload: Value,
 }
+
+/// Section 53 cutover gate (a claim condition on a delivery of `devplat_webhook_deliveries`
+/// rows aliased by the table name): without any migration every delivery is claimable;
+/// while the migration from Calling is PREPARING only deliveries to NATIVE subscriptions
+/// are (Calling still sends to the migrated ones); once CUT_OVER (the takeover verified
+/// that Calling stopped sending) every delivery is; once ROLLED_BACK none is (Calling is
+/// the authority again). Held mirrors of Calling's open deliveries are never claimed.
+pub const MIGRATION_GATE: &str = "(NOT EXISTS (SELECT 1 FROM devplat_webhook_migration_state m WHERE m.id = 1) \
+    OR EXISTS (SELECT 1 FROM devplat_webhook_migration_state m WHERE m.id = 1 AND m.phase = 'CUT_OVER') \
+    OR (EXISTS (SELECT 1 FROM devplat_webhook_migration_state m WHERE m.id = 1 AND m.phase = 'PREPARING') \
+        AND EXISTS (SELECT 1 FROM devplat_webhook_subscriptions gs \
+                     WHERE gs.id = devplat_webhook_deliveries.subscription_id AND gs.origin = 'NATIVE')))";
 
 /// How an attempt ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,14 +81,15 @@ impl WebhookService {
     pub async fn claim_due(&self, limit: u64) -> Result<Vec<ClaimedDelivery>, DbErr> {
         let now = self.now();
         ClaimedDelivery::find_by_statement(stmt(
-            "UPDATE devplat_webhook_deliveries d SET status = 'DELIVERING', lease_until = $1, \
+            &format!("UPDATE devplat_webhook_deliveries d SET status = 'DELIVERING', lease_until = $1, \
                attempt_count = d.attempt_count + 1, updated_at = $2 \
              WHERE d.id IN (SELECT id FROM devplat_webhook_deliveries \
                              WHERE ((status IN ('PENDING', 'RETRY_SCHEDULED') AND next_attempt_at <= $2) \
                                     OR (status = 'DELIVERING' AND lease_until <= $2)) \
-                               AND attempt_count < $4 \
+                               AND attempt_count < $4 AND NOT migration_hold \
+                               AND {MIGRATION_GATE} \
                              ORDER BY next_attempt_at LIMIT $3 FOR UPDATE SKIP LOCKED) \
-             RETURNING d.id, d.subscription_id, d.event_id, d.attempt_count",
+             RETURNING d.id, d.subscription_id, d.event_id, d.attempt_count"),
             vec![
                 (now + self.lease()).into(),
                 now.into(),
@@ -98,6 +112,7 @@ impl WebhookService {
                    failure_category = 'LEASE_EXPIRED_AT_CAP', completed_at = $1, updated_at = $1 \
                  WHERE id IN (SELECT id FROM devplat_webhook_deliveries \
                                WHERE status = 'DELIVERING' AND lease_until <= $1 AND attempt_count >= $2 \
+                                 AND NOT migration_hold \
                                ORDER BY next_attempt_at LIMIT $3 FOR UPDATE SKIP LOCKED)",
                 vec![
                     now.into(),
@@ -118,8 +133,9 @@ impl WebhookService {
                 "UPDATE devplat_webhook_deliveries SET status = 'SHADOW', lease_until = NULL, \
                    completed_at = $1, updated_at = $1 \
                  WHERE id IN (SELECT id FROM devplat_webhook_deliveries \
-                               WHERE status IN ('PENDING', 'RETRY_SCHEDULED') \
-                                  OR (status = 'DELIVERING' AND lease_until <= $1) \
+                               WHERE (status IN ('PENDING', 'RETRY_SCHEDULED') \
+                                  OR (status = 'DELIVERING' AND lease_until <= $1)) \
+                                 AND NOT migration_hold \
                                ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED)",
                 vec![now.into(), (limit as i64).into()],
             ))
@@ -180,7 +196,8 @@ impl WebhookService {
             .settings
             .key_ring
             .as_deref()
-            .map(|ring| ring.open(&target.secret_sealed, &c.subscription_id.to_string()));
+            .zip(target.secret_sealed.as_deref())
+            .map(|(ring, sealed)| ring.open(sealed, &c.subscription_id.to_string()));
         let signing_key = match opened {
             Some(Ok(s)) => s,
             outcome => {
@@ -240,6 +257,17 @@ impl WebhookService {
             ),
             Err(e) => (cf_webhooks::retry::classify_error(e), None),
         };
+        // A receiver that is rate limiting (429) or unavailable (503) may ask for a later
+        // retry: honoured when longer than the backoff (never shorter).
+        let retry_after = match &sent {
+            Ok(r) if matches!(r.status().as_u16(), 429 | 503) => cf_webhooks::retry::retry_after(
+                r.headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok()),
+                self.now().timestamp(),
+            ),
+            _ => None,
+        };
         // The response body is never read or stored.
         drop(sent);
         match classified {
@@ -248,8 +276,16 @@ impl WebhookService {
                     .await
             }
             cf_webhooks::retry::Outcome::Retry(category) => {
-                self.finish(c, Outcome::Retry, http, Some(category), started, true)
-                    .await
+                self.finish_after(
+                    c,
+                    Outcome::Retry,
+                    http,
+                    Some(category),
+                    started,
+                    true,
+                    retry_after,
+                )
+                .await
             }
             cf_webhooks::retry::Outcome::Permanent(category) => {
                 self.finish(c, Outcome::Failed, http, Some(category), started, true)
@@ -270,6 +306,22 @@ impl WebhookService {
         started: DateTime<Utc>,
         endpoint_health: bool,
     ) -> Result<(&'static str, bool), DbErr> {
+        self.finish_after(c, outcome, http, category, started, endpoint_health, None)
+            .await
+    }
+
+    /// [`Self::finish`] with the receiver's `Retry-After` (a retry is scheduled no earlier).
+    #[allow(clippy::too_many_arguments)]
+    async fn finish_after(
+        &self,
+        c: &ClaimedDelivery,
+        outcome: Outcome,
+        http: Option<i32>,
+        category: Option<&'static str>,
+        started: DateTime<Utc>,
+        endpoint_health: bool,
+        retry_after: Option<std::time::Duration>,
+    ) -> Result<(&'static str, bool), DbErr> {
         let now = self.now();
         let exhausted =
             outcome == Outcome::Retry && c.attempt_count as u32 >= self.settings.max_attempts;
@@ -280,8 +332,11 @@ impl WebhookService {
             _ => "FAILED",
         };
         let next = now
-            + Duration::from_std(cf_webhooks::retry::backoff(c.attempt_count as u32 + 1))
-                .unwrap_or_else(|_| Duration::seconds(30));
+            + Duration::from_std(cf_webhooks::retry::next_delay(
+                c.attempt_count as u32 + 1,
+                retry_after,
+            ))
+            .unwrap_or_else(|_| Duration::seconds(30));
         let txn = self.db().begin().await?;
         // Lock order: subscription, then delivery (as every subscription mutation does).
         let endpoint = if endpoint_health && outcome != Outcome::Cancelled {

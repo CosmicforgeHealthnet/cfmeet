@@ -18,6 +18,7 @@ mod m20261101_000001_developer_platform_foundation;
 mod m20261102_000002_control_plane;
 mod m20261103_000003_api_usage;
 mod m20261104_000004_webhooks;
+mod m20261105_000005_webhook_migration;
 mod m20261110_000010_api_operation_usage;
 
 /// Name of the table recording which Developer Platform migrations have been applied.
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261102_000002_control_plane::Migration),
             Box::new(m20261103_000003_api_usage::Migration),
             Box::new(m20261104_000004_webhooks::Migration),
+            Box::new(m20261105_000005_webhook_migration::Migration),
             Box::new(m20261110_000010_api_operation_usage::Migration),
         ]
     }

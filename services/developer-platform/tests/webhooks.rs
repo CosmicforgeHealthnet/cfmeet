@@ -147,6 +147,7 @@ fn settings() -> WebhookSettings {
         request_timeout: StdDuration::from_secs(1),
         max_attempts: 3,
         auto_disable_after: 50,
+        ..Default::default()
     }
 }
 

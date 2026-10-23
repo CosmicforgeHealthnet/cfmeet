@@ -129,6 +129,7 @@
         "developer-usage.record",
         "developer-event.publish",
         "webhook-migration.export",
+        "webhook-migration.import",
         "developer-platform.administer"
       ]
     }

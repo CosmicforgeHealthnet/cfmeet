@@ -8,7 +8,8 @@ use cf_service_auth::{
 };
 use serde_json::{json, Value};
 
-/// The runtime environment of every certification stack.
+/// The runtime environment of every certification stack (unless a stack is started with
+/// another [`crate::stack::StackOptions::runtime`]: the webhook journeys use `local`).
 pub const RUNTIME: RuntimeEnvironment = RuntimeEnvironment::Test;
 
 /// `cfmeet.platform-access` -> `platform-access`.
@@ -58,6 +59,12 @@ impl ServiceKeys {
 
     /// A signer for `service` with its REAL key (operator console, forged-hop tests).
     pub fn signer(&self, service: &str) -> ServiceTokenSigner {
+        self.signer_in(service, RUNTIME)
+    }
+
+    /// [`Self::signer`] for a stack started in another runtime environment
+    /// ([`crate::stack::StackOptions::runtime`]).
+    pub fn signer_in(&self, service: &str, runtime: RuntimeEnvironment) -> ServiceTokenSigner {
         let key = ServiceSigningKey::from_pkcs8_pem(
             KeyId::parse(&kid(service)).expect("valid kid"),
             &self.pem(service),
@@ -65,7 +72,7 @@ impl ServiceKeys {
         .expect("own key parses");
         ServiceTokenSigner::new(
             ServiceId::parse(service).expect("canonical service id"),
-            RUNTIME,
+            runtime,
             key,
             TokenTtl::default(),
             std::sync::Arc::new(SystemClock),
@@ -90,13 +97,23 @@ pub fn granted(receiver: &str, started: &[&str]) -> BTreeMap<String, BTreeSet<&'
 
 /// The trust bundle of `receiver` (contract `cfmeet.platform.service-trust-bundle` v1).
 pub fn trust_bundle(receiver: &str, started: &[&str], keys: &ServiceKeys) -> Value {
+    trust_bundle_in(receiver, started, keys, RUNTIME)
+}
+
+/// [`trust_bundle`] of a stack started in `runtime` (trust bundles are per runtime).
+pub fn trust_bundle_in(
+    receiver: &str,
+    started: &[&str],
+    keys: &ServiceKeys,
+    runtime: RuntimeEnvironment,
+) -> Value {
     let issuers: Vec<Value> = granted(receiver, started)
         .into_iter()
         .map(|(issuer, permissions)| {
             json!({
                 "issuer": issuer,
                 "audience": receiver,
-                "runtime_environment": RUNTIME.as_str(),
+                "runtime_environment": runtime.as_str(),
                 "keys": [keys.public_jwk(&issuer)],
                 "permissions": permissions,
             })
@@ -105,7 +122,7 @@ pub fn trust_bundle(receiver: &str, started: &[&str], keys: &ServiceKeys) -> Val
     json!({
         "bundle_version": 1,
         "receiver": receiver,
-        "runtime_environment": RUNTIME.as_str(),
+        "runtime_environment": runtime.as_str(),
         "trusted_issuers": issuers,
     })
 }

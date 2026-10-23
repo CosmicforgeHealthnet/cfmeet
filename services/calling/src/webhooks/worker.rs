@@ -453,8 +453,13 @@ impl WebhookService {
         .db()
     }
 
-    /// One delivery pass: claim, sign, POST, record.
+    /// One delivery pass: claim, sign, POST, record. Nothing is claimed (and nothing is
+    /// sent) while delivery is disabled or the authority is retired (Part VI §53 cutover):
+    /// every delivery stays recorded, so re-enabling resumes exactly where it stopped.
     pub async fn deliver_due_once(&self, limit: u64) -> WebhookResult<DeliveryReport> {
+        if !self.settings.delivers() {
+            return Ok(DeliveryReport::default());
+        }
         let claimed = self.claim_due(limit).await?;
         let mut report = DeliveryReport::default();
         for c in claimed {
@@ -480,12 +485,19 @@ impl WebhookService {
         .db()?
         else {
             return self
-                .finish(c, "FAILED", None, Some("MISSING_TARGET"), started)
+                .finish(c, "FAILED", None, Some("MISSING_TARGET"), started, None)
                 .await;
         };
         if target.status != "ACTIVE" {
             return self
-                .finish(c, "CANCELLED", None, Some("SUBSCRIPTION_INACTIVE"), started)
+                .finish(
+                    c,
+                    "CANCELLED",
+                    None,
+                    Some("SUBSCRIPTION_INACTIVE"),
+                    started,
+                    None,
+                )
                 .await;
         }
         let secret = match self
@@ -514,7 +526,9 @@ impl WebhookService {
                     category,
                     "webhook delivery refused: the signing secret cannot be opened"
                 );
-                return self.finish(c, "RETRY", None, Some(category), started).await;
+                return self
+                    .finish(c, "RETRY", None, Some(category), started, None)
+                    .await;
             }
         };
         // The SSRF policy is enforced again at delivery time (and at connection time by
@@ -523,7 +537,7 @@ impl WebhookService {
             cf_webhooks::endpoint::validate_url(&target.endpoint_url, self.settings.policy)
         else {
             return self
-                .finish(c, "FAILED", None, Some("ENDPOINT_BLOCKED"), started)
+                .finish(c, "FAILED", None, Some("ENDPOINT_BLOCKED"), started, None)
                 .await;
         };
         let body =
@@ -551,15 +565,28 @@ impl WebhookService {
             ),
             Err(e) => (cf_webhooks::retry::classify_error(e), None),
         };
+        // A receiver that is rate limiting (429) or unavailable (503) may ask for a later
+        // retry: honoured when longer than the backoff (never shorter).
+        let retry_after = match &sent {
+            Ok(r) if matches!(r.status().as_u16(), 429 | 503) => cf_webhooks::retry::retry_after(
+                r.headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok()),
+                self.now().timestamp(),
+            ),
+            _ => None,
+        };
+        drop(sent);
         match outcome {
             cf_webhooks::retry::Outcome::Delivered => {
-                self.finish(c, "SUCCEEDED", http, None, started).await
+                self.finish(c, "SUCCEEDED", http, None, started, None).await
             }
             cf_webhooks::retry::Outcome::Retry(category) => {
-                self.finish(c, "RETRY", http, Some(category), started).await
+                self.finish(c, "RETRY", http, Some(category), started, retry_after)
+                    .await
             }
             cf_webhooks::retry::Outcome::Permanent(category) => {
-                self.finish(c, "FAILED", http, Some(category), started)
+                self.finish(c, "FAILED", http, Some(category), started, None)
                     .await
             }
         }
@@ -574,6 +601,7 @@ impl WebhookService {
         http: Option<i32>,
         category: Option<&'static str>,
         started: chrono::DateTime<chrono::Utc>,
+        retry_after: Option<std::time::Duration>,
     ) -> WebhookResult<&'static str> {
         let now = self.now();
         let exhausted = outcome == "RETRY" && c.attempt_count as u32 >= self.settings.max_attempts;
@@ -584,8 +612,11 @@ impl WebhookService {
             _ => "FAILED",
         };
         let next = now
-            + Duration::from_std(cf_webhooks::retry::backoff(c.attempt_count as u32 + 1))
-                .unwrap_or_else(|_| Duration::seconds(30));
+            + Duration::from_std(cf_webhooks::retry::next_delay(
+                c.attempt_count as u32 + 1,
+                retry_after,
+            ))
+            .unwrap_or_else(|_| Duration::seconds(30));
         let txn = sea_orm::TransactionTrait::begin(self.db()).await.db()?;
         let changed = txn
             .execute(stmt(

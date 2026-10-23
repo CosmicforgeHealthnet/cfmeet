@@ -22,6 +22,7 @@ pub mod http;
 pub mod ingest;
 pub mod keys;
 pub mod notices;
+pub mod ownership_migration;
 pub mod publication;
 pub mod worker;
 
@@ -84,6 +85,22 @@ pub struct WebhookSettings {
     pub policy: EndpointPolicy,
     pub request_timeout: Duration,
     pub max_attempts: u32,
+    /// Part VI §53 migration freeze (`CALLING_WEBHOOK_MUTATIONS_FROZEN`, default `false`):
+    /// customer create / update / delete / rotate-secret / replay answer 503
+    /// `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: frozen`; reads and deliveries
+    /// continue.
+    pub mutations_frozen: bool,
+    /// `CALLING_WEBHOOK_DELIVERY_ENABLED` (default `true`): `false` after the cutover — the
+    /// delivery worker sends nothing; deliveries stay recorded (a rollback resumes them).
+    pub delivery_enabled: bool,
+    /// `CALLING_WEBHOOK_AUTHORITY` (default `active`): `retired` — customer webhook routes
+    /// answer 503 `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: moved`, the delivery
+    /// worker is off; every record is retained.
+    pub authority: ownership_migration::WebhookAuthority,
+    /// The migration transfer key (`CALLING_WEBHOOK_MIGRATION_TRANSFER_KEY`): signing
+    /// secrets leave Calling only re-sealed under it. Unset: the export of subscriptions
+    /// (secrets) is refused.
+    pub transfer_key: Option<Arc<SecretBox>>,
 }
 
 impl Default for WebhookSettings {
@@ -93,6 +110,10 @@ impl Default for WebhookSettings {
             policy: EndpointPolicy::STRICT,
             request_timeout: Duration::from_secs(10),
             max_attempts: cf_webhooks::retry::MAX_ATTEMPTS,
+            mutations_frozen: false,
+            delivery_enabled: true,
+            authority: ownership_migration::WebhookAuthority::Active,
+            transfer_key: None,
         }
     }
 }
@@ -116,14 +137,24 @@ impl WebhookSettings {
                 "is permitted only in the local runtime environment".to_string(),
             ));
         }
+        let migration = ownership_migration::MigrationFlags::from_lookup(get)?;
         Ok(Self {
             secret_box,
             policy: EndpointPolicy {
                 allow_insecure_http: allow_private,
                 allow_private_networks: allow_private,
             },
+            mutations_frozen: migration.mutations_frozen,
+            delivery_enabled: migration.delivery_enabled,
+            authority: migration.authority,
+            transfer_key: ownership_migration::transfer_key_from_lookup(get)?.map(Arc::new),
             ..Self::default()
         })
+    }
+
+    /// Whether the delivery worker sends (delivery enabled and the authority active).
+    pub fn delivers(&self) -> bool {
+        self.delivery_enabled && self.authority == ownership_migration::WebhookAuthority::Active
     }
 
     /// The signing-secret key ring (Part H §74.12). Every key may be a secret file
@@ -398,6 +429,11 @@ impl WebhookService {
     /// The configured signing-secret key ring (`None`: webhooks unavailable).
     pub fn key_ring(&self) -> Option<&SecretBox> {
         self.settings.secret_box.as_deref()
+    }
+
+    /// The deployment settings (migration flags included).
+    pub fn settings(&self) -> &WebhookSettings {
+        &self.settings
     }
 
     pub(crate) fn now(&self) -> DateTime<Utc> {

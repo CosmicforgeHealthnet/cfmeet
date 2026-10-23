@@ -14,6 +14,8 @@
 //! | `DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY` (`_ID`, `_PREVIOUS`, `_PREVIOUS_ID`, `_FILE` variants) | no | signing-secret sealing key ring; unset = webhook subscription routes 503 (fail closed) |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` | no | http / private endpoints, `local` runtime only |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_REQUEST_TIMEOUT_MS`, `_MAX_ATTEMPTS`, `_AUTO_DISABLE_AFTER` | no | delivery timeout, attempts before dead letter, consecutive failures before automatic disablement |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN` | no | Section 53 migration freeze of customer / console webhook mutations (default `false`) |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY` (`_FILE`, `_ID`) | no | the webhook migration transfer key (Section 53 §9.1); unset = secret import / rollback export refused |
 //!
 //! The webhook variables are detailed in [`webhooks`]. Service authentication (`CF_*`) is
 //! read by [`service_auth`]. Error messages never echo a value.

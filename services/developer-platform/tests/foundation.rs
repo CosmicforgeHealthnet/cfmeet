@@ -160,8 +160,16 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         "devplat_webhook_attempts.http_status",
         "devplat_webhook_deliveries.last_http_status",
         "devplat_webhook_deliveries.status",
+        // Section 53 migration bookkeeping: Calling's subscription status and secret
+        // version at import, and the secret OUTCOME code (TRANSFERRED / ROTATION_REQUIRED_*;
+        // never secret material).
+        "devplat_webhook_migration_subscriptions.calling_secret_version",
+        "devplat_webhook_migration_subscriptions.calling_status",
+        "devplat_webhook_migration_subscriptions.secret_outcome",
         "devplat_webhook_subscriptions.secret_key_id",
         "devplat_webhook_subscriptions.secret_sealed",
+        // VALID / ROTATION_REQUIRED (a migrated subscription without any secret).
+        "devplat_webhook_subscriptions.secret_state",
         "devplat_webhook_subscriptions.secret_version",
         "devplat_webhook_subscriptions.status",
         "devplat_workspace_members.status",

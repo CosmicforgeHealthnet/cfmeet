@@ -17,6 +17,11 @@
 //!
 //! Internal: `POST /internal/v1/platform/events` (`developer-event.publish`).
 //!
+//! Section 53 migration freeze (`DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN`): every
+//! mutation (create, update, delete, rotate-secret, replay; customer and console) answers
+//! 503 `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: frozen` and `Retry-After` after
+//! the caller is authorized; reads, ingestion and delivery continue.
+//!
 //! Scope comes only from the confirmed Platform Access chain (machine) or the console
 //! environment's own profile (human): another environment's subscription or delivery is
 //! 404 without any existence hint. The signing secret is returned only by create /
@@ -313,6 +318,9 @@ async fn create(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = machine(&s, &c, Action::WebhooksManage, &[]).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let (b, _): (CreateBody, _) = body(b)?;
     svc.key_ring()?;
     svc.validate_url(&b.url)?;
@@ -360,6 +368,9 @@ async fn update(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = machine(&s, &c, Action::WebhooksManage, &[]).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let (b, _): (UpdateBody, _) = body(b)?;
     if let Some(types) = &b.event_types {
@@ -378,6 +389,9 @@ async fn delete(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = machine(&s, &c, Action::WebhooksManage, &[]).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let version = expected_version(&params(q, &["expectedVersion"])?)?;
     let row = svc.delete(&c, &scope, id, version).await?;
@@ -392,6 +406,9 @@ async fn rotate(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = machine(&s, &c, Action::WebhooksManage, &[]).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let (b, _): (VersionBody, _) = body(b)?;
     let (row, secret) = svc
@@ -426,6 +443,9 @@ async fn replay(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = machine(&s, &c, Action::WebhooksManage, &[]).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let row = svc.replay(&c, &scope, id_path(&id)?).await?;
     Ok(respond(StatusCode::CREATED, row.view()))
 }
@@ -494,6 +514,9 @@ async fn console_create(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let (b, raw): (CreateBody, _) = body(b)?;
     svc.key_ring()?;
     let key = headers
@@ -548,6 +571,9 @@ async fn console_update(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let (b, _): (UpdateBody, _) = body(b)?;
     let (version, change) = b.change()?;
@@ -563,6 +589,9 @@ async fn console_delete(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let version = expected_version(&params(q, &["expectedVersion"])?)?;
     let row = svc.delete(&c, &scope, id, version).await?;
@@ -577,6 +606,9 @@ async fn console_rotate(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let id = id_path(&id)?;
     let (b, _): (VersionBody, _) = body(b)?;
     let (row, secret) = svc
@@ -631,6 +663,9 @@ async fn console_replay(
 ) -> ApiResult<Response> {
     let svc = service(&s)?;
     let scope = console(&s, &c, &env, Action::WebhooksManage).await?;
+    if let Some(refused) = svc.migration_refusal() {
+        return Ok(refused);
+    }
     let row = svc.replay(&c, &scope, id_path(&id)?).await?;
     Ok(respond(StatusCode::CREATED, row.view()))
 }

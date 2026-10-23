@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use base64::Engine;
-use cf_service_auth::services;
+use cf_service_auth::{services, RuntimeEnvironment};
 use rand::{distributions::Alphanumeric, Rng, RngCore};
 use uuid::Uuid;
 
@@ -148,6 +148,46 @@ fn random_b64(standard: bool) -> String {
     }
 }
 
+/// How a stack deviates from the default certification stack (additive; the default is
+/// exactly what [`Stack::start`] runs).
+#[derive(Debug, Clone, Default)]
+pub struct StackOptions {
+    /// The runtime environment of EVERY service (keys, trust bundles, the operator console
+    /// and `CF_RUNTIME_ENVIRONMENT`); default [`keys::RUNTIME`] (`test`). The webhook
+    /// journeys run a `local` stack: only there may a deployment deliver to a loopback
+    /// receiver (`*_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` is refused in every other runtime).
+    pub runtime: Option<RuntimeEnvironment>,
+    /// Extra variables per process (keyed by the names of [`Stack::urls`] plus
+    /// [`DEVELOPER_PLATFORM_WORKER`]), applied after the stack's own variables (a variable
+    /// set here replaces the stack's value).
+    pub env: BTreeMap<String, Vec<(String, String)>>,
+}
+
+impl StackOptions {
+    /// Adds `key=value` to the environment of `process`.
+    pub fn set(mut self, process: &str, key: &str, value: impl Into<String>) -> Self {
+        self.env
+            .entry(process.to_string())
+            .or_default()
+            .push((key.to_string(), value.into()));
+        self
+    }
+}
+
+/// What a process was started with (for [`Stack::restart`]).
+#[derive(Debug, Clone)]
+struct LaunchSpec {
+    bin: String,
+    env: Vec<(String, String)>,
+    ready: Option<String>,
+}
+
+/// Replaces (or adds) `key` in `env`.
+fn put(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    env.retain(|(k, _)| k != key);
+    env.push((key.to_string(), value.to_string()));
+}
+
 /// Secrets the stack generated (test material, never reused across stacks).
 #[derive(Debug, Clone)]
 pub struct Secrets {
@@ -168,6 +208,10 @@ pub struct Stack {
     /// Service name -> database URL (evidence probes only; services never share one).
     pub db_urls: BTreeMap<String, String>,
     pub http: reqwest::Client,
+    /// The runtime environment every service of this stack runs in.
+    pub runtime: RuntimeEnvironment,
+    options: StackOptions,
+    specs: BTreeMap<String, LaunchSpec>,
     dbs: Vec<String>,
     procs: Vec<Service>,
     torn_down: bool,
@@ -189,6 +233,11 @@ pub const STARTED: &[&str] = &[
 impl Stack {
     /// Starts the whole stack (about half a minute, dominated by migrations).
     pub async fn start(config: StackConfig) -> anyhow::Result<Stack> {
+        Self::start_with(config, StackOptions::default()).await
+    }
+
+    /// [`Stack::start`] with [`StackOptions`] (another runtime, extra variables).
+    pub async fn start_with(config: StackConfig, options: StackOptions) -> anyhow::Result<Stack> {
         let id = Uuid::new_v4().simple().to_string()[..12].to_string();
         let dir = std::env::temp_dir().join(format!("cfmeet-cert-{id}"));
         std::fs::create_dir_all(dir.join("logs"))?;
@@ -210,6 +259,9 @@ impl Stack {
             urls: BTreeMap::new(),
             db_urls: BTreeMap::new(),
             http,
+            runtime: options.runtime.unwrap_or(keys::RUNTIME),
+            options,
+            specs: BTreeMap::new(),
             dbs: Vec::new(),
             procs: Vec::new(),
             torn_down: false,
@@ -254,7 +306,7 @@ impl Stack {
         let mut env = vec![
             (
                 "CF_RUNTIME_ENVIRONMENT".to_string(),
-                keys::RUNTIME.as_str().to_string(),
+                self.runtime.as_str().to_string(),
             ),
             ("CF_SERVICE_AUTH_KEY_ID".to_string(), keys::kid(identity)),
             (
@@ -263,7 +315,7 @@ impl Stack {
             ),
         ];
         if with_bundle {
-            let bundle = keys::trust_bundle(identity, STARTED, &self.keys);
+            let bundle = keys::trust_bundle_in(identity, STARTED, &self.keys, self.runtime);
             env.push((
                 "CF_SERVICE_TRUST_BUNDLE_FILE".to_string(),
                 self.write(&format!("{short}-trust.json"), &bundle.to_string())?,
@@ -276,25 +328,66 @@ impl Stack {
         &mut self,
         name: &str,
         bin: &str,
-        env: Vec<(String, String)>,
+        mut env: Vec<(String, String)>,
         ready: Option<String>,
     ) -> anyhow::Result<()> {
-        let bin = self.bin(bin);
+        for (k, v) in self.options.env.get(name).cloned().unwrap_or_default() {
+            put(&mut env, &k, &v);
+        }
+        let spec = LaunchSpec {
+            bin: bin.to_string(),
+            env,
+            ready,
+        };
+        self.specs.insert(name.to_string(), spec.clone());
+        self.spawn_spec(name, &spec).await
+    }
+
+    async fn spawn_spec(&mut self, name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
+        let bin = self.bin(&spec.bin);
         let log_dir = self.dir.join("logs");
         let svc = process::spawn(
             Launch {
                 name,
                 bin: &bin,
-                env,
+                env: spec.env.clone(),
                 dir: &self.dir,
                 log_dir: &log_dir,
-                ready,
+                ready: spec.ready.clone(),
             },
             &self.http,
         )
         .await?;
         self.procs.push(svc);
         Ok(())
+    }
+
+    /// Stops `process` (a name of [`Stack::urls`] or [`DEVELOPER_PLATFORM_WORKER`]) and
+    /// starts it again — same binary, port, database and keys — with `overrides` replacing
+    /// (or adding) variables; they stay in effect for later restarts. Fails (with the log)
+    /// when the process refuses to start: it then stays stopped.
+    pub async fn restart(
+        &mut self,
+        process: &str,
+        overrides: &[(&str, &str)],
+    ) -> anyhow::Result<()> {
+        let mut spec = self
+            .specs
+            .get(process)
+            .cloned()
+            .with_context(|| format!("unknown process {process}"))?;
+        for (k, v) in overrides {
+            put(&mut spec.env, k, v);
+        }
+        if let Some(i) = self.procs.iter().position(|p| p.name == process) {
+            let mut old = self.procs.remove(i);
+            let _ = old.child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(10), old.child.wait()).await;
+            // Keep the previous log next to the new one.
+            let _ = std::fs::rename(&old.log, old.log.with_extension("previous.log"));
+        }
+        self.specs.insert(process.to_string(), spec.clone());
+        self.spawn_spec(process, &spec).await
     }
 
     async fn boot(&mut self) -> anyhow::Result<()> {
@@ -632,11 +725,18 @@ impl Stack {
     /// Platform), holding the harness's operator-console key.
     pub fn operator(&self) -> Operator {
         Operator::new(
-            self.keys.signer(services::OPERATOR_CONSOLE),
+            self.keys
+                .signer_in(services::OPERATOR_CONSOLE, self.runtime),
             self.url(PLATFORM_ACCESS),
             self.url(DEVELOPER_PLATFORM),
             self.http.clone(),
         )
+    }
+
+    /// A signer holding `service`'s REAL key in this stack's runtime (a receiver-side
+    /// proof calls a service directly as one of its peers).
+    pub fn signer(&self, service: &str) -> cf_service_auth::ServiceTokenSigner {
+        self.keys.signer_in(service, self.runtime)
     }
 
     /// A probe connection to `service`'s own database (evidence only).

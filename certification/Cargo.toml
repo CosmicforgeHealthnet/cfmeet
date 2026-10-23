@@ -7,8 +7,9 @@ publish = false
 description = "CF Meet Part VI cross-service certification harness: starts the REAL services as processes (real Ed25519 service auth, one PostgreSQL database per service, real Redis, deterministic provider adapters) behind the real API Gateway and runs the developer journeys against them"
 
 # Stand-alone, NON-deployable test workspace (like packages/messaging-crypto). It depends
-# only on shared packages (packages/service-auth, packages/messaging-crypto), never on a
-# service crate: every service is exercised as its own built binary, over HTTP.
+# only on shared packages (packages/service-auth, packages/messaging-crypto,
+# packages/webhooks), never on a service crate: every service is exercised as its own
+# built binary, over HTTP.
 [workspace]
 
 [lib]
@@ -25,6 +26,8 @@ path = "src/bin/cfmeet-cert-stack.rs"
 cf-service-auth = { path = "../packages/service-auth" }
 # Messaging device registration (MLS KeyPackage) for client tokens / realtime tickets.
 cf-messaging-crypto = { path = "../packages/messaging-crypto", features = ["client"] }
+# Receiver-side verification of customer webhook signatures (the reference verifier).
+cf-webhooks = { path = "../packages/webhooks" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "process", "io-util", "fs"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"] }

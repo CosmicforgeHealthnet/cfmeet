@@ -16,13 +16,16 @@
 //! [`provision`] drives the services exactly as their operators and customers do: the
 //! operator console (signed operator calls to Platform Access and the Developer Platform),
 //! the CF Meet account API of the Meeting Service, and the public API Gateway.
+//! [`receiver`] is a customer's webhook endpoint (scripted answers, recorded requests,
+//! signature verification with the reference verifier of `packages/webhooks`).
 
 pub mod db;
 pub mod keys;
 pub mod process;
 pub mod provision;
+pub mod receiver;
 pub mod redis;
 pub mod stack;
 pub mod ws;
 
-pub use stack::{Stack, StackConfig};
+pub use stack::{Stack, StackConfig, StackOptions};

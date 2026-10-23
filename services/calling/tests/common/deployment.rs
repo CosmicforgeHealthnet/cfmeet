@@ -60,6 +60,7 @@ pub fn webhook_settings() -> WebhookSettings {
         },
         request_timeout: std::time::Duration::from_secs(1),
         max_attempts: 3,
+        ..Default::default()
     }
 }
 

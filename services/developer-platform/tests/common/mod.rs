@@ -833,6 +833,18 @@ impl Control {
             .map(|(c, w)| (c, w.expect("webhooks configured")))
     }
 
+    /// [`Control::with_webhooks`] whose state is further configured by `configure` (e.g.
+    /// the Section 53 migration's Calling port).
+    pub async fn with_webhooks_configured(
+        mut settings: WebhookSettings,
+        configure: impl FnOnce(AppState) -> AppState,
+    ) -> Option<(Self, Webhooks)> {
+        settings.enabled = true;
+        Self::build_with(Some(settings), configure)
+            .await
+            .map(|(c, w)| (c, w.expect("webhooks configured")))
+    }
+
     /// A harness whose webhook service is configured but NOT enabled (the flag off).
     pub async fn with_webhooks_disabled(mut settings: WebhookSettings) -> Option<(Self, Webhooks)> {
         settings.enabled = false;
@@ -842,6 +854,13 @@ impl Control {
     }
 
     async fn build(webhooks: Option<WebhookSettings>) -> Option<(Self, Option<Webhooks>)> {
+        Self::build_with(webhooks, |s| s).await
+    }
+
+    async fn build_with(
+        webhooks: Option<WebhookSettings>,
+        configure: impl FnOnce(AppState) -> AppState,
+    ) -> Option<(Self, Option<Webhooks>)> {
         let db = TestDb::new().await?;
         let (runtime, peers, operator, producers) = service_auth_with_producers();
         let pa = Arc::new(MemoryPlatformAccess::default());
@@ -865,6 +884,7 @@ impl Control {
                 offset,
             }
         });
+        let state = configure(state);
         Some((
             Self {
                 router: http::app(state),

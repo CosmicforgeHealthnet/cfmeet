@@ -18,6 +18,7 @@
 pub mod config;
 pub mod control;
 pub mod db;
+pub mod digest;
 pub mod domain;
 pub mod http;
 pub mod platform_access;

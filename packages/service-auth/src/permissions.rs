@@ -251,6 +251,12 @@ pub enum InternalPermission {
     /// migration transfer key; never plaintext).
     #[serde(rename = "webhook-migration.export")]
     WebhookMigrationExport,
+    /// Calling (Part VI §53): apply the Developer Platform's rollback export of webhook
+    /// subscriptions (signing secrets only re-sealed under the migration transfer key) and
+    /// settle Calling deliveries the Developer Platform already delivered — only for a
+    /// controlled rollback of the webhook cutover.
+    #[serde(rename = "webhook-migration.import")]
+    WebhookMigrationImport,
     /// Developer Platform (Part VI §50): operator administration of the control plane
     /// (organization restriction / suspension, plan versions and assignments, explicit
     /// first-party registration). Operator tooling only.
@@ -736,6 +742,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Export Calling-owned webhook subscriptions, events, deliveries and attempts for the controlled migration (secrets re-sealed under the migration transfer key only)",
     },
     PermissionDefinition {
+        permission: InternalPermission::WebhookMigrationImport,
+        name: "webhook-migration.import",
+        receiver: services::CALLING,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Apply the Developer Platform's rollback export of webhook subscriptions (secrets re-sealed under the migration transfer key only) and settle deliveries it already delivered; controlled webhook cutover rollback only",
+    },
+    PermissionDefinition {
         permission: InternalPermission::DeveloperPlatformAdminister,
         name: "developer-platform.administer",
         receiver: services::DEVELOPER_PLATFORM,
@@ -807,6 +821,7 @@ impl InternalPermission {
         InternalPermission::DeveloperUsageRecord,
         InternalPermission::DeveloperEventPublish,
         InternalPermission::WebhookMigrationExport,
+        InternalPermission::WebhookMigrationImport,
         InternalPermission::DeveloperPlatformAdminister,
     ];
 
@@ -1171,6 +1186,7 @@ mod tests {
                 "platform-identity.delegate",
                 "user-session.verify",
                 "webhook-migration.export",
+                "webhook-migration.import",
             ]
         );
         assert_eq!(

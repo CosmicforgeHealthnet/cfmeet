@@ -40,6 +40,12 @@ async fn main() -> anyhow::Result<()> {
         gateway_api = config.flags.gateway_api,
         webhooks = config.webhooks.enabled,
         webhook_mode = config.webhooks.mode.as_str(),
+        webhook_mutations_frozen = config.webhooks.mutations_frozen,
+        webhook_migration_transfer_key_id = config
+            .webhooks
+            .transfer_key
+            .as_deref()
+            .map(|k| k.current_kid()),
         "developer platform configuration loaded"
     );
     let db =
@@ -53,6 +59,13 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|e| fatal("webhook configuration error", e));
         let service = WebhookService::new(state.db.clone(), config.webhooks.clone());
         state = state.with_webhooks(service);
+    }
+    if settings.has_target(cf_service_auth::services::CALLING) {
+        state = state.with_calling_export(Arc::new(
+            developer_platform::webhooks::migration::port::HttpCallingMigration::new(
+                service_auth.client(),
+            ),
+        ));
     }
     if settings.has_target(cf_service_auth::services::MEETING_SERVICE) {
         state = state.with_sessions(Arc::new(MeetingServiceSessions::new(service_auth.client())));

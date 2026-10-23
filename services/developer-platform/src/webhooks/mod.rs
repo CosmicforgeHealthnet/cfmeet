@@ -23,6 +23,7 @@
 pub mod catalog;
 pub mod http;
 pub mod ingest;
+pub mod migration;
 pub mod worker;
 
 use std::{fmt, sync::Arc, time::Duration};
@@ -68,6 +69,13 @@ pub struct WebhookSettings {
     pub max_attempts: u32,
     /// Consecutive failed attempts after which an ACTIVE endpoint is disabled.
     pub auto_disable_after: i32,
+    /// Section 53 migration freeze (`DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN`):
+    /// customer and console mutations answer 503 with `CF-Webhook-Migration: frozen`.
+    pub mutations_frozen: bool,
+    /// The migration transfer key (`DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY`):
+    /// opens the secrets Calling exports and seals the ones a rollback hands back. Unset:
+    /// the import of secrets and the rollback export are refused.
+    pub transfer_key: Option<Arc<SecretBox>>,
 }
 
 impl Default for WebhookSettings {
@@ -80,6 +88,8 @@ impl Default for WebhookSettings {
             request_timeout: Duration::from_secs(10),
             max_attempts: cf_webhooks::retry::MAX_ATTEMPTS,
             auto_disable_after: 50,
+            mutations_frozen: false,
+            transfer_key: None,
         }
     }
 }
@@ -97,6 +107,14 @@ impl fmt::Debug for WebhookSettings {
             .field("request_timeout", &self.request_timeout)
             .field("max_attempts", &self.max_attempts)
             .field("auto_disable_after", &self.auto_disable_after)
+            .field("mutations_frozen", &self.mutations_frozen)
+            .field(
+                "transfer_key",
+                &self
+                    .transfer_key
+                    .as_ref()
+                    .map(|r| r.current_kid().to_string()),
+            )
             .finish()
     }
 }
@@ -147,6 +165,8 @@ pub struct SubscriptionRow {
     pub last_failure_at: Option<DateTime<Utc>>,
     pub disabled_reason: Option<String>,
     pub origin: String,
+    /// `VALID` or `ROTATION_REQUIRED` (a migrated subscription without its secret).
+    pub secret_state: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -154,7 +174,7 @@ pub struct SubscriptionRow {
 /// Never the sealed secret: views and checks do not load it.
 const SUBSCRIPTION_COLUMNS: &str = "id, environment_id, environment_kind, url, description, \
     event_types, status, secret_version, version, consecutive_failures, last_success_at, \
-    last_failure_at, disabled_reason, origin, created_at, updated_at";
+    last_failure_at, disabled_reason, origin, secret_state, created_at, updated_at";
 
 impl SubscriptionRow {
     /// The customer contract view (Calling's `Webhook`; never the secret).
@@ -339,6 +359,25 @@ impl WebhookService {
 
     pub fn now(&self) -> DateTime<Utc> {
         (self.clock)()
+    }
+
+    /// The migration refusal of a customer / console mutation while frozen: 503
+    /// `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: frozen` and `Retry-After`.
+    pub fn migration_refusal(&self) -> Option<axum::response::Response> {
+        if !self.settings.mutations_frozen {
+            return None;
+        }
+        let mut r = crate::http::error::error_response(ErrorCode::ServiceUnavailable);
+        let headers = r.headers_mut();
+        headers.insert(
+            "cf-webhook-migration",
+            axum::http::HeaderValue::from_static("frozen"),
+        );
+        headers.insert(
+            axum::http::header::RETRY_AFTER,
+            axum::http::HeaderValue::from_static("300"),
+        );
+        Some(r)
     }
 
     /// The sealing key ring, or 503 CAPABILITY_UNAVAILABLE (fail closed).
@@ -556,6 +595,11 @@ impl WebhookService {
         if current.version != expected_version {
             return Err(ApiError(ErrorCode::VersionConflict));
         }
+        // A migrated subscription whose secret could not be carried over is enabled only
+        // after the customer rotated its secret (never with a substitute).
+        if change.status.as_deref() == Some("ACTIVE") && current.secret_state != "VALID" {
+            return Err(ApiError(ErrorCode::InvalidState));
+        }
         let row = SubscriptionRow::find_by_statement(stmt(
             &format!(
                 "UPDATE devplat_webhook_subscriptions SET url = COALESCE($2, url), \
@@ -642,6 +686,7 @@ impl WebhookService {
         let row = SubscriptionRow::find_by_statement(stmt(
             &format!(
                 "UPDATE devplat_webhook_subscriptions SET secret_sealed = $2, secret_key_id = $3, \
+                   secret_state = 'VALID', \
                    secret_version = secret_version + 1, version = version + 1, updated_at = $4 \
                  WHERE id = $1 RETURNING {SUBSCRIPTION_COLUMNS}"
             ),
@@ -864,7 +909,7 @@ pub async fn unknown_key_ids<C: ConnectionTrait>(
     let rows = db
         .query_all(stmt(
             "SELECT DISTINCT secret_key_id FROM devplat_webhook_subscriptions \
-              WHERE status <> 'DELETED' ORDER BY 1",
+              WHERE status <> 'DELETED' AND secret_key_id IS NOT NULL ORDER BY 1",
             vec![],
         ))
         .await?;

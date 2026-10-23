@@ -189,10 +189,12 @@ fn webhook_cryptography_comes_only_from_cf_webhooks() {
             }
         }
         if code.contains("cf_webhooks::signing::sign(") {
-            signs = true;
-            assert_eq!(
-                file, "src/webhooks/worker.rs",
-                "signing happens in the worker only"
+            // Deliveries are signed in the worker only; the Section 53 migration computes
+            // Calling's keyed continuity fingerprint with the same primitive (no delivery).
+            signs |= file == "src/webhooks/worker.rs";
+            assert!(
+                file == "src/webhooks/worker.rs" || file == "src/webhooks/migration/mod.rs",
+                "{file}: signing happens in the worker only"
             );
         }
         if code.contains(".seal(&secret") {

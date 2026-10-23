@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.4.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over."
+    "version": "1.5.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback)."
   },
   "paths": {
     "/health": {
@@ -1386,6 +1386,716 @@
           }
         },
         "x-cfmeet-required-scope": "webhooks.manage"
+      }
+    },
+    "/internal/v1/operator/webhook-migration/status": {
+      "get": {
+        "operationId": "operatorWebhookMigrationStatus",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. The cutover phase (PREPARING / CUT_OVER / ROLLED_BACK, null before any import), the delivery mode, the freeze, the transfer key id, counts of migrated subscriptions / events / deliveries, held deliveries, rotation-required subscriptions and the latest import run. Writes nothing.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "phase",
+                    "deliveryMode",
+                    "migratedSubscriptions",
+                    "rotationRequired",
+                    "heldDeliveries",
+                    "latestRun"
+                  ],
+                  "properties": {
+                    "phase": {},
+                    "deliveryMode": {},
+                    "migratedSubscriptions": {},
+                    "rotationRequired": {},
+                    "heldDeliveries": {},
+                    "latestRun": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/inventory": {
+      "get": {
+        "operationId": "operatorWebhookMigrationInventory",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Dry run: every Calling export page applied inside ONE transaction that is rolled back — what an import would insert / update / leave unchanged, the conflicts and the subscriptions that would require a customer secret rotation. Writes nothing.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What an import would do.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "dryRun",
+                    "calling",
+                    "wouldImport",
+                    "rotationRequired",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "dryRun": {},
+                    "calling": {},
+                    "wouldImport": {},
+                    "rotationRequired": {},
+                    "conflicts": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/import": {
+      "post": {
+        "operationId": "operatorWebhookMigrationImport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Imports Calling's subscriptions, events, deliveries and attempts with their ids. Resumes the open run from its checkpoint (each page and its checkpoint commit together), else starts a full run; idempotent (upserts keyed by Calling's ids; a subscription is updated only when Calling's version is newer and it is unchanged here; a delivery still open at Calling is a held mirror). Signing secrets arrive only transfer-sealed and are re-sealed under this deployment's key ring; a secret that cannot be carried over makes the subscription ROTATION_REQUIRED (DISABLED, no secret) — never substituted. 503 CAPABILITY_UNAVAILABLE without the transfer key, the key ring or CF_CALLING_BASE_URL. Audited.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pageSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "runId",
+                    "state",
+                    "phase",
+                    "pages",
+                    "counts",
+                    "conflicts",
+                    "callingAtStart",
+                    "resumed"
+                  ],
+                  "properties": {
+                    "runId": {},
+                    "state": {},
+                    "phase": {},
+                    "pages": {},
+                    "counts": {},
+                    "conflicts": {},
+                    "callingAtStart": {},
+                    "resumed": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/reconcile": {
+      "get": {
+        "operationId": "operatorWebhookMigrationReconcile",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Calling's inventory and per-entity digests (sha256-canonical-lines-v1) against the same digests over the migrated rows here; for every entity whose digest differs, each MISSING_IN_DEVELOPER_PLATFORM / EXTRA_IN_DEVELOPER_PLATFORM / DIFFERENT record (with the differing fields; bounded list). Writes nothing.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The reconciliation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "clean",
+                    "algorithm",
+                    "digests",
+                    "inventory",
+                    "driftCount",
+                    "drift"
+                  ],
+                  "properties": {
+                    "clean": {},
+                    "algorithm": {},
+                    "digests": {},
+                    "inventory": {},
+                    "driftCount": {},
+                    "drift": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/shadow-report": {
+      "get": {
+        "operationId": "operatorWebhookMigrationShadowReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Dual-ingestion parity of the shadow window: for every event both services ingested, each (subscription, event) Calling delivered has a native delivery here and vice versa, and no native delivery to a migrated subscription was actually sent. Writes nothing.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The shadow report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "eventsComparedBothSides",
+                    "missingInDeveloperPlatformCount",
+                    "missingInCallingCount",
+                    "developerPlatformDeliveriesSent",
+                    "parity"
+                  ],
+                  "properties": {
+                    "eventsComparedBothSides": {},
+                    "missingInDeveloperPlatformCount": {},
+                    "missingInCallingCount": {},
+                    "developerPlatformDeliveriesSent": {},
+                    "parity": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/cutover-check": {
+      "get": {
+        "operationId": "operatorWebhookMigrationCutoverCheck",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. The cutover preconditions: Calling and this platform frozen, the last import completed without conflicts, reconcile clean, shadow parity, every required rotation acknowledged, the transfer key configured. Writes nothing.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ready",
+                    "checks",
+                    "info"
+                  ],
+                  "properties": {
+                    "ready": {},
+                    "checks": {},
+                    "info": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/rotation-acknowledgements": {
+      "post": {
+        "operationId": "operatorWebhookMigrationAcknowledgeRotations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Records the operator's acknowledgement that the named migrated subscriptions require a customer secret rotation (no secret was carried over). Audited.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "webhookIds"
+                ],
+                "properties": {
+                  "webhookIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "How many were acknowledged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "acknowledged"
+                  ],
+                  "properties": {
+                    "acknowledged": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/takeover": {
+      "post": {
+        "operationId": "operatorWebhookMigrationTakeover",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. The delivery switch. Refused (409 INVALID_STATE) unless this platform delivers (DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE=active), Calling stopped sending (CALLING_WEBHOOK_DELIVERY_ENABLED=false, no live claim) and the last completed import started after that. Releases the held mirrors of Calling's open deliveries (same delivery and event ids, attempts continued), de-duplicates every logical delivery to exactly one sender and moves to CUT_OVER (deliveries to migrated subscriptions are sent only from then on). Audited.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phase and what was released / de-duplicated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "phase",
+                    "result"
+                  ],
+                  "properties": {
+                    "phase": {},
+                    "result": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/rollback-export": {
+      "post": {
+        "operationId": "operatorWebhookMigrationRollbackExport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Pushes every subscription changed here since Calling last had it (and every subscription created here) back to Calling (webhook-migration.import); a newer signing secret travels only transfer-sealed for the rollback direction. Audited.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What Calling applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "candidates",
+                    "applied",
+                    "unchanged",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "candidates": {},
+                    "applied": {},
+                    "unchanged": {},
+                    "conflicts": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/webhook-migration/rollback": {
+      "post": {
+        "operationId": "operatorWebhookMigrationRollback",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53 §9.1 / §19.3 webhook migration from Calling (operator tooling). Permission `developer-platform.administer` (operator console only) and a named human operator. Rolls the delivery switch back: refused unless the phase is CUT_OVER / ROLLED_BACK and Calling's delivery is still disabled; moves to ROLLED_BACK (nothing is sent here any more; refused while a claim here is live), settles at Calling every open delivery already delivered here and hands every other open delivery back to Calling. Deliveries of events Calling never recorded are reported as orphans (the rollback stops unless acceptOrphans). Audited.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "acceptOrphans": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The rollback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "phase",
+                    "completed",
+                    "settledInCalling",
+                    "handedBack",
+                    "orphanCount",
+                    "orphans"
+                  ],
+                  "properties": {
+                    "phase": {},
+                    "completed": {},
+                    "settledInCalling": {},
+                    "handedBack": {},
+                    "orphanCount": {},
+                    "orphans": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },

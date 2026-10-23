@@ -8,7 +8,10 @@ use crate::{
     config::{service_auth::ServiceAuthRuntime, FeatureFlags},
     platform_access::{PlatformAccessPort, UnconfiguredPlatformAccess},
     session::{HumanSessions, UnconfiguredSessions},
-    webhooks::WebhookService,
+    webhooks::{
+        migration::port::{CallingMigrationPort, UnconfiguredCalling},
+        WebhookService,
+    },
 };
 
 #[derive(Clone)]
@@ -20,6 +23,9 @@ pub struct AppState {
     pub flags: FeatureFlags,
     /// Central customer webhooks (Section 53); `None`: every webhook route is 404.
     pub webhooks: Option<WebhookService>,
+    /// Calling's controlled webhook export (Section 53 migration); unconfigured: every
+    /// migration command fails closed.
+    pub calling_export: Arc<dyn CallingMigrationPort>,
 }
 
 impl AppState {
@@ -31,6 +37,7 @@ impl AppState {
             sessions: Arc::new(UnconfiguredSessions),
             flags: FeatureFlags::default(),
             webhooks: None,
+            calling_export: Arc::new(UnconfiguredCalling),
         }
     }
 
@@ -46,6 +53,11 @@ impl AppState {
 
     pub fn with_flags(mut self, flags: FeatureFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    pub fn with_calling_export(mut self, calling: Arc<dyn CallingMigrationPort>) -> Self {
+        self.calling_export = calling;
         self
     }
 

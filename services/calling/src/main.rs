@@ -341,6 +341,14 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     tracing::info!(
+        webhook_mutations_frozen = webhook_settings.mutations_frozen,
+        webhook_delivery_enabled = webhook_settings.delivers(),
+        webhook_authority = webhook_settings.authority.as_str(),
+        webhook_migration_transfer_key_id =
+            calling::webhooks::ownership_migration::transfer_key_id(&webhook_settings),
+        "customer webhook migration flags"
+    );
+    tracing::info!(
         webhooks_available = webhook_settings.secret_box.is_some(),
         webhook_key_id = webhook_settings
             .secret_box

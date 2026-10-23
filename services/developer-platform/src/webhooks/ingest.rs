@@ -5,7 +5,9 @@
 //!   its type must belong to that producer's own domain (unknown families are refused).
 //! * Internal-only facts of the producer's domain are acknowledged and never stored.
 //! * `(producer, source event id)` is the dedupe key: a re-published, replayed or
-//!   out-of-order duplicate returns the SAME `whe_` event id and never fans out again.
+//!   out-of-order duplicate returns the SAME `whe_` event id and never fans out again —
+//!   also when the event is Calling's history imported by the Section 53 migration (its
+//!   original `whe_` id is returned, so a late re-publication never re-delivers it).
 //! * Fan-out targets ACTIVE subscriptions of the SAME tenant / application / environment
 //!   whose event types match — a sandbox subscription never receives a production event.
 //!   In shadow mode the deliveries are recorded SHADOW (nothing will be sent).
@@ -144,7 +146,8 @@ async fn existing_event<C: ConnectionTrait>(
 ) -> Result<Option<String>, ApiError> {
     let row = db
         .query_one(stmt(
-            "SELECT event_id FROM devplat_webhook_events WHERE producer = $1 AND source_event_id = $2",
+            "SELECT event_id FROM devplat_webhook_events WHERE producer = $1 AND source_event_id = $2 \
+              ORDER BY (origin = 'NATIVE') DESC LIMIT 1",
             vec![producer.into(), source_event_id.into()],
         ))
         .await?;
@@ -213,7 +216,7 @@ impl WebhookService {
                 "INSERT INTO devplat_webhook_events (event_id, producer, source_event_id, event_type, \
                    tenant_id, application_id, environment_id, occurred_at, payload, received_at) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
-                 ON CONFLICT (producer, source_event_id) DO NOTHING",
+                 ON CONFLICT (producer, source_event_id) WHERE origin = 'NATIVE' DO NOTHING",
                 vec![
                     event_id.clone().into(),
                     producer.into(),

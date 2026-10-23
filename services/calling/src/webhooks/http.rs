@@ -5,6 +5,13 @@
 //! `webhooks.manage`, and every subscribed event type needs its own read scope
 //! (e.g. `calls.read` for `call.*`). Mutations of an existing subscription carry
 //! `expectedVersion`. The signing secret is returned only by create / rotate-secret.
+//!
+//! Part VI §53 webhook migration: while `CALLING_WEBHOOK_MUTATIONS_FROZEN` is set, every
+//! mutation (create, update, delete, rotate-secret, replay) answers 503
+//! `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: frozen` and `Retry-After` (reads and
+//! deliveries continue); with `CALLING_WEBHOOK_AUTHORITY=retired` every route answers 503
+//! `SERVICE_UNAVAILABLE` with `CF-Webhook-Migration: moved` (the Developer Platform owns
+//! customer webhooks). The scope checks run first: an unauthorized caller learns nothing.
 
 use axum::{
     extract::{rejection::JsonRejection, rejection::QueryRejection, Path, Query, State},
@@ -106,6 +113,9 @@ async fn create(
     body: Result<Json<CreateBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
+    if let Some(refused) = state.webhooks.migration_refusal(true) {
+        return Ok(refused);
+    }
     let body = parse_body(body)?;
     let created = state
         .webhooks
@@ -120,6 +130,9 @@ async fn list(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_READ)?;
+    if let Some(refused) = state.webhooks.migration_refusal(false) {
+        return Ok(refused);
+    }
     let q = QueryParams::parse(query, &["limit", "cursor"])?;
     let (limit, cursor) = page(&q)?;
     let list = state
@@ -135,6 +148,9 @@ async fn get_one(
     Path(id): Path<String>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_READ)?;
+    if let Some(refused) = state.webhooks.migration_refusal(false) {
+        return Ok(refused);
+    }
     let view = state
         .webhooks
         .get(CallScope::of_platform(&ctx), uuid_path(&id)?)
@@ -149,6 +165,9 @@ async fn update(
     body: Result<Json<UpdateBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
+    if let Some(refused) = state.webhooks.migration_refusal(true) {
+        return Ok(refused);
+    }
     let id = uuid_path(&id)?;
     let b = parse_body(body)?;
     // Part H §72: a suspended scope may only DISABLE a subscription here — never move
@@ -185,6 +204,9 @@ async fn delete(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
+    if let Some(refused) = state.webhooks.migration_refusal(true) {
+        return Ok(refused);
+    }
     let id = uuid_path(&id)?;
     let q = QueryParams::parse(query, &["expectedVersion"])?;
     let version = q
@@ -202,6 +224,9 @@ async fn rotate(
     body: Result<Json<VersionBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
+    if let Some(refused) = state.webhooks.migration_refusal(true) {
+        return Ok(refused);
+    }
     let id = uuid_path(&id)?;
     let b = parse_body(body)?;
     let rotated = state
@@ -218,6 +243,9 @@ async fn deliveries(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_READ)?;
+    if let Some(refused) = state.webhooks.migration_refusal(false) {
+        return Ok(refused);
+    }
     let id = uuid_path(&id)?;
     let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
     let (limit, cursor) = page(&q)?;
@@ -240,6 +268,9 @@ async fn replay(
     Path(id): Path<String>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::WEBHOOKS_MANAGE)?;
+    if let Some(refused) = state.webhooks.migration_refusal(true) {
+        return Ok(refused);
+    }
     let view = state.webhooks.replay(&ctx, uuid_path(&id)?).await?;
     Ok(respond(StatusCode::CREATED, view, false))
 }

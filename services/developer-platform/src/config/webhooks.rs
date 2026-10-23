@@ -12,6 +12,9 @@
 //! | `DEVELOPER_PLATFORM_WEBHOOK_REQUEST_TIMEOUT_MS` | no | delivery request timeout (500–30000, default 10000) |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_MAX_ATTEMPTS` | no | attempts before a delivery is dead-lettered (1–20, default 8) |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_AUTO_DISABLE_AFTER` | no | consecutive failed attempts after which an endpoint is disabled automatically (5–10000, default 50) |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN` | no | Section 53 migration freeze (default `false`): `true` — customer and console webhook mutations answer 503 `SERVICE_UNAVAILABLE` (`CF-Webhook-Migration: frozen`); reads, ingestion and delivery continue |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY` | no | the webhook migration transfer key shared with Calling under its own variable name (base64, 32 bytes, not weak): opens the transfer-sealed secrets Calling exports and seals the ones a rollback hands back; unset = secret import and rollback export refused |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY_ID` | with the transfer key | its key id (`[A-Za-z0-9_-]`, 1–32; must equal Calling's) |
 //!
 //! Every key may instead be a mounted secret file (`<NAME>_FILE`): both forms set is
 //! refused, an unreadable / empty file is refused (never a fallback to "no key"), and
@@ -36,6 +39,9 @@ const PREVIOUS: &str = "DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_PREVIOUS";
 const PREVIOUS_FILE: &str = "DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_PREVIOUS_FILE";
 const PREVIOUS_ID: &str = "DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_PREVIOUS_ID";
 const ALLOW_PRIVATE: &str = "DEVELOPER_PLATFORM_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS";
+const TRANSFER: &str = "DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY";
+const TRANSFER_FILE: &str = "DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY_FILE";
+const TRANSFER_ID: &str = "DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY_ID";
 
 /// Largest key file accepted.
 const MAX_KEY_FILE_BYTES: u64 = 16 * 1024;
@@ -97,7 +103,34 @@ pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<WebhookSetti
         request_timeout,
         max_attempts,
         auto_disable_after,
+        mutations_frozen: flag(get, "DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN")?,
+        transfer_key: transfer_key(get)?.map(Arc::new),
     })
+}
+
+/// The webhook migration transfer key (one key, no rotation: it lives only for the
+/// migration window), or `None` when unset.
+pub fn transfer_key(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<SecretBox>, ConfigError> {
+    let permissive = matches!(runtime(get).as_deref(), Some("local") | Some("test"));
+    let Some(raw) = read_key(get, TRANSFER, TRANSFER_FILE, permissive)? else {
+        return Ok(None);
+    };
+    let kid = get(TRANSFER_ID).ok_or(ConfigError::Missing { var: TRANSFER_ID })?;
+    let key = SealingKey::from_base64(&kid, raw.expose_secret()).map_err(|e| match e {
+        SecretBoxError::KeyId => {
+            ConfigError::invalid(TRANSFER_ID, "has an invalid key id ([A-Za-z0-9_-], 1-32)")
+        }
+        SecretBoxError::WeakKey => ConfigError::invalid(
+            TRANSFER,
+            "is a weak key (repeated or low-entropy bytes); generate 32 random bytes",
+        ),
+        _ => ConfigError::invalid(TRANSFER, "must be 32 bytes, base64"),
+    })?;
+    SecretBox::new(key, None)
+        .map(Some)
+        .map_err(|_| ConfigError::invalid(TRANSFER, "is invalid"))
 }
 
 /// The sealing key ring (current + optional previous), or `None` when no key is set.
@@ -263,6 +296,43 @@ mod tests {
             vec![(KEY_FILE, "/nonexistent/key".to_string())],
         ] {
             let err = key_ring(&lookup(&pairs)).expect_err("refused");
+            for (_, v) in &pairs {
+                assert!(!err.to_string().contains(v.as_str()), "{err}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_migration_flags_and_transfer_key_are_parsed_without_echo() {
+        let s = from_lookup(&lookup(&[])).unwrap();
+        assert!(!s.mutations_frozen && s.transfer_key.is_none());
+        let s = from_lookup(&lookup(&[
+            ("DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN", "true".into()),
+            (TRANSFER, b64(9)),
+            (TRANSFER_ID, "transfer-1".into()),
+        ]))
+        .unwrap();
+        assert!(s.mutations_frozen);
+        assert_eq!(s.transfer_key.unwrap().current_kid(), "transfer-1");
+        let weak = base64::engine::general_purpose::STANDARD.encode([3u8; 32]);
+        for pairs in [
+            vec![(TRANSFER, b64(9))],
+            vec![
+                (TRANSFER, weak.clone()),
+                (TRANSFER_ID, "transfer-x9".to_string()),
+            ],
+            vec![(TRANSFER, b64(9)), (TRANSFER_ID, "a b".to_string())],
+            vec![
+                (TRANSFER, b64(9)),
+                (TRANSFER_FILE, "/nonexistent".to_string()),
+                (TRANSFER_ID, "transfer-x9".to_string()),
+            ],
+            vec![(
+                "DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN",
+                "maybe".to_string(),
+            )],
+        ] {
+            let err = from_lookup(&lookup(&pairs)).expect_err("refused");
             for (_, v) in &pairs {
                 assert!(!err.to_string().contains(v.as_str()), "{err}");
             }

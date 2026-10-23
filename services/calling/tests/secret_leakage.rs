@@ -316,6 +316,7 @@ async fn runtime_secrets_never_reach_logs_or_any_other_response() {
             },
             request_timeout: std::time::Duration::from_secs(2),
             max_attempts: 3,
+            ..Default::default()
         };
     })
     .await

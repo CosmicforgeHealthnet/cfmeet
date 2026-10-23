@@ -62,6 +62,7 @@ pub fn app(state: AppState) -> Router {
             "/internal/v1",
             internal::routes()
                 .merge(operator::routes())
+                .merge(crate::webhooks::migration::http::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
