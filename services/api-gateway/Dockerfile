@@ -2,8 +2,10 @@
 #
 #   docker build -f services/api-gateway/Dockerfile -t cfmeet-api-gateway .
 #
-# Only packages/service-auth and services/api-gateway enter the build context. The image
-# contains the gateway only (no database, no migrations). The signing key FILE and the
+# Only packages/service-auth, services/api-gateway, the generated route manifest
+# (infra/api-gateway/route-manifest.json) and the generated public OpenAPI documents
+# (packages/contracts/bundled/public) enter the build; the latter two are embedded in the
+# binary at compile time. The image contains the gateway only (no database, no migrations). The signing key FILE and the
 # Platform Access / upstream URLs are supplied at runtime; public routing is OFF unless
 # API_GATEWAY_PUBLIC_ROUTING_ENABLED=true. Not deployed by any workflow yet; live Nginx
 # routing is unchanged.
@@ -12,6 +14,8 @@ FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY services/api-gateway services/api-gateway
+COPY infra/api-gateway/route-manifest.json infra/api-gateway/route-manifest.json
+COPY packages/contracts/bundled/public packages/contracts/bundled/public
 WORKDIR /src/services/api-gateway
 RUN cargo build --release --locked --bin api-gateway
 

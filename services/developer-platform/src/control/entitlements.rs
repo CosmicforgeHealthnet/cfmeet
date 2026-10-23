@@ -28,9 +28,15 @@ pub fn environment_cap(kind: &str) -> (u64, u64) {
 
 /// The effective entitlement snapshot of `environment_id` (404 when the environment is
 /// unknown to the Developer Platform).
+///
+/// The environment kind is the Developer Platform profile's; for an environment known
+/// only by its anchored reference (created outside the console), `confirmed_kind` — the
+/// kind Platform Access confirmed to the caller — is used; with neither, the STRICTEST
+/// cap applies (an unknown kind never receives production limits).
 pub async fn effective<C: ConnectionTrait>(
     db: &C,
     environment_id: Uuid,
+    confirmed_kind: Option<&str>,
 ) -> Result<Value, ApiError> {
     let env = db
         .query_one(stmt(
@@ -45,7 +51,9 @@ pub async fn effective<C: ConnectionTrait>(
         .ok_or(ApiError(ErrorCode::NotFound))?;
     let tenant_id: Option<Uuid> = env.try_get("", "tenant_id")?;
     let application_id: Option<Uuid> = env.try_get("", "application_id")?;
-    let kind: Option<String> = env.try_get("", "kind")?;
+    let kind: Option<String> = env
+        .try_get::<Option<String>>("", "kind")?
+        .or_else(|| confirmed_kind.map(str::to_string));
     let org_state: Option<String> = env.try_get("", "state")?;
     let plans = match (tenant_id, application_id) {
         (Some(t), Some(a)) => {
@@ -75,7 +83,7 @@ pub async fn effective<C: ConnectionTrait>(
             project_plan = Some(entry);
         }
     }
-    let (cap_min, cap_day) = environment_cap(kind.as_deref().unwrap_or("PRODUCTION"));
+    let (cap_min, cap_day) = environment_cap(kind.as_deref().unwrap_or("SANDBOX"));
     let resolve = |key: &str, default: u64, cap: u64| -> (u64, &'static str) {
         let mut value = tenant_plan
             .as_ref()

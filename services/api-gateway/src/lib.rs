@@ -14,10 +14,14 @@
 //! The gateway owns NO database and no communications data, stores no E2EE material and
 //! has no product-specific route.
 
+pub mod catalogue;
 pub mod config;
 pub mod context;
+pub mod docs;
 pub mod headers;
 pub mod http;
 pub mod identity;
+pub mod quota;
 pub mod routing;
 pub mod state;
+pub mod ws;

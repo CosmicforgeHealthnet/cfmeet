@@ -5,7 +5,10 @@
 //! unless `CFMEET_SKIP_DB_TESTS=1` (explicit SKIPPED line).
 //!
 //! Requests go through the REAL router. Customer credentials are resolved by a scripted
-//! authority (the real Platform Access is exercised by the cross-service journeys);
+//! authority (the real Platform Access is exercised by the cross-service journeys); a
+//! gateway-forwarded customer request carries a real API Gateway service token (trusted
+//! with exactly `sms-request.forward`) whose delegated credential id the scripted
+//! authority re-verifies like Platform Access's delegated-authority operation;
 //! Numbering is a scripted port; the provider is the deterministic adapter; internal
 //! requests carry real Ed25519 service tokens verified by the gateway's trust bundle.
 #![allow(dead_code)]
@@ -231,6 +234,11 @@ pub fn protection() -> Protection {
 pub struct FakeAuthority {
     pub tokens: StdMutex<HashMap<String, TrustedContext>>,
     pub down: StdMutex<bool>,
+    /// Every delegated context a delegated-authority request carried (with its correlation).
+    pub delegated: StdMutex<Vec<(DelegatedPlatformContext, CorrelationId)>>,
+    /// Answers the next delegated-authority request with this chain, unchecked (a
+    /// misbehaving authority).
+    pub misbind: StdMutex<Option<TrustedContext>>,
 }
 
 #[async_trait]
@@ -243,6 +251,47 @@ impl CustomerAuthority for FakeAuthority {
             Some(c) => Authentication::Authenticated(Box::new(c.clone())),
             None => Authentication::Rejected {
                 reason: "unknown".into(),
+                throttle: None,
+            },
+        })
+    }
+
+    /// Platform Access's delegated-authority operation: the LIVE chain of the delegated
+    /// credential, only when it belongs to the delegated tenant / application /
+    /// environment / service account.
+    async fn authenticate_delegated(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        self.delegated
+            .lock()
+            .unwrap()
+            .push((delegated.clone(), correlation_id.clone()));
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        if let Some(chain) = self.misbind.lock().unwrap().take() {
+            return Ok(Authentication::Authenticated(Box::new(chain)));
+        }
+        let live = self
+            .tokens
+            .lock()
+            .unwrap()
+            .values()
+            .find(|c| Some(c.credential_id) == delegated.initiating_credential_id())
+            .cloned();
+        Ok(match live {
+            Some(c)
+                if c.tenant_id == delegated.tenant_id()
+                    && c.application_id == delegated.application_id()
+                    && c.environment_id == delegated.application_environment_id()
+                    && c.service_account_id == delegated.initiating_service_account_id() =>
+            {
+                Authentication::Authenticated(Box::new(c))
+            }
+            _ => Authentication::Rejected {
+                reason: "unknown_credential".into(),
                 throttle: None,
             },
         })
@@ -553,15 +602,21 @@ pub struct Peers {
     pub telephony: Arc<ServiceTokenSigner>,
     /// Messaging: trusted with exactly `sms-bridge.submit` (Part V H SMS Bridge).
     pub messaging: Arc<ServiceTokenSigner>,
+    /// The API Gateway: trusted with exactly `sms-request.forward` (Part VI §51).
+    pub api_gateway: Arc<ServiceTokenSigner>,
+    /// Claims the API Gateway identity, but signs with a key the bundle does not hold.
+    pub rogue_api_gateway: Arc<ServiceTokenSigner>,
 }
 
-/// The gateway's service-auth runtime: Messaging is the only trusted issuer, with
-/// exactly `sms-bridge.submit`.
+/// The gateway's service-auth runtime: Messaging is trusted with exactly
+/// `sms-bridge.submit`, the API Gateway with exactly `sms-request.forward`.
 pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let clock: SharedClock = Arc::new(SystemClock);
     let me = key("sms-gateway-test-1");
     let telephony = key("telephony-test-1");
     let messaging = key("messaging-test-1");
+    let api_gateway = key("api-gateway-test-1");
+    let rogue_api_gateway = key("api-gateway-test-2");
     let bundle = json!({
         "bundle_version": 1,
         "receiver": cf_service_auth::services::SMS_GATEWAY,
@@ -572,6 +627,12 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
             "runtime_environment": ENV,
             "keys": [messaging.public_jwk()],
             "permissions": ["sms-bridge.submit"],
+        }, {
+            "issuer": cf_service_auth::services::API_GATEWAY,
+            "audience": cf_service_auth::services::SMS_GATEWAY,
+            "runtime_environment": ENV,
+            "keys": [api_gateway.public_jwk()],
+            "permissions": ["sms-request.forward"],
         }],
     })
     .to_string();
@@ -606,6 +667,20 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
             ENV,
             messaging,
             TokenTtl::default(),
+            clock.clone(),
+        )),
+        api_gateway: Arc::new(ServiceTokenSigner::new(
+            ServiceId::api_gateway(),
+            ENV,
+            api_gateway,
+            TokenTtl::seconds(60).unwrap(),
+            clock.clone(),
+        )),
+        rogue_api_gateway: Arc::new(ServiceTokenSigner::new(
+            ServiceId::api_gateway(),
+            ENV,
+            rogue_api_gateway,
+            TokenTtl::seconds(60).unwrap(),
             clock,
         )),
     };
@@ -902,6 +977,57 @@ impl Harness {
             None => Body::empty(),
         };
         self.raw(b.body(body).unwrap()).await
+    }
+
+    /// The delegated context the API Gateway signs for a request it authenticated with
+    /// `customer`'s credential.
+    pub fn gateway_delegation(&self, customer: &Customer) -> DelegatedPlatformContext {
+        customer
+            .context
+            .owner_scope()
+            .delegated(None)
+            .with_initiating_credential(customer.context.credential_id)
+    }
+
+    /// A customer request as the API Gateway forwards it: the original method, path,
+    /// body and `idempotency-key`, NO `Authorization` header, and a fresh service token of
+    /// `signer` carrying `delegated` (plus any `extra` headers, e.g. an Authorization a
+    /// test adds on purpose). Returns the response and the signed correlation id.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn forwarded(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<&str>,
+        delegated: Option<DelegatedPlatformContext>,
+        extra: &[(&str, &str)],
+    ) -> (Response, CorrelationId) {
+        let mut outbound = OutboundServiceRequest::new_operation(ServiceId::sms_gateway());
+        if let Some(d) = delegated {
+            outbound = outbound.with_delegated_context(d);
+        }
+        let correlation = outbound.correlation_id().clone();
+        let signed = signer.sign(&outbound).unwrap();
+        let mut b = Request::builder().method(method).uri(path);
+        for (k, v) in signed.headers().iter() {
+            b = b.header(k, v);
+        }
+        if let Some(k) = idempotency_key {
+            b = b.header("idempotency-key", k);
+        }
+        for (k, v) in extra {
+            b = b.header(*k, *v);
+        }
+        let body = match body {
+            Some(v) => {
+                b = b.header("content-type", "application/json");
+                Body::from(v.to_string())
+            }
+            None => Body::empty(),
+        };
+        (self.raw(b.body(body).unwrap()).await, correlation)
     }
 
     /// An internal request signed by `signer`.

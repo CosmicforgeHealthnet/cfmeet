@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use api_gateway::{
+    catalogue,
     config::{service_auth::ServiceAuthSettings, ApiGatewayConfig, LogFormat},
     http,
     identity::PlatformAccessAuthority,
-    routing,
+    quota::{DeveloperPlatformQuotas, QuotaEngine},
     state::AppState,
 };
 use tracing_subscriber::EnvFilter;
@@ -38,8 +39,12 @@ async fn main() -> anyhow::Result<()> {
     let service_auth = settings
         .load(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("service authentication configuration error", e));
-    let routes = routing::table_for(config.flags.public_routing, config.flags.websockets)
-        .unwrap_or_else(|e| fatal("route catalogue error", e));
+    let routes = catalogue::table_for(
+        config.flags.public_routing,
+        config.flags.websockets,
+        &config.controls,
+    )
+    .unwrap_or_else(|e| fatal("route catalogue error", e));
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %service_auth.signer().runtime_environment(),
@@ -55,11 +60,38 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let authority = Arc::new(PlatformAccessAuthority::new(service_auth.client()));
+    // Platform request quotas: shared Redis counters when configured (per-instance
+    // otherwise), limits and durable daily accounting from the Developer Platform.
+    let redis = match config.quotas.redis_url() {
+        Some(url) => {
+            let client = redis::Client::open(url)
+                .unwrap_or_else(|_| fatal("configuration error", "API_GATEWAY_REDIS_URL"));
+            match redis::aio::ConnectionManager::new(client).await {
+                Ok(c) => Some(c),
+                Err(_) => {
+                    tracing::warn!("quota store unreachable at startup: per-instance counters until it recovers");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+    let quota = Arc::new(QuotaEngine::new(
+        redis,
+        config.quotas.key_prefix.clone(),
+        Arc::new(DeveloperPlatformQuotas::new(service_auth.client())),
+    ));
+    tokio::spawn(quota.clone().run_flusher(config.quota_flush_interval));
     let state = AppState::new(authority, service_auth, routes)
         .with_flags(config.flags)
+        .with_controls(config.controls.clone())
         .with_quotas(config.quotas.clone())
+        .with_quota_engine(quota)
         .with_upstream_timeout(config.upstream_timeout)
-        .with_max_body_bytes(config.max_body_bytes);
+        .with_max_body_bytes(config.max_body_bytes)
+        .with_header_limits(config.max_header_bytes, config.max_headers)
+        .with_ws_max_message_bytes(config.ws_max_message_bytes)
+        .with_cors_allowed_origins(config.cors_allowed_origins.clone());
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "api gateway listening");
     axum::serve(listener, http::app(state))

@@ -14,6 +14,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20261101_000001_developer_platform_foundation;
 mod m20261102_000002_control_plane;
+mod m20261103_000003_api_usage;
 
 /// Name of the table recording which Developer Platform migrations have been applied.
 pub const MIGRATION_TABLE: &str = "developer_platform_seaql_migrations";
@@ -26,6 +27,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20261101_000001_developer_platform_foundation::Migration),
             Box::new(m20261102_000002_control_plane::Migration),
+            Box::new(m20261103_000003_api_usage::Migration),
         ]
     }
 

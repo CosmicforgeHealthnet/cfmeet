@@ -24,6 +24,7 @@ pub mod operator;
 pub mod organizations;
 pub mod pagination;
 pub mod projects;
+pub mod usage;
 
 use cf_service_auth::DelegatedPlatformContext;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};

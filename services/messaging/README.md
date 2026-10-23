@@ -28,6 +28,16 @@ the credential's principal restriction and when Platform Access resolves it ACTI
 credential's own environment. Client tokens are refused there
 (`CLIENT_TOKENS_NOT_ENABLED`); only the device-direct realtime routes accept them.
 
+Requests forwarded by the public API Gateway (Part VI §51) reach the same `/v1` routes
+WITHOUT `Authorization`: they carry a fresh gateway service token instead, accepted only
+when Messaging's trust bundle grants `cfmeet.api-gateway` `messaging-request.forward` and
+its signed delegated context names the initiating credential. Messaging then asks Platform
+Access for that credential's LIVE authority chain
+(`POST /internal/v1/credentials/delegated-authority`, `platform-credential.authenticate`,
+never cached) and continues exactly as for a bearer credential. A token together with
+`Authorization`, any other issuer, a missing grant or credential id, or a rejected chain is
+401; Platform Access unreachable is 503. Without the grant in the bundle the path is off.
+
 | Route | Scope |
 |---|---|
 | `GET /health`, `GET /ready`, `GET /openapi.json` | — |

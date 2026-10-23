@@ -753,14 +753,14 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) and operator administration (developer-platform.administer, operator console only)."
+      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only)."
     },
     {
       "id": "cfmeet.developer-platform.control",
@@ -786,25 +786,133 @@
     },
     {
       "id": "cfmeet.api-gateway.common",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "json-schema",
       "path": "platform-developer/gateway/common/v1.schema.json",
       "owner": "api-gateway",
       "visibility": "public",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "API Gateway vocabulary (Part VI §§1–5 foundation): public error envelope (default-deny NOT_FOUND, authentication, scope, rate, upstream availability / timeout) and probes."
+      "description": "API Gateway vocabulary: public error envelope (default-deny NOT_FOUND, authentication, scope, credential throttling, platform request quota, header / URI / origin limits, upstream availability / timeout) and probes."
     },
     {
       "id": "cfmeet.api-gateway.http-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "platform-developer/gateway/http/v1.openapi.json",
       "owner": "api-gateway",
       "visibility": "public",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Customer ingress of services/api-gateway: probes and the flag-gated foundation route GET /v1/developer-platform/context. Default deny; internal, provider-callback, operator and Telephony surfaces are never routable. The Section 51 route catalogue is not included."
+      "description": "Customer ingress of services/api-gateway: probes, public API documentation (/openapi.json, /openapi/{domain}.json, /docs) and discovery, and the flag-gated generated public route catalogue. Default deny; internal, provider-callback, operator and Telephony surfaces are never routable."
+    },
+    {
+      "id": "cfmeet.meeting-service.public-api",
+      "version": "1.1.0",
+      "kind": "openapi",
+      "path": "bundled/public/meetings/v1.openapi.json",
+      "owner": "meeting-service",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the meetings API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.calling.public-api",
+      "version": "1.11.0",
+      "kind": "openapi",
+      "path": "bundled/public/calling/v1.openapi.json",
+      "owner": "calling",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the calling API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.privacy-relay.public-api",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/public/privacy-relay/v1.openapi.json",
+      "owner": "privacy-relay",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the privacy-relay API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.messaging.public-api",
+      "version": "1.13.0",
+      "kind": "openapi",
+      "path": "bundled/public/messaging/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the messaging API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.numbering.public-api",
+      "version": "1.12.0",
+      "kind": "openapi",
+      "path": "bundled/public/numbering/v1.openapi.json",
+      "owner": "numbering",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the numbering API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.sms-gateway.public-api",
+      "version": "1.2.0",
+      "kind": "openapi",
+      "path": "bundled/public/sms/v1.openapi.json",
+      "owner": "sms-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the sms API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.developer-platform.public-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/public/developer-platform/v1.openapi.json",
+      "owner": "developer-platform",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the developer-platform API through the CF Meet public API Gateway: only allow-listed PUBLIC_CUSTOMER operations of the source contract, internal security schemes and unreferenced internal schemas removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.api-gateway.public-http-api",
+      "version": "1.1.0",
+      "kind": "openapi",
+      "path": "bundled/public/gateway/v1.openapi.json",
+      "owner": "api-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Customer-facing public OpenAPI of the API Gateway's own customer operation (GET /v1/developer-platform/context, the Part VI foundation route served by the Developer Platform) through the CF Meet public API Gateway: allow-listed PUBLIC_CUSTOMER operations of cfmeet.api-gateway.http-api only, internal security schemes removed, every reference resolved offline. Derived, never edited."
+    },
+    {
+      "id": "cfmeet.api-gateway.public-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/public/aggregate/v1.openapi.json",
+      "owner": "api-gateway",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
+      "description": "Aggregate customer-facing API reference of the CF Meet public API Gateway (every public domain, service-namespaced components, per-service versions preserved). Derived from the per-domain public documents; never edited."
     }
   ]
 }

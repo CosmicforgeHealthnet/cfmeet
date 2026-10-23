@@ -3,6 +3,9 @@
 //! | Route | Permission | Context |
 //! |---|---|---|
 //! | `GET /internal/v1/gateway/context` | `developer-request.forward` (API Gateway only) | signed delegated context, re-validated by Platform Access |
+//! | `GET /internal/v1/entitlements/environments/{id}` | `developer-entitlement.read` | — |
+//! | `POST /internal/v1/usage/api-requests` | `developer-usage.record` | idempotent batch |
+//! | `GET /internal/v1/usage/api-requests/{environmentId}/{day}` | `developer-usage.record` | — |
 //!
 //! `gateway/context` is the Part VI foundation route of the customer path: it returns the
 //! canonical Platform Access ids of the caller's application environment as Platform
@@ -34,6 +37,47 @@ pub fn routes() -> Router<AppState> {
             "/entitlements/environments/:environment_id",
             get(environment_entitlements),
         )
+        .route("/usage/api-requests", axum::routing::post(record_usage))
+        .route("/usage/api-requests/:environment_id/:day", get(daily_usage))
+}
+
+/// `POST /internal/v1/usage/api-requests` — an idempotent batch of accepted public API
+/// request counts (API Gateway quota accounting). Permission `developer-usage.record`.
+async fn record_usage(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(batch): Json<crate::control::usage::UsageBatch>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperUsageRecord)?;
+    let by = caller
+        .context()
+        .authenticated_service()
+        .as_str()
+        .to_string();
+    Ok(Json(
+        crate::control::usage::record(&state.db, &by, batch).await?,
+    ))
+}
+
+/// `GET /internal/v1/usage/api-requests/{environmentId}/{day}` — the durable daily total
+/// the gateway re-seeds its shared day window from. Permission `developer-usage.record`.
+async fn daily_usage(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Path((environment_id, day)): axum::extract::Path<(Uuid, String)>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperUsageRecord)?;
+    Ok(Json(
+        crate::control::usage::daily(&state.db, environment_id, &day).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntitlementQuery {
+    /// The environment kind Platform Access confirmed to the caller (used only for an
+    /// environment without a Developer Platform profile).
+    kind: Option<String>,
 }
 
 /// `GET /internal/v1/entitlements/environments/{id}` — effective platform entitlements
@@ -42,10 +86,16 @@ async fn environment_entitlements(
     State(state): State<AppState>,
     caller: InternalCaller,
     axum::extract::Path(environment_id): axum::extract::Path<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<EntitlementQuery>,
 ) -> Result<Json<Value>, ApiError> {
     caller.require_permission(InternalPermission::DeveloperEntitlementRead)?;
+    let kind = match query.kind.as_deref() {
+        None => None,
+        Some(k @ ("SANDBOX" | "TEST" | "PRODUCTION")) => Some(k),
+        Some(_) => return Err(ApiError(ErrorCode::ValidationError)),
+    };
     Ok(Json(
-        crate::control::entitlements::effective(&state.db, environment_id).await?,
+        crate::control::entitlements::effective(&state.db, environment_id, kind).await?,
     ))
 }
 

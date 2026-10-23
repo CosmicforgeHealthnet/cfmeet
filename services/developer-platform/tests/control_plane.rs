@@ -4,9 +4,10 @@
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
+use cf_service_auth::{OutboundServiceRequest, ServiceId};
 use common::*;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -1418,4 +1419,167 @@ async fn activity_history_is_immutable_and_paginated() {
         "INSERT INTO devplat_activity_events (id, tenant_id, actor_kind, actor_ref, action, target_type, target_id, outcome, request_id, correlation_id, summary, occurred_at) \
          VALUES ('{}', '{o}', 'USER', 'user:x', 'x.y', 'X', 'x', 'SUCCEEDED', 'r', 'c', '{{\"signingSecret\":\"whsec\"}}', now())", Uuid::new_v4())).await;
     assert!(r.is_err());
+}
+
+#[tokio::test]
+async fn api_request_usage_batches_are_counted_exactly_once() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let env = Uuid::new_v4();
+    let gw = |method: Method, path: String, body: Option<Value>| {
+        let signed = c
+            .peers
+            .gateway
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        c.raw(method, path, headers, body)
+    };
+    let batch = Uuid::new_v4();
+    let body = json!({ "batchId": batch, "entries": [
+        { "environmentId": env, "day": "2026-10-23", "count": 7 },
+        { "environmentId": env, "day": "2026-10-22", "count": 3 } ] });
+    let r = gw(
+        Method::POST,
+        "/internal/v1/usage/api-requests".into(),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["outcome"], "RECORDED");
+    // A replay after an unknown outcome is acknowledged, never counted twice.
+    let r = gw(
+        Method::POST,
+        "/internal/v1/usage/api-requests".into(),
+        Some(body),
+    )
+    .await;
+    assert_eq!(r.json["outcome"], "ALREADY_RECORDED");
+    let more = json!({ "batchId": Uuid::new_v4(), "entries": [{ "environmentId": env, "day": "2026-10-23", "count": 5 }] });
+    gw(
+        Method::POST,
+        "/internal/v1/usage/api-requests".into(),
+        Some(more),
+    )
+    .await;
+    let d = gw(
+        Method::GET,
+        format!("/internal/v1/usage/api-requests/{env}/2026-10-23"),
+        None,
+    )
+    .await;
+    assert_eq!(d.json["count"], 12);
+    let d = gw(
+        Method::GET,
+        format!("/internal/v1/usage/api-requests/{env}/2026-10-21"),
+        None,
+    )
+    .await;
+    assert_eq!(d.json["count"], 0);
+    // Invalid batches are refused whole.
+    for bad in [
+        json!({ "batchId": Uuid::new_v4(), "entries": [] }),
+        json!({ "batchId": Uuid::new_v4(), "entries": [{ "environmentId": env, "day": "2026-13-01", "count": 1 }] }),
+        json!({ "batchId": Uuid::new_v4(), "entries": [{ "environmentId": env, "day": "2026-10-23", "count": 0 }] }),
+        json!({ "batchId": Uuid::new_v4(), "entries": [{ "environmentId": env, "day": "2026-10-23", "count": 1, "path": "/v1/x" }] }),
+    ] {
+        let r = gw(
+            Method::POST,
+            "/internal/v1/usage/api-requests".into(),
+            Some(bad),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    }
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_api_usage_batches")
+            .await,
+        2
+    );
+    // Only the gateway's developer-usage.record grant reaches these routes.
+    let r = c
+        .operator(
+            Method::GET,
+            &format!("/internal/v1/usage/api-requests/{env}/2026-10-23"),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = c
+        .raw(
+            Method::GET,
+            format!("/internal/v1/usage/api-requests/{env}/2026-10-23"),
+            HeaderMap::new(),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    // Counters never shrink and are never deleted.
+    let db = &c.db.conn;
+    let shrink = db
+        .execute(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("UPDATE devplat_api_usage_daily SET request_count = 1 WHERE environment_id = '{env}'"),
+        ))
+        .await;
+    assert!(shrink.is_err());
+    let delete = db
+        .execute(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "DELETE FROM devplat_api_usage_batches".to_string(),
+        ))
+        .await;
+    assert!(delete.is_err());
+}
+
+#[tokio::test]
+async fn reference_only_environments_never_receive_production_limits_by_default() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let env = Uuid::new_v4();
+    c.db.conn
+        .execute_unprepared(&format!(
+            "INSERT INTO devplat_environment_refs (id, tenant_id, application_id, environment_id, first_seen_at, last_seen_at) \
+             VALUES ('{}', '{}', '{}', '{env}', now(), now())",
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4()
+        ))
+        .await
+        .unwrap();
+    let get = |q: &'static str| {
+        let signed = c
+            .peers
+            .gateway
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        c.raw(
+            Method::GET,
+            format!("/internal/v1/entitlements/environments/{env}{q}"),
+            headers,
+            None,
+        )
+    };
+    let r = get("").await;
+    assert_eq!(r.json["apiRequestsPerMinute"], 120, "{}", r.json);
+    assert_eq!(
+        r.json["limitingLevel"]["apiRequestsPerMinute"],
+        "ENVIRONMENT"
+    );
+    let r = get("?kind=PRODUCTION").await;
+    assert_eq!(r.json["apiRequestsPerMinute"], 600);
+    assert_eq!(r.json["environmentKind"], "PRODUCTION");
+    let r = get("?kind=TEST").await;
+    assert_eq!(r.json["apiRequestsPerMinute"], 300);
+    assert_eq!(get("?kind=STAGING").await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(get("?other=1").await.status, StatusCode::BAD_REQUEST);
 }

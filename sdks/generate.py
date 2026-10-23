@@ -1,14 +1,31 @@
 #!/usr/bin/env python3
-"""CF Meet SDK generation scaffolding (Part VI §4; the full SDK is Section 52).
+"""CF Meet SDK generator (Part VI Section 52).
 
-Reads sdks/generation.json and packages/contracts/manifest.json and emits, for the
-TypeScript and Dart SDKs, the pinned contract catalogue (id, version, kind, path,
-lifecycle) the SDK is generated from. Rules enforced (exit 1 on violation):
+Reads sdks/generation.json, packages/contracts/manifest.json, the generated public API
+documents (packages/contracts/bundled/public/**) and the gateway route manifest
+(infra/api-gateway/route-manifest.json) and emits, for the TypeScript and Dart SDKs:
+
+  * the pinned contract catalogue (id, version, kind, path, lifecycle);
+  * the operation catalogue: every PUBLIC_CUSTOMER operation the gateway routes, with its
+    domain, method, path template, protocol, authentication modes, required scope, path /
+    query / header parameters, body, Idempotency-Key requirement, cursor pagination and
+    RETRY CLASS:
+      SAFE         GET: retried on network errors, 408 / 429 / 502 / 503 / 504;
+      IDEMPOTENT   PUT / DELETE, or a mutation carrying an Idempotency-Key: retried with
+                   the SAME key on the same conditions;
+      NO_RETRY     other mutations: retried only on 429 (a refusal: nothing was done);
+      NEVER        paid telecom mutations (generation.json `paidTelecomOperations`): NEVER
+                   retried automatically; an unknown outcome is surfaced to the caller,
+                   who reconciles (e.g. replays the same Idempotency-Key deliberately).
+
+Rules enforced (exit 1 on violation):
 
   * every listed contract is registered in the manifest;
   * SDKs are generated from published contracts only: no `internal` contract and nothing
     owned by a service whose surface is not customer ingress;
   * no product-specific name (CosmicForge products use the same SDK as everyone else);
+  * every operation of the route manifest is in exactly one public document, operation
+    names are unique per domain, every paid telecom operation exists and is a mutation;
   * generated files are deterministic and current (`--check`).
 
 Usage:  generate.py            regenerate
@@ -81,11 +98,165 @@ def dart(cat: list[dict], status: str) -> str:
     return "\n".join(lines)
 
 
+PUBLIC_DOCS = ROOT / "packages/contracts/bundled/public"
+ROUTE_MANIFEST = ROOT / "infra/api-gateway/route-manifest.json"
+MUTATIONS = ("POST", "PUT", "PATCH", "DELETE")
+
+
+def resolve(doc: dict, node):
+    seen = 0
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not ref.startswith("#/"):
+            raise ValueError(f"external reference {ref}")
+        cur = doc
+        for part in ref[2:].split("/"):
+            cur = cur[part]
+        node = cur
+        seen += 1
+        if seen > 32:
+            raise ValueError(f"reference cycle at {ref}")
+    return node
+
+
+def camel(name: str) -> str:
+    parts = re.split(r"[^A-Za-z0-9]+", name)
+    head, *rest = [p for p in parts if p] or ["op"]
+    out = head[0].lower() + head[1:] + "".join(p[0].upper() + p[1:] for p in rest)
+    return out if not out[0].isdigit() else "op" + out
+
+
+def operations(config: dict) -> tuple[list[dict], list[str]]:
+    errors: list[str] = []
+    manifest = load(ROUTE_MANIFEST)
+    paid = {(p.split(" ", 1)[0], p.split(" ", 1)[1]) for p in config["paidTelecomOperations"]}
+    docs = {}
+    for f in sorted(PUBLIC_DOCS.glob("*/v1.openapi.json")):
+        if f.parent.name != "aggregate":
+            docs[f.parent.name] = load(f)
+    ops: list[dict] = []
+    names: dict[tuple[str, str], str] = {}
+    found_paid = set()
+    for r in manifest["routes"]:
+        domain, method, path = r["domain"], r["method"], r["pattern"]
+        doc = docs.get(domain)
+        node = doc and doc["paths"].get(path, {}).get(method.lower())
+        if not node:
+            errors.append(f"{method} {path}: routed but not in bundled/public/{domain}")
+            continue
+        item = doc["paths"][path]
+        params = [resolve(doc, x) for x in item.get("parameters", []) + node.get("parameters", [])]
+        path_params = [x["name"] for x in params if x["in"] == "path"]
+        query = [{"name": x["name"], "required": bool(x.get("required"))} for x in params if x["in"] == "query"]
+        headers = [{"name": x["name"].lower(), "required": bool(x.get("required"))}
+                   for x in params if x["in"] == "header" and x["name"].lower() != "idempotency-key"]
+        idem = next((x for x in params if x["in"] == "header" and x["name"].lower() == "idempotency-key"), None)
+        idempotency = "NONE" if idem is None else ("REQUIRED" if idem.get("required") else "OPTIONAL")
+        body = node.get("requestBody")
+        body = resolve(doc, body) if body else None
+        pagination = None
+        if method == "GET" and any(q["name"] == "cursor" for q in query):
+            ok = next((resolve(doc, v) for k, v in node.get("responses", {}).items() if k.startswith("2")), {})
+            schema = resolve(doc, ok.get("content", {}).get("application/json", {}).get("schema", {}))
+            props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+            arrays = [k for k, v in props.items() if resolve(doc, v).get("type") == "array"]
+            if "nextCursor" in props and len(arrays) == 1:
+                pagination = {"cursorParam": "cursor", "nextField": "nextCursor", "itemsField": arrays[0]}
+        is_paid = (method, path) in paid
+        if is_paid:
+            found_paid.add((method, path))
+            retry = "NEVER"
+        elif method == "GET":
+            retry = "SAFE"
+        elif method in ("PUT", "DELETE") or idempotency != "NONE":
+            retry = "IDEMPOTENT"
+        else:
+            retry = "NO_RETRY"
+        name = camel(node.get("operationId") or r["id"].split(".", 1)[-1])
+        key = (domain, name)
+        if key in names:
+            errors.append(f"{domain}.{name}: duplicate operation name ({names[key]} and {method} {path})")
+        names[key] = f"{method} {path}"
+        success = sorted(int(k) for k in node.get("responses", {}) if k.isdigit() and k.startswith("2"))
+        ops.append({
+            "domain": domain, "name": name, "operationId": node.get("operationId", ""), "method": method,
+            "path": path, "protocol": r["protocol"], "auth": r["auth"], "scope": r.get("requiredScope"),
+            "pathParams": path_params, "query": query, "headers": headers,
+            "body": "NONE" if not body else ("REQUIRED" if body.get("required") else "OPTIONAL"),
+            "idempotency": idempotency, "retry": retry, "paidTelecom": is_paid, "pagination": pagination,
+            "success": success,
+        })
+    for m, p in paid - found_paid:
+        errors.append(f"paidTelecomOperations: {m} {p} is not a routed public operation")
+    for m, p in paid:
+        if m not in MUTATIONS:
+            errors.append(f"paidTelecomOperations: {m} {p} is not a mutation")
+    ops.sort(key=lambda o: (o["domain"], o["name"]))
+    return ops, errors
+
+
+def ts_operations(ops: list[dict]) -> str:
+    lines = [f"// {HEADER.replace('packages/contracts/manifest.json', 'the public API documents and the gateway route manifest')}", "",
+             "export type RetryClass = 'SAFE' | 'IDEMPOTENT' | 'NO_RETRY' | 'NEVER';",
+             "export type AuthMode = string;", "",
+             "export interface ParamSpec {", "  readonly name: string;", "  readonly required: boolean;", "}", "",
+             "export interface PaginationSpec {", "  readonly cursorParam: string;", "  readonly nextField: string;",
+             "  readonly itemsField: string;", "}", "",
+             "export interface OperationSpec {", "  readonly domain: string;", "  readonly name: string;",
+             "  readonly operationId: string;", "  readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';",
+             "  readonly path: string;", "  readonly protocol: 'REST' | 'WEBSOCKET';", "  readonly auth: readonly AuthMode[];",
+             "  readonly scope: string | null;", "  readonly pathParams: readonly string[];",
+             "  readonly query: readonly ParamSpec[];", "  readonly headers: readonly ParamSpec[];",
+             "  readonly body: 'NONE' | 'OPTIONAL' | 'REQUIRED';", "  readonly idempotency: 'NONE' | 'OPTIONAL' | 'REQUIRED';",
+             "  readonly retry: RetryClass;", "  readonly paidTelecom: boolean;",
+             "  readonly pagination: PaginationSpec | null;", "  readonly success: readonly number[];", "}", "",
+             "export const OPERATIONS: readonly OperationSpec[] = ["]
+    for o in ops:
+        lines.append("  " + json.dumps(o, ensure_ascii=False, separators=(", ", ": ")) + ",")
+    lines += ["];", ""]
+    return "\n".join(lines)
+
+
+def dart_str(v) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, str):
+        return "'" + v.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$") + "'"
+    if isinstance(v, list):
+        return "<Object?>[" + ", ".join(dart_str(x) for x in v) + "]" if v and not all(isinstance(x, str) for x in v) else "<String>[" + ", ".join(dart_str(x) for x in v) + "]"
+    raise TypeError(v)
+
+
+def dart_operations(ops: list[dict]) -> str:
+    lines = [f"// {HEADER.replace('packages/contracts/manifest.json', 'the public API documents and the gateway route manifest')}", "",
+             "import '../operation.dart';", "", "const List<OperationSpec> operations = <OperationSpec>["]
+    for o in ops:
+        params = lambda xs: "<ParamSpec>[" + ", ".join(f"ParamSpec({dart_str(x['name'])}, required: {dart_str(x['required'])})" for x in xs) + "]"
+        pag = "null" if not o["pagination"] else (
+            f"PaginationSpec(cursorParam: {dart_str(o['pagination']['cursorParam'])}, nextField: {dart_str(o['pagination']['nextField'])}, itemsField: {dart_str(o['pagination']['itemsField'])})")
+        lines.append(
+            "  OperationSpec("
+            f"domain: {dart_str(o['domain'])}, name: {dart_str(o['name'])}, operationId: {dart_str(o['operationId'])}, "
+            f"method: {dart_str(o['method'])}, path: {dart_str(o['path'])}, protocol: {dart_str(o['protocol'])}, "
+            f"auth: {dart_str(o['auth'])}, scope: {dart_str(o['scope'])}, pathParams: {dart_str(o['pathParams'])}, "
+            f"query: {params(o['query'])}, headers: {params(o['headers'])}, body: {dart_str(o['body'])}, "
+            f"idempotency: {dart_str(o['idempotency'])}, retry: RetryClass.{ {'SAFE': 'safe', 'IDEMPOTENT': 'idempotent', 'NO_RETRY': 'noRetry', 'NEVER': 'never'}[o['retry']]}, "
+            f"paidTelecom: {dart_str(o['paidTelecom'])}, pagination: {pag}, success: <int>[{', '.join(map(str, o['success']))}]),")
+    lines += ["];", ""]
+    return "\n".join(lines)
+
+
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     config = load(HERE / "generation.json")
     manifest = load(ROOT / "packages/contracts/manifest.json")
     cat, errors = catalogue(config, manifest)
+    ops, op_errors = operations(config)
+    errors += op_errors
     for sdk in ("typescript", "dart"):
         for f in (HERE / sdk).rglob("*"):
             if f.is_file() and "node_modules" not in f.parts and PRODUCT_RE.search(f.read_text(encoding="utf-8", errors="ignore")):
@@ -93,6 +264,8 @@ def main(argv: list[str]) -> int:
     outputs = {
         HERE / config["typescript"]["output"]: typescript(cat, config["status"]),
         HERE / config["dart"]["output"]: dart(cat, config["status"]),
+        HERE / config["typescript"]["operations"]: ts_operations(ops),
+        HERE / config["dart"]["operations"]: dart_operations(ops),
     }
     for path, text in outputs.items():
         if check:
@@ -106,7 +279,7 @@ def main(argv: list[str]) -> int:
     if errors:
         print(f"sdks: FAILED — {len(errors)} problem(s)", file=sys.stderr)
         return 1
-    print(f"sdks: OK — {len(cat)} contract(s) pinned for {config['typescript']['package']} and {config['dart']['package']} ({config['status']})")
+    print(f"sdks: OK — {len(ops)} operation(s) ({sum(o['paidTelecom'] for o in ops)} paid telecom, never auto-retried); {len(cat)} contract(s) pinned for {config['typescript']['package']} and {config['dart']['package']} ({config['status']})")
     return 0
 
 

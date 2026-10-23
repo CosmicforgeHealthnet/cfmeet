@@ -829,6 +829,17 @@ impl Control {
         }
     }
 
+    /// A request with exactly `headers`.
+    pub async fn raw(
+        &self,
+        method: Method,
+        path: String,
+        headers: HeaderMap,
+        body: Option<Value>,
+    ) -> Response {
+        self.send(method, &path, headers, body).await
+    }
+
     /// A gateway-forwarded customer request.
     pub async fn req(
         &self,

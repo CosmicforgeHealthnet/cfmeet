@@ -74,13 +74,25 @@ jobs:
       - name: SDK generation is current (TypeScript + Dart scaffolding)
         working-directory: .
         run: python3 sdks/generate.py --check
+      - name: Route manifest and public OpenAPI are generated from the contracts (no drift, no leak)
+        working-directory: .
+        run: python3 scripts/contracts/public_api.py --check
 
   test:
-    name: test (unit, routing, ingress, startup)
+    name: test (unit, routing, ingress, websocket, quotas, startup)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       # The cross-service journey runs in its own job below.
       CFMEET_SKIP_DB_TESTS: "1"
+      # Shared atomic quota counters across gateway instances.
+      TEST_REDIS_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -88,8 +100,8 @@ jobs:
         with:
           workspaces: services/api-gateway -> target
           key: test
-      - name: Default deny, forged contexts and headers, Platform Access failure modes
-        run: cargo test --locked --test routing --test ingress --test startup
+      - name: Default deny, forged contexts and headers, Platform Access failure modes, WebSockets
+        run: cargo test --locked --test routing --test ingress --test websocket --test startup
       - name: cargo test (all)
         run: cargo test --no-fail-fast --locked
 
@@ -97,6 +109,12 @@ jobs:
     name: integration (real Platform Access + Developer Platform)
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
       postgres:
         image: postgres:16
         env:
@@ -107,6 +125,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379
       PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
       PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
       DEVELOPER_PLATFORM_BIN: ${{ github.workspace }}/services/developer-platform/target/debug/developer-platform

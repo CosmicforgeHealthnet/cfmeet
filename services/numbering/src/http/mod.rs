@@ -4,7 +4,13 @@
 //!   outbox / job backlog (counts only).
 //! * `/v1/numbers/**` — customer reads of the caller's own assignments and reservations,
 //!   authenticated by Platform Access and scope-checked (`numbers.read`). Full public
-//!   search / provisioning APIs are later workstreams (H–I).
+//!   search / provisioning APIs are later workstreams (H–I). This family alone is public
+//!   through the API Gateway (Part VI §51): a gateway-forwarded request carries the
+//!   gateway's service token (`numbering-request.forward`) instead of the credential, and
+//!   Platform Access re-verifies the delegated credential live
+//!   ([`middleware::require_customer`]).
+//! * `/v1/admin/**` — Numbering administration (`numbers.admin`, first-party, an audited
+//!   operator): a presented credential only, never a gateway-forwarded request.
 //! * `/internal/v1/**` — service-authenticated (`number-resource.read`): the canonical,
 //!   provider-independent view of a Number Resource.
 //!

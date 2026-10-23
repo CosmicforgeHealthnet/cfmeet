@@ -13,6 +13,9 @@
 //! * entries are keyed by SHA-256 of the presented credential (the value is never kept)
 //!   and the cache is bounded (flushed when full).
 //!
+//! Requests forwarded by the API Gateway ([`CustomerAuthority::authenticate_forwarded`])
+//! are never cached: each one re-fetches the credential's chain from Platform Access.
+//!
 //! Mutations and security-critical operations (device registration, KeyPackage
 //! publication, revocation, conversation creation / lifecycle) always authenticate
 //! afresh, and the acting principal is always resolved afresh.
@@ -229,6 +232,16 @@ impl CustomerAuthority for CachingAuthority {
     /// The trait entry point is always FRESH.
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable> {
         self.authenticate_with(presented, Freshness::Fresh).await
+    }
+
+    /// Always fresh: an API Gateway forwarded request is never answered from the cache
+    /// (revocation and suspension apply at once).
+    async fn authenticate_forwarded(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+        correlation_id: &cf_service_auth::CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        self.inner.authenticate_forwarded(ctx, correlation_id).await
     }
 
     /// Always fresh (internal delegated calls are few and change state).

@@ -562,7 +562,7 @@ async fn environment_entitlements(
         .ok_or(ApiError(ErrorCode::NotFound))?
         .try_get("", "tenant_id")?;
     control::authorize(&s, &c, tenant, Action::LimitsRead).await?;
-    Ok(Json(entitlements::effective(&s.db, id).await?))
+    Ok(Json(entitlements::effective(&s.db, id, None).await?))
 }
 
 async fn activity_list(

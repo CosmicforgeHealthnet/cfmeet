@@ -1,17 +1,31 @@
 //! The trusted request context.
 //!
-//! Customers present a CF Meet API credential; the SMS Gateway does not verify it itself — it
-//! asks Platform Access (`POST /internal/v1/credentials/authenticate`, permission
-//! `platform-credential.authenticate`) and takes the tenant, application, environment,
-//! service account and scopes ONLY from the authority chain Platform Access returns. A
-//! tenant or environment id in a request never becomes authority. Platform Access
+//! The SMS Gateway never verifies a customer credential itself; Platform Access is the
+//! identity authority (permission `platform-credential.authenticate`) and the tenant,
+//! application, environment, service account and scopes come ONLY from the authority chain
+//! it returns. A customer request reaches the gateway one of two ways:
+//!
+//! * **Direct** — the customer presents a CF Meet API credential; the gateway asks Platform
+//!   Access `POST /internal/v1/credentials/authenticate` ([`CustomerAuthority::authenticate`]).
+//! * **Forwarded by the API Gateway** (Part VI §51) — the API Gateway already authenticated
+//!   the credential and forwards the request WITHOUT it, under a service token carrying a
+//!   signed delegated context naming the credential id (`initiating_credential_id`). The
+//!   gateway asks Platform Access `POST /internal/v1/credentials/delegated-authority` with
+//!   that delegated context attached to its own outbound token
+//!   ([`CustomerAuthority::authenticate_delegated`]); Platform Access re-fetches the LIVE
+//!   chain (revocation and suspension take effect immediately) and checks it belongs to the
+//!   delegated tenant / application / environment / service account. The delegated context
+//!   itself is never authority.
+//!
+//! A tenant or environment id in a request never becomes authority. Platform Access
 //! unreachable means the request is refused (fail closed).
 
 use std::{collections::BTreeSet, sync::Arc};
 
+use axum::http::Method;
 use cf_service_auth::{
-    client::{InternalCallError, InternalServiceClient},
-    services, OutboundServiceRequest, ServiceId,
+    client::{InternalCallError, InternalResponse, InternalServiceClient},
+    services, CorrelationId, DelegatedPlatformContext, OutboundServiceRequest, ServiceId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -114,6 +128,16 @@ impl TrustedContext {
         }
     }
 
+    /// Whether this chain is exactly the credential and scope `delegated` names (a defence
+    /// in depth over Platform Access's own check of a gateway-forwarded credential).
+    pub fn is_named_by(&self, delegated: &DelegatedPlatformContext) -> bool {
+        delegated.initiating_credential_id() == Some(self.credential_id)
+            && delegated.tenant_id() == self.tenant_id
+            && delegated.application_id() == self.application_id
+            && delegated.application_environment_id() == self.environment_id
+            && delegated.initiating_service_account_id() == self.service_account_id
+    }
+
     /// Parses Platform Access's `AuthorityChain` (contract `cfmeet.platform-access.identity`).
     pub fn from_authority(authority: &Value) -> Option<Self> {
         let id = |path: &[&str]| -> Option<Uuid> {
@@ -174,7 +198,19 @@ pub struct AuthorityUnavailable(pub String);
 
 #[async_trait::async_trait]
 pub trait CustomerAuthority: Send + Sync {
+    /// Authenticates a credential the customer presented directly.
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable>;
+
+    /// The CURRENT authority chain of the credential the API Gateway authenticated, named
+    /// by `delegated.initiating_credential_id()` of a verified gateway service token. The
+    /// authority re-evaluates the credential live and refuses (REJECTED) a credential that
+    /// does not belong to the delegated tenant / application / environment / service
+    /// account. `correlation_id` continues the forwarded operation.
+    async fn authenticate_delegated(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable>;
 }
 
 /// Platform Access over authenticated internal HTTP.
@@ -192,6 +228,45 @@ fn platform_access() -> ServiceId {
     ServiceId::parse(services::PLATFORM_ACCESS).expect("canonical identity")
 }
 
+/// Maps Platform Access's `AuthenticateResponse` (the same shape for both operations).
+fn authentication_of(response: InternalResponse) -> Result<Authentication, AuthorityUnavailable> {
+    if response.status() != 200 {
+        return Err(AuthorityUnavailable(format!(
+            "HTTP {} {}",
+            response.status(),
+            response.error_code().unwrap_or_default()
+        )));
+    }
+    let body: Value = response
+        .json()
+        .map_err(|_| AuthorityUnavailable("malformed authentication response".into()))?;
+    match body.get("outcome").and_then(Value::as_str) {
+        Some("AUTHENTICATED") => body
+            .get("authority")
+            .and_then(TrustedContext::from_authority)
+            .map(|c| Authentication::Authenticated(Box::new(c)))
+            .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
+        Some("REJECTED") => Ok(Authentication::Rejected {
+            reason: body
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("rejected")
+                .chars()
+                .take(64)
+                .collect(),
+            throttle: body
+                .get("throttle")
+                .and_then(|t| serde_json::from_value(t.clone()).ok()),
+        }),
+        _ => Err(AuthorityUnavailable(
+            "unknown authentication outcome".into(),
+        )),
+    }
+}
+
+/// Platform Access's re-verification of a gateway-forwarded credential.
+pub const DELEGATED_AUTHORITY_PATH: &str = "/internal/v1/credentials/delegated-authority";
+
 #[async_trait::async_trait]
 impl CustomerAuthority for PlatformAccessAuthority {
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable> {
@@ -205,38 +280,24 @@ impl CustomerAuthority for PlatformAccessAuthority {
             )
             .await
             .map_err(|e: InternalCallError| AuthorityUnavailable(e.to_string()))?;
-        if response.status() != 200 {
-            return Err(AuthorityUnavailable(format!(
-                "HTTP {} {}",
-                response.status(),
-                response.error_code().unwrap_or_default()
-            )));
-        }
-        let body: Value = response
-            .json()
-            .map_err(|_| AuthorityUnavailable("malformed authentication response".into()))?;
-        match body.get("outcome").and_then(Value::as_str) {
-            Some("AUTHENTICATED") => body
-                .get("authority")
-                .and_then(TrustedContext::from_authority)
-                .map(|c| Authentication::Authenticated(Box::new(c)))
-                .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
-            Some("REJECTED") => Ok(Authentication::Rejected {
-                reason: body
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("rejected")
-                    .chars()
-                    .take(64)
-                    .collect(),
-                throttle: body
-                    .get("throttle")
-                    .and_then(|t| serde_json::from_value(t.clone()).ok()),
-            }),
-            _ => Err(AuthorityUnavailable(
-                "unknown authentication outcome".into(),
-            )),
-        }
+        authentication_of(response)
+    }
+
+    async fn authenticate_delegated(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        // No request body: Platform Access reads the credential id ONLY from the delegated
+        // context signed into this hop's service token.
+        let request = OutboundServiceRequest::continuing(platform_access(), correlation_id)
+            .with_delegated_context(delegated.clone());
+        let response = self
+            .client
+            .exchange_json::<()>(&request, Method::POST, DELEGATED_AUTHORITY_PATH, None)
+            .await
+            .map_err(|e: InternalCallError| AuthorityUnavailable(e.to_string()))?;
+        authentication_of(response)
     }
 }
 
@@ -246,6 +307,16 @@ pub struct UnconfiguredAuthority;
 #[async_trait::async_trait]
 impl CustomerAuthority for UnconfiguredAuthority {
     async fn authenticate(&self, _presented: &str) -> Result<Authentication, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no identity authority is configured".into(),
+        ))
+    }
+
+    async fn authenticate_delegated(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
         Err(AuthorityUnavailable(
             "no identity authority is configured".into(),
         ))
@@ -368,5 +439,21 @@ mod tests {
         // Anything malformed is not a context.
         assert!(TrustedContext::from_authority(&chain("STAGING", "FULL")).is_none());
         assert!(TrustedContext::from_authority(&json!({})).is_none());
+    }
+
+    #[test]
+    fn a_forwarded_chain_must_be_exactly_the_delegated_credential_and_scope() {
+        let ctx = TrustedContext::from_authority(&chain("SANDBOX", "FULL")).unwrap();
+        let scope = ctx.owner_scope().delegated(None);
+        assert!(!ctx.is_named_by(&scope), "no credential named");
+        assert!(ctx.is_named_by(&scope.clone().with_initiating_credential(ctx.credential_id)));
+        assert!(!ctx.is_named_by(&scope.with_initiating_credential(Uuid::new_v4())));
+        let mut foreign = ctx.clone();
+        foreign.tenant_id = Uuid::new_v4();
+        let foreign = foreign
+            .owner_scope()
+            .delegated(None)
+            .with_initiating_credential(ctx.credential_id);
+        assert!(!ctx.is_named_by(&foreign));
     }
 }

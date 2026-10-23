@@ -31,13 +31,37 @@ reads another service's database.
 
 | Service | Permission | Use |
 |---|---|---|
-| Platform Access | `platform-credential.authenticate`, `platform-principal.resolve` | every customer credential (fail closed: 503); the principal a message is sent for |
+| Platform Access | `platform-credential.authenticate`, `platform-principal.resolve` | every customer credential, presented directly (`credentials/authenticate`) or forwarded by the API Gateway (`credentials/delegated-authority`) (fail closed: 503); the principal a message is sent for |
 | Numbering | `number-sms-sender.authorize`, `number-grant.verify` | single-use SMS_SENDER grant per outbound message, consumed before AUTHORIZED |
 | Numbering | `number-sms-route.resolve` | the destination of a received message (`sms-destination-resolutions`, SMS only) |
 | Calling | `platform-event.publish` | message events → `sms.*` customer webhooks |
 
-The gateway serves no internal operation; `/internal/v1/**` is authenticated anyway
-(unknown paths included) and its trust bundle trusts no issuer.
+`/internal/v1/**` is authenticated for every path (unknown paths included); each route
+requires the permission its trust bundle grants the caller (Messaging:
+`sms-bridge.submit`). The API Gateway is trusted only with `sms-request.forward`, which no
+internal route accepts.
+
+## Customer authentication
+
+Every `/v1/sms/**` request is verified by Platform Access, and the tenant, application,
+environment, service account and scopes come ONLY from the authority chain it returns:
+
+* **Direct** — `Authorization: Bearer <credential>` →
+  `POST /internal/v1/credentials/authenticate`.
+* **Forwarded by the API Gateway** (Part VI §51) — NO `Authorization` header; an
+  `X-CF-Service-Authorization` service token (issuer `cfmeet.api-gateway`) verified by the
+  trust bundle, granted `sms-request.forward`, whose signed delegated context names the
+  credential the API Gateway authenticated (`initiating_credential_id`). The gateway
+  re-verifies that credential LIVE with `POST /internal/v1/credentials/delegated-authority`
+  (no body; the delegated context rides on its own outbound token), so revocation and
+  suspension take effect immediately; the returned chain must be exactly the delegated
+  one. The request continues the API Gateway's signed correlation id.
+
+Both paths then behave identically (FULL authority only, scopes, environment and
+live-telecom rules, rate limits, `Idempotency-Key`). Any authentication failure —
+including a service token next to an `Authorization` header, an untrusted or unpermitted
+issuer, or a token without a delegated credential id — is the same 401; Platform Access
+unreachable is a 503. Provider callbacks and internal routes never accept a gateway token.
 
 ## HTTP surface
 

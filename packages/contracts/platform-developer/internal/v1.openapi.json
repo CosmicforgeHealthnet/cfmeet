@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request."
   },
   "paths": {
@@ -124,6 +124,20 @@
             "required": true,
             "schema": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "The environment kind Platform Access confirmed to the caller; used only for an environment without a Developer Platform profile. Without either, the strictest environment cap applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SANDBOX",
+                "TEST",
+                "PRODUCTION"
+              ]
             }
           }
         ],
@@ -626,6 +640,182 @@
             "$ref": "#/components/responses/Error"
           },
           "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/usage/api-requests": {
+      "post": {
+        "operationId": "recordApiRequestUsage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Durable accounting of accepted public API requests (API Gateway quota flush). The batch is applied exactly once: a replay of an already applied batchId is acknowledged as ALREADY_RECORDED without counting again. Counts only; no request content or caller identity. Permission `developer-usage.record`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "batchId",
+                  "entries"
+                ],
+                "properties": {
+                  "batchId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10000,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "environmentId",
+                        "day",
+                        "count"
+                      ],
+                      "properties": {
+                        "environmentId": {
+                          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                        },
+                        "day": {
+                          "type": "string",
+                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                          "description": "UTC day (YYYY-MM-DD)."
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000000000
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded or already recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "batchId",
+                    "outcome"
+                  ],
+                  "properties": {
+                    "batchId": {
+                      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "RECORDED",
+                        "ALREADY_RECORDED"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/usage/api-requests/{environmentId}/{day}": {
+      "get": {
+        "operationId": "getDailyApiRequestUsage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Durable accepted-request total of an application environment on a UTC day (0 when none); the API Gateway re-seeds its shared day window from it. Permission `developer-usage.record`.",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+              "description": "UTC day (YYYY-MM-DD)."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "environmentId",
+                    "day",
+                    "count"
+                  ],
+                  "properties": {
+                    "environmentId": {
+                      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                    },
+                    "day": {
+                      "type": "string",
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                      "description": "UTC day (YYYY-MM-DD)."
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

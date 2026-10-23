@@ -35,6 +35,8 @@ fn invalid(var: &'static str, reason: impl Into<String>) -> ConfigError {
 pub struct ServiceAuthRuntime {
     signer: Arc<ServiceTokenSigner>,
     client: Arc<InternalServiceClient>,
+    /// Base URLs of the customer-facing upstreams (validated like internal targets).
+    upstreams: Arc<std::collections::BTreeMap<String, url::Url>>,
 }
 
 impl fmt::Debug for ServiceAuthRuntime {
@@ -57,7 +59,29 @@ impl ServiceAuthRuntime {
         if signer.issuer() != &ServiceId::api_gateway() {
             return Err(WrongSignerIdentity(signer.issuer().clone()));
         }
-        Ok(Self { signer, client })
+        Ok(Self {
+            signer,
+            client,
+            upstreams: Arc::new(Default::default()),
+        })
+    }
+
+    /// Declares the base URLs of customer-facing upstreams.
+    pub fn with_upstreams(
+        mut self,
+        upstreams: std::collections::BTreeMap<String, url::Url>,
+    ) -> Self {
+        self.upstreams = Arc::new(upstreams);
+        self
+    }
+
+    /// The base URL of `service`, when configured.
+    pub fn upstream_base(&self, service: &ServiceId) -> Option<&url::Url> {
+        self.upstreams.get(service.as_str())
+    }
+
+    pub fn upstream_services(&self) -> impl Iterator<Item = &String> {
+        self.upstreams.keys()
     }
 
     pub fn signer(&self) -> &ServiceTokenSigner {
@@ -76,6 +100,12 @@ const TARGETS: &[(&str, &str)] = &[
         "CF_DEVELOPER_PLATFORM_BASE_URL",
         services::DEVELOPER_PLATFORM,
     ),
+    // Part VI §51: the owning services of the public route catalogue.
+    ("CF_CALLING_BASE_URL", services::CALLING),
+    ("CF_MESSAGING_BASE_URL", services::MESSAGING),
+    ("CF_NUMBERING_BASE_URL", services::NUMBERING),
+    ("CF_SMS_GATEWAY_BASE_URL", services::SMS_GATEWAY),
+    ("CF_MEETING_SERVICE_BASE_URL", services::MEETING_SERVICE),
 ];
 
 #[derive(Debug, Clone)]
@@ -189,7 +219,17 @@ impl ServiceAuthSettings {
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)
                 .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?,
         );
-        ServiceAuthRuntime::new(signer, client).map_err(|e| invalid("CF_SERVICE_ID", e.to_string()))
+        let mut upstreams = std::collections::BTreeMap::new();
+        for (service, url) in &self.targets {
+            if crate::routing::CUSTOMER_UPSTREAMS.contains(&service.as_str()) {
+                let parsed =
+                    url::Url::parse(url).map_err(|_| invalid("CF_*_BASE_URL", "invalid URL"))?;
+                upstreams.insert(service.as_str().to_string(), parsed);
+            }
+        }
+        Ok(ServiceAuthRuntime::new(signer, client)
+            .map_err(|e| invalid("CF_SERVICE_ID", e.to_string()))?
+            .with_upstreams(upstreams))
     }
 }
 

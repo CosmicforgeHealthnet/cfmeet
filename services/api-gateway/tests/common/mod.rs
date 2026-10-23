@@ -1,7 +1,9 @@
 //! Shared harness for API Gateway tests: the REAL gateway router with a scripted customer
-//! authority and a REAL upstream HTTP server that verifies the gateway's Ed25519 service
-//! tokens with its own trust bundle (as the Developer Platform does) and records exactly
-//! what reached it. No database (the gateway has none).
+//! authority, and REAL upstream HTTP servers playing the owning services. Each upstream
+//! verifies the gateway's Ed25519 service tokens with its OWN trust bundle and receiver
+//! permission (as Calling / Messaging / the Developer Platform do), or records the
+//! transported end-user token (Meeting Service), and records exactly what reached it.
+//! No database (the gateway has none).
 #![allow(dead_code)]
 
 use std::{
@@ -17,22 +19,23 @@ use api_gateway::{
         AuthenticatedCustomer, Authentication, AuthorityUnavailable, CustomerAuthority, Throttle,
         TrustClassification,
     },
-    routing::{Protocol, RouteDefinition, RouteTable},
+    quota::QuotaEngine,
+    routing::{AuthMode, Protocol, RouteDefinition, RouteTable, RoutingControls},
     state::AppState,
 };
 use async_trait::async_trait;
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{ws::WebSocketUpgrade, Request, State},
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     Router,
 };
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
-    ApplicationEnvironmentKind, CorrelationId, DelegatedPlatformContext, KeyId, RuntimeEnvironment,
-    ServiceId, ServiceSigningKey, ServiceTokenSigner, ServiceTokenVerifier, SystemClock, TokenTtl,
-    TrustPolicy,
+    services, ApplicationEnvironmentKind, CorrelationId, DelegatedPlatformContext,
+    InternalPermission, KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey,
+    ServiceTokenSigner, ServiceTokenVerifier, SystemClock, TokenTtl, TrustPolicy,
 };
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -116,7 +119,7 @@ impl CustomerAuthority for FakeAuthority {
     }
 }
 
-/// What reached the upstream (after its own token verification).
+/// What reached an upstream.
 #[derive(Debug, Clone)]
 pub struct Received {
     pub method: String,
@@ -124,28 +127,29 @@ pub struct Received {
     pub query: Option<String>,
     pub headers: HeaderMap,
     pub body: Value,
-    pub issuer: String,
-    pub correlation_id: String,
-    pub request_id: String,
+    /// `Some` when a gateway service token was presented and verified.
+    pub issuer: Option<String>,
+    pub correlation_id: Option<String>,
+    pub request_id: Option<String>,
     pub delegated: Option<DelegatedPlatformContext>,
     pub expires_in: i64,
 }
 
 #[derive(Clone)]
 struct UpstreamState {
-    verifier: Arc<ServiceTokenVerifier>,
+    /// `None`: an end-user-token service (no gateway token expected).
+    verifier: Option<(Arc<ServiceTokenVerifier>, InternalPermission)>,
     received: Arc<Mutex<Vec<Received>>>,
     delay: Arc<Mutex<Duration>>,
     rejected: Arc<Mutex<usize>>,
 }
 
-/// A real HTTP upstream (identity `cfmeet.developer-platform`) verifying every request.
+/// A real HTTP upstream.
 pub struct Upstream {
     pub base_url: String,
     pub received: Arc<Mutex<Vec<Received>>>,
     pub delay: Arc<Mutex<Duration>>,
     pub rejected: Arc<Mutex<usize>>,
-    pub verifier: Arc<ServiceTokenVerifier>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -160,85 +164,178 @@ async fn upstream_handler(
     request: Request,
 ) -> axum::response::Response {
     let (parts, body) = request.into_parts();
-    let ctx = match s.verifier.verify_headers(&parts.headers) {
-        Ok(c) => c,
-        Err(_) => {
-            *s.rejected.lock().unwrap() += 1;
-            return (StatusCode::UNAUTHORIZED, axum::Json(json!({"error": {"code": "INTERNAL_AUTHENTICATION_FAILED", "message": "x", "requestId": null}}))).into_response();
+    let path = parts.uri.path().to_string();
+    let (issuer, correlation, request_id, delegated, expires_in) = match &s.verifier {
+        Some((verifier, permission))
+            if parts.headers.contains_key("x-cf-service-authorization") =>
+        {
+            match verifier.verify_headers(&parts.headers) {
+                Ok(ctx) => {
+                    if ctx.require_permission(*permission).is_err() {
+                        return StatusCode::FORBIDDEN.into_response();
+                    }
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64;
+                    (
+                        Some(ctx.authenticated_service().as_str().to_string()),
+                        Some(ctx.correlation_id().as_str().to_string()),
+                        Some(ctx.request_id().as_str().to_string()),
+                        ctx.delegated_platform_context().cloned(),
+                        ctx.expires_at() - now,
+                    )
+                }
+                Err(_) => {
+                    *s.rejected.lock().unwrap() += 1;
+                    return (StatusCode::UNAUTHORIZED, axum::Json(json!({"error": {"code": "INTERNAL_AUTHENTICATION_FAILED", "message": "x", "requestId": null}}))).into_response();
+                }
+            }
         }
+        _ => (None, None, None, None, 0),
     };
-    if ctx
-        .require_permission(cf_service_auth::InternalPermission::DeveloperRequestForward)
-        .is_err()
-    {
-        return StatusCode::FORBIDDEN.into_response();
-    }
     let bytes = body.collect().await.unwrap().to_bytes();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let delay = *s.delay.lock().unwrap();
     s.received.lock().unwrap().push(Received {
         method: parts.method.to_string(),
-        path: parts.uri.path().to_string(),
+        path: path.clone(),
         query: parts.uri.query().map(str::to_string),
         headers: parts.headers.clone(),
         body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-        issuer: ctx.authenticated_service().as_str().to_string(),
-        correlation_id: ctx.correlation_id().as_str().to_string(),
-        request_id: ctx.request_id().as_str().to_string(),
-        delegated: ctx.delegated_platform_context().cloned(),
-        expires_in: ctx.expires_at() - now,
+        issuer: issuer.clone(),
+        correlation_id: correlation,
+        request_id,
+        delegated: delegated.clone(),
+        expires_in,
     });
+    let delay = *s.delay.lock().unwrap();
     if !delay.is_zero() {
         tokio::time::sleep(delay).await;
     }
-    if parts.uri.path().ends_with("/not-yours") {
+    if path.ends_with("/not-yours") {
         // The domain service keeps final resource authorization.
         return (
             StatusCode::FORBIDDEN,
             [("x-cf-internal-detail", "upstream-only")],
-            axum::Json(
-                json!({"error": {"code": "FORBIDDEN", "message": "Not yours.", "requestId": null}}),
-            ),
+            axum::Json(json!({"error": {"code": "CALL_NOT_FOUND_OR_FORBIDDEN", "message": "Not yours.", "requestId": "req_upstream"}})),
         )
             .into_response();
     }
-    let tenant = ctx
-        .delegated_platform_context()
-        .map(|d| d.tenant_id().to_string());
+    if path.ends_with("/big") {
+        let chunk = vec![b'x'; 64 * 1024];
+        let stream = futures_util::stream::iter(
+            (0..48).map(move |_| Ok::<_, std::io::Error>(bytes::Bytes::from(chunk.clone()))),
+        );
+        return (
+            [("content-type", "application/octet-stream")],
+            Body::from_stream(stream),
+        )
+            .into_response();
+    }
+    if path.ends_with("/created") {
+        return (
+            StatusCode::CREATED,
+            [
+                ("location", "/v1/test/items/abc"),
+                ("idempotent-replayed", "true"),
+                ("x-cf-internal-detail", "upstream-only"),
+                ("set-cookie", "session=leak"),
+            ],
+            axum::Json(json!({ "id": "abc" })),
+        )
+            .into_response();
+    }
+    if path.ends_with("/text") {
+        return (
+            [("content-type", "text/plain; charset=utf-8")],
+            "plain upstream text",
+        )
+            .into_response();
+    }
+    let tenant = delegated.as_ref().map(|d| d.tenant_id().to_string());
     (
         StatusCode::OK,
         [
             ("x-cf-internal-detail", "upstream-only"),
             ("cache-control", "no-store"),
         ],
-        axum::Json(json!({ "tenantId": tenant, "path": parts.uri.path() })),
+        axum::Json(json!({
+            "tenantId": tenant,
+            "path": path,
+            "query": parts.uri.query(),
+            "auth": if issuer.is_some() { "service" } else { "passthrough" },
+            "authorization": parts.headers.get("authorization").and_then(|v| v.to_str().ok()),
+            "credentialId": delegated.as_ref().and_then(|d| d.initiating_credential_id()),
+            "body": serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+        })),
     )
         .into_response()
 }
 
-impl Upstream {
-    pub async fn start(gateway_key: &ServiceSigningKey) -> Self {
-        let bundle = json!({
-            "bundle_version": 1,
-            "receiver": cf_service_auth::services::DEVELOPER_PLATFORM,
-            "runtime_environment": ENV,
-            "trusted_issuers": [{
-                "issuer": cf_service_auth::services::API_GATEWAY,
-                "audience": cf_service_auth::services::DEVELOPER_PLATFORM,
-                "runtime_environment": ENV,
-                "keys": [gateway_key.public_jwk()],
-                "permissions": ["developer-request.forward"],
-            }],
-        })
+/// A WebSocket upstream: requires the `cfmeet.ticket.good` subprotocol ticket (refuses
+/// 401 otherwise), selects `cfmeet.messaging.v1`, echoes frames, closes with 4001 on
+/// "bye".
+async fn ws_handler(headers: HeaderMap, upgrade: WebSocketUpgrade) -> axum::response::Response {
+    use axum::extract::ws::{CloseFrame, Message};
+    let offered = headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
         .to_string();
-        let policy =
-            TrustPolicy::from_json(&bundle, &ServiceId::developer_platform(), ENV).unwrap();
-        let verifier = Arc::new(ServiceTokenVerifier::new(policy, Arc::new(SystemClock)));
+    if !offered.split(',').any(|p| p.trim() == "cfmeet.ticket.good") {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(
+                json!({"error": {"code": "TICKET_INVALID", "message": "x", "requestId": null}}),
+            ),
+        )
+            .into_response();
+    }
+    upgrade
+        .protocols(["cfmeet.messaging.v1"])
+        .on_upgrade(|mut socket| async move {
+            while let Some(Ok(m)) = socket.recv().await {
+                match m {
+                    Message::Text(t) if t == "bye" => {
+                        let _ = socket
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 4001,
+                                reason: "ticket expired".into(),
+                            })))
+                            .await;
+                        break;
+                    }
+                    Message::Close(_) => break,
+                    other => {
+                        if socket.send(other).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+}
+
+impl Upstream {
+    /// An upstream receiving `permission` from the gateway as `receiver` (or, with
+    /// `None`, an end-user-token service).
+    pub async fn start(gateway_key: &ServiceSigningKey, receiver: Option<(&str, &str)>) -> Self {
+        let verifier = receiver.map(|(receiver, permission)| {
+            let bundle = json!({
+                "bundle_version": 1, "receiver": receiver, "runtime_environment": ENV,
+                "trusted_issuers": [{
+                    "issuer": services::API_GATEWAY, "audience": receiver, "runtime_environment": ENV,
+                    "keys": [gateway_key.public_jwk()], "permissions": [permission],
+                }],
+            })
+            .to_string();
+            let policy = TrustPolicy::from_json(&bundle, &ServiceId::parse(receiver).unwrap(), ENV).unwrap();
+            (
+                Arc::new(ServiceTokenVerifier::new(policy, Arc::new(SystemClock))),
+                InternalPermission::parse(permission).unwrap(),
+            )
+        });
         let state = UpstreamState {
-            verifier: verifier.clone(),
+            verifier,
             received: Arc::default(),
             delay: Arc::new(Mutex::new(Duration::ZERO)),
             rejected: Arc::default(),
@@ -250,7 +347,10 @@ impl Upstream {
             state.delay.clone(),
             state.rejected.clone(),
         );
-        let router = Router::new().fallback(upstream_handler).with_state(state);
+        let router = Router::new()
+            .route("/v1/test/realtime", axum::routing::get(ws_handler))
+            .fallback(upstream_handler)
+            .with_state(state);
         let task = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
@@ -259,7 +359,6 @@ impl Upstream {
             received,
             delay,
             rejected,
-            verifier,
             task,
         }
     }
@@ -279,61 +378,156 @@ impl Upstream {
 }
 
 pub fn route(
-    id: &'static str,
+    id: &str,
+    domain: &str,
     method: Method,
-    pattern: &'static str,
-    upstream_path: &'static str,
-    scope: Option<&'static str>,
+    pattern: &str,
+    upstream: &str,
+    auth: &[AuthMode],
+    scope: Option<&str>,
 ) -> RouteDefinition {
     RouteDefinition {
-        id,
+        id: id.into(),
+        domain: domain.into(),
         method,
-        pattern,
+        pattern: pattern.into(),
         protocol: Protocol::Rest,
-        upstream: cf_service_auth::services::DEVELOPER_PLATFORM,
-        upstream_path,
-        required_scope: scope,
+        upstream: upstream.into(),
+        upstream_path: pattern.into(),
+        auth: auth.to_vec(),
+        required_scope: scope.map(str::to_string),
+        forward_headers: if domain == "messaging" {
+            vec!["cf-acting-principal".into()]
+        } else {
+            vec![]
+        },
         timeout: None,
     }
 }
 
 /// Routes of the test table.
 pub fn test_routes() -> Vec<RouteDefinition> {
-    let mut ws = route(
-        "test.stream",
+    use AuthMode::*;
+    let c = services::CALLING;
+    let mut context = route(
+        "gateway.context",
+        "gateway",
         Method::GET,
-        "/v1/test/stream",
-        "/internal/v1/test/stream",
+        "/v1/developer-platform/context",
+        services::DEVELOPER_PLATFORM,
+        &[PlatformCredential],
+        None,
+    );
+    context.upstream_path = "/internal/v1/gateway/context".into();
+    let mut ws = route(
+        "messaging.realtime",
+        "messaging",
+        Method::GET,
+        "/v1/test/realtime",
+        services::MESSAGING,
+        &[RealtimeTicket],
         None,
     );
     ws.protocol = Protocol::WebSocket;
     vec![
+        context,
         route(
-            "test.context",
-            Method::GET,
-            "/v1/developer-platform/context",
-            "/internal/v1/gateway/context",
-            None,
-        ),
-        route(
-            "test.items.get",
+            "calling.items.get",
+            "calling",
             Method::GET,
             "/v1/test/items/{item_id}",
-            "/internal/v1/test/items/{item_id}",
+            c,
+            &[PlatformCredential],
             Some("test.read"),
         ),
         route(
-            "test.items.create",
+            "calling.items.create",
+            "calling",
             Method::POST,
             "/v1/test/items",
-            "/internal/v1/test/items",
+            c,
+            &[PlatformCredential],
             Some("test.write"),
         ),
         route(
-            "test.not-yours",
+            "calling.items.created",
+            "calling",
+            Method::POST,
+            "/v1/test/created",
+            c,
+            &[PlatformCredential],
+            None,
+        ),
+        route(
+            "calling.history",
+            "calling",
+            Method::GET,
+            "/v1/test/items/history",
+            c,
+            &[PlatformCredential],
+            None,
+        ),
+        route(
+            "calling.not-yours",
+            "calling",
             Method::GET,
             "/v1/test/not-yours",
-            "/internal/v1/test/not-yours",
+            c,
+            &[PlatformCredential],
+            None,
+        ),
+        route(
+            "calling.big",
+            "calling",
+            Method::GET,
+            "/v1/test/big",
+            c,
+            &[PlatformCredential],
+            None,
+        ),
+        route(
+            "calling.text",
+            "calling",
+            Method::GET,
+            "/v1/test/text",
+            c,
+            &[PlatformCredential],
+            None,
+        ),
+        route(
+            "calling.signaling",
+            "calling",
+            Method::GET,
+            "/v1/test/devices",
+            c,
+            &[SignalingCredential],
+            None,
+        ),
+        route(
+            "messaging.mixed",
+            "messaging",
+            Method::GET,
+            "/v1/test/mixed",
+            services::MESSAGING,
+            &[PlatformCredential, ClientToken],
+            None,
+        ),
+        route(
+            "meetings.spaces",
+            "meetings",
+            Method::GET,
+            "/api/v2/test-spaces/{id}",
+            services::MEETING_SERVICE,
+            &[MeetingSession, ParticipantToken],
+            None,
+        ),
+        route(
+            "developer-platform.orgs",
+            "developer-platform",
+            Method::GET,
+            "/v1/test-orgs",
+            services::DEVELOPER_PLATFORM,
+            &[DeveloperSession, PlatformCredential],
             None,
         ),
         ws,
@@ -342,8 +536,12 @@ pub fn test_routes() -> Vec<RouteDefinition> {
 
 pub struct Gateway {
     pub router: Router,
+    pub state: AppState,
     pub authority: Arc<FakeAuthority>,
-    pub upstream: Option<Upstream>,
+    pub calling: Option<Upstream>,
+    pub messaging: Option<Upstream>,
+    pub meeting: Option<Upstream>,
+    pub dp: Option<Upstream>,
     pub gateway_key_pem: String,
 }
 
@@ -352,6 +550,9 @@ pub struct Options {
     pub routes: Option<Vec<RouteDefinition>>,
     pub timeout: Duration,
     pub max_body: usize,
+    pub quota: Option<Arc<QuotaEngine>>,
+    pub cors: Vec<String>,
+    pub controls: RoutingControls,
 }
 
 impl Default for Options {
@@ -361,6 +562,9 @@ impl Default for Options {
             routes: None,
             timeout: Duration::from_secs(5),
             max_body: 4096,
+            quota: None,
+            cors: vec![],
+            controls: RoutingControls::default(),
         }
     }
 }
@@ -374,12 +578,16 @@ pub fn runtime(key: ServiceSigningKey, targets: &[(ServiceId, String)]) -> Servi
         Arc::new(SystemClock),
     ));
     let mut t = InternalTargets::new(ENV);
+    let mut upstreams = std::collections::BTreeMap::new();
     for (s, u) in targets {
         t.insert(s.clone(), u).unwrap();
+        upstreams.insert(s.as_str().to_string(), url::Url::parse(u).unwrap());
     }
     let client =
         Arc::new(InternalServiceClient::new(signer.clone(), t, Duration::from_secs(2)).unwrap());
-    ServiceAuthRuntime::new(signer, client).unwrap()
+    ServiceAuthRuntime::new(signer, client)
+        .unwrap()
+        .with_upstreams(upstreams)
 }
 
 impl Gateway {
@@ -390,34 +598,78 @@ impl Gateway {
     pub async fn with(o: Options) -> Self {
         let k = key("api-gateway-test-1");
         let pem = k.to_pkcs8_pem().to_string();
-        let upstream = if o.upstream {
-            Some(Upstream::start(&k).await)
+        let (calling, messaging, meeting, dp) = if o.upstream {
+            (
+                Some(
+                    Upstream::start(&k, Some((services::CALLING, "calling-request.forward"))).await,
+                ),
+                Some(
+                    Upstream::start(&k, Some((services::MESSAGING, "messaging-request.forward")))
+                        .await,
+                ),
+                Some(Upstream::start(&k, None).await),
+                Some(
+                    Upstream::start(
+                        &k,
+                        Some((services::DEVELOPER_PLATFORM, "developer-request.forward")),
+                    )
+                    .await,
+                ),
+            )
         } else {
-            None
+            (None, None, None, None)
         };
         let mut targets = Vec::new();
-        if let Some(u) = &upstream {
-            targets.push((ServiceId::developer_platform(), u.base_url.clone()));
+        for (svc, up) in [
+            (ServiceId::calling(), &calling),
+            (ServiceId::messaging(), &messaging),
+            (ServiceId::meeting_service(), &meeting),
+            (ServiceId::developer_platform(), &dp),
+        ] {
+            if let Some(u) = up {
+                targets.push((svc, u.base_url.clone()));
+            }
         }
         let routes = RouteTable::new(o.routes.unwrap_or_else(test_routes), true).unwrap();
         let authority = Arc::new(FakeAuthority::default());
-        let state = AppState::new(authority.clone(), runtime(k, &targets), routes)
+        let mut state = AppState::new(authority.clone(), runtime(k, &targets), routes)
             .with_flags(FeatureFlags {
                 public_routing: true,
                 websockets: true,
             })
+            .with_controls(o.controls)
             .with_upstream_timeout(o.timeout)
-            .with_max_body_bytes(o.max_body);
+            .with_max_body_bytes(o.max_body)
+            .with_cors_allowed_origins(o.cors);
+        if let Some(q) = o.quota {
+            state = state.with_quota_engine(q);
+        }
         Self {
-            router: http::app(state),
+            router: http::app(state.clone()),
+            state,
             authority,
-            upstream,
+            calling,
+            messaging,
+            meeting,
+            dp,
             gateway_key_pem: pem,
         }
     }
 
-    pub fn upstream(&self) -> &Upstream {
-        self.upstream.as_ref().unwrap()
+    pub fn calling(&self) -> &Upstream {
+        self.calling.as_ref().unwrap()
+    }
+
+    pub fn messaging(&self) -> &Upstream {
+        self.messaging.as_ref().unwrap()
+    }
+
+    pub fn meeting(&self) -> &Upstream {
+        self.meeting.as_ref().unwrap()
+    }
+
+    pub fn dp(&self) -> &Upstream {
+        self.dp.as_ref().unwrap()
     }
 
     pub async fn call(
@@ -448,6 +700,7 @@ impl Gateway {
             status,
             headers,
             json: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            bytes: bytes.to_vec(),
         }
     }
 
@@ -457,12 +710,24 @@ impl Gateway {
             auth.iter().map(|a| ("authorization", a.as_str())).collect();
         self.call(Method::GET, path, &headers, None).await
     }
+
+    /// Serves the gateway on a real socket (WebSocket tests).
+    pub async fn serve(&self) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let router = self.router.clone();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        format!("127.0.0.1:{}", addr.port())
+    }
 }
 
 pub struct Resp {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub json: Value,
+    pub bytes: Vec<u8>,
 }
 
 impl Resp {
@@ -491,10 +756,7 @@ pub fn conforms(reference: &str, value: &Value) {
     let registry = builder.prepare().unwrap();
     let validator = jsonschema::options()
         .with_registry(&registry)
-        .build(&json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$ref": format!("https://schemas.cfmeet.com/{reference}")
-        }))
+        .build(&json!({ "$schema": "https://json-schema.org/draft/2020-12/schema", "$ref": format!("https://schemas.cfmeet.com/{reference}") }))
         .unwrap();
     let errors: Vec<String> = validator
         .iter_errors(value)

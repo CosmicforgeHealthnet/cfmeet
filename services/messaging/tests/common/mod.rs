@@ -321,6 +321,18 @@ pub struct Peers {
     pub sms_gateway: Arc<ServiceTokenSigner>,
     /// The Meeting Service's name with a key Messaging's bundle does not list.
     pub rogue_meeting: Arc<ServiceTokenSigner>,
+    /// The public API Gateway (Part VI §51), trusted with `messaging-request.forward`.
+    pub gateway: Arc<ServiceTokenSigner>,
+    /// The API Gateway's name with a key Messaging's bundle does not list.
+    pub rogue_gateway: Arc<ServiceTokenSigner>,
+}
+
+/// The API Gateway's permissions in Messaging's bundle.
+pub const GATEWAY_PERMISSIONS: &[&str] = &["messaging-request.forward"];
+
+fn gateway_key() -> &'static ServiceSigningKey {
+    static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| key("api-gateway-test-1"))
 }
 
 pub const MEETING_PERMISSIONS: &[&str] =
@@ -356,11 +368,14 @@ pub fn peers() -> Peers {
         privacy_relay: signer(ServiceId::privacy_relay(), p),
         sms_gateway: signer(ServiceId::sms_gateway(), s),
         rogue_meeting: signer(ServiceId::meeting_service(), &key("meeting-rogue-1")),
+        gateway: signer(ServiceId::api_gateway(), gateway_key()),
+        rogue_gateway: signer(ServiceId::api_gateway(), &key("api-gateway-rogue-1")),
     }
 }
 
 /// Messaging's runtime: its trust bundle grants the Meeting Service, Privacy Relay and
-/// the SMS Gateway exactly their Part V H permissions; Calling (a correctly signing peer)
+/// the SMS Gateway exactly their Part V H permissions and the API Gateway
+/// `messaging-request.forward` (Part VI §51); Calling (a correctly signing peer)
 /// is not trusted.
 pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
     let clock: SharedClock = Arc::new(SystemClock);
@@ -382,6 +397,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
             issuer(cf_service_auth::services::MEETING_SERVICE, m, MEETING_PERMISSIONS),
             issuer(cf_service_auth::services::PRIVACY_RELAY, p, &["messaging-context-authority.apply"]),
             issuer(cf_service_auth::services::SMS_GATEWAY, s, &["messaging-sms-bridge.deliver"]),
+            issuer(cf_service_auth::services::API_GATEWAY, gateway_key(), GATEWAY_PERMISSIONS),
         ],
     })
     .to_string();

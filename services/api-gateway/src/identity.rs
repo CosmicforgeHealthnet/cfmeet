@@ -56,6 +56,9 @@ impl AuthenticatedCustomer {
             self.environment_kind,
             self.service_account_id,
         )
+        // The receiver re-verifies this credential with Platform Access (revocation,
+        // expiry and effective scopes are evaluated live, never trusted from here).
+        .with_initiating_credential(self.credential_id)
     }
 
     /// Parses Platform Access's `AuthorityChain` (contract `cfmeet.platform-access.identity`).

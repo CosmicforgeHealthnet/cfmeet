@@ -290,7 +290,7 @@ async fn customers_reach_the_developer_platform_only_with_platform_access_author
         issuer(s::OPERATOR_CONSOLE, &op_key, &["platform-identity.administer"], s::PLATFORM_ACCESS),
     ]});
     let dp_bundle = json!({"bundle_version": 1, "receiver": s::DEVELOPER_PLATFORM, "runtime_environment": "test",
-        "trusted_issuers": [issuer(s::API_GATEWAY, &gw_key, &["developer-request.forward"], s::DEVELOPER_PLATFORM)]});
+        "trusted_issuers": [issuer(s::API_GATEWAY, &gw_key, &["developer-request.forward", "developer-entitlement.read", "developer-usage.record"], s::DEVELOPER_PLATFORM)]});
 
     // Platform Access.
     let pa_db = env.database("gwe2e_pa").await;
@@ -377,7 +377,17 @@ async fn customers_reach_the_developer_platform_only_with_platform_access_author
         ),
         ("CF_PLATFORM_ACCESS_BASE_URL", pa_url.clone()),
         ("CF_DEVELOPER_PLATFORM_BASE_URL", dp_url.clone()),
+        ("API_GATEWAY_QUOTA_FLUSH_INTERVAL_MS", "200".into()),
     ];
+    // Shared quota counters when a Redis is available (per-instance counters otherwise).
+    let mut gw_env = gw_env;
+    if let Ok(redis) = std::env::var("TEST_REDIS_URL") {
+        gw_env.push(("API_GATEWAY_REDIS_URL", redis));
+        gw_env.push((
+            "API_GATEWAY_REDIS_KEY_PREFIX",
+            format!("gwe2e{}:", &Uuid::new_v4().simple().to_string()[..16]),
+        ));
+    }
     env.spawn(&PathBuf::from(GATEWAY_BIN), gw_env, &format!("{gw}/ready"))
         .await;
 
@@ -446,7 +456,36 @@ async fn customers_reach_the_developer_platform_only_with_platform_access_author
         .await
         .unwrap();
     assert_eq!(body["tenantId"], other_chain["tenantId"]);
+    // Platform request quotas: limits from the Developer Platform's effective
+    // entitlements (SANDBOX cap), counted per environment and durably accounted.
+    let r = http.get(&path).bearer_auth(&secret).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-cf-quota-limit-minute"], "120");
+    assert_eq!(r.headers()["x-cf-quota-limit-day"], "10000");
+    let remaining: u64 = r.headers()["x-cf-quota-remaining-minute"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(remaining < 120);
     let dp = Database::connect(&dp_db_url).await.unwrap();
+    let env_id = chain["environmentId"].as_str().unwrap();
+    let mut durable = 0;
+    for _ in 0..100 {
+        durable = count(
+            &dp,
+            &format!("SELECT COALESCE(SUM(request_count), 0)::bigint FROM devplat_api_usage_daily WHERE environment_id = '{env_id}'"),
+        )
+        .await;
+        if durable >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        durable, 2,
+        "accepted requests are durably accounted exactly once"
+    );
     assert_eq!(
         count(&dp, "SELECT count(*) FROM devplat_environment_refs").await,
         2

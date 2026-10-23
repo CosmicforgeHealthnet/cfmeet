@@ -100,7 +100,16 @@ Voice resolutions, current-assignment views and valid grant verifications carry 
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
-never authority). Platform Access unreachable → 503 (fail closed). Search and reservations are
+never authority). Platform Access unreachable → 503 (fail closed). The customer
+`/v1/numbers/**` family is also public through the **API Gateway** (Part VI §51): the gateway
+forwards the request WITHOUT `Authorization`, with its own service token
+(`numbering-request.forward`, granted to `cfmeet.api-gateway` by Numbering's trust bundle)
+whose delegated context names the authenticated credential; Numbering asks Platform Access
+to re-verify that credential live (`POST /internal/v1/credentials/delegated-authority`) and
+admits the request exactly like a presented credential (same scopes, SAFETY_ONLY refusal,
+throttling, 401 / 503). A token together with `Authorization`, a token without the
+permission or credential id, and any gateway token on `/v1/admin/**` or another surface are
+refused (401). Search and reservations are
 Workstream H ([ADR 0037](../../docs/decisions/0037-numbering-inventory-search-and-reservation.md)),
 provisioning and activation prerequisites Workstream I ([ADR 0038](../../docs/decisions/0038-numbering-provisioning-and-activation.md)),
 ownership and assignment Workstream J ([ADR 0039](../../docs/decisions/0039-numbering-ownership-and-assignment.md)),
@@ -140,7 +149,7 @@ start the real Platform Access binary with its own database.
 
 | Suite | Covers |
 |---|---|
-| `service` | probes, trusted / untrusted / unpermitted internal callers, customer auth through Platform Access, scope enforcement, tenant isolation, correlation / causation, failure handling, OpenAPI = routes |
+| `service` | probes, trusted / untrusted / unpermitted internal callers, customer auth through Platform Access (presented and API-Gateway-forwarded credentials; administration refuses the gateway), scope enforcement, tenant isolation, correlation / causation, failure handling, OpenAPI = routes |
 | `startup` | the real binary: fail-closed configuration, pending migrations refused, serving once migrated |
 | `migrations` | fresh / down / re-up, upgrade with data, exact table set, no cross-service FK, least-privilege runtime role |
 | `outbox` | atomicity, immutability, ordering, backoff, dead-letter, concurrent publishers, lease takeover, envelope conformance |

@@ -287,6 +287,10 @@ pub struct Peers {
     pub rogue_calling: Arc<ServiceTokenSigner>,
     /// Privacy Relay with its TRUSTED key: relay-number import / leases only (Part P).
     pub relay: Arc<ServiceTokenSigner>,
+    /// The API Gateway with its TRUSTED key: `numbering-request.forward` only (Part VI §51).
+    pub gateway: Arc<ServiceTokenSigner>,
+    /// The API Gateway identity name, but a key the bundle does not list.
+    pub rogue_gateway: Arc<ServiceTokenSigner>,
 }
 
 /// Numbering's service-auth runtime (system clock) whose client reaches `targets`.
@@ -299,6 +303,7 @@ pub fn service_auth(
     let telephony = peer_key("telephony-test-1");
     let sms_gateway = peer_key("sms-gateway-test-1");
     let relay = peer_key("privacy-relay-lease-1");
+    let gateway = peer_key("api-gateway-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle_json(
             cf_service_auth::services::NUMBERING,
@@ -342,6 +347,11 @@ pub fn service_auth(
                     vec![relay.public_jwk()],
                     &["number-relay.lease"],
                 ),
+                (
+                    cf_service_auth::services::API_GATEWAY,
+                    vec![gateway.public_jwk()],
+                    &["numbering-request.forward"],
+                ),
             ],
         ),
         &ServiceId::numbering(),
@@ -378,6 +388,8 @@ pub fn service_auth(
         privacy_relay: signer(ServiceId::privacy_relay(), key("privacy-relay-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         relay: signer(ServiceId::privacy_relay(), relay),
+        gateway: signer(ServiceId::api_gateway(), gateway),
+        rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-rogue-1")),
     };
     (runtime, peers)
 }
@@ -546,6 +558,40 @@ impl Harness {
         }
         self.raw(builder.body(Body::from(body.to_string())).unwrap())
             .await
+    }
+
+    /// A customer request as the API Gateway forwards it (Part VI §51): the gateway's
+    /// signed service token (optionally with a delegated context), NO `Authorization`
+    /// unless `extra` adds one, and a JSON body when `body` is given.
+    pub async fn forwarded(
+        &self,
+        signer: &ServiceTokenSigner,
+        delegated: Option<cf_service_auth::DelegatedPlatformContext>,
+        extra: &[(&str, &str)],
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Reply {
+        let mut outbound = OutboundServiceRequest::new_operation(ServiceId::numbering());
+        if let Some(delegated) = delegated {
+            outbound = outbound.with_delegated_context(delegated);
+        }
+        let signed = signer.sign(&outbound).unwrap();
+        let mut builder = Request::builder().method(method).uri(path);
+        for (name, value) in signed.headers().iter() {
+            builder = builder.header(name, value);
+        }
+        for (name, value) in extra {
+            builder = builder.header(*name, *value);
+        }
+        let body = match body {
+            Some(body) => {
+                builder = builder.header("content-type", "application/json");
+                Body::from(body.to_string())
+            }
+            None => Body::empty(),
+        };
+        self.raw(builder.body(body).unwrap()).await
     }
 
     /// The same harness with routing grants (a dedicated grant key) installed; the

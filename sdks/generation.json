@@ -1,17 +1,41 @@
 {
-  "description": "Single source of truth of the CF Meet platform SDKs (Part VI §4 scaffolding). Both SDKs are generated from these PUBLIC published contracts only; first-party CosmicForge products and external customers use the same SDKs and differ only through authorized scopes and trust classification. The full Section 52 SDK (typed clients, auth helpers, retries, pagination, WebSockets) is not implemented yet.",
-  "status": "scaffold",
+  "description": "Single source of truth of the CF Meet platform SDKs (Part VI Section 52). Both SDKs are generated from these PUBLIC published contracts only (the gateway's public API documents and route manifest); first-party CosmicForge products and external customers use the same SDKs and differ only through authorized scopes and trust classification.",
+  "status": "beta",
   "contracts": [
     "cfmeet.api-gateway.http-api",
     "cfmeet.api-gateway.common",
-    "cfmeet.developer-platform.common"
+    "cfmeet.developer-platform.common",
+    "cfmeet.api-gateway.public-api",
+    "cfmeet.api-gateway.public-http-api",
+    "cfmeet.meeting-service.public-api",
+    "cfmeet.calling.public-api",
+    "cfmeet.privacy-relay.public-api",
+    "cfmeet.messaging.public-api",
+    "cfmeet.numbering.public-api",
+    "cfmeet.sms-gateway.public-api",
+    "cfmeet.developer-platform.public-api"
   ],
   "typescript": {
     "package": "@cfmeet/platform-sdk",
-    "output": "typescript/src/generated/contracts.ts"
+    "output": "typescript/src/generated/contracts.ts",
+    "operations": "typescript/src/generated/operations.ts"
   },
   "dart": {
     "package": "cfmeet_platform_sdk",
-    "output": "dart/lib/src/generated/contracts.dart"
-  }
+    "output": "dart/lib/src/generated/contracts.dart",
+    "operations": "dart/lib/src/generated/operations.dart"
+  },
+  "paidTelecomOperations": [
+    "POST /v1/calls",
+    "POST /v1/calls/{call_id}/transfer",
+    "POST /v1/calls/{call_id}/recordings",
+    "POST /v1/sms/messages",
+    "POST /v1/numbers/acquisitions",
+    "POST /v1/numbers/reservations",
+    "POST /v1/numbers/ports",
+    "POST /v1/numbers/ports/{portId}/submit",
+    "POST /v1/numbers/assignments",
+    "POST /v1/privacy-relay/contexts/{context_id}/sessions"
+  ],
+  "paidTelecomRationale": "Mutations that place a call, send an SMS, start a billable recording, or acquire / reserve / port / assign a number (and relay sessions that bridge calls). An unknown outcome (timeout, connection loss, 5xx after sending) may already have incurred cost: the SDK never retries them automatically; callers reconcile, typically by replaying the same Idempotency-Key deliberately."
 }

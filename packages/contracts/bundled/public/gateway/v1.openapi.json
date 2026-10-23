@@ -1,0 +1,235 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet public API — gateway",
+    "version": "1.1.0",
+    "description": "Customer ingress of services/api-gateway (Part VI §51): probes, public documentation and discovery, and the generated public route catalogue (infra/api-gateway/route-manifest.json, documented per domain in cfmeet.*.public-api and in aggregate in cfmeet.api-gateway.public-api). Default deny; internal, provider-callback, operator, Platform Access and Telephony surfaces are never routable. The foundation diagnostic route GET /v1/developer-platform/context is kept.",
+    "x-cfmeet-source-contract": "cfmeet.api-gateway.http-api",
+    "x-cfmeet-source-version": "1.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.cfmeet.com",
+      "description": "CF Meet public API Gateway"
+    }
+  ],
+  "paths": {
+    "/v1/developer-platform/context": {
+      "get": {
+        "operationId": "getDeveloperPlatformContext",
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "description": "Foundation route (catalogue id developer-platform.context): authenticates the credential through Platform Access and forwards to the Developer Platform (GET /internal/v1/gateway/context) with the signed delegated context. Served only when API_GATEWAY_PUBLIC_ROUTING_ENABLED is true.",
+        "responses": {
+          "200": {
+            "description": "Canonical context of the credential's application environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.common.v1.GatewayContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "gateway",
+        "x-cfmeet-route-id": "gateway.getDeveloperPlatformContext",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A CF Meet API credential issued by Platform Access (Authorization: Bearer). X-CF-* headers supplied by a client are stripped; a client X-CF-Service-Authorization is refused."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/platform-developer.gateway.common.v1.Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "platform-developer.common.v1.AuthorityMode": {
+        "type": "string",
+        "enum": [
+          "FULL",
+          "SAFETY_ONLY"
+        ]
+      },
+      "platform-developer.common.v1.EnvironmentKind": {
+        "$ref": "#/components/schemas/platform.common.v1.ApplicationEnvironmentKind"
+      },
+      "platform-developer.common.v1.GatewayContext": {
+        "description": "GET /internal/v1/gateway/context: the canonical Platform Access ids of the caller's application environment, as Platform Access re-validated them from the API Gateway's signed delegated context.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "environmentKind",
+          "serviceAccountId",
+          "authorityMode",
+          "authority",
+          "forwardedBy",
+          "correlationId"
+        ],
+        "properties": {
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentKind": {
+            "$ref": "#/components/schemas/platform-developer.common.v1.EnvironmentKind"
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "authorityMode": {
+            "$ref": "#/components/schemas/platform-developer.common.v1.AuthorityMode"
+          },
+          "authority": {
+            "const": "PLATFORM_ACCESS"
+          },
+          "forwardedBy": {
+            "const": "cfmeet.api-gateway"
+          },
+          "correlationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.CorrelationId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.gateway.common.v1.Error": {
+        "description": "Public error envelope (Cache-Control: no-store). An unknown route is NOT_FOUND (default deny); messages never echo input, credentials or upstream text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/platform-developer.gateway.common.v1.ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/platform.common.v1.RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "platform-developer.gateway.common.v1.ErrorCode": {
+        "type": "string",
+        "enum": [
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "PAYLOAD_TOO_LARGE",
+          "VALIDATION_ERROR",
+          "AUTHENTICATION_FAILED",
+          "INSUFFICIENT_SCOPE",
+          "RATE_LIMITED",
+          "QUOTA_EXCEEDED",
+          "HEADERS_TOO_LARGE",
+          "URI_TOO_LONG",
+          "ORIGIN_NOT_ALLOWED",
+          "PROTOCOL_NOT_ENABLED",
+          "UPSTREAM_UNAVAILABLE",
+          "UPSTREAM_TIMEOUT",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "platform.common.v1.ApplicationEnvironmentKind": {
+        "description": "Kind of a customer application environment (Part B section 7).",
+        "type": "string",
+        "enum": [
+          "SANDBOX",
+          "TEST",
+          "PRODUCTION"
+        ]
+      },
+      "platform.common.v1.CorrelationId": {
+        "description": "Server-generated identifier that stays stable across every hop of one causal operation.",
+        "type": "string",
+        "pattern": "^corr_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    }
+  }
+}

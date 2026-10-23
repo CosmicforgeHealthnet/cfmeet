@@ -1,5 +1,6 @@
 //! Part IV C1 / C6: the service surface — probes, trusted vs untrusted internal callers,
-//! customer authentication through a REAL Platform Access with scope enforcement and
+//! customer authentication through a REAL Platform Access (presented credentials and
+//! API-Gateway-forwarded requests re-verified live, Part VI §51) with scope enforcement and
 //! tenant isolation, correlation / causation propagation, failure handling and the error
 //! envelope (every response conforms to `cfmeet.numbering.internal-api`).
 mod common;
@@ -11,7 +12,8 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use cf_service_auth::{
-    headers, CorrelationId, InternalPermission, OutboundServiceRequest, ServiceId, TrustPolicy,
+    headers, ApplicationEnvironmentKind, CorrelationId, DelegatedPlatformContext,
+    InternalPermission, OutboundServiceRequest, ServiceId, TrustPolicy,
 };
 use common::{actor, contracts::conforms, scope, Harness};
 use numbering::{
@@ -301,6 +303,29 @@ impl CustomerAuthority for Scripted {
     async fn authenticate(&self, _presented: &str) -> Result<Authentication, AuthorityUnavailable> {
         Ok(self.0.clone())
     }
+
+    async fn authenticate_delegated(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        Ok(self.0.clone())
+    }
+}
+
+/// The delegated context the API Gateway attaches for `c`'s credential.
+fn delegated_for(
+    c: &common::platform_access::Customer,
+    kind: ApplicationEnvironmentKind,
+) -> DelegatedPlatformContext {
+    DelegatedPlatformContext::new(
+        c.tenant_id,
+        c.application_id,
+        c.environment_id,
+        kind,
+        c.service_account_id,
+    )
+    .with_initiating_credential(c.credential_id)
 }
 
 #[tokio::test]
@@ -361,8 +386,114 @@ async fn throttling_and_suspended_authority_are_mapped_without_detail() {
         "a suspended scope has no numbering operation"
     );
     ctx.full_authority = true;
-    let (status, _) = call(app(Authentication::Authenticated(Box::new(ctx)))).await;
+    let (status, _) = call(app(Authentication::Authenticated(Box::new(ctx.clone())))).await;
     assert_eq!(status, StatusCode::OK);
+
+    // A gateway-forwarded request (Part VI §51) is admitted by the SAME tail: SAFETY_ONLY
+    // refused, throttling a 429, FULL admitted — and the chain must be exactly the
+    // delegated scope and credential.
+    let delegated = DelegatedPlatformContext::new(
+        ctx.tenant_id,
+        ctx.application_id,
+        ctx.environment_id,
+        ApplicationEnvironmentKind::Sandbox,
+        ctx.service_account_id,
+    )
+    .with_initiating_credential(ctx.credential_id);
+    let forward = |router: axum::Router, delegated: DelegatedPlatformContext| {
+        let signer = h.peers.gateway.clone();
+        async move {
+            let signed = signer
+                .sign(
+                    &OutboundServiceRequest::new_operation(ServiceId::numbering())
+                        .with_delegated_context(delegated),
+                )
+                .unwrap();
+            let mut request = Request::get("/v1/numbers/assignments");
+            for (n, v) in signed.headers().iter() {
+                request = request.header(n, v);
+            }
+            let response = router
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            (
+                response.status(),
+                response.headers().get("retry-after").cloned(),
+                response
+                    .headers()
+                    .get("x-request-id")
+                    .map(|v| v.to_str().unwrap().to_string()),
+                signed.request_id().as_str().to_string(),
+            )
+        }
+    };
+    let (status, _, request_id, signed_request_id) = forward(
+        app(Authentication::Authenticated(Box::new(ctx.clone()))),
+        delegated.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        request_id.as_deref(),
+        Some(signed_request_id.as_str()),
+        "the forwarded request continues the gateway's signed request id"
+    );
+    let mut suspended = ctx.clone();
+    suspended.full_authority = false;
+    let (status, ..) = forward(
+        app(Authentication::Authenticated(Box::new(suspended))),
+        delegated.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, retry, ..) = forward(
+        app(Authentication::Rejected {
+            reason: "rate_limited".into(),
+            throttle: Some(Throttle {
+                retry_after_seconds: 7,
+                threshold_crossed: false,
+            }),
+        }),
+        delegated.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(retry.unwrap(), "7");
+    // A chain that is not the delegated scope (or credential) is never trusted.
+    for other in [
+        DelegatedPlatformContext::new(
+            Uuid::new_v4(),
+            ctx.application_id,
+            ctx.environment_id,
+            ApplicationEnvironmentKind::Sandbox,
+            ctx.service_account_id,
+        )
+        .with_initiating_credential(ctx.credential_id),
+        DelegatedPlatformContext::new(
+            ctx.tenant_id,
+            ctx.application_id,
+            ctx.environment_id,
+            ApplicationEnvironmentKind::Production,
+            ctx.service_account_id,
+        )
+        .with_initiating_credential(ctx.credential_id),
+        DelegatedPlatformContext::new(
+            ctx.tenant_id,
+            ctx.application_id,
+            ctx.environment_id,
+            ApplicationEnvironmentKind::Sandbox,
+            ctx.service_account_id,
+        )
+        .with_initiating_credential(Uuid::new_v4()),
+    ] {
+        let (status, ..) = forward(
+            app(Authentication::Authenticated(Box::new(ctx.clone()))),
+            other,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
     // No authority configured: fail closed.
     let reply = h
         .customer(Some("cfk_anything"), Method::GET, "/v1/numbers/assignments")
@@ -569,6 +700,301 @@ async fn customers_are_authenticated_by_platform_access_scoped_and_isolated() {
     assert_eq!(
         (reply.status, reply.code()),
         (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE")
+    );
+}
+
+/// A body-less GET as the API Gateway forwards it.
+async fn forwarded_get(
+    h: &Harness,
+    signer: &cf_service_auth::ServiceTokenSigner,
+    delegated: Option<DelegatedPlatformContext>,
+    extra: &[(&str, &str)],
+    path: &str,
+) -> common::Reply {
+    h.forwarded(signer, delegated, extra, Method::GET, path, None)
+        .await
+}
+
+#[tokio::test]
+async fn gateway_forwarded_customer_requests_are_reverified_by_platform_access() {
+    let Some(h) = Harness::with_platform_access().await else {
+        return;
+    };
+    let pa = h.pa.clone().unwrap();
+    let alice = pa
+        .customer("SANDBOX", &["numbers.read"], &["numbers.read"])
+        .await;
+    let bob = pa
+        .customer("SANDBOX", &["numbers.read"], &["numbers.read"])
+        .await;
+    let carol = pa
+        .customer("SANDBOX", &["numbers.read", "calls.read"], &["calls.read"])
+        .await;
+    let ops = pa
+        .customer_as(
+            "PRODUCTION",
+            "FIRST_PARTY",
+            &["numbers.admin", "numbers.read"],
+            &["numbers.admin", "numbers.read"],
+        )
+        .await;
+    let sandbox = ApplicationEnvironmentKind::Sandbox;
+    let j = h
+        .active(
+            &owner_scope(&alice, EnvironmentKind::Sandbox),
+            OwnershipClass::EmployeeDirect,
+        )
+        .await;
+    let gateway = &h.peers.gateway;
+
+    // Accepted: no Authorization, the gateway's token, and the context comes ONLY from
+    // the chain Platform Access returns for the delegated credential.
+    let list = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&alice, sandbox)),
+        &[],
+        "/v1/numbers/assignments",
+    )
+    .await;
+    assert_eq!(list.status, 200, "{:?}", list.body);
+    conforms(
+        "numbering/common/v1.schema.json#/$defs/DcnAssignmentList",
+        &list.body,
+    );
+    assert_eq!(list.body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        list.body["data"][0]["assignmentId"],
+        j.assignment.id.to_string()
+    );
+    let path = format!("/v1/numbers/assignments/{}", j.assignment.id);
+    let one = h
+        .forwarded(
+            gateway,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            Method::GET,
+            &path,
+            None,
+        )
+        .await;
+    assert_eq!(one.status, 200, "{:?}", one.body);
+    // Scoped to the returned chain: Bob's forwarded request never sees Alice's record,
+    // and a delegated context mixing Alice's scope with Bob's credential is rejected by
+    // Platform Access.
+    let bobs = h
+        .forwarded(
+            gateway,
+            Some(delegated_for(&bob, sandbox)),
+            &[],
+            Method::GET,
+            &path,
+            None,
+        )
+        .await;
+    assert_eq!(
+        (bobs.status, bobs.code()),
+        (StatusCode::NOT_FOUND, "NOT_FOUND")
+    );
+    let mixed = DelegatedPlatformContext::new(
+        alice.tenant_id,
+        alice.application_id,
+        alice.environment_id,
+        sandbox,
+        alice.service_account_id,
+    )
+    .with_initiating_credential(bob.credential_id);
+    // Scopes are enforced exactly as on the bearer path.
+    let reply = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&carol, sandbox)),
+        &[],
+        "/v1/numbers/assignments",
+    )
+    .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::FORBIDDEN, "INSUFFICIENT_SCOPE")
+    );
+
+    // Every refusal is the same normalized 401 as the bearer path.
+    let bearer_failure = h
+        .customer(None, Method::GET, "/v1/numbers/assignments")
+        .await;
+    let alice_bearer = format!("Bearer {}", alice.secret);
+    let no_credential = DelegatedPlatformContext::new(
+        alice.tenant_id,
+        alice.application_id,
+        alice.environment_id,
+        sandbox,
+        alice.service_account_id,
+    );
+    let refusals = vec![
+        // Platform Access rejects a credential outside the delegated scope.
+        forwarded_get(&h, gateway, Some(mixed), &[], "/v1/numbers/assignments").await,
+        // No delegated credential id / no delegated context at all.
+        forwarded_get(
+            &h,
+            gateway,
+            Some(no_credential),
+            &[],
+            "/v1/numbers/assignments",
+        )
+        .await,
+        forwarded_get(&h, gateway, None, &[], "/v1/numbers/assignments").await,
+        // A trusted issuer without numbering-request.forward.
+        forwarded_get(
+            &h,
+            &h.peers.calling,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            "/v1/numbers/assignments",
+        )
+        .await,
+        // The gateway's name with a key the bundle does not list; an untrusted issuer.
+        forwarded_get(
+            &h,
+            &h.peers.rogue_gateway,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            "/v1/numbers/assignments",
+        )
+        .await,
+        forwarded_get(
+            &h,
+            &h.peers.privacy_relay,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            "/v1/numbers/assignments",
+        )
+        .await,
+        // A token AND a (valid) Authorization header.
+        forwarded_get(
+            &h,
+            gateway,
+            Some(delegated_for(&alice, sandbox)),
+            &[("authorization", alice_bearer.as_str())],
+            "/v1/numbers/assignments",
+        )
+        .await,
+        // A path outside the customer numbers family.
+        forwarded_get(
+            &h,
+            gateway,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            "/v1/numbers-unknown",
+        )
+        .await,
+        forwarded_get(
+            &h,
+            gateway,
+            Some(delegated_for(&alice, sandbox)),
+            &[],
+            "/v1/numbers/unknown-route",
+        )
+        .await,
+    ];
+    for reply in &refusals {
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED"),
+            "{:?}",
+            reply.body
+        );
+        assert_eq!(
+            reply.body["error"]["message"],
+            bearer_failure.body["error"]["message"]
+        );
+        conforms(ERROR, &reply.body);
+    }
+
+    // Administration never accepts the gateway branch, even for a credential that may
+    // administer with its own bearer.
+    let ops_bearer = format!("Bearer {}", ops.secret);
+    let reply = h
+        .raw(
+            Request::get("/v1/admin/controls")
+                .header("authorization", &ops_bearer)
+                .header("x-cf-operator", "ops.alice")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    let production = ApplicationEnvironmentKind::Production;
+    let admin_refusal = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&ops, production)),
+        &[("x-cf-operator", "ops.alice")],
+        "/v1/admin/controls",
+    )
+    .await;
+    assert_eq!(admin_refusal.code(), "AUTHENTICATION_FAILED");
+    assert_eq!(
+        admin_refusal.body["error"]["message"],
+        bearer_failure.body["error"]["message"]
+    );
+    assert_eq!(admin_refusal.status, StatusCode::UNAUTHORIZED);
+    // Nor do internal routes: the gateway holds no internal permission there.
+    let r = h.available_number(InventorySource::SyntheticTest).await;
+    let reply = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&alice, sandbox)),
+        &[],
+        &format!("/internal/v1/number-resources/{}", r.id),
+    )
+    .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::FORBIDDEN, "INTERNAL_PERMISSION_DENIED")
+    );
+
+    // Revocation takes effect on the next forwarded request (REJECTED → 401).
+    pa.revoke(alice.credential_id).await;
+    let reply = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&alice, sandbox)),
+        &[],
+        "/v1/numbers/assignments",
+    )
+    .await;
+    assert_eq!(
+        reply.body["error"]["message"],
+        bearer_failure.body["error"]["message"]
+    );
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+
+    // Platform Access unreachable: the same 503 as the bearer path (fail closed); an
+    // administration route still refuses BEFORE asking the authority.
+    pa.stop().await;
+    let reply = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&bob, sandbox)),
+        &[],
+        "/v1/numbers/assignments",
+    )
+    .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE")
+    );
+    let reply = forwarded_get(
+        &h,
+        gateway,
+        Some(delegated_for(&ops, production)),
+        &[("x-cf-operator", "ops.alice")],
+        "/v1/admin/controls",
+    )
+    .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED")
     );
 }
 

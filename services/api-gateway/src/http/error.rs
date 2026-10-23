@@ -44,6 +44,10 @@ error_codes! {
     AuthenticationFailed = "AUTHENTICATION_FAILED" => UNAUTHORIZED, "Authentication failed.";
     InsufficientScope = "INSUFFICIENT_SCOPE" => FORBIDDEN, "The credential lacks the required scope.";
     RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests.";
+    QuotaExceeded = "QUOTA_EXCEEDED" => TOO_MANY_REQUESTS, "The platform request quota of this environment is exhausted.";
+    HeadersTooLarge = "HEADERS_TOO_LARGE" => REQUEST_HEADER_FIELDS_TOO_LARGE, "The request headers are too large.";
+    UriTooLong = "URI_TOO_LONG" => URI_TOO_LONG, "The request URI is too long.";
+    OriginNotAllowed = "ORIGIN_NOT_ALLOWED" => FORBIDDEN, "This origin is not allowed.";
     ProtocolNotEnabled = "PROTOCOL_NOT_ENABLED" => NOT_IMPLEMENTED, "This protocol is not enabled for the route.";
     UpstreamUnavailable = "UPSTREAM_UNAVAILABLE" => BAD_GATEWAY, "The service behind this route is unavailable.";
     UpstreamTimeout = "UPSTREAM_TIMEOUT" => GATEWAY_TIMEOUT, "The service behind this route did not answer in time.";
@@ -55,6 +59,7 @@ error_codes! {
 pub enum ApiError {
     Code(ErrorCode),
     RateLimited { retry_after_seconds: u64 },
+    QuotaExceeded { retry_after_seconds: u64 },
 }
 
 impl From<ErrorCode> for ApiError {
@@ -88,8 +93,16 @@ impl IntoResponse for ApiError {
             ApiError::Code(code) => error_response(code),
             ApiError::RateLimited {
                 retry_after_seconds,
+            }
+            | ApiError::QuotaExceeded {
+                retry_after_seconds,
             } => {
-                let mut r = error_response(ErrorCode::RateLimited);
+                let code = if matches!(self, ApiError::RateLimited { .. }) {
+                    ErrorCode::RateLimited
+                } else {
+                    ErrorCode::QuotaExceeded
+                };
+                let mut r = error_response(code);
                 if let Ok(v) = HeaderValue::from_str(&retry_after_seconds.max(1).to_string()) {
                     r.headers_mut().insert(header::RETRY_AFTER, v);
                 }

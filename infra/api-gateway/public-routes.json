@@ -1,0 +1,3260 @@
+{
+  "description": "Explicit Part VI §51 public route allow-list of the API Gateway. Every source-contract operation that is not automatically INTERNAL_SERVICE / OPERATOR_ADMIN / PROVIDER_CALLBACK / PUBLIC_INFRASTRUCTURE must appear here as PUBLIC_CUSTOMER (routable) or EXCLUDED (with a reason code); anything else fails scripts/contracts/public_api.py (default deny). Reviewed like code: adding an entry is a public API decision.",
+  "reasons": {
+    "LEGACY_DIRECT_INGRESS": "Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers.",
+    "FIRST_PARTY_APP_BACKEND": "The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly.",
+    "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY": "Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority.",
+    "FIRST_PARTY_APP_ACCOUNT": "The CF Meet app's own account profile.",
+    "NOT_AN_API_OPERATION": "Service landing response.",
+    "MEDIA_PLANE_DIRECT": "Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway.",
+    "CONTACT_VAULT_PRIVATE": "Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway.",
+    "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family."
+  },
+  "operations": [
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/abuse-reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/blocks/{block_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/endpoints",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/endpoints",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/calling/endpoints/{endpoint_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/invitations/{invitation_id}/accept",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/invitations/{invitation_id}/decline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/media/rtc",
+      "class": "EXCLUDED",
+      "reason": "MEDIA_PLANE_DIRECT"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/media/rtc/v1",
+      "class": "EXCLUDED",
+      "reason": "MEDIA_PLANE_DIRECT"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/media/rtc/v1/validate",
+      "class": "EXCLUDED",
+      "reason": "MEDIA_PLANE_DIRECT"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/media/rtc/validate",
+      "class": "EXCLUDED",
+      "reason": "MEDIA_PLANE_DIRECT"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/sessions/{session_id}/media-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/signaling",
+      "class": "PUBLIC_CUSTOMER",
+      "protocol": "WEBSOCKET"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/signaling-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/abuse-reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/accept",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}/actions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/decline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/end",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/hold",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/ivr/input",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}/recording-authorizations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/recording-consent",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}/recordings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/recordings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/recordings/{recording_id}/stop",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/sessions/{session_id}/media-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/sessions/{session_id}/remove",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/transfer",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/audit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/business-hours",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/business-hours",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/business-hours/{business_hours_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/business-hours/{business_hours_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/business-hours/{business_hours_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/business-hours/{business_hours_id}/evaluation",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/departments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/departments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/departments/{department_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/departments/{department_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/departments/{department_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/departments/{department_id}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/effective-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/extensions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/extensions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/extensions/{extension_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/extensions/{extension_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/extensions/{extension_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/forwarding-rules",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/forwarding-rules",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/forwarding-rules/{forwarding_rule_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/forwarding-rules/{forwarding_rule_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/forwarding-rules/{forwarding_rule_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ivr-flows",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/ivr-flows",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}/activation",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions/{version_number}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/policies",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/policies",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/policies/{policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/policies/{policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/policies/{policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/public-contacts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/public-contacts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/public-contacts/{public_contact_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/public-contacts/{public_contact_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/queues",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/queues",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/queues/{queue_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/queues/{queue_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/queues/{queue_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/queues/{queue_id}/entries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/queues/{queue_id}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/recording-policies",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/recording-policies",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/recording-policies/{recording_policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/recording-policies/{recording_policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/recording-policies/{recording_policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/recordings/{recording_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/recordings/{recording_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/recordings/{recording_id}/access-audit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/recordings/{recording_id}/media-access",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ring-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/ring-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/ring-groups/{ring_group_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/ring-groups/{ring_group_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/ring-groups/{ring_group_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/ring-groups/{ring_group_id}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/sip-devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/sip-devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/sip-devices/{sip_device_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/sip-devices/{sip_device_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/voicemail/mailboxes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/voicemail/mailboxes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/voicemail/mailboxes/{mailbox_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/voicemail/mailboxes/{mailbox_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/enterprise/voicemail/mailboxes/{mailbox_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/voicemail/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/enterprise/voicemail/messages/{message_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/voicemail/messages/{message_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/enterprise/voicemail/messages/{message_id}/media-access",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PUT",
+      "path": "/v1/enterprise/voicemail/messages/{message_id}/read-state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/webhook-deliveries/{delivery_id}/replay",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/webhooks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/webhooks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/webhooks/{webhook_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/webhooks/{webhook_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "PATCH",
+      "path": "/v1/webhooks/{webhook_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/webhooks/{webhook_id}/deliveries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/webhooks/{webhook_id}/rotate-secret",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/commercial-plans",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/entitlements",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/invitations/accept",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PATCH",
+      "path": "/v1/organizations/{organizationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/activity",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/organizations/{organizationId}/billing-account",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations/{organizationId}/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/commercial",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations/{organizationId}/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations/{organizationId}/invitations/{invitationId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "path": "/v1/organizations/{organizationId}/members/{memberId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PATCH",
+      "path": "/v1/organizations/{organizationId}/members/{memberId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations/{organizationId}/ownership-transfer",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/plan-assignments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/projects",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/organizations/{organizationId}/projects",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PATCH",
+      "path": "/v1/projects/{projectId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/archive",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/environments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/environments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/scopes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "gateway",
+      "method": "GET",
+      "path": "/v1/developer-platform/context",
+      "class": "PUBLIC_CUSTOMER",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/internal/v1/gateway/context"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/",
+      "class": "EXCLUDED",
+      "reason": "NOT_AN_API_OPERATION"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/api-keys",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/api-keys",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v1/api-keys/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/api-keys/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/api/meetings",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/api/meetings/{id}/join",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/change-password",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/forgot-password",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/auth/oauth/google",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/auth/oauth/google/callback",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/refresh",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/resend-verification",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/reset-password",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/verify-email",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/verify-reset-token",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/instant",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/join/{meeting_identifier}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings/public/{meeting_identifier}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v1/meetings/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v1/meetings/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings/{id}/chat",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{id}/chat",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{id}/end",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{id}/join",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings/{meeting_id}/participants",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{meeting_id}/screen-share/start",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{meeting_id}/screen-share/stop",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/meetings/{meeting_id}/waiting",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{meeting_id}/waiting/{participant_id}/admit",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/meetings/{meeting_id}/waiting/{participant_id}/deny",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v1/participants/{participant_id}/audio",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/participants/{participant_id}/kick",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v1/participants/{participant_id}/video",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/users/me",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v1/users/me",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/users/me/deactivate",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v1/webhooks",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/webhooks",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v1/webhooks/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v1/webhooks/{id}",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/artifacts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/artifacts/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/artifacts/{artifactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/artifacts/{artifactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/artifacts/{artifactId}/access",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/attendance",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/backstage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/backstage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/breakouts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/announcement",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/assign",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/close-all",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/leave",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/move",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/{breakoutId}/announcement",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/conferences/{id}/breakouts/{breakoutId}/assignments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/{breakoutId}/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/{breakoutId}/enter",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/breakouts/{breakoutId}/open",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/conferences/{id}/chat-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/collaboration",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/conferences/{id}/collaboration-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/consents",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/consents/requirements",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/consents/{consentType}/withdraw",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/end",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/events",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/hand-raise",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/hand-raise",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/hand-raise",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/intelligence/requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/join",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/leave",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/media-credential",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/participants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/participants/me",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/audio-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/audio-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/ban",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/hand-raise",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/mute",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/remove",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/return-to-waiting",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/role",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/video-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/participants/{participantId}/video-lock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/polls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/polls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}/archive",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}/open",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}/responses",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/polls/{pollId}/results",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/pre-join",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/prepare",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/quality",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/quality/samples",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/questions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/answer",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/archive",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/dismiss",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/pin",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/pin",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/vote",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/vote",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/reactions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/realtime",
+      "class": "PUBLIC_CUSTOMER",
+      "protocol": "WEBSOCKET"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/realtime/ticket",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/recordings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/recordings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/recordings/{recordingId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/recordings/{recordingId}/stop",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/reschedule",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/screen-share/{participantId}/stop",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/spotlights",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/spotlights/{participantId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/start",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/transcription",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/transcription/{jobId}/stop",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/transcripts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/transcripts/{artifactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/transcripts/{artifactId}/translations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/unlock",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/waiting-room",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/waiting-room/admit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/waiting-room/deny",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/instant-meetings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/invitations/{token}/resolve",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/organizations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/meeting-spaces/{id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/archive",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/conferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/conferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/duplicate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/meeting-spaces/{id}/members/{memberId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/meeting-spaces/{id}/members/{memberId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/owner-transfer",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/profile-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/meeting-spaces/{id}/profile-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/meeting-spaces/{id}/recurrence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/recurrence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/meeting-spaces/{id}/recurrence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/recurrence/exceptions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/meeting-spaces/{id}/recurrence/exceptions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/registrations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/registrations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/meeting-spaces/{id}/registrations/{registrationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/registrations/{registrationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/client-sessions/revoke-all",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/client-tokens",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices/registration-challenges",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices/{deviceId}/key-packages",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/devices/{deviceId}/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/messaging/directory",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/directory/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/messaging/me",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/principals/names",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/members",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/members/{userId}",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/resolve/{identifier}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/conversations/{conversationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/attachments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/attachments/{attachmentId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/attachments/{attachmentId}/content",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/bans",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/bans",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/conversations/{conversationId}/bans/{principalId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/events",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invitation/accept",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invitation/decline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/conversations/{conversationId}/members/{principalId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/conversations/{conversationId}/members/{principalId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/reactions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/revisions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/sms-transport",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/thread",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/mls/commits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/mls/key-package-claims",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/mls/state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/pins",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/conversations/{conversationId}/pins/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/pins/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/read-cursor",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/search",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/sms-bridges",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/sms-bridges",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/sms-bridges/{bridgeId}/close",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/unread",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/audit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/backups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/backups/latest",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/backups/{backupId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/backups/{backupId}/download-grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/backups/{backupId}/finalize",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/blocks/{principalId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/client-sessions/revoke-all",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/client-sessions/{sessionId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/client-tokens",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/deletion-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/deletion-requests/{requestId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/devices/registration-challenges",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/devices/{deviceId}/key-packages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/devices/{deviceId}/push-registration",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/devices/{deviceId}/push-registration",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/devices/{deviceId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/devices/{deviceId}/welcomes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/exports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/exports/{exportId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/exports/{exportId}/download-grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers/{transferId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers/{transferId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/history-transfers/{transferId}/complete",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/history-transfers/{transferId}/sealed-history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/history-transfers/{transferId}/sealed-history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/key-transparency/proofs",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/legal-holds",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/legal-holds",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/legal-holds/{holdId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/legal-holds/{holdId}/release",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/moderation/actions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/moderation/actions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/presence/settings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/presence/settings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/principals/{principalId}/devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/reports/{reportId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/search",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/sms-bridge/disclosure",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/realtime",
+      "class": "PUBLIC_CUSTOMER",
+      "protocol": "WEBSOCKET"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/realtime/tickets",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/acquisitions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/acquisitions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/acquisitions/{acquisitionId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/acquisitions/{acquisitionId}/routes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/activate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}/capabilities",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/offboarding",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}/quarantine",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/release",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/restore",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}/routing",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/routing",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/assignments/{assignmentId}/suspension",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/assignments/{assignmentId}/transfer",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/catalog/countries/{countryCode}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/countries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/countries/{countryCode}/number-types",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/eligibility",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/eligibility/{decisionId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/kyc/cases",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/kyc/cases/{caseId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/kyc/cases/{caseId}/appeals",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/kyc/cases/{caseId}/evidence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/kyc/cases/{caseId}/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/kyc/cases/{caseId}/submit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/kyc/requirements/{countryCode}/{numberType}/{ownershipClass}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/pools",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/pools",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/pools/{poolId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/pools/{poolId}/members",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "DELETE",
+      "path": "/v1/numbers/pools/{poolId}/members/{assignmentId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/ports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/ports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/ports/{portId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/ports/{portId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/ports/{portId}/evidence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/ports/{portId}/submit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/reassignments",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/releases/{releaseId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/reservations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/reservations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/reservations/{reservationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/reservations/{reservationId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/risk-decisions/{decisionId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "POST",
+      "path": "/v1/numbers/risk-decisions/{decisionId}/appeals",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/search",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "numbering",
+      "method": "GET",
+      "path": "/v1/numbers/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contact-access-grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contacts",
+      "class": "EXCLUDED",
+      "reason": "CONTACT_VAULT_PRIVATE"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/contacts/{contact_reference}",
+      "class": "EXCLUDED",
+      "reason": "CONTACT_VAULT_PRIVATE"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "PATCH",
+      "path": "/v1/privacy-relay/contacts/{contact_reference}",
+      "class": "EXCLUDED",
+      "reason": "CONTACT_VAULT_PRIVATE"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contacts/{contact_reference}/disable",
+      "class": "EXCLUDED",
+      "reason": "CONTACT_VAULT_PRIVATE"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contacts/{contact_reference}/verification",
+      "class": "EXCLUDED",
+      "reason": "CONTACT_VAULT_PRIVATE"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/contexts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/contexts/{context_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "PATCH",
+      "path": "/v1/privacy-relay/contexts/{context_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts/{context_id}/complete",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/contexts/{context_id}/evidence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts/{context_id}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts/{context_id}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts/{context_id}/sessions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/contexts/{context_id}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/sessions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/sessions/{relay_session_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "GET",
+      "path": "/v1/privacy-relay/sessions/{relay_session_id}/evidence",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/sessions/{relay_session_id}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/sessions/{relay_session_id}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "privacy-relay",
+      "method": "POST",
+      "path": "/v1/privacy-relay/sessions/{relay_session_id}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "GET",
+      "path": "/v1/sms/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "POST",
+      "path": "/v1/sms/messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "GET",
+      "path": "/v1/sms/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "POST",
+      "path": "/v1/sms/opt-outs",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "GET",
+      "path": "/v1/sms/threads",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "sms",
+      "method": "GET",
+      "path": "/v1/sms/threads/{threadId}/messages",
+      "class": "PUBLIC_CUSTOMER"
+    }
+  ]
+}

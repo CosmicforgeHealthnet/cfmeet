@@ -24,8 +24,49 @@ const AUTHORITY_PREFIXES: &[&str] = &[
 ];
 const AUTHORITY_NAMES: &[&str] = &["forwarded", "x-real-ip", "x-user-id", "x-scopes"];
 
-/// The client header forwarded upstream (validated by the internal client).
+/// The client header forwarded on the Developer Platform foundation route (internal client).
 pub const FORWARDED_CLIENT_HEADERS: &[&str] = &["idempotency-key"];
+
+/// Client request headers forwarded on every public route (content negotiation,
+/// idempotency and conditional requests). Everything else is dropped; a route may add a
+/// documented header of its own (`forwardHeaders` in the manifest).
+pub const FORWARDED_REQUEST_HEADERS: &[&str] = &[
+    "accept",
+    "accept-language",
+    "content-type",
+    "idempotency-key",
+    "if-match",
+    "if-none-match",
+    "range",
+];
+
+/// Upstream response headers relayed to the client (besides the gateway's own ids and
+/// quota headers). Internal headers (service tokens, upstream request ids) never leave.
+pub const RELAYED_RESPONSE_HEADERS: &[&str] = &[
+    "content-type",
+    "content-length",
+    "cache-control",
+    "etag",
+    "last-modified",
+    "location",
+    "retry-after",
+    "idempotent-replayed",
+    "content-disposition",
+    "content-range",
+    "accept-ranges",
+    "deprecation",
+    "sunset",
+    "link",
+    "www-authenticate",
+    "ratelimit-limit",
+    "ratelimit-remaining",
+    "ratelimit-reset",
+];
+
+/// Bounded, visible-ASCII header value.
+pub fn safe_value(v: &axum::http::HeaderValue) -> bool {
+    v.len() <= 4096 && v.as_bytes().iter().all(|b| (0x20..=0x7e).contains(b))
+}
 
 /// Lower-case names of client headers that claim authority (all of them are dropped).
 pub fn stripped_authority_headers(headers: &HeaderMap) -> Vec<String> {

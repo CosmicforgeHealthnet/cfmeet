@@ -1,174 +1,266 @@
-//! Default-deny routing: the catalogue can never expose internal, provider-callback,
-//! operator, Platform Access or Telephony surfaces; the flags default to deny-all.
+//! Default-deny routing: the route table refuses non-customer upstreams, internal /
+//! administrative / callback patterns and foreign upstream paths at construction, and
+//! the generated catalogue is in parity with the contracts (every public operation
+//! resolves to exactly one route; nothing non-public resolves at all).
 
 mod common;
 
-use api_gateway::routing::{
-    foundation_catalogue, table_for, Lookup, Protocol, RouteError, RouteTable, CUSTOMER_UPSTREAMS,
+use api_gateway::{
+    catalogue,
+    routing::{
+        AuthMode, Lookup, Protocol, RouteError, RouteTable, RoutingControls, CUSTOMER_UPSTREAMS,
+    },
 };
 use axum::http::Method;
 use cf_service_auth::services;
-use common::route;
+use common::*;
+use serde_json::Value;
 
-#[test]
-fn routing_is_deny_all_unless_enabled() {
-    let table = table_for(false, false).unwrap();
-    assert!(table.is_empty());
-    for path in [
-        "/v1/developer-platform/context",
-        "/v1/anything",
-        "/",
-        "/internal/v1/x",
-    ] {
-        assert!(
-            matches!(table.lookup(&Method::GET, path), Lookup::NoRoute),
-            "{path}"
-        );
-    }
-    let enabled = table_for(true, false).unwrap();
-    assert_eq!(enabled.len(), foundation_catalogue().len());
-    match enabled.lookup(&Method::GET, "/v1/developer-platform/context") {
-        Lookup::Matched(m) => {
-            assert_eq!(m.upstream.as_str(), services::DEVELOPER_PLATFORM);
-            assert_eq!(m.upstream_path, "/internal/v1/gateway/context");
-        }
-        other => panic!("{other:?}"),
-    }
-    assert!(matches!(
-        enabled.lookup(&Method::POST, "/v1/developer-platform/context"),
-        Lookup::MethodNotAllowed
-    ));
+fn one(pattern: &str, upstream: &str, upstream_path: &str) -> Result<RouteTable, RouteError> {
+    let mut r = route(
+        "x",
+        "calling",
+        Method::GET,
+        pattern,
+        upstream,
+        &[AuthMode::PlatformCredential],
+        None,
+    );
+    r.upstream_path = upstream_path.into();
+    RouteTable::new(vec![r], true)
 }
 
 #[test]
-fn the_production_catalogue_is_customer_facing_only() {
-    for d in foundation_catalogue() {
-        assert!(CUSTOMER_UPSTREAMS.contains(&d.upstream), "{}", d.id);
-        assert!(d.pattern.starts_with("/v1/"));
-        assert_eq!(d.protocol, Protocol::Rest);
-    }
-}
-
-#[test]
-fn forbidden_upstreams_are_refused() {
+fn construction_refuses_every_non_customer_surface() {
     for upstream in [
         services::PLATFORM_ACCESS,
         services::TELEPHONY,
         services::PRIVACY_RELAY,
         services::OPERATOR_CONSOLE,
         services::API_GATEWAY,
-        "cfmeet.unknown-service",
     ] {
-        let mut r = route("x", Method::GET, "/v1/x", "/internal/v1/x", None);
-        r.upstream = upstream;
         assert!(
             matches!(
-                RouteTable::new(vec![r], true),
+                one("/v1/x", upstream, "/v1/x"),
                 Err(RouteError::ForbiddenUpstream(..))
             ),
             "{upstream}"
         );
     }
-    assert!(!CUSTOMER_UPSTREAMS.contains(&services::TELEPHONY));
-    assert!(!CUSTOMER_UPSTREAMS.contains(&services::PLATFORM_ACCESS));
-}
-
-#[test]
-fn internal_callback_and_operator_paths_are_never_public() {
     for pattern in [
         "/internal/v1/x",
-        "/v1/internal/x",
-        "/v1/admin/tenants",
+        "/v1/admin/x",
+        "/v1/x/admin",
         "/v1/operator/x",
-        "/v1/provider-callbacks/sms",
-        "/v1/telephony/callbacks",
+        "/v1/provider-callbacks/x",
+        "/v1/x/callbacks",
         "/v1/metrics",
-        "/provider-callbacks/v1/sms",
-        "/health",
+        "/v2/x",
         "/v1/",
         "/v1/x/",
-        "/v1/x//y",
-        "/v1/../internal",
+        "/v1/../x",
         "/v1/X",
     ] {
-        let r = route("x", Method::GET, pattern, "/internal/v1/x", None);
         assert!(
             matches!(
-                RouteTable::new(vec![r], true),
+                one(pattern, services::CALLING, pattern),
                 Err(RouteError::ForbiddenPattern(_))
             ),
             "{pattern}"
         );
     }
-    for upstream_path in [
+    // An upstream path must be the public pattern itself (receivers authorize their own
+    // public routes) — only the Developer Platform has /internal/v1 gateway routes.
+    assert!(matches!(
+        one("/v1/x", services::CALLING, "/internal/v1/x"),
+        Err(RouteError::ForbiddenUpstreamPath(_))
+    ));
+    assert!(matches!(
+        one("/v1/x", services::CALLING, "/v1/y"),
+        Err(RouteError::ForbiddenUpstreamPath(_))
+    ));
+    assert!(matches!(
+        one(
+            "/v1/x",
+            services::DEVELOPER_PLATFORM,
+            "/internal/v1/admin/x"
+        ),
+        Err(RouteError::ForbiddenUpstreamPath(_))
+    ));
+    assert!(one(
         "/v1/x",
-        "/internal/v1/admin/tenants",
-        "/internal/v1/x/operator",
-        "/internal/v2/x",
-        "/internal/v1/{other}",
-    ] {
-        let r = route("x", Method::GET, "/v1/x", upstream_path, None);
-        assert!(
-            matches!(
-                RouteTable::new(vec![r], true),
-                Err(RouteError::ForbiddenUpstreamPath(_))
-            ),
-            "{upstream_path}"
-        );
-    }
-}
-
-#[test]
-fn duplicates_and_disabled_websockets_are_refused() {
-    let a = route("a", Method::GET, "/v1/x", "/internal/v1/x", None);
-    let b = route("b", Method::GET, "/v1/x", "/internal/v1/y", None);
+        services::DEVELOPER_PLATFORM,
+        "/internal/v1/gateway/x"
+    )
+    .is_ok());
+    assert!(one(
+        "/api/v2/x/{id}",
+        services::MEETING_SERVICE,
+        "/api/v2/x/{id}"
+    )
+    .is_ok());
+    // Duplicates, missing auth and disabled WebSockets.
+    let r = route(
+        "a",
+        "calling",
+        Method::GET,
+        "/v1/a",
+        services::CALLING,
+        &[AuthMode::PlatformCredential],
+        None,
+    );
     assert!(matches!(
-        RouteTable::new(vec![a.clone(), b], true),
+        RouteTable::new(vec![r.clone(), r.clone()], true),
         Err(RouteError::Duplicate(_))
     ));
-    let c = route("a", Method::POST, "/v1/y", "/internal/v1/y", None);
+    let mut no_auth = r.clone();
+    no_auth.auth.clear();
     assert!(matches!(
-        RouteTable::new(vec![a, c], true),
-        Err(RouteError::Duplicate(_))
+        RouteTable::new(vec![no_auth], true),
+        Err(RouteError::InvalidAuth(_))
     ));
-    let mut ws = route("ws", Method::GET, "/v1/stream", "/internal/v1/stream", None);
+    let mut ws = r;
     ws.protocol = Protocol::WebSocket;
     assert!(matches!(
-        RouteTable::new(vec![ws.clone()], false),
+        RouteTable::new(vec![ws], false),
         Err(RouteError::WebSocketsDisabled(_))
     ));
-    assert_eq!(RouteTable::new(vec![ws], true).unwrap().len(), 1);
+    assert_eq!(CUSTOMER_UPSTREAMS.len(), 6);
 }
 
 #[test]
-fn parameters_bind_safe_segments_only() {
-    let t = RouteTable::new(
-        vec![route(
-            "p",
-            Method::GET,
-            "/v1/items/{item_id}",
-            "/internal/v1/items/{item_id}",
-            None,
-        )],
-        false,
-    )
-    .unwrap();
-    match t.lookup(&Method::GET, "/v1/items/abc-123_X") {
-        Lookup::Matched(m) => assert_eq!(m.upstream_path, "/internal/v1/items/abc-123_X"),
+fn lookups_bind_safe_parameters_and_prefer_literals() {
+    let t = RouteTable::new(test_routes(), true).unwrap();
+    match t.lookup(&Method::GET, "/v1/test/items/history") {
+        Lookup::Matched(m) => assert_eq!(m.definition.id, "calling.history"),
+        other => panic!("{other:?}"),
+    }
+    match t.lookup(&Method::GET, "/v1/test/items/abc-123") {
+        Lookup::Matched(m) => assert_eq!(m.upstream_path, "/v1/test/items/abc-123"),
+        other => panic!("{other:?}"),
+    }
+    match t.lookup(&Method::GET, "/v1/developer-platform/context") {
+        Lookup::Matched(m) => assert_eq!(m.upstream_path, "/internal/v1/gateway/context"),
         other => panic!("{other:?}"),
     }
     for bad in [
-        "/v1/items/a.b",
-        "/v1/items/..",
-        "/v1/items/a%2Fb",
-        "/v1/items/",
-        "/v1/items/a/b",
+        "/v1/test/items/a%2Fb",
+        "/v1/test/items/..",
+        "/v1/test/items/%2e%2e",
+        "/v1/test/items/a%00",
+        "/v1/test/items/a b",
     ] {
         assert!(
             matches!(t.lookup(&Method::GET, bad), Lookup::NoRoute),
             "{bad}"
         );
     }
-    let long = format!("/v1/items/{}", "a".repeat(129));
-    assert!(matches!(t.lookup(&Method::GET, &long), Lookup::NoRoute));
+    assert!(
+        matches!(t.lookup(&Method::DELETE, "/v1/test/items"), Lookup::MethodNotAllowed(ref m) if m == &[Method::POST])
+    );
+    assert!(matches!(
+        t.lookup(&Method::GET, "/internal/v1/gateway/context"),
+        Lookup::NoRoute
+    ));
+    assert!(matches!(
+        t.lookup(&Method::GET, "/v1/test"),
+        Lookup::NoRoute
+    ));
+}
+
+#[test]
+fn the_generated_catalogue_is_in_parity_with_the_contracts() {
+    let manifest: Value = serde_json::from_str(catalogue::MANIFEST).unwrap();
+    let table = catalogue::table_for(true, true, &RoutingControls::default()).unwrap();
+    // Every classified operation of the source contracts has exactly one class, and
+    // only PUBLIC_CUSTOMER operations are routable.
+    let mut public = 0;
+    for e in catalogue::catalogue() {
+        let m = Method::from_bytes(e.method.as_bytes()).unwrap();
+        let sample = e
+            .path
+            .split('/')
+            .map(|s| if s.starts_with('{') { "abc" } else { s })
+            .collect::<Vec<_>>()
+            .join("/");
+        let routed = matches!(table.lookup(&m, &sample), Lookup::Matched(ref r) if r.definition.pattern == e.path);
+        match e.class.as_str() {
+            "PUBLIC_CUSTOMER" => {
+                public += 1;
+                assert!(
+                    routed,
+                    "public operation not routable: {} {}",
+                    e.method, e.path
+                );
+            }
+            "INTERNAL_SERVICE"
+            | "OPERATOR_ADMIN"
+            | "PROVIDER_CALLBACK"
+            | "PUBLIC_INFRASTRUCTURE"
+            | "EXCLUDED" => {
+                assert!(
+                    !routed,
+                    "{} operation routable: {} {}",
+                    e.class, e.method, e.path
+                );
+            }
+            other => panic!("unknown class {other}"),
+        }
+    }
+    assert_eq!(public, table.len());
+    assert_eq!(public, manifest["routes"].as_array().unwrap().len());
+    // Platform Access, Telephony and internal / admin / provider paths never appear.
+    for r in table.definitions() {
+        assert!(
+            CUSTOMER_UPSTREAMS.contains(&r.upstream.as_str()),
+            "{}",
+            r.id
+        );
+        assert!(
+            !r.pattern.contains("/internal")
+                && !r.pattern.contains("admin")
+                && !r.pattern.contains("provider"),
+            "{}",
+            r.pattern
+        );
+    }
+    // The approved families are all present.
+    for (domain, sample) in [
+        ("meetings", "/api/v2/meeting-spaces"),
+        ("calling", "/v1/calls"),
+        ("privacy-relay", "/v1/privacy-relay/contexts"),
+        ("messaging", "/v1/conversations"),
+        ("numbering", "/v1/numbers/search"),
+        ("sms", "/v1/sms/messages"),
+        ("developer-platform", "/v1/organizations"),
+    ] {
+        assert!(
+            table
+                .definitions()
+                .any(|d| d.domain == domain && d.pattern == sample),
+            "{domain} {sample}"
+        );
+    }
+    // Contact Vault operations stay private; numbering administration is never public.
+    assert!(!table.definitions().any(|d| d.pattern.contains("/contacts")));
+    assert!(!table
+        .definitions()
+        .any(|d| d.pattern.starts_with("/v1/admin")));
+    // The three approved realtime channels are WebSocket routes.
+    let ws: Vec<_> = table
+        .definitions()
+        .filter(|d| d.protocol == Protocol::WebSocket)
+        .map(|d| d.pattern.as_str())
+        .collect();
+    assert_eq!(ws.len(), 3, "{ws:?}");
+    for p in [
+        "/api/v2/conferences/{id}/realtime",
+        "/v1/calling/signaling",
+        "/v1/realtime",
+    ] {
+        assert!(ws.contains(&p), "{p}");
+    }
+    // WebSockets off: REST routing still works, realtime routes are absent.
+    let rest = catalogue::table_for(true, false, &RoutingControls::default()).unwrap();
+    assert_eq!(rest.len(), table.len() - 3);
 }

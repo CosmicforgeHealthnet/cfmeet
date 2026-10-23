@@ -3,9 +3,15 @@
 //! | Routes | Authentication |
 //! |---|---|
 //! | `/health`, `/ready`, `/openapi.json` | none (no data) |
-//! | `/v1/**` | `Authorization: Bearer <CF Meet API credential>` verified by Platform Access ([`CustomerCaller`]); `GET` may use the bounded, feed-invalidated cache, every other method authenticates afresh. A `CF-Client-Token` scheme is refused explicitly (client tokens are a later workstream; there is no fake or permanent client token) |
+//! | `/v1/**` | `Authorization: Bearer <CF Meet API credential>` verified by Platform Access ([`CustomerCaller`]); `GET` may use the bounded, feed-invalidated cache, every other method authenticates afresh. `CF-Client-Token` is accepted only on the device-direct member operations ([`client_token_route`]) |
+//! | `/v1/**` forwarded by the API Gateway (Part VI §51) | NO `Authorization`, instead an Ed25519 service token verified by Messaging's trust bundle, whose issuer holds `messaging-request.forward` and whose signed delegated context names the initiating credential; that credential is then authenticated LIVE by Platform Access (`POST /internal/v1/credentials/delegated-authority`, never cached). Both headers together, any other issuer, a missing grant or a missing credential id are refused like a bad credential |
 //! | `/internal/v1/**` | an Ed25519 service token whose issuer Messaging's trust bundle grants the route's permission ([`InternalCaller`]) |
 //! | operations | `GET /metrics` on a separate listener only |
+//!
+//! Both customer paths end in the same tail (`authenticated_customer`): the authority
+//! chain Platform Access returned is the ONLY source of tenant, environment, scopes and
+//! principal restriction; suspended (SAFETY_ONLY) chains, rejections, throttles and an
+//! unreachable authority are answered identically.
 //!
 //! The ACTING principal ([`Acting`]) comes from `CF-Acting-Principal`, honoured only
 //! inside the credential's principal restriction and when Platform Access resolves it
@@ -27,7 +33,10 @@ use uuid::Uuid;
 use super::error::{ApiError, ErrorCode};
 use crate::{
     domain::{scoped, CausationId, RequestContext},
-    identity::{cache::Freshness, Authentication, PrincipalStatus, TrustedContext},
+    identity::{
+        cache::Freshness, Authentication, AuthorityUnavailable, CustomerAuthority, PrincipalStatus,
+        TrustedContext,
+    },
     state::AppState,
 };
 
@@ -215,7 +224,7 @@ fn presented(request: &Request) -> Presented {
 
 pub async fn require_customer(
     State(state): State<AppState>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
     let context = RequestContext::generate();
@@ -224,66 +233,135 @@ pub async fn require_customer(
     let response = scoped(
         context.clone(),
         async move {
-            // A service token never authenticates a customer route.
-            if request
+            let authentication = if request
                 .headers()
                 .contains_key(headers::SERVICE_AUTHORIZATION)
             {
-                return ApiError::code(ErrorCode::AuthenticationFailed).into_response();
-            }
-            let token = match presented(&request) {
-                Presented::Credential(t) => zeroize::Zeroizing::new(t),
-                Presented::ClientToken(t) => {
-                    let token = zeroize::Zeroizing::new(t);
-                    return client_token_request(&state, &token, request, next).await;
-                }
-                Presented::Invalid => {
-                    return ApiError::code(ErrorCode::AuthenticationFailed).into_response()
-                }
-            };
-            let freshness = if request.method() == Method::GET || request.method() == Method::HEAD {
-                Freshness::BoundedStale
+                gateway_forwarded(&state, request.headers()).await
             } else {
-                Freshness::Fresh
+                let token = match presented(&request) {
+                    Presented::Credential(t) => zeroize::Zeroizing::new(t),
+                    Presented::ClientToken(t) => {
+                        let token = zeroize::Zeroizing::new(t);
+                        return client_token_request(&state, &token, request, next).await;
+                    }
+                    Presented::Invalid => {
+                        return ApiError::code(ErrorCode::AuthenticationFailed).into_response()
+                    }
+                };
+                let freshness =
+                    if request.method() == Method::GET || request.method() == Method::HEAD {
+                        Freshness::BoundedStale
+                    } else {
+                        Freshness::Fresh
+                    };
+                state.authority.authenticate_with(&token, freshness).await
             };
-            match state.authority.authenticate_with(&token, freshness).await {
-                Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
-                    drop(token);
-                    let mutation =
-                        request.method() != Method::GET && request.method() != Method::HEAD;
-                    request.extensions_mut().insert(CustomerCaller(*ctx));
-                    let response = next.run(request).await;
-                    if mutation && response.status().is_success() {
-                        // A committed change may have queued events: publish them now.
-                        state.wake_outbox();
-                    }
-                    response
-                }
-                Ok(Authentication::Authenticated(_)) => {
-                    tracing::info!("customer authentication refused (suspended scope)");
-                    ApiError::code(ErrorCode::AuthoritySuspended).into_response()
-                }
-                Ok(Authentication::Rejected { reason, throttle }) => {
-                    crate::metrics::inc("messaging_customer_auth_rejected_total", &[]);
-                    tracing::info!(%reason, "customer authentication rejected");
-                    match throttle {
-                        Some(t) => ApiError::RateLimited {
-                            retry_after_seconds: t.retry_after_seconds,
-                        }
-                        .into_response(),
-                        None => ApiError::code(ErrorCode::AuthenticationFailed).into_response(),
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "identity authority unavailable");
-                    ApiError::code(ErrorCode::ServiceUnavailable).into_response()
-                }
-            }
+            authenticated_customer(&state, authentication, request, next).await
         }
         .instrument(span),
     )
     .await;
     with_request_id(response, &context)
+}
+
+/// Part VI §51: a `/v1` request the public API Gateway authenticated and forwarded. The
+/// gateway strips `Authorization` and signs a fresh service token instead; it is accepted
+/// only when Messaging's trust bundle grants its issuer `messaging-request.forward` and its
+/// signed delegated context names the initiating credential. That credential is then
+/// authenticated LIVE by Platform Access — the token itself is never authority. Every
+/// refusal is a [`Authentication::Rejected`] (the normalized 401 of a bad credential);
+/// reasons are fixed vocabulary, token values are never logged.
+async fn gateway_forwarded(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Authentication, AuthorityUnavailable> {
+    let refused = |reason: &'static str| {
+        crate::metrics::inc(
+            "messaging_gateway_forward_refused_total",
+            &[("reason", reason)],
+        );
+        Ok(Authentication::Rejected {
+            reason: format!("gateway_forward_{reason}"),
+            throttle: None,
+        })
+    };
+    // A service token never accompanies a customer credential.
+    if headers.contains_key(header::AUTHORIZATION) {
+        return refused("customer_authorization_present");
+    }
+    let caller = match state.service_auth.verifier().verify_headers(headers) {
+        Ok(caller) => caller,
+        Err(error) => return refused(error.failure.as_str()),
+    };
+    if !caller.has_permission(InternalPermission::MessagingRequestForward) {
+        tracing::warn!(caller = %caller.authenticated_service(), "service token without messaging-request.forward on a customer route");
+        return refused("permission_denied");
+    }
+    let Some(delegated) = caller
+        .delegated_platform_context()
+        .filter(|d| d.initiating_credential_id().is_some())
+    else {
+        return refused("credential_id_missing");
+    };
+    let outcome = state
+        .authority
+        .authenticate_forwarded(delegated, caller.correlation_id())
+        .await;
+    crate::metrics::inc(
+        "messaging_gateway_forward_total",
+        &[(
+            "outcome",
+            match &outcome {
+                Ok(Authentication::Authenticated(_)) => "authenticated",
+                Ok(Authentication::Rejected { .. }) => "rejected",
+                Err(_) => "authority_unavailable",
+            },
+        )],
+    );
+    outcome
+}
+
+/// The common tail of every customer authentication: only a FULL authority chain becomes
+/// the request's [`CustomerCaller`]; a suspended scope, a rejection (throttled or not) and
+/// an unreachable authority are answered the same way whichever path authenticated.
+async fn authenticated_customer(
+    state: &AppState,
+    authentication: Result<Authentication, AuthorityUnavailable>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    match authentication {
+        Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
+            let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+            request.extensions_mut().insert(CustomerCaller(*ctx));
+            let response = next.run(request).await;
+            if mutation && response.status().is_success() {
+                // A committed change may have queued events: publish them now.
+                state.wake_outbox();
+            }
+            response
+        }
+        Ok(Authentication::Authenticated(_)) => {
+            tracing::info!("customer authentication refused (suspended scope)");
+            ApiError::code(ErrorCode::AuthoritySuspended).into_response()
+        }
+        Ok(Authentication::Rejected { reason, throttle }) => {
+            crate::metrics::inc("messaging_customer_auth_rejected_total", &[]);
+            tracing::info!(%reason, "customer authentication rejected");
+            match throttle {
+                Some(t) => ApiError::RateLimited {
+                    retry_after_seconds: t.retry_after_seconds,
+                }
+                .into_response(),
+                None => ApiError::code(ErrorCode::AuthenticationFailed).into_response(),
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "identity authority unavailable");
+            ApiError::code(ErrorCode::ServiceUnavailable).into_response()
+        }
+    }
 }
 
 /// A device-direct REST request with a client token (§105): only the allow-listed member
@@ -523,7 +601,6 @@ pub async fn delegated_context_for_restriction(
     let Some(ctx) = caller.context().delegated_platform_context() else {
         return Err(ApiError::code(ErrorCode::DelegatedContextRequired));
     };
-    use crate::identity::CustomerAuthority;
     match state.authority.validate_delegated(ctx).await {
         Ok(crate::identity::DelegatedScope::Valid {
             first_party,
@@ -550,7 +627,6 @@ pub async fn delegated_context(
     let Some(ctx) = caller.context().delegated_platform_context() else {
         return Err(ApiError::code(ErrorCode::DelegatedContextRequired));
     };
-    use crate::identity::CustomerAuthority;
     match state.authority.validate_delegated(ctx).await {
         Ok(crate::identity::DelegatedScope::Valid {
             first_party,

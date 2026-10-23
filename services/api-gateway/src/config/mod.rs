@@ -7,7 +7,7 @@
 //! | `API_GATEWAY_WEBSOCKETS_ENABLED` | no | feature flag (default `false`): admit WebSocket routes into the catalogue (forwarding them is Section 51) |
 //! | `API_GATEWAY_UPSTREAM_TIMEOUT_MS` | no | per-request upstream deadline (100–60000, default 10000) |
 //! | `API_GATEWAY_MAX_BODY_BYTES` | no | request body limit (1024–8388608, default 1048576) |
-//! | `API_GATEWAY_REDIS_URL` | no | Redis for future SHARED quotas (`redis://` local / test, `rediss://` otherwise); unset: quotas not enforced |
+//! | `API_GATEWAY_REDIS_URL` | no | Redis for SHARED atomic quota counters across instances (`redis://` local / test, `rediss://` otherwise); unset: per-instance counters (quotas still enforced, limits from the Developer Platform) |
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
@@ -104,6 +104,14 @@ impl QuotaSettings {
 pub struct ApiGatewayConfig {
     pub bind_address: SocketAddr,
     pub flags: FeatureFlags,
+    /// Routing rollback controls (disabled API families, central webhooks cut-over).
+    pub controls: crate::routing::RoutingControls,
+    /// Exact allowed browser origins (`scheme://host[:port]`); empty: no CORS.
+    pub cors_allowed_origins: Vec<String>,
+    pub max_header_bytes: usize,
+    pub max_headers: usize,
+    pub ws_max_message_bytes: usize,
+    pub quota_flush_interval: Duration,
     pub upstream_timeout: Duration,
     pub max_body_bytes: usize,
     pub quotas: QuotaSettings,
@@ -225,6 +233,66 @@ impl ApiGatewayConfig {
                 "must be at most 32 characters of [a-z0-9:_-]",
             ));
         }
+        const DOMAINS: &[&str] = &[
+            "meetings",
+            "calling",
+            "privacy-relay",
+            "messaging",
+            "numbering",
+            "sms",
+            "developer-platform",
+            "gateway",
+        ];
+        let mut controls = crate::routing::RoutingControls::default();
+        if let Some(v) = get("API_GATEWAY_DISABLED_DOMAINS") {
+            for d in v.split(',').map(str::trim).filter(|d| !d.is_empty()) {
+                if !DOMAINS.contains(&d) {
+                    return Err(ConfigError::invalid(
+                        "API_GATEWAY_DISABLED_DOMAINS",
+                        format!("unknown API family (known: {})", DOMAINS.join(", ")),
+                    ));
+                }
+                controls.disabled_domains.insert(d.to_string());
+            }
+        }
+        controls.central_webhooks = flag(&get, "API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED")?;
+        let mut cors_allowed_origins = Vec::new();
+        if let Some(v) = get("API_GATEWAY_CORS_ALLOWED_ORIGINS") {
+            for o in v.split(',').map(str::trim).filter(|o| !o.is_empty()) {
+                let ok = url::Url::parse(o).ok().is_some_and(|u| {
+                    matches!(u.scheme(), "https" | "http")
+                        && u.host_str().is_some()
+                        && u.path() == "/"
+                        && u.query().is_none()
+                        && u.username().is_empty()
+                        && !o.ends_with('/')
+                });
+                if !ok || o == "*" {
+                    return Err(ConfigError::invalid(
+                        "API_GATEWAY_CORS_ALLOWED_ORIGINS",
+                        "must be a comma-separated list of exact origins such as https://app.cfmeet.com (no wildcard)",
+                    ));
+                }
+                cors_allowed_origins.push(o.to_string());
+            }
+        }
+        let max_header_bytes =
+            bounded(&get, "API_GATEWAY_MAX_HEADER_BYTES", 16_384, 1_024, 65_536)? as usize;
+        let max_headers = bounded(&get, "API_GATEWAY_MAX_HEADERS", 64, 8, 200)? as usize;
+        let ws_max_message_bytes = bounded(
+            &get,
+            "API_GATEWAY_WS_MAX_MESSAGE_BYTES",
+            1_048_576,
+            1_024,
+            16_777_216,
+        )? as usize;
+        let quota_flush_interval = Duration::from_millis(bounded(
+            &get,
+            "API_GATEWAY_QUOTA_FLUSH_INTERVAL_MS",
+            5_000,
+            100,
+            300_000,
+        )? as u64);
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -238,6 +306,12 @@ impl ApiGatewayConfig {
         Ok(Self {
             bind_address,
             flags,
+            controls,
+            cors_allowed_origins,
+            max_header_bytes,
+            max_headers,
+            ws_max_message_bytes,
+            quota_flush_interval,
             upstream_timeout,
             max_body_bytes,
             quotas: QuotaSettings {

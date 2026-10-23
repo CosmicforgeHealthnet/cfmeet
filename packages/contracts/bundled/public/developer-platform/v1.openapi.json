@@ -1,0 +1,4014 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet public API — developer-platform",
+    "version": "1.0.0",
+    "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id.",
+    "x-cfmeet-source-contract": "cfmeet.developer-platform.http-api",
+    "x-cfmeet-source-version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.cfmeet.com",
+      "description": "CF Meet public API Gateway"
+    }
+  ],
+  "paths": {
+    "/v1/organizations": {
+      "get": {
+        "operationId": "listOrganizations",
+        "summary": "List the caller's organizations (a machine credential sees only its own)",
+        "description": "List the caller's organizations (a machine credential sees only its own). Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OrganizationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listOrganizations",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "post": {
+        "operationId": "createOrganization",
+        "summary": "Create an organization; the creator becomes its OWNER",
+        "description": "Create an organization; the creator becomes its OWNER. Platform Access creates the canonical EXTERNAL tenant.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreateOrganizationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.createOrganization",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}": {
+      "get": {
+        "operationId": "getOrganization",
+        "summary": "Read an organization (including its Platform Access classification)",
+        "description": "Read an organization (including its Platform Access classification). Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getOrganization",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "patch": {
+        "operationId": "updateOrganization",
+        "summary": "Update the organization profile (optimistic concurrency)",
+        "description": "Update the organization profile (optimistic concurrency). Roles: OWNER, ADMIN. Machine credentials need `organizations.manage`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.UpdateOrganizationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.updateOrganization",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/close": {
+      "post": {
+        "operationId": "closeOrganization",
+        "summary": "Close the organization (terminal; machine access is withdrawn in Platform Access first)",
+        "description": "Close the organization (terminal; machine access is withdrawn in Platform Access first). Roles: OWNER.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Organization"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.closeOrganization",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/members": {
+      "get": {
+        "operationId": "listMembers",
+        "summary": "List human workspace members",
+        "description": "List human workspace members. Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.MemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listMembers",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/members/{memberId}": {
+      "patch": {
+        "operationId": "changeMemberRole",
+        "summary": "Change a member's role (the last OWNER can never be demoted)",
+        "description": "Change a member's role (the last OWNER can never be demoted). Roles: OWNER.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.ChangeRoleRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.changeMemberRole",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      },
+      "delete": {
+        "operationId": "removeMember",
+        "summary": "Remove a member (OWNER) or leave (self); never the last OWNER",
+        "description": "Remove a member (OWNER) or leave (self); never the last OWNER. Roles: OWNER, or the member themself.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.removeMember",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/ownership-transfer": {
+      "post": {
+        "operationId": "transferOwnership",
+        "summary": "Transfer ownership: the target member becomes OWNER and the caller becomes ADMIN, atomically",
+        "description": "Transfer ownership: the target member becomes OWNER and the caller becomes ADMIN, atomically. Roles: OWNER.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.TransferOwnershipRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.transferOwnership",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/invitations": {
+      "get": {
+        "operationId": "listInvitations",
+        "summary": "List invitations (tokens are never returned)",
+        "description": "List invitations (tokens are never returned). Roles: any member.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.InvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listInvitations",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      },
+      "post": {
+        "operationId": "createInvitation",
+        "summary": "Invite a person by email; the one-time token is returned only in this response",
+        "description": "Invite a person by email; the one-time token is returned only in this response. Roles: OWNER.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.InvitationWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreateInvitationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.createInvitation",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/invitations/{invitationId}/revoke": {
+      "post": {
+        "operationId": "revokeInvitation",
+        "summary": "Revoke a pending invitation",
+        "description": "Revoke a pending invitation. Roles: OWNER.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Invitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.revokeInvitation",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/invitations/accept": {
+      "post": {
+        "operationId": "acceptInvitation",
+        "summary": "Accept an invitation with its one-time token; the session's verified email must equal the invited address",
+        "description": "Accept an invitation with its one-time token; the session's verified email must equal the invited address.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.AcceptInvitationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.acceptInvitation",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "List projects",
+        "description": "List projects. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.ProjectList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listProjects",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "post": {
+        "operationId": "createProject",
+        "summary": "Create a project; Platform Access creates the canonical application",
+        "description": "Create a project; Platform Access creates the canonical application. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreateProjectRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.createProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "get": {
+        "operationId": "getProject",
+        "summary": "Read a project",
+        "description": "Read a project. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "patch": {
+        "operationId": "updateProject",
+        "summary": "Update project metadata (optimistic concurrency)",
+        "description": "Update project metadata (optimistic concurrency). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.UpdateProjectRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.updateProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/archive": {
+      "post": {
+        "operationId": "archiveProject",
+        "summary": "Archive the project (terminal): the Platform Access application is suspended; no communications-domain data is deleted",
+        "description": "Archive the project (terminal): the Platform Access application is suspended; no communications-domain data is deleted. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.archiveProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/suspend": {
+      "post": {
+        "operationId": "suspendProject",
+        "summary": "Suspend the project (its Platform Access application is suspended)",
+        "description": "Suspend the project (its Platform Access application is suspended). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.suspendProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/resume": {
+      "post": {
+        "operationId": "resumeProject",
+        "summary": "Resume a suspended project",
+        "description": "Resume a suspended project. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.resumeProject",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/scopes": {
+      "get": {
+        "operationId": "listProjectScopes",
+        "summary": "The project's scope grants as Platform Access reports them",
+        "description": "The project's scope grants as Platform Access reports them. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.ProjectScopes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listProjectScopes",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments": {
+      "get": {
+        "operationId": "listEnvironments",
+        "summary": "List the project's environments",
+        "description": "List the project's environments. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EnvironmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listEnvironments",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      },
+      "post": {
+        "operationId": "createEnvironment",
+        "summary": "Create a SANDBOX or TEST environment (Platform Access creates the canonical environment)",
+        "description": "Create a SANDBOX or TEST environment (Platform Access creates the canonical environment). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Environment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreateEnvironmentRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.createEnvironment",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}": {
+      "get": {
+        "operationId": "getEnvironment",
+        "summary": "Read an environment with its Platform Access status",
+        "description": "Read an environment with its Platform Access status. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Environment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getEnvironment",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/suspend": {
+      "post": {
+        "operationId": "suspendEnvironment",
+        "summary": "Suspend a non-production environment",
+        "description": "Suspend a non-production environment. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Environment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.suspendEnvironment",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/resume": {
+      "post": {
+        "operationId": "resumeEnvironment",
+        "summary": "Resume a suspended non-production environment",
+        "description": "Resume a suspended non-production environment. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Environment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.resumeEnvironment",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/entitlements": {
+      "get": {
+        "operationId": "getEnvironmentEntitlements",
+        "summary": "Effective platform entitlements (API request quotas) of an environment",
+        "description": "Effective platform entitlements (API request quotas) of an environment. Roles: OWNER, ADMIN, DEVELOPER, ANALYST. Machine credentials need `usage.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.Entitlements"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "usage.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getEnvironmentEntitlements",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/activity": {
+      "get": {
+        "operationId": "listActivity",
+        "summary": "Immutable activity history of the organization, newest first",
+        "description": "Immutable activity history of the organization, newest first. Roles: OWNER, ADMIN, ANALYST. Machine credentials need `audit.read`.",
+        "tags": [
+          "Activity"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.ActivityList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "audit.read",
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listActivity",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION",
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/commercial": {
+      "get": {
+        "operationId": "getOrganizationCommercial",
+        "summary": "Current plan assignment(s) and billing-account reference",
+        "description": "Current plan assignment(s) and billing-account reference. Roles: OWNER, ADMIN, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OrganizationCommercial"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.getOrganizationCommercial",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/plan-assignments": {
+      "get": {
+        "operationId": "listPlanAssignments",
+        "summary": "Immutable effective history of plan assignments",
+        "description": "Immutable effective history of plan assignments. Roles: OWNER, ADMIN, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PlanAssignmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listPlanAssignments",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/organizations/{organizationId}/billing-account": {
+      "put": {
+        "operationId": "putBillingAccount",
+        "summary": "Create or update the billing-account reference (RETAIL / CONTRACT)",
+        "description": "Create or update the billing-account reference (RETAIL / CONTRACT). No payment data is accepted. Roles: OWNER, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.BillingAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PutBillingAccountRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.putBillingAccount",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/commercial-plans": {
+      "get": {
+        "operationId": "listCommercialPlans",
+        "summary": "Active commercial plan versions (entitlement profiles; no prices)",
+        "description": "Active commercial plan versions (entitlement profiles; no prices).",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.CommercialPlanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.listCommercialPlans",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "A Platform Access API credential (server-side only; never in a browser)."
+      },
+      "userSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "CF Meet session",
+        "description": "The signed-in developer's CF Meet session (Developer Console). Never a machine credential."
+      }
+    },
+    "parameters": {
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Replays return the original response; reuse with a different request is IDEMPOTENCY_KEY_REUSED. One-time secrets are never replayed.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e]{1,128}$"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Server-generated request id.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/platform-developer.common.v1.Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "platform-developer.common.v1.EnvironmentKind": {
+        "$ref": "#/components/schemas/platform.common.v1.ApplicationEnvironmentKind"
+      },
+      "platform-developer.common.v1.Error": {
+        "description": "Error envelope (Cache-Control: no-store). Messages never contain an identifier, credential, token or database text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/platform-developer.common.v1.ErrorCode"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "requestId": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/platform.common.v1.RequestId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "platform-developer.common.v1.ErrorCode": {
+        "type": "string",
+        "enum": [
+          "VALIDATION_ERROR",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "PAYLOAD_TOO_LARGE",
+          "INTERNAL_AUTHENTICATION_FAILED",
+          "INTERNAL_PERMISSION_DENIED",
+          "DELEGATED_CONTEXT_REQUIRED",
+          "DELEGATED_CONTEXT_INVALID",
+          "AUTHENTICATION_REQUIRED",
+          "PERMISSION_DENIED",
+          "INSUFFICIENT_SCOPE",
+          "ORGANIZATION_RESTRICTED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_CLOSED",
+          "ORGANIZATION_NOT_ACTIVE",
+          "VERSION_CONFLICT",
+          "INVALID_STATE",
+          "LAST_OWNER",
+          "ALREADY_MEMBER",
+          "INVITATION_PENDING",
+          "INVITATION_INVALID",
+          "INVITATION_EMAIL_MISMATCH",
+          "IDEMPOTENCY_KEY_REUSED",
+          "POLICY_VIOLATION",
+          "OPERATOR_REQUIRED",
+          "SERVICE_UNAVAILABLE",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "platform-developer.control.v1.AcceptInvitationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "platform-developer.control.v1.ActivityEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "actorKind",
+          "actorRef",
+          "action",
+          "targetType",
+          "targetId",
+          "outcome",
+          "requestId",
+          "correlationId",
+          "summary",
+          "occurredAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "actorKind": {
+            "enum": [
+              "USER",
+              "OPERATOR",
+              "SERVICE"
+            ]
+          },
+          "actorRef": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_.]*$"
+          },
+          "targetType": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "targetId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "outcome": {
+            "enum": [
+              "SUCCEEDED",
+              "DENIED",
+              "FAILED"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "correlationId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "summary": {
+            "type": "object",
+            "description": "Safe change summary: opaque ids, codes and display metadata only — never secrets, credentials, contacts or E2EE material.",
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "secret"
+                  ]
+                },
+                {
+                  "required": [
+                    "signingSecret"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential"
+                  ]
+                },
+                {
+                  "required": [
+                    "password"
+                  ]
+                },
+                {
+                  "required": [
+                    "token"
+                  ]
+                },
+                {
+                  "required": [
+                    "apiKey"
+                  ]
+                },
+                {
+                  "required": [
+                    "verifier"
+                  ]
+                },
+                {
+                  "required": [
+                    "privateKey"
+                  ]
+                },
+                {
+                  "required": [
+                    "phoneNumber"
+                  ]
+                },
+                {
+                  "required": [
+                    "email"
+                  ]
+                },
+                {
+                  "required": [
+                    "contact"
+                  ]
+                }
+              ]
+            }
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.ActivityList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.BillingAccount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "classification",
+          "status",
+          "billingContactMemberId",
+          "currency",
+          "country",
+          "externalBillingRef",
+          "costCenterRef",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "classification": {
+            "enum": [
+              "RETAIL",
+              "CONTRACT",
+              "INTERNAL_COST_CENTER"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "CLOSED"
+            ]
+          },
+          "billingContactMemberId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalBillingRef": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costCenterRef": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]{1,64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "Billing-account REFERENCE metadata. Never card, bank, charge or balance data."
+      },
+      "platform-developer.control.v1.ChangeRoleRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "platform-developer.control.v1.CommercialPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "code",
+          "version",
+          "displayName",
+          "status",
+          "entitlementProfileRef",
+          "entitlements",
+          "effectiveFrom",
+          "effectiveUntil",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "RETIRED"
+            ]
+          },
+          "entitlementProfileRef": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "entitlements": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.EntitlementValues"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "effectiveUntil": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "An immutable commercial plan version. No price exists in Part VI."
+      },
+      "platform-developer.control.v1.CommercialPlanList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.CommercialPlan"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.CreateEnvironmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "SANDBOX",
+              "TEST"
+            ],
+            "description": "PRODUCTION environments are activated by the production-access workflow (Section 55)."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        }
+      },
+      "platform-developer.control.v1.CreateInvitationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          },
+          "role": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+          }
+        }
+      },
+      "platform-developer.control.v1.CreateOrganizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "displayName"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "supportEmail": {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          }
+        }
+      },
+      "platform-developer.control.v1.CreateProjectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "displayName"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "supportEmail": {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          },
+          "labels": {
+            "type": "object",
+            "maxProperties": 32,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9._/-]{1,64}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        }
+      },
+      "platform-developer.control.v1.EntitlementValues": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiRequestsPerMinute": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "apiRequestsPerDay": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "concurrentCalls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "meetingParticipants": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "activeNumbers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "smsPerDay": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "messagingAttachmentBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "platform-developer.control.v1.Entitlements": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "organizationId",
+          "projectId",
+          "environmentKind",
+          "organizationState",
+          "apiRequestsPerMinute",
+          "apiRequestsPerDay",
+          "limitingLevel",
+          "plan",
+          "projectPlan",
+          "domainEntitlements"
+        ],
+        "properties": {
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "environmentKind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.common.v1.EnvironmentKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizationState": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.OrganizationState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "apiRequestsPerMinute": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "apiRequestsPerDay": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limitingLevel": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "apiRequestsPerMinute",
+              "apiRequestsPerDay"
+            ],
+            "properties": {
+              "apiRequestsPerMinute": {
+                "enum": [
+                  "PLATFORM_DEFAULT",
+                  "ORGANIZATION_PLAN",
+                  "PROJECT_PLAN",
+                  "ENVIRONMENT"
+                ]
+              },
+              "apiRequestsPerDay": {
+                "enum": [
+                  "PLATFORM_DEFAULT",
+                  "ORGANIZATION_PLAN",
+                  "PROJECT_PLAN",
+                  "ENVIRONMENT"
+                ]
+              }
+            }
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "version"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectPlan": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "version"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "domainEntitlements": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.EntitlementValues"
+          }
+        },
+        "description": "Effective platform entitlements: organization plan, stricter project plan and environment caps; the most restrictive value wins and the limiting level is named."
+      },
+      "platform-developer.control.v1.Environment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "projectId",
+          "organizationId",
+          "kind",
+          "displayName",
+          "status",
+          "productionAccessState",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "The canonical Platform Access environment id."
+          },
+          "projectId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/platform-developer.common.v1.EnvironmentKind"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "productionAccessState": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ProductionAccessState"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "authorityStatus": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ],
+            "description": "Status reported by Platform Access (GET of one environment)."
+          },
+          "liveTelecomAllowed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-developer.control.v1.EnvironmentList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.Environment"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.Invitation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "email",
+          "role",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "decidedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          },
+          "role": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.InvitationStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.InvitationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.Invitation"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.InvitationStatus": {
+        "enum": [
+          "PENDING",
+          "ACCEPTED",
+          "REVOKED",
+          "EXPIRED"
+        ]
+      },
+      "platform-developer.control.v1.InvitationWithToken": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "email",
+          "role",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "decidedAt",
+          "token"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          },
+          "role": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.InvitationStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^cfinv_[A-Za-z0-9_-]{43}$",
+            "description": "One-time acceptance token, returned ONLY in this response (stored as a digest; never readable again)."
+          }
+        }
+      },
+      "platform-developer.control.v1.Member": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "userId",
+          "role",
+          "status",
+          "joinedVia",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "userId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "Opaque CF Meet account id (human developer); not a Platform Access principal."
+          },
+          "role": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "REMOVED"
+            ]
+          },
+          "joinedVia": {
+            "enum": [
+              "CREATOR",
+              "INVITATION",
+              "OPERATOR"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "platform-developer.control.v1.MemberList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.Member"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.Organization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName",
+          "state",
+          "stateReason",
+          "supportEmail",
+          "createdAt",
+          "updatedAt",
+          "closedAt",
+          "version",
+          "myRole"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "The organization id IS the canonical Platform Access tenant id."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "state": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.OrganizationState"
+          },
+          "stateReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supportEmail": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "myRole": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "classification": {
+            "enum": [
+              "FIRST_PARTY",
+              "EXTERNAL"
+            ],
+            "description": "Platform Access tenant classification (operator-controlled; GET of one organization only)."
+          }
+        }
+      },
+      "platform-developer.control.v1.OrganizationCommercial": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "planAssignment",
+          "projectPlanAssignments",
+          "billingAccount"
+        ],
+        "properties": {
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "planAssignment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PlanAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectPlanAssignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PlanAssignment"
+            }
+          },
+          "billingAccount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.BillingAccount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OrganizationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.Organization"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.OrganizationState": {
+        "enum": [
+          "INVITED",
+          "ACTIVE",
+          "RESTRICTED",
+          "SUSPENDED",
+          "CLOSED"
+        ]
+      },
+      "platform-developer.control.v1.PlanAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "projectId",
+          "planId",
+          "planCode",
+          "planVersion",
+          "source",
+          "effectiveFrom",
+          "effectiveUntil",
+          "supersededBy",
+          "assignedBy",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "projectId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "planCode": {
+            "type": "string"
+          },
+          "planVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source": {
+            "enum": [
+              "INTERNAL",
+              "CONTRACT",
+              "SELF_SERVICE"
+            ]
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "effectiveUntil": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersededBy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assignedBy": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.CommercialPlan"
+          }
+        }
+      },
+      "platform-developer.control.v1.PlanAssignmentList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PlanAssignment"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.ProductionAccessState": {
+        "enum": [
+          "NOT_APPLICABLE",
+          "SANDBOX_READY",
+          "PRODUCTION_REQUESTED",
+          "UNDER_REVIEW",
+          "APPROVED",
+          "REJECTED",
+          "SUSPENDED"
+        ]
+      },
+      "platform-developer.control.v1.Project": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "displayName",
+          "description",
+          "supportEmail",
+          "labels",
+          "status",
+          "statusReason",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "The project id IS the canonical Platform Access application id."
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supportEmail": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "labels": {
+            "type": "object",
+            "maxProperties": 32,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9._/-]{1,64}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ProjectStatus"
+          },
+          "statusReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "platform-developer.control.v1.ProjectList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.Project"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.ProjectScopes": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId",
+          "scopes"
+        ],
+        "properties": {
+          "projectId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Platform Access application scope grants (Platform Access is the authority)."
+          }
+        }
+      },
+      "platform-developer.control.v1.ProjectStatus": {
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "ARCHIVED"
+        ]
+      },
+      "platform-developer.control.v1.PutBillingAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "classification"
+        ],
+        "properties": {
+          "classification": {
+            "enum": [
+              "RETAIL",
+              "CONTRACT"
+            ]
+          },
+          "billingContactMemberId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "externalBillingRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "platform-developer.control.v1.Role": {
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "DEVELOPER",
+          "ANALYST",
+          "BILLING"
+        ],
+        "description": "Part VI workspace role (Section 50 permission matrix)."
+      },
+      "platform-developer.control.v1.TransferOwnershipRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memberId"
+        ],
+        "properties": {
+          "memberId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "platform-developer.control.v1.UpdateOrganizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "supportEmail": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.UpdateProjectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supportEmail": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "labels": {
+            "type": "object",
+            "maxProperties": 32,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9._/-]{1,64}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        }
+      },
+      "platform.common.v1.ApplicationEnvironmentKind": {
+        "description": "Kind of a customer application environment (Part B section 7).",
+        "type": "string",
+        "enum": [
+          "SANDBOX",
+          "TEST",
+          "PRODUCTION"
+        ]
+      },
+      "platform.common.v1.RequestId": {
+        "description": "Server-generated identifier of one request / one service hop.",
+        "type": "string",
+        "pattern": "^req_[0-9a-f]{32}$"
+      },
+      "platform.common.v1.Uuid": {
+        "description": "Lower-case hyphenated UUID.",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    }
+  }
+}
