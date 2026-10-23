@@ -1,0 +1,2148 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Developer Platform API",
+    "version": "1.0.0",
+    "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id."
+  },
+  "servers": [
+    {
+      "url": "https://api.cfmeet.com",
+      "description": "Public API Gateway"
+    }
+  ],
+  "paths": {
+    "/v1/organizations": {
+      "get": {
+        "operationId": "listOrganizations",
+        "summary": "List the caller's organizations (a machine credential sees only its own)",
+        "description": "List the caller's organizations (a machine credential sees only its own). Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OrganizationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read"
+      },
+      "post": {
+        "operationId": "createOrganization",
+        "summary": "Create an organization; the creator becomes its OWNER",
+        "description": "Create an organization; the creator becomes its OWNER. Platform Access creates the canonical EXTERNAL tenant.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreateOrganizationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}": {
+      "get": {
+        "operationId": "getOrganization",
+        "summary": "Read an organization (including its Platform Access classification)",
+        "description": "Read an organization (including its Platform Access classification). Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read"
+      },
+      "patch": {
+        "operationId": "updateOrganization",
+        "summary": "Update the organization profile (optimistic concurrency)",
+        "description": "Update the organization profile (optimistic concurrency). Roles: OWNER, ADMIN. Machine credentials need `organizations.manage`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UpdateOrganizationRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.manage"
+      }
+    },
+    "/v1/organizations/{organizationId}/close": {
+      "post": {
+        "operationId": "closeOrganization",
+        "summary": "Close the organization (terminal; machine access is withdrawn in Platform Access first)",
+        "description": "Close the organization (terminal; machine access is withdrawn in Platform Access first). Roles: OWNER.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/members": {
+      "get": {
+        "operationId": "listMembers",
+        "summary": "List human workspace members",
+        "description": "List human workspace members. Roles: any member. Machine credentials need `organizations.read`.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/MemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "organizations.read"
+      }
+    },
+    "/v1/organizations/{organizationId}/members/{memberId}": {
+      "patch": {
+        "operationId": "changeMemberRole",
+        "summary": "Change a member's role (the last OWNER can never be demoted)",
+        "description": "Change a member's role (the last OWNER can never be demoted). Roles: OWNER.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ChangeRoleRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeMember",
+        "summary": "Remove a member (OWNER) or leave (self); never the last OWNER",
+        "description": "Remove a member (OWNER) or leave (self); never the last OWNER. Roles: OWNER, or the member themself.",
+        "tags": [
+          "Members"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/ownership-transfer": {
+      "post": {
+        "operationId": "transferOwnership",
+        "summary": "Transfer ownership: the target member becomes OWNER and the caller becomes ADMIN, atomically",
+        "description": "Transfer ownership: the target member becomes OWNER and the caller becomes ADMIN, atomically. Roles: OWNER.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/TransferOwnershipRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/invitations": {
+      "get": {
+        "operationId": "listInvitations",
+        "summary": "List invitations (tokens are never returned)",
+        "description": "List invitations (tokens are never returned). Roles: any member.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/InvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createInvitation",
+        "summary": "Invite a person by email; the one-time token is returned only in this response",
+        "description": "Invite a person by email; the one-time token is returned only in this response. Roles: OWNER.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/InvitationWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreateInvitationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/invitations/{invitationId}/revoke": {
+      "post": {
+        "operationId": "revokeInvitation",
+        "summary": "Revoke a pending invitation",
+        "description": "Revoke a pending invitation. Roles: OWNER.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Invitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/invitations/accept": {
+      "post": {
+        "operationId": "acceptInvitation",
+        "summary": "Accept an invitation with its one-time token; the session's verified email must equal the invited address",
+        "description": "Accept an invitation with its one-time token; the session's verified email must equal the invited address.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AcceptInvitationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "List projects",
+        "description": "List projects. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ProjectList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      },
+      "post": {
+        "operationId": "createProject",
+        "summary": "Create a project; Platform Access creates the canonical application",
+        "description": "Create a project; Platform Access creates the canonical application. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreateProjectRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "get": {
+        "operationId": "getProject",
+        "summary": "Read a project",
+        "description": "Read a project. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      },
+      "patch": {
+        "operationId": "updateProject",
+        "summary": "Update project metadata (optimistic concurrency)",
+        "description": "Update project metadata (optimistic concurrency). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UpdateProjectRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/projects/{projectId}/archive": {
+      "post": {
+        "operationId": "archiveProject",
+        "summary": "Archive the project (terminal): the Platform Access application is suspended; no communications-domain data is deleted",
+        "description": "Archive the project (terminal): the Platform Access application is suspended; no communications-domain data is deleted. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/projects/{projectId}/suspend": {
+      "post": {
+        "operationId": "suspendProject",
+        "summary": "Suspend the project (its Platform Access application is suspended)",
+        "description": "Suspend the project (its Platform Access application is suspended). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/projects/{projectId}/resume": {
+      "post": {
+        "operationId": "resumeProject",
+        "summary": "Resume a suspended project",
+        "description": "Resume a suspended project. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/projects/{projectId}/scopes": {
+      "get": {
+        "operationId": "listProjectScopes",
+        "summary": "The project's scope grants as Platform Access reports them",
+        "description": "The project's scope grants as Platform Access reports them. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ProjectScopes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      }
+    },
+    "/v1/projects/{projectId}/environments": {
+      "get": {
+        "operationId": "listEnvironments",
+        "summary": "List the project's environments",
+        "description": "List the project's environments. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EnvironmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      },
+      "post": {
+        "operationId": "createEnvironment",
+        "summary": "Create a SANDBOX or TEST environment (Platform Access creates the canonical environment)",
+        "description": "Create a SANDBOX or TEST environment (Platform Access creates the canonical environment). Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Environment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreateEnvironmentRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/environments/{environmentId}": {
+      "get": {
+        "operationId": "getEnvironment",
+        "summary": "Read an environment with its Platform Access status",
+        "description": "Read an environment with its Platform Access status. Roles: any member. Machine credentials need `projects.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Environment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      }
+    },
+    "/v1/environments/{environmentId}/suspend": {
+      "post": {
+        "operationId": "suspendEnvironment",
+        "summary": "Suspend a non-production environment",
+        "description": "Suspend a non-production environment. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Environment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/environments/{environmentId}/resume": {
+      "post": {
+        "operationId": "resumeEnvironment",
+        "summary": "Resume a suspended non-production environment",
+        "description": "Resume a suspended non-production environment. Roles: OWNER, ADMIN. Machine credentials need `projects.manage`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Environment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.manage"
+      }
+    },
+    "/v1/environments/{environmentId}/entitlements": {
+      "get": {
+        "operationId": "getEnvironmentEntitlements",
+        "summary": "Effective platform entitlements (API request quotas) of an environment",
+        "description": "Effective platform entitlements (API request quotas) of an environment. Roles: OWNER, ADMIN, DEVELOPER, ANALYST. Machine credentials need `usage.read`.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Entitlements"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "usage.read"
+      }
+    },
+    "/v1/organizations/{organizationId}/activity": {
+      "get": {
+        "operationId": "listActivity",
+        "summary": "Immutable activity history of the organization, newest first",
+        "description": "Immutable activity history of the organization, newest first. Roles: OWNER, ADMIN, ANALYST. Machine credentials need `audit.read`.",
+        "tags": [
+          "Activity"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/ActivityList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "audit.read"
+      }
+    },
+    "/v1/organizations/{organizationId}/commercial": {
+      "get": {
+        "operationId": "getOrganizationCommercial",
+        "summary": "Current plan assignment(s) and billing-account reference",
+        "description": "Current plan assignment(s) and billing-account reference. Roles: OWNER, ADMIN, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OrganizationCommercial"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/plan-assignments": {
+      "get": {
+        "operationId": "listPlanAssignments",
+        "summary": "Immutable effective history of plan assignments",
+        "description": "Immutable effective history of plan assignments. Roles: OWNER, ADMIN, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PlanAssignmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organizationId}/billing-account": {
+      "put": {
+        "operationId": "putBillingAccount",
+        "summary": "Create or update the billing-account reference (RETAIL / CONTRACT)",
+        "description": "Create or update the billing-account reference (RETAIL / CONTRACT). No payment data is accepted. Roles: OWNER, BILLING.",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/BillingAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PutBillingAccountRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/commercial-plans": {
+      "get": {
+        "operationId": "listCommercialPlans",
+        "summary": "Active commercial plan versions (entitlement profiles; no prices)",
+        "description": "Active commercial plan versions (entitlement profiles; no prices).",
+        "tags": [
+          "Commercial"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CommercialPlanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "userSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "CF Meet session",
+        "description": "The signed-in developer's CF Meet session (Developer Console). Never a machine credential."
+      },
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "A Platform Access API credential (server-side only; never in a browser)."
+      }
+    },
+    "parameters": {
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Replays return the original response; reuse with a different request is IDEMPOTENCY_KEY_REUSED. One-time secrets are never replayed.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e]{1,128}$"
+        }
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Server-generated request id.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

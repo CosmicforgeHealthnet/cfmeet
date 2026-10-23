@@ -109,21 +109,59 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         .await,
         0
     );
-    // Platform Access is the identity authority: no copy of its attributes, scopes,
-    // credentials or verifiers; no communications content; no E2EE material.
-    let forbidden = h
-        .count(
-            "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' \
-             AND table_name LIKE 'devplat\\_%' AND (column_name ~ \
-             '(name|slug|display|classification|status|scope|credential|secret|verifier|hash|pepper|password|token|private|key_material|plaintext|content|body|e164|phone)')",
-        )
-        .await;
-    assert_eq!(forbidden, 0);
+    // Platform Access is the identity authority: no copy of its attributes (slug,
+    // classification, scopes), credentials or verifiers; no communications content; no
+    // E2EE material. The only columns matching sensitive-looking names are the
+    // Developer Platform's own metadata, listed explicitly with their reason.
+    let rows = h
+        .db
+        .conn
+        .query_all(Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT table_name || '.' || column_name AS c FROM information_schema.columns \
+             WHERE table_schema = 'public' AND table_name LIKE 'devplat\\_%' AND (column_name ~ \
+             '(name|slug|display|classification|status|scope|credential|secret|verifier|hash|pepper|password|token|private|key_material|plaintext|content|body|e164|phone)') \
+             ORDER BY 1",
+        ))
+        .await
+        .unwrap();
+    let found: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "c").unwrap())
+        .collect();
+    const ALLOWED: &[&str] = &[
+        // Section 50 billing-account reference metadata (never Platform Access identity):
+        // RETAIL / CONTRACT / INTERNAL_COST_CENTER and its own lifecycle.
+        "devplat_billing_accounts.classification",
+        "devplat_billing_accounts.status",
+        // Plans: customer-facing display metadata and lifecycle.
+        "devplat_commercial_plans.display_name",
+        "devplat_commercial_plans.status",
+        // Developer Platform display metadata and its own lifecycle (not Platform Access's).
+        "devplat_environment_profiles.display_name",
+        "devplat_environment_profiles.status",
+        // Idempotency replay (actor + operation key; secrets redacted before storage).
+        "devplat_idempotency_records.response_body",
+        "devplat_idempotency_records.response_status",
+        "devplat_idempotency_records.scope_key",
+        // Invitations: the one-time token is stored as a SHA-256 digest only.
+        "devplat_invitations.status",
+        "devplat_invitations.token_digest",
+        "devplat_organizations.display_name",
+        "devplat_project_profiles.display_name",
+        "devplat_project_profiles.status",
+        "devplat_project_profiles.status_reason",
+        "devplat_workspace_members.status",
+    ];
+    assert_eq!(
+        found, ALLOWED,
+        "every sensitive-looking column is justified"
+    );
     // No table of the identity hierarchy itself.
     assert_eq!(
         h.count(
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename ~ \
-             '(tenants|applications|environments$|service_accounts|credentials|scopes|principals)'"
+             '(tenants|applications|environments$|service_accounts|credentials|scopes|principals|memberships)'"
         )
         .await,
         0
@@ -349,7 +387,10 @@ async fn the_served_openapi_is_the_contract_and_every_listed_route_exists() {
     assert_eq!(r.json, contract);
     for (path, ops) in contract["paths"].as_object().unwrap() {
         for method in ops.as_object().unwrap().keys() {
-            assert_eq!(method, "get", "foundation routes are reads");
+            // Parameterised and operator routes are covered by the control-plane suite.
+            if method != "get" || path.contains('{') || path.contains("/operator/") {
+                continue;
+            }
             let r = if path.starts_with("/internal/") {
                 h.signed_get(&h.peers.gateway, path, Some(delegated()))
                     .await
@@ -359,8 +400,17 @@ async fn the_served_openapi_is_the_contract_and_every_listed_route_exists() {
             assert!(r.status.is_success(), "{path}: {} {}", r.status, r.json);
         }
     }
-    // Unknown public paths are the error envelope, not a framework page.
+    // Every /v1 path (unknown ones included) requires the gateway hop first; the answer
+    // is the error envelope, not a framework page.
     let r = h.get("/v1/anything").await;
-    assert_eq!(r.status, StatusCode::NOT_FOUND);
-    assert_eq!(r.json["error"]["code"], "NOT_FOUND");
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.json["error"]["code"], "INTERNAL_AUTHENTICATION_FAILED");
+    let r = h
+        .signed_get(&h.peers.gateway, "/v1/anything", Some(delegated()))
+        .await;
+    assert_eq!(
+        r.status,
+        StatusCode::UNAUTHORIZED,
+        "a delegated context without a credential id is not a caller"
+    );
 }

@@ -88,6 +88,210 @@ pub trait PlatformAccessPort: Send + Sync {
 
     /// Names of the registered scopes.
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable>;
+
+    /// Whether the credential of the delegated scope holds ALL `scopes` now (Platform
+    /// Access `POST /internal/v1/authorization/evaluate`).
+    async fn credential_allows(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+        credential_id: Uuid,
+        scopes: &[&str],
+    ) -> Result<bool, AuthorityUnavailable> {
+        let _ = (delegated, correlation, credential_id, scopes);
+        Err(AuthorityUnavailable("not supported".into()))
+    }
+
+    /// One delegated identity operation (`/internal/v1/delegation/**`).
+    async fn delegate(
+        &self,
+        call: DelegationCall,
+        correlation: &CorrelationId,
+    ) -> Result<Delegated, AuthorityUnavailable> {
+        let _ = (call, correlation);
+        Err(AuthorityUnavailable("not supported".into()))
+    }
+}
+
+/// The acting party of a delegated mutation: a human member (`u-…`), the service
+/// account of a scoped machine credential (`s-…`) or a Developer Platform operator
+/// command (`o-<command id>`, cross-referenced by the operator activity event).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelegationActor {
+    Human(Uuid),
+    ServiceAccount(Uuid),
+    Operator(Uuid),
+}
+
+impl DelegationActor {
+    pub fn header_value(&self) -> String {
+        match self {
+            DelegationActor::Human(id) => format!("u-{}", id.simple()),
+            DelegationActor::ServiceAccount(id) => format!("s-{}", id.simple()),
+            DelegationActor::Operator(id) => format!("o-{}", id.simple()),
+        }
+    }
+}
+
+/// A delegated Platform Access operation (Part VI §50). The Developer Platform never
+/// chooses a tenant classification and never creates a PRODUCTION environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DelegationCall {
+    CreateTenant {
+        actor: DelegationActor,
+        slug: String,
+        display_name: String,
+    },
+    GetTenant {
+        tenant_id: Uuid,
+    },
+    SetTenantStatus {
+        actor: DelegationActor,
+        tenant_id: Uuid,
+        suspended: bool,
+    },
+    CreateApplication {
+        actor: DelegationActor,
+        tenant_id: Uuid,
+        slug: String,
+        display_name: String,
+    },
+    GetApplication {
+        application_id: Uuid,
+    },
+    SetApplicationStatus {
+        actor: DelegationActor,
+        application_id: Uuid,
+        suspended: bool,
+    },
+    CreateEnvironment {
+        actor: DelegationActor,
+        application_id: Uuid,
+        kind: String,
+    },
+    GetEnvironment {
+        environment_id: Uuid,
+    },
+    SetEnvironmentStatus {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        suspended: bool,
+    },
+    ListApplicationScopes {
+        application_id: Uuid,
+    },
+}
+
+impl DelegationCall {
+    /// `(method, path, body, actor)` of the Platform Access request.
+    pub fn request(
+        &self,
+    ) -> (
+        axum::http::Method,
+        String,
+        Option<Value>,
+        Option<DelegationActor>,
+    ) {
+        use axum::http::Method;
+        use serde_json::json;
+        let status = |s: bool| json!({ "status": if s { "SUSPENDED" } else { "ACTIVE" } });
+        match self {
+            DelegationCall::CreateTenant {
+                actor,
+                slug,
+                display_name,
+            } => (
+                Method::POST,
+                "/internal/v1/delegation/tenants".into(),
+                Some(json!({ "slug": slug, "displayName": display_name })),
+                Some(*actor),
+            ),
+            DelegationCall::GetTenant { tenant_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/tenants/{tenant_id}"),
+                None,
+                None,
+            ),
+            DelegationCall::SetTenantStatus {
+                actor,
+                tenant_id,
+                suspended,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/tenants/{tenant_id}/status"),
+                Some(status(*suspended)),
+                Some(*actor),
+            ),
+            DelegationCall::CreateApplication {
+                actor,
+                tenant_id,
+                slug,
+                display_name,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/tenants/{tenant_id}/applications"),
+                Some(json!({ "slug": slug, "displayName": display_name })),
+                Some(*actor),
+            ),
+            DelegationCall::GetApplication { application_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/applications/{application_id}"),
+                None,
+                None,
+            ),
+            DelegationCall::SetApplicationStatus {
+                actor,
+                application_id,
+                suspended,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/applications/{application_id}/status"),
+                Some(status(*suspended)),
+                Some(*actor),
+            ),
+            DelegationCall::CreateEnvironment {
+                actor,
+                application_id,
+                kind,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/applications/{application_id}/environments"),
+                Some(json!({ "kind": kind })),
+                Some(*actor),
+            ),
+            DelegationCall::GetEnvironment { environment_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}"),
+                None,
+                None,
+            ),
+            DelegationCall::SetEnvironmentStatus {
+                actor,
+                environment_id,
+                suspended,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/environments/{environment_id}/status"),
+                Some(status(*suspended)),
+                Some(*actor),
+            ),
+            DelegationCall::ListApplicationScopes { application_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/applications/{application_id}/scopes"),
+                None,
+                None,
+            ),
+        }
+    }
+}
+
+/// The outcome of a delegated operation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Delegated {
+    /// 2xx: Platform Access's resource view.
+    Ok(Value),
+    /// Platform Access refused (stable code; never a reason to retry).
+    Refused { status: u16, code: String },
 }
 
 /// Platform Access over authenticated internal HTTP.
@@ -148,6 +352,25 @@ impl PlatformAccessPort for HttpPlatformAccess {
         }
     }
 
+    async fn credential_allows(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+        credential_id: Uuid,
+        scopes: &[&str],
+    ) -> Result<bool, AuthorityUnavailable> {
+        self.evaluate(delegated, correlation, credential_id, scopes)
+            .await
+    }
+
+    async fn delegate(
+        &self,
+        call: DelegationCall,
+        correlation: &CorrelationId,
+    ) -> Result<Delegated, AuthorityUnavailable> {
+        self.delegate_http(call, correlation).await
+    }
+
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable> {
         let request = OutboundServiceRequest::new_operation(ServiceId::platform_access());
         let response = self
@@ -168,6 +391,74 @@ impl PlatformAccessPort for HttpPlatformAccess {
                     .collect()
             })
             .unwrap_or_default())
+    }
+}
+
+impl HttpPlatformAccess {
+    async fn evaluate(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+        credential_id: Uuid,
+        scopes: &[&str],
+    ) -> Result<bool, AuthorityUnavailable> {
+        let request = OutboundServiceRequest::continuing(ServiceId::platform_access(), correlation)
+            .with_delegated_context(delegated.clone());
+        let body = serde_json::json!({ "credentialId": credential_id, "requiredScopes": scopes });
+        let response = self
+            .client
+            .exchange_json(
+                &request,
+                axum::http::Method::POST,
+                "/internal/v1/authorization/evaluate",
+                Some(&body),
+            )
+            .await
+            .map_err(unavailable)?;
+        match response.status() {
+            200 => Ok(response
+                .json::<Value>()
+                .ok()
+                .and_then(|v| v.get("allowed").and_then(Value::as_bool))
+                .unwrap_or(false)),
+            400 | 403 | 404 => Ok(false),
+            status => Err(AuthorityUnavailable(format!("HTTP {status}"))),
+        }
+    }
+
+    async fn delegate_http(
+        &self,
+        call: DelegationCall,
+        correlation: &CorrelationId,
+    ) -> Result<Delegated, AuthorityUnavailable> {
+        let (method, path, body, actor) = call.request();
+        let request = OutboundServiceRequest::continuing(ServiceId::platform_access(), correlation);
+        let actor_value = actor.map(|a| a.header_value());
+        let headers: Vec<(&str, &str)> = actor_value
+            .as_deref()
+            .map(|v| vec![("x-cf-delegated-actor", v)])
+            .unwrap_or_default();
+        let response = self
+            .client
+            .exchange_json_query_with_headers(&request, method, &path, &[], &headers, body.as_ref())
+            .await
+            .map_err(unavailable)?;
+        match response.status() {
+            200..=299 => response
+                .json::<Value>()
+                .map(Delegated::Ok)
+                .map_err(|_| AuthorityUnavailable("malformed delegation response".into())),
+            status @ (400 | 403 | 404 | 409 | 422) => Ok(Delegated::Refused {
+                status,
+                code: response
+                    .error_code()
+                    .unwrap_or_else(|| "REFUSED".into())
+                    .chars()
+                    .take(64)
+                    .collect(),
+            }),
+            status => Err(AuthorityUnavailable(format!("HTTP {status}"))),
+        }
     }
 }
 

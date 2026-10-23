@@ -1,0 +1,15 @@
+{
+  "id": "8b9c0d1e-2f3a-4b4c-8d5e-6f7a8b9c0d1e",
+  "organizationId": "3f0f4c1e-6a7b-4c2d-9e8f-0a1b2c3d4e5f",
+  "classification": "INTERNAL_COST_CENTER",
+  "status": "ACTIVE",
+  "billingContactMemberId": null,
+  "currency": null,
+  "country": null,
+  "externalBillingRef": null,
+  "costCenterRef": "cf.healthcare-products",
+  "createdAt": "2026-11-02T10:00:00Z",
+  "updatedAt": "2026-11-02T10:00:00Z",
+  "version": 1,
+  "cardNumber": "4242424242424242"
+}

@@ -45,6 +45,23 @@ error_codes! {
     InternalPermissionDenied = "INTERNAL_PERMISSION_DENIED" => FORBIDDEN, "The caller is not permitted to perform this operation.";
     DelegatedContextRequired = "DELEGATED_CONTEXT_REQUIRED" => FORBIDDEN, "The operation requires a signed delegated platform context.";
     DelegatedContextInvalid = "DELEGATED_CONTEXT_INVALID" => FORBIDDEN, "The identity authority did not confirm the delegated platform context.";
+    AuthenticationRequired = "AUTHENTICATION_REQUIRED" => UNAUTHORIZED, "A verified CF Meet session or an API credential is required.";
+    PermissionDenied = "PERMISSION_DENIED" => FORBIDDEN, "Your workspace role does not permit this operation.";
+    InsufficientScope = "INSUFFICIENT_SCOPE" => FORBIDDEN, "The credential lacks the required scope.";
+    OrganizationRestricted = "ORGANIZATION_RESTRICTED" => FORBIDDEN, "The organization is restricted; this operation is disabled.";
+    OrganizationSuspended = "ORGANIZATION_SUSPENDED" => FORBIDDEN, "The organization is suspended.";
+    OrganizationClosed = "ORGANIZATION_CLOSED" => FORBIDDEN, "The organization is closed.";
+    OrganizationNotActive = "ORGANIZATION_NOT_ACTIVE" => FORBIDDEN, "The organization has not been activated yet.";
+    VersionConflict = "VERSION_CONFLICT" => CONFLICT, "The resource was changed concurrently; reload and retry.";
+    InvalidState = "INVALID_STATE" => CONFLICT, "The resource is not in a state that allows this operation.";
+    LastOwner = "LAST_OWNER" => CONFLICT, "An organization must keep at least one owner.";
+    AlreadyMember = "ALREADY_MEMBER" => CONFLICT, "The user is already a member of this organization.";
+    InvitationPending = "INVITATION_PENDING" => CONFLICT, "A pending invitation already exists for this address.";
+    InvitationInvalid = "INVITATION_INVALID" => NOT_FOUND, "The invitation is invalid, expired or already used.";
+    InvitationEmailMismatch = "INVITATION_EMAIL_MISMATCH" => FORBIDDEN, "The invitation was issued to another verified email address.";
+    IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED" => UNPROCESSABLE_ENTITY, "The Idempotency-Key was already used with a different request.";
+    PolicyViolation = "POLICY_VIOLATION" => UNPROCESSABLE_ENTITY, "The operation is not permitted by platform policy.";
+    OperatorRequired = "OPERATOR_REQUIRED" => BAD_REQUEST, "Operator administration requires a named operator.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";
 }

@@ -440,3 +440,503 @@ pub fn conforms(reference: &str, value: &Value) {
         "{reference} violated: {errors:?}\n{value:#}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Section 50: an in-memory Platform Access (delegation + evaluation) and sessions.
+// The real processes are exercised by the API Gateway's cross-service journeys.
+// ---------------------------------------------------------------------------
+
+use developer_platform::{
+    platform_access::{Delegated, DelegationActor, DelegationCall},
+    session::{HumanSessions, HumanUser, SessionAuthorityUnavailable, SessionOutcome},
+};
+
+#[derive(Debug, Clone)]
+pub struct MemTenant {
+    pub classification: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemApp {
+    pub tenant: Uuid,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemEnv {
+    pub tenant: Uuid,
+    pub app: Uuid,
+    pub kind: String,
+    pub status: String,
+}
+
+#[derive(Default)]
+pub struct MemoryPlatformAccess {
+    pub tenants: StdMutex<std::collections::HashMap<Uuid, MemTenant>>,
+    pub apps: StdMutex<std::collections::HashMap<Uuid, MemApp>>,
+    pub envs: StdMutex<std::collections::HashMap<Uuid, MemEnv>>,
+    /// credential id -> scopes (machine callers).
+    pub credential_scopes: StdMutex<std::collections::HashMap<Uuid, Vec<String>>>,
+    /// Delegated mutations: (actor header, call).
+    pub audit: StdMutex<Vec<(String, DelegationCall)>>,
+    pub down: std::sync::atomic::AtomicBool,
+}
+
+impl MemoryPlatformAccess {
+    pub fn first_party_tenant(&self) -> Uuid {
+        let id = Uuid::new_v4();
+        self.tenants.lock().unwrap().insert(
+            id,
+            MemTenant {
+                classification: "FIRST_PARTY".into(),
+                status: "ACTIVE".into(),
+            },
+        );
+        id
+    }
+
+    pub fn tenant_status(&self, id: Uuid) -> String {
+        self.tenants.lock().unwrap()[&id].status.clone()
+    }
+
+    pub fn app_status(&self, id: Uuid) -> String {
+        self.apps.lock().unwrap()[&id].status.clone()
+    }
+
+    pub fn env_status(&self, id: Uuid) -> String {
+        self.envs.lock().unwrap()[&id].status.clone()
+    }
+
+    /// A machine credential of `env` holding `scopes`; returns its delegated context.
+    pub fn machine(&self, env: Uuid, scopes: &[&str]) -> DelegatedPlatformContext {
+        let e = self.envs.lock().unwrap()[&env].clone();
+        let credential = Uuid::new_v4();
+        self.credential_scopes
+            .lock()
+            .unwrap()
+            .insert(credential, scopes.iter().map(|s| s.to_string()).collect());
+        let kind = match e.kind.as_str() {
+            "TEST" => cf_service_auth::ApplicationEnvironmentKind::Test,
+            "PRODUCTION" => cf_service_auth::ApplicationEnvironmentKind::Production,
+            _ => cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+        };
+        DelegatedPlatformContext::new(e.tenant, e.app, env, kind, Uuid::new_v4())
+            .with_initiating_credential(credential)
+    }
+
+    fn view_tenant(id: Uuid, t: &MemTenant) -> Value {
+        json!({ "id": id, "classification": t.classification, "status": t.status })
+    }
+}
+
+#[async_trait]
+impl PlatformAccessPort for MemoryPlatformAccess {
+    async fn trusted_context(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        _correlation: &CorrelationId,
+    ) -> Result<ContextOutcome, AuthorityUnavailable> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let envs = self.envs.lock().unwrap();
+        let tenants = self.tenants.lock().unwrap();
+        match envs.get(&delegated.application_environment_id()) {
+            Some(e) if e.tenant == delegated.tenant_id() && e.app == delegated.application_id() => {
+                let suspended = tenants.get(&e.tenant).is_some_and(|t| t.status != "ACTIVE");
+                Ok(ContextOutcome::Confirmed(CanonicalContext {
+                    tenant_id: e.tenant,
+                    application_id: e.app,
+                    environment_id: delegated.application_environment_id(),
+                    environment_kind: e.kind.clone(),
+                    service_account_id: delegated.initiating_service_account_id(),
+                    authority_mode: if suspended { "SAFETY_ONLY" } else { "FULL" }.into(),
+                }))
+            }
+            _ => Ok(ContextOutcome::Refused {
+                code: "DELEGATED_CONTEXT_INVALID".into(),
+            }),
+        }
+    }
+
+    async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable> {
+        Ok(vec![])
+    }
+
+    async fn credential_allows(
+        &self,
+        _delegated: &DelegatedPlatformContext,
+        _correlation: &CorrelationId,
+        credential_id: Uuid,
+        scopes: &[&str],
+    ) -> Result<bool, AuthorityUnavailable> {
+        let map = self.credential_scopes.lock().unwrap();
+        let held = map.get(&credential_id).cloned().unwrap_or_default();
+        Ok(scopes.iter().all(|s| held.iter().any(|h| h == s)))
+    }
+
+    async fn delegate(
+        &self,
+        call: DelegationCall,
+        _correlation: &CorrelationId,
+    ) -> Result<Delegated, AuthorityUnavailable> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let (_, _, _, actor) = call.request();
+        if let Some(a) = actor {
+            self.audit
+                .lock()
+                .unwrap()
+                .push((a.header_value(), call.clone()));
+        }
+        let refused = |status: u16, code: &str| {
+            Ok(Delegated::Refused {
+                status,
+                code: code.into(),
+            })
+        };
+        let status = |s: bool| if s { "SUSPENDED" } else { "ACTIVE" }.to_string();
+        match call {
+            DelegationCall::CreateTenant { .. } => {
+                let id = Uuid::new_v4();
+                let t = MemTenant {
+                    classification: "EXTERNAL".into(),
+                    status: "ACTIVE".into(),
+                };
+                let v = Self::view_tenant(id, &t);
+                self.tenants.lock().unwrap().insert(id, t);
+                Ok(Delegated::Ok(v))
+            }
+            DelegationCall::GetTenant { tenant_id } => {
+                match self.tenants.lock().unwrap().get(&tenant_id) {
+                    Some(t) => Ok(Delegated::Ok(Self::view_tenant(tenant_id, t))),
+                    None => refused(404, "NOT_FOUND"),
+                }
+            }
+            DelegationCall::SetTenantStatus {
+                tenant_id,
+                suspended,
+                ..
+            } => {
+                let mut ts = self.tenants.lock().unwrap();
+                let Some(t) = ts.get_mut(&tenant_id) else {
+                    return refused(404, "NOT_FOUND");
+                };
+                t.status = status(suspended);
+                Ok(Delegated::Ok(Self::view_tenant(tenant_id, t)))
+            }
+            DelegationCall::CreateApplication { tenant_id, .. } => {
+                if !self.tenants.lock().unwrap().contains_key(&tenant_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                let id = Uuid::new_v4();
+                self.apps.lock().unwrap().insert(
+                    id,
+                    MemApp {
+                        tenant: tenant_id,
+                        status: "ACTIVE".into(),
+                    },
+                );
+                Ok(Delegated::Ok(
+                    json!({ "id": id, "tenantId": tenant_id, "status": "ACTIVE" }),
+                ))
+            }
+            DelegationCall::GetApplication { application_id } => {
+                match self.apps.lock().unwrap().get(&application_id) {
+                    Some(a) => Ok(Delegated::Ok(
+                        json!({ "id": application_id, "tenantId": a.tenant, "status": a.status }),
+                    )),
+                    None => refused(404, "NOT_FOUND"),
+                }
+            }
+            DelegationCall::SetApplicationStatus {
+                application_id,
+                suspended,
+                ..
+            } => {
+                let mut apps = self.apps.lock().unwrap();
+                let Some(a) = apps.get_mut(&application_id) else {
+                    return refused(404, "NOT_FOUND");
+                };
+                a.status = status(suspended);
+                Ok(Delegated::Ok(
+                    json!({ "id": application_id, "status": a.status }),
+                ))
+            }
+            DelegationCall::CreateEnvironment {
+                application_id,
+                kind,
+                ..
+            } => {
+                if kind == "PRODUCTION" {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                let Some(app) = self.apps.lock().unwrap().get(&application_id).cloned() else {
+                    return refused(404, "NOT_FOUND");
+                };
+                let id = Uuid::new_v4();
+                self.envs.lock().unwrap().insert(
+                    id,
+                    MemEnv {
+                        tenant: app.tenant,
+                        app: application_id,
+                        kind: kind.clone(),
+                        status: "ACTIVE".into(),
+                    },
+                );
+                Ok(Delegated::Ok(
+                    json!({ "id": id, "tenantId": app.tenant, "applicationId": application_id, "kind": kind, "status": "ACTIVE", "liveTelecomAllowed": false }),
+                ))
+            }
+            DelegationCall::GetEnvironment { environment_id } => {
+                match self.envs.lock().unwrap().get(&environment_id) {
+                    Some(e) => Ok(Delegated::Ok(
+                        json!({ "id": environment_id, "kind": e.kind, "status": e.status, "liveTelecomAllowed": false }),
+                    )),
+                    None => refused(404, "NOT_FOUND"),
+                }
+            }
+            DelegationCall::SetEnvironmentStatus {
+                environment_id,
+                suspended,
+                ..
+            } => {
+                let mut envs = self.envs.lock().unwrap();
+                let Some(e) = envs.get_mut(&environment_id) else {
+                    return refused(404, "NOT_FOUND");
+                };
+                e.status = status(suspended);
+                Ok(Delegated::Ok(
+                    json!({ "id": environment_id, "status": e.status }),
+                ))
+            }
+            DelegationCall::ListApplicationScopes { .. } => {
+                Ok(Delegated::Ok(json!({ "scopes": [] })))
+            }
+        }
+    }
+}
+
+/// Session tokens -> verified humans.
+#[derive(Default)]
+pub struct MemorySessions {
+    pub users: StdMutex<std::collections::HashMap<String, HumanUser>>,
+    pub down: std::sync::atomic::AtomicBool,
+}
+
+impl MemorySessions {
+    /// A signed-in human with a verified email; returns the session token.
+    pub fn sign_in(&self, email: &str) -> (String, Uuid) {
+        let token = format!("session-{}", Uuid::new_v4().simple());
+        let user = Uuid::new_v4();
+        self.users.lock().unwrap().insert(
+            token.clone(),
+            HumanUser {
+                user_id: user,
+                verified_email: Some(email.to_string()),
+            },
+        );
+        (token, user)
+    }
+}
+
+#[async_trait]
+impl HumanSessions for MemorySessions {
+    async fn verify(
+        &self,
+        session_token: &str,
+        _correlation: &CorrelationId,
+    ) -> Result<SessionOutcome, SessionAuthorityUnavailable> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SessionAuthorityUnavailable("down".into()));
+        }
+        Ok(match self.users.lock().unwrap().get(session_token) {
+            Some(u) => SessionOutcome::Verified(u.clone()),
+            None => SessionOutcome::Rejected,
+        })
+    }
+}
+
+/// The Section 50 harness: real router, real gateway tokens, in-memory authorities.
+pub struct Control {
+    pub db: TestDb,
+    pub router: Router,
+    pub peers: Peers,
+    pub pa: Arc<MemoryPlatformAccess>,
+    pub sessions: Arc<MemorySessions>,
+    pub operator: Arc<ServiceTokenSigner>,
+}
+
+pub enum As<'a> {
+    User(&'a str),
+    Machine(&'a DelegatedPlatformContext),
+    Nobody,
+}
+
+impl Control {
+    pub async fn new() -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (runtime, peers, operator) = service_auth_with_operator();
+        let pa = Arc::new(MemoryPlatformAccess::default());
+        let sessions = Arc::new(MemorySessions::default());
+        let state = AppState::new(db.conn.clone(), runtime)
+            .with_platform_access(pa.clone())
+            .with_sessions(sessions.clone())
+            .with_flags(FeatureFlags { gateway_api: true });
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+            pa,
+            sessions,
+            operator,
+        })
+    }
+
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        headers: HeaderMap,
+        body: Option<Value>,
+    ) -> Response {
+        let mut request = Request::builder().method(method).uri(path);
+        for (k, v) in headers.iter() {
+            request = request.header(k, v);
+        }
+        let body = match body {
+            Some(b) => {
+                request = request.header("content-type", "application/json");
+                Body::from(b.to_string())
+            }
+            None => Body::empty(),
+        };
+        let response = self
+            .router
+            .clone()
+            .oneshot(request.body(body).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        Response {
+            status,
+            headers,
+            json: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        }
+    }
+
+    /// A gateway-forwarded customer request.
+    pub async fn req(
+        &self,
+        who: As<'_>,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Response {
+        self.req_with(who, method, path, body, &[]).await
+    }
+
+    pub async fn req_with(
+        &self,
+        who: As<'_>,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        extra: &[(&str, &str)],
+    ) -> Response {
+        let mut outbound = OutboundServiceRequest::new_operation(ServiceId::developer_platform());
+        if let As::Machine(d) = &who {
+            outbound = outbound.with_delegated_context((*d).clone());
+        }
+        let signed = self.peers.gateway.sign(&outbound).unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        if let As::User(token) = who {
+            headers.insert("x-cf-user-session", token.parse().unwrap());
+        }
+        for (k, v) in extra {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        self.send(method, path, headers, body).await
+    }
+
+    /// An operator-console command.
+    pub async fn operator(&self, method: Method, path: &str, body: Option<Value>) -> Response {
+        let signed = self
+            .operator
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        headers.insert("x-cf-operator", "ops.tester".parse().unwrap());
+        self.send(method, path, headers, body).await
+    }
+
+    pub async fn count(&self, sql: &str) -> i64 {
+        self.db
+            .conn
+            .query_one(Statement::from_string(sea_orm::DbBackend::Postgres, sql))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by_index::<i64>(0)
+            .unwrap()
+    }
+}
+
+/// [`service_auth`] plus an operator-console signer granted `developer-platform.administer`
+/// and the gateway's entitlement permission.
+pub fn service_auth_with_operator() -> (ServiceAuthRuntime, Peers, Arc<ServiceTokenSigner>) {
+    let clock: SharedClock = Arc::new(SystemClock);
+    let me = key("developer-platform-test-1");
+    let gateway = key("api-gateway-test-1");
+    let messaging = key("messaging-test-1");
+    let operator = key("operator-test-1");
+    let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
+        json!({
+        "issuer": id, "audience": cf_service_auth::services::DEVELOPER_PLATFORM, "runtime_environment": ENV,
+        "keys": [k.public_jwk()], "permissions": perms })
+    };
+    let bundle = json!({
+        "bundle_version": 1, "receiver": cf_service_auth::services::DEVELOPER_PLATFORM, "runtime_environment": ENV,
+        "trusted_issuers": [
+            issuer(cf_service_auth::services::API_GATEWAY, &gateway, &["developer-request.forward", "developer-entitlement.read", "developer-usage.record"]),
+            issuer(cf_service_auth::services::OPERATOR_CONSOLE, &operator, &["developer-platform.administer"]),
+        ],
+    }).to_string();
+    let policy = TrustPolicy::from_json(&bundle, &ServiceId::developer_platform(), ENV).unwrap();
+    let own = signer(ServiceId::developer_platform(), me);
+    let verifier = Arc::new(ServiceTokenVerifier::new(policy, clock));
+    let client = Arc::new(
+        InternalServiceClient::new(
+            own.clone(),
+            InternalTargets::new(ENV),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap(),
+    );
+    let runtime = ServiceAuthRuntime::new(own, verifier, client).unwrap();
+    (
+        runtime,
+        Peers {
+            gateway: signer(ServiceId::api_gateway(), gateway),
+            messaging: signer(ServiceId::messaging(), messaging),
+            rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+        },
+        signer(ServiceId::operator_console(), operator),
+    )
+}
+
+#[allow(unused)]
+fn _actor_kinds(a: DelegationActor) -> String {
+    a.header_value()
+}

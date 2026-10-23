@@ -13,6 +13,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261101_000001_developer_platform_foundation;
+mod m20261102_000002_control_plane;
 
 /// Name of the table recording which Developer Platform migrations have been applied.
 pub const MIGRATION_TABLE: &str = "developer_platform_seaql_migrations";
@@ -22,9 +23,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            m20261101_000001_developer_platform_foundation::Migration,
-        )]
+        vec![
+            Box::new(m20261101_000001_developer_platform_foundation::Migration),
+            Box::new(m20261102_000002_control_plane::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

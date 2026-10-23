@@ -28,13 +28,18 @@ pub async fn heartbeat_once<C: ConnectionTrait>(
     Ok(())
 }
 
-/// One worker pass.
+/// One worker pass: heartbeat, then the Section 50 sweeps (expired invitations).
 pub async fn run_once(
     db: &DatabaseConnection,
     instance: &str,
     runtime_environment: &str,
 ) -> Result<(), DbErr> {
-    heartbeat_once(db, instance, runtime_environment, Utc::now()).await
+    heartbeat_once(db, instance, runtime_environment, Utc::now()).await?;
+    let expired = crate::control::members::expire_due(db).await?;
+    if expired > 0 {
+        tracing::info!(expired, "pending invitations expired");
+    }
+    Ok(())
 }
 
 /// Runs passes every `interval` until `shutdown` resolves. A failed pass is logged and

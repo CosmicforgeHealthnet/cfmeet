@@ -192,6 +192,10 @@ impl ServiceAuthSettings {
     }
 
     /// Whether Platform Access (required by the server) is configured.
+    pub fn has_target(&self, service: &str) -> bool {
+        self.targets.iter().any(|(s, _)| s.as_str() == service)
+    }
+
     pub fn has_platform_access(&self) -> bool {
         self.targets
             .iter()

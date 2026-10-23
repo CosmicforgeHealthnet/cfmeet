@@ -14,10 +14,12 @@
 //! never reads another service's database.
 
 pub mod config;
+pub mod control;
 pub mod db;
 pub mod domain;
 pub mod http;
 pub mod platform_access;
+pub mod session;
 pub mod state;
 pub mod worker;
 

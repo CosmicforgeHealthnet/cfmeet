@@ -45,10 +45,10 @@
         "name": "X-CF-Delegated-Actor",
         "in": "header",
         "required": true,
-        "description": "The Developer Platform's opaque reference of the authorized human member performing the change (`u-<32 lowercase hex>`); recorded as operator `devplat.<actor>` in the append-only audit.",
+        "description": "The acting party: `u-<32 lowercase hex>` (a human member the Developer Platform authorized) `s-<32 lowercase hex>` (the service account of a scoped machine credential) or `o-<32 lowercase hex>` (a Developer Platform operator command); recorded as operator `devplat.<actor>` in the append-only audit.",
         "schema": {
           "type": "string",
-          "pattern": "^u-[0-9a-f]{32}$"
+          "pattern": "^[uso]-[0-9a-f]{32}$"
         }
       }
     },

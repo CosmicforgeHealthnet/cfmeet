@@ -20,8 +20,10 @@
 //! | `GET /delegation/environments/{id}` | read |
 //! | `POST /delegation/environments/{id}/status` | non-production environments only |
 //!
-//! Every mutation names the acting human (`x-cf-delegated-actor: u-<32 hex>`, the
-//! Developer Platform's own member reference) and goes through the audited `operator_*`
+//! Every mutation names the acting party (`x-cf-delegated-actor`: `u-<32 hex>` a human
+//! member the Developer Platform authorized, or `s-<32 hex>` the Platform Access service
+//! account of a scoped machine credential, or `o-<32 hex>` a Developer Platform operator
+//! command) and goes through the audited `operator_*`
 //! operations with operator id `devplat.<actor>`: one Platform Access audit row per
 //! committed change. No credential, verifier, privileged scope, principal or live
 //! telecom switch is reachable here.
@@ -91,7 +93,7 @@ pub fn routes() -> Router<AppState> {
 
 fn valid_actor(value: &str) -> bool {
     value.len() == 34
-        && value.starts_with("u-")
+        && (value.starts_with("u-") || value.starts_with("s-") || value.starts_with("o-"))
         && value[2..]
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))

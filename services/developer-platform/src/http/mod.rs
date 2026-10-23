@@ -11,6 +11,8 @@
 pub mod error;
 pub mod internal;
 pub mod middleware;
+pub mod operator;
+pub mod public;
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -41,10 +43,25 @@ pub fn app(state: AppState) -> Router {
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
         .layer(from_fn(request_context));
+    let customer = Router::new()
+        .nest(
+            "/v1",
+            public::routes()
+                .fallback(not_found)
+                .method_not_allowed_fallback(method_not_allowed),
+        )
+        .layer(map_response(normalize_rejections))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(from_fn_with_state(
+            state.clone(),
+            public::require_gateway_caller,
+        ))
+        .with_state(state.clone());
     let internal = Router::new()
         .nest(
             "/internal/v1",
             internal::routes()
+                .merge(operator::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
@@ -52,7 +69,7 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
         .with_state(state);
-    public.merge(internal)
+    public.merge(customer).merge(internal)
 }
 
 /// The served API description: exactly the checked-in contract

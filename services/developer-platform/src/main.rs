@@ -6,6 +6,7 @@ use developer_platform::{
     config::{service_auth::ServiceAuthSettings, DeveloperPlatformConfig},
     http,
     platform_access::HttpPlatformAccess,
+    session::MeetingServiceSessions,
     state::AppState,
 };
 
@@ -40,9 +41,16 @@ async fn main() -> anyhow::Result<()> {
     );
     let db =
         developer_platform::connect(config.database_url(), config.database_max_connections).await?;
-    let state = AppState::new(db, service_auth.clone())
+    let mut state = AppState::new(db, service_auth.clone())
         .with_platform_access(Arc::new(HttpPlatformAccess::new(service_auth.client())))
         .with_flags(config.flags);
+    if settings.has_target(cf_service_auth::services::MEETING_SERVICE) {
+        state = state.with_sessions(Arc::new(MeetingServiceSessions::new(service_auth.client())));
+    } else {
+        tracing::warn!(
+            "CF_MEETING_SERVICE_BASE_URL is not set: Developer Console sessions are refused"
+        );
+    }
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "developer platform listening");

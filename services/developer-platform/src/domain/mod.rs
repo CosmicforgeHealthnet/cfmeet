@@ -3,3 +3,5 @@
 pub mod context;
 
 pub use context::{current_context, scoped, CausationId, CorrelationId, RequestContext, RequestId};
+
+pub mod rbac;

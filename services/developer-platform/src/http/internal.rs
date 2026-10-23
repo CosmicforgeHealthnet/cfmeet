@@ -28,7 +28,25 @@ use crate::{
 };
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/gateway/context", get(gateway_context))
+    Router::new()
+        .route("/gateway/context", get(gateway_context))
+        .route(
+            "/entitlements/environments/:environment_id",
+            get(environment_entitlements),
+        )
+}
+
+/// `GET /internal/v1/entitlements/environments/{id}` — effective platform entitlements
+/// (API Gateway quota configuration). Permission `developer-entitlement.read`.
+async fn environment_entitlements(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Path(environment_id): axum::extract::Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperEntitlementRead)?;
+    Ok(Json(
+        crate::control::entitlements::effective(&state.db, environment_id).await?,
+    ))
 }
 
 async fn gateway_context(

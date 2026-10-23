@@ -39,6 +39,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 secrecy = "0.10"
 async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+sha2 = "0.10"
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }

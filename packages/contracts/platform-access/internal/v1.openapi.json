@@ -3,7 +3,7 @@
   "info": {
     "title": "CF Meet Platform Access internal API",
     "version": "1.3.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path \u2014 including unknown ones \u2014 requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H \u00a7104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration)."
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration)."
   },
   "components": {
     "securitySchemes": {
@@ -45,10 +45,10 @@
         "name": "X-CF-Delegated-Actor",
         "in": "header",
         "required": true,
-        "description": "The Developer Platform's opaque reference of the authorized human member performing the change (`u-<32 lowercase hex>`); recorded as operator `devplat.<actor>` in the append-only audit.",
+        "description": "The acting party: `u-<32 lowercase hex>` (a human member the Developer Platform authorized) `s-<32 lowercase hex>` (the service account of a scoped machine credential) or `o-<32 lowercase hex>` (a Developer Platform operator command); recorded as operator `devplat.<actor>` in the append-only audit.",
         "schema": {
           "type": "string",
-          "pattern": "^u-[0-9a-f]{32}$"
+          "pattern": "^[uso]-[0-9a-f]{32}$"
         }
       }
     },
@@ -603,7 +603,7 @@
     "/internal/v1/principals/ensure": {
       "post": {
         "operationId": "ensurePrincipal",
-        "description": "Part V H \u00a7104: get or create the NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the first-party login authority (Meeting Service) authenticated itself. Idempotent. Permission: `platform-principal.ensure`. Requires the delegated platform context signed into the caller's service token; it must be a FIRST_PARTY tenant at FULL authority (EXTERNAL \u2192 POLICY_VIOLATION, suspended chain or principal \u2192 INVALID_STATE).",
+        "description": "Part V H §104: get or create the NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the first-party login authority (Meeting Service) authenticated itself. Idempotent. Permission: `platform-principal.ensure`. Requires the delegated platform context signed into the caller's service token; it must be a FIRST_PARTY tenant at FULL authority (EXTERNAL → POLICY_VIOLATION, suspended chain or principal → INVALID_STATE).",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2263,7 +2263,7 @@
     "/internal/v1/credentials/delegated-authority": {
       "post": {
         "operationId": "delegatedCredentialAuthority",
-        "description": "Part VI \u00a751: the CURRENT authority chain of the API credential the API Gateway authenticated, for a receiving domain service. The credential id is taken only from the signed delegated context (`initiating_credential_id`) and must belong exactly to the delegated tenant / application / environment / service account; revocation, expiry, supersession, suspension and effective scopes are evaluated now. No secret is presented. Permission: `platform-credential.authenticate`.",
+        "description": "Part VI §51: the CURRENT authority chain of the API credential the API Gateway authenticated, for a receiving domain service. The credential id is taken only from the signed delegated context (`initiating_credential_id`) and must belong exactly to the delegated tenant / application / environment / service account; revocation, expiry, supersession, suspension and effective scopes are evaluated now. No secret is presented. Permission: `platform-credential.authenticate`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2298,7 +2298,7 @@
     "/internal/v1/delegation/tenants": {
       "post": {
         "operationId": "delegateCreateTenant",
-        "description": "Create the canonical EXTERNAL tenant of a new developer organization (classification is never caller-selected). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Create the canonical EXTERNAL tenant of a new developer organization (classification is never caller-selected). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2358,7 +2358,7 @@
     "/internal/v1/delegation/tenants/{tenantId}": {
       "get": {
         "operationId": "delegateGetTenant",
-        "description": "Read a tenant. Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Read a tenant. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2413,7 +2413,7 @@
     "/internal/v1/delegation/tenants/{tenantId}/status": {
       "post": {
         "operationId": "delegateSetTenantStatus",
-        "description": "Suspend / reactivate the tenant of an organization (organization suspension / closure). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Suspend / reactivate the tenant of an organization (organization suspension / closure). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2481,7 +2481,7 @@
     "/internal/v1/delegation/tenants/{tenantId}/applications": {
       "post": {
         "operationId": "delegateCreateApplication",
-        "description": "Create the canonical application of a new developer project. Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Create the canonical application of a new developer project. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2549,7 +2549,7 @@
     "/internal/v1/delegation/applications/{applicationId}": {
       "get": {
         "operationId": "delegateGetApplication",
-        "description": "Read an application. Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Read an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2604,7 +2604,7 @@
     "/internal/v1/delegation/applications/{applicationId}/status": {
       "post": {
         "operationId": "delegateSetApplicationStatus",
-        "description": "Suspend / reactivate the application of a project (project suspension / archive). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Suspend / reactivate the application of a project (project suspension / archive). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2672,7 +2672,7 @@
     "/internal/v1/delegation/applications/{applicationId}/environments": {
       "post": {
         "operationId": "delegateCreateEnvironment",
-        "description": "Create a SANDBOX or TEST environment (PRODUCTION is refused: production-access approval workflow). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Create a SANDBOX or TEST environment (PRODUCTION is refused: production-access approval workflow). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2738,7 +2738,7 @@
       },
       "get": {
         "operationId": "delegateListEnvironments",
-        "description": "List the environments of an application. Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "List the environments of an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2793,7 +2793,7 @@
     "/internal/v1/delegation/applications/{applicationId}/scopes": {
       "get": {
         "operationId": "delegateListApplicationScopes",
-        "description": "List the application's scope grants (read only). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "List the application's scope grants (read only). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2848,7 +2848,7 @@
     "/internal/v1/delegation/environments/{environmentId}": {
       "get": {
         "operationId": "delegateGetEnvironment",
-        "description": "Read an environment. Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Read an environment. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -2903,7 +2903,7 @@
     "/internal/v1/delegation/environments/{environmentId}/status": {
       "post": {
         "operationId": "delegateSetEnvironmentStatus",
-        "description": "Suspend / reactivate a non-production environment (PRODUCTION is refused). Developer Platform delegation (Part VI \u00a750): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "description": "Suspend / reactivate a non-production environment (PRODUCTION is refused). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"

@@ -1184,7 +1184,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            InternalPermission::DeveloperPlatformAdminister.definition().grantable_to,
+            InternalPermission::DeveloperPlatformAdminister
+                .definition()
+                .grantable_to,
             &[services::OPERATOR_CONSOLE]
         );
         for d in REGISTRY.iter().filter(|d| d.sensitive) {

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.0.0",
-    "description": "HTTP surface of services/developer-platform (Part VI §§1–5 foundation): GET /health, GET /ready and the service-authenticated /internal/v1 API. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them through Platform Access and forwards a signed delegated context. The functional Developer Platform API (Sections 50+) is not part of this version."
+    "version": "1.1.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request."
   },
   "paths": {
     "/health": {
@@ -100,6 +100,532 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/entitlements/environments/{environmentId}": {
+      "get": {
+        "operationId": "getEffectiveEntitlements",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Effective platform entitlements of an application environment (API Gateway quota configuration): organization plan, stricter project plan and environment caps. Permission `developer-entitlement.read`.",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Entitlements"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations": {
+      "post": {
+        "operationId": "operatorRegisterFirstPartyOrganization",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Register the organization of an existing FIRST_PARTY Platform Access tenant (classification verified with Platform Access): state INVITED with an OWNER invitation whose token is returned once. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/FirstPartyRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/RegisterFirstPartyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}": {
+      "get": {
+        "operationId": "operatorGetOrganization",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Operator overview of an organization. Permission `developer-platform.administer`.",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OrganizationOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/state": {
+      "post": {
+        "operationId": "operatorSetOrganizationState",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Restrict, suspend, reactivate or close an organization. SUSPENDED / CLOSED withdraw machine access in Platform Access first; reactivation restores it after the state is recorded. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SetOrganizationStateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/plan-assignments": {
+      "post": {
+        "operationId": "operatorAssignPlan",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Assign a plan version to the organization or one of its projects (supersedes the open assignment; history is immutable). Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PlanAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AssignPlanRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/cost-center": {
+      "put": {
+        "operationId": "operatorSetCostCenter",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "First-party internal cost allocation: INTERNAL_COST_CENTER billing account with a cost-centre reference. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/BillingAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CostCenterRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/commercial-plans": {
+      "post": {
+        "operationId": "operatorPublishPlan",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Publish the next immutable version of a commercial plan (entitlement profile; no price). Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CommercialPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PublishPlanRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/commercial-plans/{planId}/retire": {
+      "post": {
+        "operationId": "operatorRetirePlan",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Retire a plan version. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CommercialPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
