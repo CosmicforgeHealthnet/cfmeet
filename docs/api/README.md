@@ -70,6 +70,47 @@ not a proxy for all services: use each service's real authorized ingress for API
 traffic.
 
 
+## Swagger operation grouping and labels
+
+The OpenAPI contracts for all peer services now explicitly declare one meaningful
+`tags` group per HTTP operation, a concise human-readable `summary`, and a
+full `description`. Swagger UI displays these groups instead of a single
+`default` block. The generated Meeting Service OpenAPI document already
+declares operation tags and remains unchanged.
+
+| Service | Documented operations | Sections |
+|---|---:|---:|
+| Calling | 136 | 25 |
+| Messaging (customer) | 99 | 24 |
+| Numbering / DCNs | 98 | 24 |
+| Privacy Relay (customer) | 22 | 7 |
+| SMS Gateway (customer) | 11 | 5 |
+| Messaging (internal) | 7 | 5 |
+| Platform Access (internal) | 37 | 12 |
+| Privacy Relay (internal) | 25 | 8 |
+| SMS Gateway (internal) | 4 | 2 |
+| Telephony (internal) | 17 | 6 |
+| Platform internal HTTP conventions | 0 | Schema-only |
+| **Peer subtotal** | **456** | |
+| Meetings (generated) | 205 | Already tagged |
+| **All source specifications** | **661** | |
+
+The public Swagger explorer uses the **same tags** after filtering out
+internal-only operations. Hidden operations retain their labels in the private
+catalog. Some protected administration operations legitimately remain in the
+private view; labels are explanatory, not access controls.
+
+New operations must provide `operationId`, `tags`, `summary`, and a detailed
+`description` in the authoritative contract. CI runs
+`scripts/contracts/check_openapi_labels.py` on both sources and generated bundles,
+then renders all bundled specifications in Chromium to ensure that the UI does
+not return to an unstructured `default` section.
+
+This metadata-only change **does not** add, remove, rename or authenticate
+endpoints; alter payload schemas; change Swagger server routing; alter security
+schemes; or enable Try-it-out. Public/private documentation access remains
+governed by the independent deployment and access-control workflow.
+
 ## Meeting service (`services/meeting-service`)
 
 The authoritative HTTP API description for the current Meeting & Conference Platform service is the OpenAPI 3.0 document generated from the Rust code (utoipa annotations collected in `services/meeting-service/src/swagger/mod.rs`).
