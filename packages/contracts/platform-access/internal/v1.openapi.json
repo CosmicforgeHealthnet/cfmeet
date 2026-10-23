@@ -117,10 +117,64 @@
       "cfServiceAuth": []
     }
   ],
+  "tags": [
+    {
+      "name": "Internal Admin — Applications",
+      "description": "Internal Admin — Applications operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Credentials",
+      "description": "Internal Admin — Credentials operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Environments",
+      "description": "Internal Admin — Environments operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Principals",
+      "description": "Internal Admin — Principals operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Service Accounts",
+      "description": "Internal Admin — Service Accounts operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Tenants",
+      "description": "Internal Admin — Tenants operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Authorization",
+      "description": "Internal — Authorization operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Credential Authentication",
+      "description": "Internal — Credential Authentication operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Identity Context",
+      "description": "Internal — Identity Context operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Principal Registry",
+      "description": "Internal — Principal Registry operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Scope Registry",
+      "description": "Internal — Scope Registry operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Service Health",
+      "description": "Service Health operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "operationId": "health",
+        "tags": [
+          "Service Health"
+        ],
+        "summary": "Check service health",
         "security": [],
         "description": "Liveness.",
         "responses": {
@@ -140,6 +194,10 @@
     "/ready": {
       "get": {
         "operationId": "ready",
+        "tags": [
+          "Service Health"
+        ],
+        "summary": "Check service readiness",
         "security": [],
         "description": "Readiness: database reachable and no migration pending (counts and versions only).",
         "responses": {
@@ -169,6 +227,10 @@
     "/internal/v1/credentials/authenticate": {
       "post": {
         "operationId": "authenticateCredential",
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "authenticate Credential",
         "description": "Validate a presented customer credential and return its trusted authority chain (or the rejection reason and any throttle). The presented value is never logged or stored. Permission: `platform-credential.authenticate`.",
         "parameters": [
           {
@@ -217,6 +279,10 @@
     "/internal/v1/credentials/{credentialId}": {
       "get": {
         "operationId": "getCredentialStatus",
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "get Credential Status",
         "description": "Status, expiry and revocation of a credential of the delegated scope (no secret, no verifier). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -266,6 +332,10 @@
     "/internal/v1/authorization/evaluate": {
       "post": {
         "operationId": "evaluateAuthorization",
+        "tags": [
+          "Internal — Authorization"
+        ],
+        "summary": "evaluate Authorization",
         "description": "Re-evaluate NOW whether the credential of the delegated scope may perform an operation needing the given scopes (optionally for a principal). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -317,6 +387,10 @@
     "/internal/v1/identity/context": {
       "get": {
         "operationId": "getTrustedContext",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "get Trusted Context",
         "description": "The trusted context of the caller's delegated scope: tenant, application, environment, service account and authority mode. Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -358,6 +432,10 @@
     "/internal/v1/identity/changes": {
       "post": {
         "operationId": "readIdentityChanges",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "read Identity Changes",
         "description": "A page of the identity change feed after the cursor (consumer projections). POST because internal requests carry no query strings. Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -406,6 +484,10 @@
     "/internal/v1/identity/imports/{bundleDigest}": {
       "get": {
         "operationId": "getImportReceipt",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "get Import Receipt",
         "description": "Receipt of an operator-imported identity bundle (hand-off verification by the previous authority). Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -456,6 +538,10 @@
     "/internal/v1/scopes": {
       "get": {
         "operationId": "getScopeRegistry",
+        "tags": [
+          "Internal — Scope Registry"
+        ],
+        "summary": "get Scope Registry",
         "description": "The server-authoritative scope registry (Calling, Numbering and SMS scopes; trust levels). Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -491,6 +577,10 @@
     "/internal/v1/principals/resolve": {
       "post": {
         "operationId": "resolvePrincipals",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "resolve Principals",
         "description": "Resolve principal references inside the delegated scope only. Permission: `platform-principal.resolve`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -542,6 +632,10 @@
     "/internal/v1/principals/telephone-endpoints": {
       "post": {
         "operationId": "ensureTelephoneEndpoint",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "ensure Telephone Endpoint",
         "description": "Get or create the TELEPHONE_ENDPOINT principal of a protected public party (by ContactReference, never a number). Idempotent. Permission: `platform-principal.register`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -593,6 +687,10 @@
     "/internal/v1/principals/ensure": {
       "post": {
         "operationId": "ensurePrincipal",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "ensure Principal",
         "description": "Part V H §104: get or create the NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the first-party login authority (Meeting Service) authenticated itself. Idempotent. Permission: `platform-principal.ensure`. Requires the delegated platform context signed into the caller's service token; it must be a FIRST_PARTY tenant at FULL authority (EXTERNAL → POLICY_VIOLATION, suspended chain or principal → INVALID_STATE).",
         "parameters": [
           {
@@ -647,6 +745,10 @@
     "/internal/v1/principals/{principalId}/tombstone": {
       "post": {
         "operationId": "tombstonePrincipal",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "tombstone Principal",
         "description": "Tombstone a principal for good (audited with the named human operator). Idempotent. Permission: `platform-principal.register`.",
         "parameters": [
           {
@@ -706,6 +808,10 @@
     "/internal/v1/admin/tenants": {
       "post": {
         "operationId": "createTenant",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "create Tenant",
         "description": "Create a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -766,6 +872,10 @@
     "/internal/v1/admin/tenants/{tenantId}": {
       "get": {
         "operationId": "getTenant",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "get Tenant",
         "description": "Read a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -824,6 +934,10 @@
     "/internal/v1/admin/tenants/{tenantId}/status": {
       "post": {
         "operationId": "setTenantStatus",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "set Tenant Status",
         "description": "Suspend / reactivate a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -892,6 +1006,10 @@
     "/internal/v1/admin/tenants/{tenantId}/applications": {
       "post": {
         "operationId": "createApplication",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "create Application",
         "description": "Create an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -960,6 +1078,10 @@
     "/internal/v1/admin/applications/{applicationId}": {
       "get": {
         "operationId": "getApplication",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "get Application",
         "description": "Read an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1018,6 +1140,10 @@
     "/internal/v1/admin/applications/{applicationId}/status": {
       "post": {
         "operationId": "setApplicationStatus",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "set Application Status",
         "description": "Suspend / reactivate an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1086,6 +1212,10 @@
     "/internal/v1/admin/applications/{applicationId}/environments": {
       "post": {
         "operationId": "createEnvironment",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "create Environment",
         "description": "Create an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1154,6 +1284,10 @@
     "/internal/v1/admin/applications/{applicationId}/scopes": {
       "post": {
         "operationId": "grantApplicationScope",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "grant Application Scope",
         "description": "Allow a scope for an application (privileged scopes need `privileged: true` and a FIRST_PARTY tenant). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1220,6 +1354,10 @@
       },
       "get": {
         "operationId": "listApplicationScopes",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "list Application Scopes",
         "description": "List the application's allowed scopes. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1278,6 +1416,10 @@
     "/internal/v1/admin/applications/{applicationId}/scopes/{scope}": {
       "delete": {
         "operationId": "revokeApplicationScope",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "revoke Application Scope",
         "description": "Withdraw a scope from the application and its credentials. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1345,6 +1487,10 @@
     "/internal/v1/admin/environments/{environmentId}/status": {
       "post": {
         "operationId": "setEnvironmentStatus",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "set Environment Status",
         "description": "Suspend / reactivate an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1413,6 +1559,10 @@
     "/internal/v1/admin/environments/{environmentId}/live-telecom": {
       "post": {
         "operationId": "setLiveTelecom",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "set Live Telecom",
         "description": "Allow / forbid live telecom (PRODUCTION only). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1481,6 +1631,10 @@
     "/internal/v1/admin/environments/{environmentId}/service-accounts": {
       "post": {
         "operationId": "createServiceAccount",
+        "tags": [
+          "Internal Admin — Service Accounts"
+        ],
+        "summary": "create Service Account",
         "description": "Create a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1549,6 +1703,10 @@
     "/internal/v1/admin/environments/{environmentId}/principals": {
       "post": {
         "operationId": "registerPrincipal",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "register Principal",
         "description": "Register a principal (opaque reference). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1615,6 +1773,10 @@
       },
       "get": {
         "operationId": "listPrincipals",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "list Principals",
         "description": "List principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1673,6 +1835,10 @@
     "/internal/v1/admin/service-accounts/{serviceAccountId}/status": {
       "post": {
         "operationId": "setServiceAccountStatus",
+        "tags": [
+          "Internal Admin — Service Accounts"
+        ],
+        "summary": "set Service Account Status",
         "description": "Suspend / reactivate / revoke a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1741,6 +1907,10 @@
     "/internal/v1/admin/service-accounts/{serviceAccountId}/credentials": {
       "post": {
         "operationId": "issueCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "issue Credential",
         "description": "Issue a credential; the raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1807,6 +1977,10 @@
       },
       "get": {
         "operationId": "listCredentials",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "list Credentials",
         "description": "List credentials (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1865,6 +2039,10 @@
     "/internal/v1/admin/credentials/{credentialId}": {
       "get": {
         "operationId": "getCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "get Credential",
         "description": "Read a credential (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1923,6 +2101,10 @@
     "/internal/v1/admin/credentials/{credentialId}/rotate": {
       "post": {
         "operationId": "rotateCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "rotate Credential",
         "description": "Rotate; the successor's raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1991,6 +2173,10 @@
     "/internal/v1/admin/credentials/{credentialId}/revoke": {
       "post": {
         "operationId": "revokeCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "revoke Credential",
         "description": "Revoke immediately (idempotent). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2049,6 +2235,10 @@
     "/internal/v1/admin/credentials/{credentialId}/principal-restriction": {
       "put": {
         "operationId": "restrictCredentialPrincipals",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "restrict Credential Principals",
         "description": "Restrict a credential to act only for given principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2117,6 +2307,10 @@
     "/internal/v1/admin/principals/{principalId}/status": {
       "post": {
         "operationId": "setPrincipalStatus",
+        "tags": [
+          "Internal Admin — Principals"
+        ],
+        "summary": "set Principal Status",
         "description": "Suspend / reactivate / deactivate a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2185,6 +2379,10 @@
     "/internal/v1/admin/principals/{principalId}/tombstone": {
       "post": {
         "operationId": "operatorTombstonePrincipal",
+        "tags": [
+          "Internal Admin — Principals"
+        ],
+        "summary": "operator Tombstone Principal",
         "description": "Tombstone a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {

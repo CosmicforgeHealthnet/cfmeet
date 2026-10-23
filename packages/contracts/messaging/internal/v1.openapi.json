@@ -5,10 +5,36 @@
     "version": "1.0.0",
     "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1."
   },
+  "tags": [
+    {
+      "name": "Internal — Chat Migration",
+      "description": "Internal — Chat Migration operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Context Authority",
+      "description": "Internal — Context Authority operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Meeting Moderation",
+      "description": "Internal — Meeting Moderation operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Meeting Synchronization",
+      "description": "Internal — Meeting Synchronization operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — SMS Bridge",
+      "description": "Internal — SMS Bridge operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    }
+  ],
   "paths": {
     "/internal/v1/meeting-conversations": {
       "post": {
         "operationId": "resolveMeetingConversation",
+        "tags": [
+          "Internal — Meeting Synchronization"
+        ],
+        "summary": "resolve Meeting Conversation",
         "security": [
           {
             "serviceToken": []
@@ -71,6 +97,10 @@
     "/internal/v1/meeting-conversations/{conversationId}/members/{principalId}": {
       "put": {
         "operationId": "syncMeetingMember",
+        "tags": [
+          "Internal — Meeting Synchronization"
+        ],
+        "summary": "sync Meeting Member",
         "security": [
           {
             "serviceToken": []
@@ -140,6 +170,10 @@
     "/internal/v1/meeting-conversations/{conversationId}/lifecycle": {
       "post": {
         "operationId": "syncMeetingLifecycle",
+        "tags": [
+          "Internal — Meeting Synchronization"
+        ],
+        "summary": "sync Meeting Lifecycle",
         "security": [
           {
             "serviceToken": []
@@ -201,6 +235,10 @@
     "/internal/v1/meeting-conversations/{conversationId}/legacy-imports": {
       "post": {
         "operationId": "importLegacyMeetingChat",
+        "tags": [
+          "Internal — Chat Migration"
+        ],
+        "summary": "import Legacy Meeting Chat",
         "security": [
           {
             "serviceToken": []
@@ -262,6 +300,10 @@
     "/internal/v1/meeting-conversations/{conversationId}/messages/{messageId}/moderation": {
       "post": {
         "operationId": "moderateMeetingMessage",
+        "tags": [
+          "Internal — Meeting Moderation"
+        ],
+        "summary": "moderate Meeting Message",
         "security": [
           {
             "serviceToken": []
@@ -331,6 +373,10 @@
     "/internal/v1/context-authorities": {
       "post": {
         "operationId": "applyContextAuthority",
+        "tags": [
+          "Internal — Context Authority"
+        ],
+        "summary": "apply Context Authority",
         "security": [
           {
             "serviceToken": []
@@ -379,6 +425,10 @@
     "/internal/v1/sms-bridge/inbound": {
       "post": {
         "operationId": "deliverInboundSms",
+        "tags": [
+          "Internal — SMS Bridge"
+        ],
+        "summary": "deliver Inbound SMS",
         "security": [
           {
             "serviceToken": []
