@@ -160,7 +160,7 @@ pub async fn subscribe(
     let authorized = async {
         match &q.ticket {
             Some(ticket) => {
-                let principal = match rt.verify_ticket(ticket, id)? {
+                let principal = match rt.verify_ticket(ticket, id).await? {
                     TicketSubject::User(uid) => {
                         SubscriberPrincipal::User(rt.user_actor(uid).await?)
                     }
