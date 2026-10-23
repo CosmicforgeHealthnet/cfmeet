@@ -17,6 +17,9 @@ documents (packages/contracts/bundled/public/**) and the gateway route manifest
       NEVER        paid telecom mutations (generation.json `paidTelecomOperations`): NEVER
                    retried automatically; an unknown outcome is surfaced to the caller,
                    who reconciles (e.g. replays the same Idempotency-Key deliberately).
+  * TypeScript models (generation.json `typescript.models`): a namespace per public domain
+    with a type per component schema and the typed parameters / response of every REST
+    operation.
 
 Rules enforced (exit 1 on violation):
 
@@ -250,6 +253,275 @@ def dart_operations(ops: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------------------
+# TypeScript models (additive emitter): one namespace per public domain document with a
+# type for every component schema, plus `Operations` — the typed request parameters and
+# response of every REST operation of the domain (WebSocket operations are excluded; the
+# SDK's realtime helpers own them). JSON Schema keywords that only constrain values
+# (pattern, bounds, not, if / then / else, propertyNames) have no TypeScript counterpart
+# and are ignored; descriptions that name a product are omitted (product-name guard).
+
+TS_DOMAIN_NAMESPACE = {
+    "calling": "Calling", "developer-platform": "DeveloperPlatform", "gateway": "Gateway",
+    "meetings": "Meetings", "messaging": "Messaging", "numbering": "Numbering",
+    "privacy-relay": "PrivacyRelay", "sms": "Sms",
+}
+TS_IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+TS_CONSTRAINT_KEYS = {"required", "not", "description", "title", "if", "then", "else", "$comment",
+                      "minProperties", "maxProperties", "examples", "example", "deprecated"}
+
+
+def ts_pascal(segment: str) -> str:
+    return "".join(p[:1].upper() + p[1:] for p in re.split(r"[^A-Za-z0-9]+", segment) if p)
+
+
+def ts_model_names(names: list[str]) -> dict[str, str]:
+    """Shortest unique, readable identifier per schema name (`a.common.v1.Call` → `Call`)."""
+    segs = {n: [s for s in n.split(".") if s] for n in names}
+    useful = {n: [s for s in segs[n][:-1] if not re.fullmatch(r"v\d+", s)] for n in names}
+    depth = {n: 0 for n in names}
+
+    def ident(n: str) -> str:
+        parts = useful[n][len(useful[n]) - depth[n]:] if depth[n] else []
+        out = "".join(ts_pascal(p) for p in parts + [segs[n][-1]]) or "Schema"
+        out = out if TS_IDENT_RE.match(out) and not out[0].isdigit() else "S" + out
+        return out
+
+    while True:
+        groups: dict[str, list[str]] = {}
+        for n in names:
+            groups.setdefault(ident(n), []).append(n)
+        clashes = [g for g in groups.values() if len(g) > 1]
+        if not clashes:
+            return {n: ident(n) for n in names}
+        progressed = False
+        for g in clashes:
+            for n in g:
+                if depth[n] < len(useful[n]):
+                    depth[n] += 1
+                    progressed = True
+        if not progressed:
+            raise ValueError(f"cannot name schemas uniquely: {clashes}")
+
+
+def ts_doc(text, indent: str) -> list[str]:
+    if not isinstance(text, str) or not text.strip() or PRODUCT_RE.search(text):
+        return []
+    para = " ".join(text.strip().split("\n\n")[0].split())
+    if len(para) > 400:
+        para = para[:399].rsplit(" ", 1)[0] + " …"
+    para = para.replace("*/", "*\\/")
+    return [f"{indent}/** {para} */"]
+
+
+def ts_key(name: str) -> str:
+    return name if TS_IDENT_RE.match(name) else json.dumps(name)
+
+
+class TsModels:
+    def __init__(self, doc: dict):
+        self.doc = doc
+        self.schemas = doc.get("components", {}).get("schemas", {})
+        self.names = ts_model_names(list(self.schemas))
+
+    def ref(self, ref: str, depth: int) -> str:
+        prefix = "#/components/schemas/"
+        if ref.startswith(prefix) and ref[len(prefix):] in self.schemas:
+            return self.names[ref[len(prefix):]]
+        return self.type(resolve(self.doc, {"$ref": ref}), depth + 1)
+
+    def type(self, s, depth: int = 0) -> str:
+        if depth > 48:
+            return "unknown"
+        if s is True or s is None:
+            return "unknown"
+        if s is False:
+            return "never"
+        if not isinstance(s, dict):
+            return "unknown"
+        parts: list[str] = []
+        if "$ref" in s:
+            parts.append(self.ref(s["$ref"], depth))
+        if "const" in s:
+            parts.append(json.dumps(s["const"], ensure_ascii=False))
+        elif "enum" in s:
+            parts.append(" | ".join(json.dumps(v, ensure_ascii=False) for v in s["enum"]) or "never")
+        else:
+            base = self.base(s, depth)
+            if base is not None:
+                parts.append(base)
+        for kw in ("oneOf", "anyOf"):
+            if kw in s:
+                parts.append(self.union(s, s[kw], depth))
+        for member in s.get("allOf", []):
+            t = self.member(s, member, depth)
+            if t is not None:
+                parts.append(t)
+        if not parts:
+            return "unknown"
+        out = parts[0] if len(parts) == 1 else " & ".join(f"({p})" for p in parts)
+        if s.get("nullable") is True:
+            out = f"({out}) | null"
+        return out
+
+    def member(self, parent: dict, m, depth: int):
+        """An allOf / oneOf / anyOf member; constraint-only members (required, not, if...)
+        refine the parent's properties instead of standing alone."""
+        if isinstance(m, dict) and m and set(m) <= TS_CONSTRAINT_KEYS | {"properties"} and "type" not in m:
+            req = [r for r in m.get("required", []) if isinstance(r, str)]
+            props = {**parent.get("properties", {}), **m.get("properties", {})}
+            if not req:
+                return None
+            fields = "; ".join(f"{ts_key(r)}: {self.type(props.get(r, True), depth + 1)}" for r in req)
+            return "{ " + fields + " }"
+        return self.type(m, depth + 1)
+
+    def union(self, parent: dict, members: list, depth: int) -> str:
+        out = []
+        for m in members:
+            t = self.member(parent, m, depth)
+            out.append("{}" if t is None else t)
+        uniq = list(dict.fromkeys(out))
+        return " | ".join(f"({t})" if (" & " in t or " | " in t) else t for t in uniq) or "never"
+
+    def base(self, s: dict, depth: int):
+        t = s.get("type")
+        if isinstance(t, list):
+            alts = [self.single(s, x, depth) for x in t]
+            alts = [a for a in dict.fromkeys(alts) if a is not None]
+            return " | ".join(f"({a})" if " & " in a else a for a in alts) if alts else None
+        if t is None:
+            if "properties" in s or "additionalProperties" in s:
+                return self.single(s, "object", depth)
+            if "items" in s or "prefixItems" in s:
+                return self.single(s, "array", depth)
+            return None
+        return self.single(s, t, depth)
+
+    def single(self, s: dict, t: str, depth: int):
+        if t == "string":
+            return "string"
+        if t in ("integer", "number"):
+            return "number"
+        if t == "boolean":
+            return "boolean"
+        if t == "null":
+            return "null"
+        if t == "array":
+            items = s.get("items")
+            inner = self.type(items, depth + 1) if items is not None else "unknown"
+            return f"Array<{inner}>"
+        if t == "object":
+            return self.object(s, depth)
+        return "unknown"
+
+    def object(self, s: dict, depth: int) -> str:
+        props = s.get("properties", {})
+        required = [r for r in s.get("required", []) if isinstance(r, str)]
+        ap = s.get("additionalProperties", None)
+        indent = "  " * (depth + 2)
+        lines: list[str] = []
+        for name, sub in props.items():
+            lines += ts_doc(sub.get("description") if isinstance(sub, dict) else None, indent)
+            opt = "" if name in required else "?"
+            lines.append(f"{indent}{ts_key(name)}{opt}: {self.type(sub, depth + 1)};")
+        for r in required:
+            if r not in props:
+                lines.append(f"{indent}{ts_key(r)}: unknown;")
+        body = "{\n" + "\n".join(lines) + "\n" + "  " * (depth + 1) + "}" if lines else None
+        if ap is None or ap is True:
+            index = None if props else "{ [key: string]: unknown }"
+        elif ap is False:
+            index = None
+        else:
+            index = "{ [key: string]: " + self.type(ap, depth + 1) + " }"
+        if body and index:
+            return f"{body} & {index}"
+        return body or index or "{ [key: string]: never }"
+
+    def response(self, node: dict) -> str:
+        out = []
+        for code, r in sorted(node.get("responses", {}).items()):
+            if not (code.isdigit() and code.startswith("2")):
+                continue
+            r = resolve(self.doc, r)
+            content = r.get("content", {})
+            if "application/json" in content:
+                out.append(self.type(content["application/json"].get("schema", True), 1))
+            elif content:
+                out.append("ArrayBuffer")
+            else:
+                out.append("void")
+        uniq = list(dict.fromkeys(out)) or ["void"]
+        return " | ".join(f"({t})" if " & " in t else t for t in uniq)
+
+
+def ts_models(ops: list[dict]) -> str:
+    docs = {f.parent.name: load(f) for f in sorted(PUBLIC_DOCS.glob("*/v1.openapi.json")) if f.parent.name != "aggregate"}
+    head = HEADER.replace("packages/contracts/manifest.json", "the public API documents (packages/contracts/bundled/public)")
+    lines = [f"// {head}", "//",
+             "// One namespace per public domain: a type per component schema and `Operations`, the",
+             "// typed parameters / response of every REST operation (see client.ts for how they are used).",
+             "/* eslint-disable */", ""]
+    domain_map = []
+    for domain in sorted(docs):
+        ns = TS_DOMAIN_NAMESPACE.get(domain) or ts_pascal(domain)
+        doc = docs[domain]
+        m = TsModels(doc)
+        lines.append(f"export namespace {ns} {{")
+        for name in sorted(m.schemas, key=lambda n: m.names[n]):
+            schema = m.schemas[name]
+            lines += ts_doc(schema.get("description") if isinstance(schema, dict) else None, "  ")
+            lines.append(f"  export type {m.names[name]} = {m.type(schema, 0)};")
+        lines.append("")
+        lines.append("  /** Typed parameters and response of every REST operation of this domain. */")
+        lines.append("  export interface Operations {")
+        for o in (o for o in ops if o["domain"] == domain and o["protocol"] == "REST"):
+            node = doc["paths"][o["path"]][o["method"].lower()]
+            item = doc["paths"][o["path"]]
+            params = [resolve(doc, x) for x in item.get("parameters", []) + node.get("parameters", [])]
+            by_in = lambda where: [p for p in params if p["in"] == where and p["name"].lower() != "idempotency-key"]
+            fields = []
+            for where, key in (("path", "path"), ("query", "query"), ("header", "headers")):
+                ps = by_in(where)
+                if not ps:
+                    continue
+                names = [p["name"].lower() if where == "header" else p["name"] for p in ps]
+                inner = "; ".join(
+                    f"{ts_key(n)}{'' if p.get('required') or where == 'path' else '?'}: {m.type(p.get('schema', {'type': 'string'}), 3)}"
+                    for n, p in zip(names, ps))
+                req = where == "path" or any(p.get("required") for p in ps)
+                fields.append(f"{key}{'' if req else '?'}: {{ {inner} }}")
+            body = node.get("requestBody")
+            if body:
+                body = resolve(doc, body)
+                content = body.get("content", {})
+                bt = m.type(content["application/json"].get("schema", True), 3) if "application/json" in content else "unknown"
+                fields.append(f"body{'' if body.get('required') else '?'}: {bt}")
+            if o["idempotency"] != "NONE":
+                fields.append("idempotencyKey?: string")
+            summary = f"{o['method']} {o['path']}" + (f" — scope {o['scope']}" if o["scope"] else "") + \
+                      f"; auth {' | '.join(o['auth'])}; retry {o['retry']}" + ("; paid telecom" if o["paidTelecom"] else "")
+            lines.append(f"    /** {summary} */")
+            lines.append(f"    {ts_key(o['name'])}: {{")
+            lines.append("      params: {" + (" " + "; ".join(fields) + " " if fields else "") + "};")
+            response = m.response(node)
+            lines.append(f"      response: {response};")
+            if o["pagination"]:
+                lines.append(f"      item: NonNullable<({response})[{json.dumps(o['pagination']['itemsField'])}]>[number];")
+            lines.append("    };")
+        lines.append("  }")
+        lines.append("}")
+        lines.append("")
+        domain_map.append((domain, ns))
+    lines.append("/** Operation types of every domain, keyed like `OperationSpec.domain`. */")
+    lines.append("export interface DomainOperations {")
+    for domain, ns in domain_map:
+        lines.append(f"  {ts_key(domain)}: {ns}.Operations;")
+    lines += ["}", ""]
+    return "\n".join(lines)
+
+
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     config = load(HERE / "generation.json")
@@ -257,6 +529,8 @@ def main(argv: list[str]) -> int:
     cat, errors = catalogue(config, manifest)
     ops, op_errors = operations(config)
     errors += op_errors
+    if PRODUCT_RE.search((HERE / "generation.json").read_text(encoding="utf-8")):
+        errors.append("sdks/generation.json: names a product")
     for sdk in ("typescript", "dart"):
         for f in (HERE / sdk).rglob("*"):
             if f.is_file() and "node_modules" not in f.parts and PRODUCT_RE.search(f.read_text(encoding="utf-8", errors="ignore")):
@@ -267,6 +541,8 @@ def main(argv: list[str]) -> int:
         HERE / config["typescript"]["operations"]: ts_operations(ops),
         HERE / config["dart"]["operations"]: dart_operations(ops),
     }
+    if config["typescript"].get("models"):
+        outputs[HERE / config["typescript"]["models"]] = ts_models(ops)
     for path, text in outputs.items():
         if check:
             if not path.is_file() or path.read_text(encoding="utf-8") != text:

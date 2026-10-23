@@ -1,0 +1,135 @@
+name: SDK (Dart)
+
+# Part VI Section 52: the Dart platform SDK (sdks/dart) and the C ABI of the Messaging
+# E2EE core it loads through dart:ffi (packages/messaging-crypto/ffi).
+#
+# * ffi: the native bridge — rustfmt, clippy -D warnings, its C-ABI unit tests over the
+#   REAL crypto core, the dependency licence review, and the C header's syntax;
+# * dart: generation is current, then dart format / analyze --fatal-infos / test with the
+#   freshly built native library (FFI tests load it and run real MLS operations), the
+#   examples analyzed, and a dart2js build of the SDK proving browser builds refuse
+#   platform credentials. Real-stack integration tests run only when CFMEET_STACK_ENV is
+#   provided (not in this workflow: they print SKIPPED).
+#
+# Nothing here deploys or publishes anything (the package is `publish_to: none`).
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "sdks/**"
+      - "packages/contracts/**"
+      - "infra/api-gateway/**"
+      - "packages/webhooks/**"
+      - "packages/messaging-crypto/**"
+      - ".github/workflows/sdk-dart.yml"
+  pull_request:
+    paths:
+      - "sdks/**"
+      - "packages/contracts/**"
+      - "infra/api-gateway/**"
+      - "packages/webhooks/**"
+      - "packages/messaging-crypto/**"
+      - ".github/workflows/sdk-dart.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sdk-dart-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  ffi:
+    name: messaging crypto C ABI (fmt / clippy / tests / licences)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/messaging-crypto/ffi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/messaging-crypto/ffi -> target
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test (C ABI over the real core; header in sync)
+        run: cargo test --locked --no-fail-fast
+
+      - name: the C header is valid C99
+        run: cc -std=c99 -Wall -Wextra -Werror -fsyntax-only include/cf_messaging_crypto.h
+
+      - name: dependency licence review (the shipped native library)
+        working-directory: .
+        run: python3 scripts/messaging/check_licenses.py packages/messaging-crypto/ffi
+
+  dart:
+    name: Dart SDK (generate / format / analyze / test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/dart
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      # The FFI tests load this library (built below) and fail if it is missing.
+      CFMEET_MESSAGING_CRYPTO_LIB: ${{ github.workspace }}/target/debug/libcf_messaging_crypto_ffi.so
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/messaging-crypto/ffi -> ${{ github.workspace }}/target
+
+      - name: SDK generation is current
+        working-directory: .
+        run: python3 sdks/generate.py --check
+
+      - name: build the native messaging crypto library
+        working-directory: packages/messaging-crypto/ffi
+        run: |
+          cargo build --locked
+          test -f "$CFMEET_MESSAGING_CRYPTO_LIB"
+
+      - name: dart pub get
+        run: dart pub get
+
+      # lib/src/generated/ is written byte-for-byte by sdks/generate.py (checked above)
+      # and is not dart-formatted; every hand-written file must be.
+      - name: dart format (hand-written sources)
+        run: |
+          find lib test example tool -name '*.dart' -not -path 'lib/src/generated/*' -print0 \
+            | xargs -0 dart format --output=none --set-exit-if-changed
+
+      - name: dart analyze --fatal-infos (lib, tests, examples, tools)
+        run: dart analyze --fatal-infos
+
+      - name: dart test
+        run: dart test --reporter expanded
+
+      - name: browser build refuses platform credentials (dart2js + node)
+        run: |
+          set -euo pipefail
+          dart compile js -o "$RUNNER_TEMP/web_probe.js" tool/web_probe.dart
+          node -e 'globalThis.self = globalThis; require(process.argv[1])' "$RUNNER_TEMP/web_probe.js" \
+            | tee "$RUNNER_TEMP/web_probe.out"
+          grep -q 'refused as expected: platform credentials' "$RUNNER_TEMP/web_probe.out"

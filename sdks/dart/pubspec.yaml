@@ -1,10 +1,21 @@
 name: cfmeet_platform_sdk
-description: CF Meet platform SDK for Dart — Part VI scaffolding, generated from the published contracts in packages/contracts. The full SDK is Section 52.
-version: 0.0.0
+description: >-
+  CF Meet platform SDK for Dart (Part VI Section 52): a typed client over every public
+  operation the API Gateway routes (generated from the published contracts), retries by
+  retry class, idempotency, pagination, realtime WebSockets, webhook verification and the
+  Messaging E2EE core over dart:ffi.
+version: 0.1.0
 publish_to: none
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
 
+dependencies:
+  # HMAC-SHA256 of webhook signatures (no hand-rolled crypto).
+  crypto: ^3.0.3
+  # calloc / malloc for the native Messaging crypto bridge (dart:ffi).
+  ffi: ^2.1.0
+
 dev_dependencies:
+  lints: ^5.0.0
   test: ^1.25.0

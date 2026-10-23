@@ -1,0 +1,5 @@
+.dart_tool/
+build/
+# A library package: the lockfile is not committed (Dart guidance). CI stays deterministic
+# through the pinned SDK major, caret constraints and `dart pub get` against pub.dev.
+pubspec.lock

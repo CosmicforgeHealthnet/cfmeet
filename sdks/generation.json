@@ -1,5 +1,5 @@
 {
-  "description": "Single source of truth of the CF Meet platform SDKs (Part VI Section 52). Both SDKs are generated from these PUBLIC published contracts only (the gateway's public API documents and route manifest); first-party CosmicForge products and external customers use the same SDKs and differ only through authorized scopes and trust classification.",
+  "description": "Single source of truth of the CF Meet platform SDKs (Part VI Section 52). Both SDKs are generated from these PUBLIC published contracts only (the gateway's public API documents and route manifest); first-party products and external customers use the same SDKs and differ only through authorized scopes and trust classification.",
   "status": "beta",
   "contracts": [
     "cfmeet.api-gateway.http-api",
@@ -18,7 +18,8 @@
   "typescript": {
     "package": "@cfmeet/platform-sdk",
     "output": "typescript/src/generated/contracts.ts",
-    "operations": "typescript/src/generated/operations.ts"
+    "operations": "typescript/src/generated/operations.ts",
+    "models": "typescript/src/generated/models.ts"
   },
   "dart": {
     "package": "cfmeet_platform_sdk",
