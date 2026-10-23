@@ -144,47 +144,37 @@ jobs:
             rm -f "$ENABLED"
             echo "ERROR: nginx test failed"; exit 1
           fi
-          # nginx -t accepts files not included in the ACTIVE server config.
-          # Confirm this exact private site is effective before probing its listener.
+          # Confirm the private site is part of the ACTIVE Nginx configuration.
           python3 - "$CONFIG" <<'PY'
-          import pathlib, re, subprocess, sys
+          import pathlib, subprocess, sys
           target = pathlib.Path(sys.argv[1]).resolve(strict=True)
           proc = subprocess.run(["nginx", "-T"], capture_output=True, text=True)
           if proc.returncode:
-              sys.exit("ERROR: active Nginx configuration could not be inspected")
+              sys.exit("ERROR: unable to read active Nginx configuration")
           loaded = []
-          for p in re.findall(r'(?m)^# configuration file ([^:\\n]+):\\s*
-          echo "PRIVATE_SWAGGER_PROVISIONED=YES"
-          echo "PRIVATE_DOCS_COUNT=12"
-          echo "PRIVATE_UNAUTH_HTTP=401 PRIVATE_AUTH_HTTP=200"
-          echo "PRIVATE_LISTENER=127.0.0.1:18099"
-          echo "Read root-only credentials over approved SSH: sudo cat /root/cfmeet-private-docs-credentials"
-          REMOTE
-
-      - name: Error summary
-        if: failure()
-        run: echo "::error::Private Swagger setup failed; no public API route changed."
-, proc.stdout):
+          for line in proc.stdout.splitlines():
+              if not (line.startswith("# configuration file ") and line.endswith(":")):
+                  continue
+              path = line[len("# configuration file "):-1].strip()
               try:
-                  if pathlib.Path(p).resolve(strict=True) == target:
-                      loaded.append(p)
+                  if pathlib.Path(path).resolve(strict=True) == target:
+                      loaded.append(path)
               except OSError:
                   pass
           print(f"PRIVATE_NGINX_SITE_INCLUDED={bool(loaded)}", flush=True)
           if not loaded:
-              sys.exit("ERROR: private site is not loaded by Nginx; no public cutover")
+              sys.exit("ERROR: private Nginx site not included in active config")
           PY
           systemctl reload nginx
-          # Reload returns before all workers finish binding; bounded retries.
           UNAUTH="000"
           for attempt in $(seq 1 12); do
             UNAUTH="$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18099/swagger-config.json || true)"
             if [ "$UNAUTH" = "401" ]; then break; fi
-            echo "Private loopback auth not ready (attempt $attempt/12, HTTP $UNAUTH)"
+            echo "Private loopback listener pending ($attempt/12; HTTP $UNAUTH)"
             sleep 2
           done
           [ "$UNAUTH" = "401" ] || {
-            echo "ERROR: private site missing or not protected (HTTP $UNAUTH)"
+            echo "ERROR: private listener not ready or auth missing (HTTP $UNAUTH)"
             if command -v ss >/dev/null; then
               ss -lnt | grep -F '127.0.0.1:18099' || true
             fi
@@ -199,7 +189,7 @@ jobs:
             sleep 2
           done
           unset PASS
-          [ "$AUTH" = "200" ] || { echo "ERROR: authenticated private catalog read failed (HTTP $AUTH)"; exit 1; }
+          [ "$AUTH" = "200" ] || { echo "ERROR: authenticated catalog check failed (HTTP $AUTH)"; exit 1; }
           echo "PRIVATE_SWAGGER_PROVISIONED=YES"
           echo "PRIVATE_DOCS_COUNT=12"
           echo "PRIVATE_UNAUTH_HTTP=401 PRIVATE_AUTH_HTTP=200"
