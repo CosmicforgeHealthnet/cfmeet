@@ -79,6 +79,10 @@ jobs:
         working-directory: .
         run: python3 scripts/contracts/bundle_openapi.py --check
 
+      - name: every service operation has meaningful Swagger labels
+        working-directory: .
+        run: python3 scripts/contracts/check_swagger_labels.py
+
       - name: complete private engineering catalog is buildable off-repository
         working-directory: .
         run: python3 scripts/swagger/test_private_docs.py

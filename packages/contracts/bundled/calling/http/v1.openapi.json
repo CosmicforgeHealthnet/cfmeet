@@ -5,10 +5,151 @@
     "version": "1.11.0",
     "description": "HTTP surface exposed by services/calling (Part C sections 15-25): the health endpoint; the call API (list, get, available actions); application call creation (POST /v1/calls) and control (accept, decline, cancel, end, hold, resume, transfer, session removal, media credentials); the application endpoint registry and signaling-credential minting; the endpoint's own signaling operations (WebSocket channel, offer recovery, accept / decline, media credentials) authenticated by a short-lived signaling credential; the media connection gateway, which admits every media signaling connection against authoritative state before the media server is contacted; and the media provider callback, authenticated by the provider's signature. There is no generic state mutation: a client never sends a state, a scope, an authorization result, a route, a provider, a room, a media identity, a permission or a telephone number. Tenant, application and environment scope comes only from the authenticated credential; a call, principal, endpoint, offer or session of another scope is answered exactly like a missing one (404). Every state-changing command carries expectedVersion (the single concurrency mechanism); Idempotency-Key is required for call creation and transfer and honoured on every other command (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Every response carries an x-request-id header with the server-generated request id; a well-formed client x-request-id is echoed as x-client-request-id."
   },
+  "tags": [
+    {
+      "name": "Business Contacts",
+      "description": "Business Contacts operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Business Extensions",
+      "description": "Business Extensions operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Business Hours",
+      "description": "Business Hours operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Blocking",
+      "description": "Call Blocking operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Controls",
+      "description": "Call Controls operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Forwarding",
+      "description": "Call Forwarding operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call History",
+      "description": "Call History operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Invitations",
+      "description": "Call Invitations operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Management",
+      "description": "Call Management operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Media & Sessions",
+      "description": "Call Media & Sessions operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Queues",
+      "description": "Call Queues operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Recording & Consent",
+      "description": "Call Recording & Consent operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Call Recordings",
+      "description": "Call Recordings operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Calling Devices",
+      "description": "Calling Devices operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Calling Media & RTC",
+      "description": "Calling Media & RTC operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Calling Signaling",
+      "description": "Calling Signaling operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Departments & Membership",
+      "description": "Departments & Membership operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Developer Webhooks",
+      "description": "Developer Webhooks operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Enterprise Audit",
+      "description": "Enterprise Audit operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Enterprise Policies",
+      "description": "Enterprise Policies operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "IVR & Keypad",
+      "description": "IVR & Keypad operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "IVR Flows",
+      "description": "IVR Flows operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Media Providers",
+      "description": "Internal — Media Providers operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Platform Events",
+      "description": "Internal — Platform Events operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Privacy Relay",
+      "description": "Internal — Privacy Relay operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Telephony",
+      "description": "Internal — Telephony operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Recording Policies",
+      "description": "Recording Policies operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Ring Groups",
+      "description": "Ring Groups operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "SIP Devices",
+      "description": "SIP Devices operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Safety & Abuse",
+      "description": "Safety & Abuse operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Service Health",
+      "description": "Service Health operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Usage & Limits",
+      "description": "Usage & Limits operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Voicemail",
+      "description": "Voicemail operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Webhook Delivery & Replay",
+      "description": "Webhook Delivery & Replay operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
+    }
+  ],
   "paths": {
     "/internal/v1/privacy-relay/enforcement": {
       "post": {
         "operationId": "enforcePrivacyRelayAuthority",
+        "tags": [
+          "Internal — Privacy Relay"
+        ],
         "summary": "Privacy Relay active-call enforcement (internal)",
         "description": "Receives a restrictive enforcement command from Privacy Relay (contract cfmeet.privacy-relay.enforcement-command). Requires an internal service token, the receiver-granted permission communication-authority.enforce (grantable only to cfmeet.privacy-relay) and a signed delegated platform context (the only scope). Calling finds its own protected calls by the opaque communication_context_ref / privacy_relay_ref it stored, skips calls authorized at or after the enforced version, and terminates the rest through the ordinary call commands (pre-answer CANCEL; answered / connected / held / transferring END -> ENDING -> cleanup -> ENDED). Deduplicated by enforcementEventId: a replay returns the recorded result without touching calls again. It can never grant authority.",
         "security": [
@@ -60,6 +201,9 @@
     "/internal/v1/telephony/events": {
       "post": {
         "operationId": "applyTelephonyEvent",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "Normalized Telephony event (internal)",
         "description": "Receives one normalized event from Telephony's outbox (contract cfmeet.telephony.event): requires an internal service token with the receiver-granted permission telephony-event.apply (grantable only to cfmeet.telephony). Calling deduplicates by eventId, applies per-leg sequences in order (an older one is STALE), quarantines events that do not match an execution it commanded (UNMATCHED) and never resurrects a terminal Call (IGNORED_TERMINAL; a late success triggers cleanup of the execution). Every delivered event is answered 200 with its disposition; only a failure to record it is an error (Telephony retries). Telephony never sets Calling state: each event is validated against Calling's own state machines. No telephone number, provider id or SIP data exists in the body.",
         "security": [
@@ -108,6 +252,9 @@
     "/internal/v1/telephony/inbound-calls": {
       "post": {
         "operationId": "acceptTelephonyInboundCall",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "Inbound public call offer (internal)",
         "description": "Telephony offers an inbound public call to a relay number (contract cfmeet.telephony.inbound-offer). Requires an internal service token with telephony-inbound.offer (grantable only to cfmeet.telephony). Calling re-checks CURRENT Privacy Relay authority (CALLBACK_RELAY route), the routing policy (PSTN_TO_APP), the environment's configured inbound owner and the spend policy, then creates ONE canonical Call (origin PUBLIC_INBOUND; the caller is a TELEPHONE_ENDPOINT principal referencing only the opaque ContactReference) and rings the authorized application principals. Idempotent per telephonyLegId. Refusals reveal nothing to the caller.",
         "security": [
@@ -162,6 +309,10 @@
     "/health": {
       "get": {
         "operationId": "getHealth",
+        "tags": [
+          "Service Health"
+        ],
+        "description": "Reports the health and database reachability of the Calling service.",
         "summary": "Liveness and database reachability",
         "security": [],
         "responses": {
@@ -201,6 +352,9 @@
     "/v1/calls": {
       "get": {
         "operationId": "listCalls",
+        "tags": [
+          "Call Management"
+        ],
         "summary": "List the caller's calls, or one principal's call history (newest first, keyset pagination)",
         "description": "Requires the calls.read scope. Ordered by createdAt descending, then callId descending. Only the bounded filters below are accepted; unknown or repeated query parameters are rejected with 400. The cursor is opaque, carries position only and never scope. Part F §62: with principalId the response is that principal's canonical call history (CallHistoryList): only Calls it participates in, each with its participant-relative direction and outcome derived from Call evidence (never from push or realtime delivery), safe enterprise labels, the voicemail link for mailbox owners and recording availability; direction / outcome / missed need principalId. enterpriseDestinationType + enterpriseDestinationId narrow either listing.",
         "security": [
@@ -370,6 +524,9 @@
       },
       "post": {
         "operationId": "createCall",
+        "tags": [
+          "Call Management"
+        ],
         "summary": "Create and ring an application call",
         "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice.",
         "security": [
@@ -447,6 +604,9 @@
     "/v1/calls/{call_id}": {
       "get": {
         "operationId": "getCall",
+        "tags": [
+          "Call Management"
+        ],
         "summary": "Get one call with its participants, sessions and durations",
         "description": "Requires the calls.read scope. A call that does not exist, belongs to another tenant, application or environment, or whose id is malformed is answered with the same 404.",
         "security": [
@@ -508,6 +668,9 @@
     "/v1/calls/{call_id}/actions": {
       "get": {
         "operationId": "getCallActions",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Actions currently available on a call",
         "description": "Requires calls.read. Server-derived from the Call's state, its live offers, the credential's scopes and the media provider's capabilities.",
         "security": [
@@ -563,6 +726,9 @@
     "/v1/calls/{call_id}/accept": {
       "post": {
         "operationId": "acceptCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Accept a ring offer on behalf of one endpoint",
         "description": "Requires calls.write. Exactly one device per participant wins (single-winner arbitration in the database); the participant's other offers become ANSWERED_ELSEWHERE and lose every media path. The first winning participant moves the Call to ANSWERED. An expired offer is 410; an offer that is no longer live (cancelled, answered elsewhere, declined) is 409.",
         "security": [
@@ -643,6 +809,9 @@
     "/v1/calls/{call_id}/decline": {
       "post": {
         "operationId": "declineCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Decline a ring offer on behalf of one endpoint",
         "description": "Requires calls.write. Declines only this endpoint's offer; other devices keep ringing. The Call ends as DECLINED only when every live offer of every pending target is declined.",
         "security": [
@@ -723,6 +892,9 @@
     "/v1/calls/{call_id}/cancel": {
       "post": {
         "operationId": "cancelCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Cancel a call before it is active",
         "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. Repeating it on a CANCELLED call is a no-op.",
         "security": [
@@ -800,6 +972,9 @@
     "/v1/calls/{call_id}/end": {
       "post": {
         "operationId": "endCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "End an active call",
         "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized.",
         "security": [
@@ -877,6 +1052,9 @@
     "/v1/calls/{call_id}/hold": {
       "post": {
         "operationId": "holdCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Hold a connected call",
         "description": "Requires calls.write. Enforced at the media provider: every admitted connection loses audio and video publishing (subscription unchanged) before the Call becomes HELD. A provider that cannot update permissions is 422 CAPABILITY_UNAVAILABLE; an unconfirmed update is 503 MEDIA_UNAVAILABLE and the Call stays CONNECTED.",
         "security": [
@@ -957,6 +1135,9 @@
     "/v1/calls/{call_id}/resume": {
       "post": {
         "operationId": "resumeCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Resume a held call",
         "description": "Requires calls.write. Re-derives every connection's permissions from the currently authorized server state (never from a stored pre-hold grant) and applies them at the provider before the Call becomes CONNECTED.",
         "security": [
@@ -1037,6 +1218,9 @@
     "/v1/calls/{call_id}/transfer": {
       "post": {
         "operationId": "transferCall",
+        "tags": [
+          "Call Controls"
+        ],
         "summary": "Transfer a participant's place to another principal",
         "description": "Requires calls.write and an Idempotency-Key. The same Call continues (TRANSFERRING): the target's endpoints are rung with TRANSFER offers; when the target joins with a media path the transferring participant is retired and the Call returns to CONNECTED. If the target declines, does not answer or cannot join, the transfer FAILS and the Call returns to its pre-transfer state (CONNECTED or HELD) when the remaining parties still have a media path.",
         "security": [
@@ -1117,6 +1301,9 @@
     "/v1/calls/{call_id}/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueSessionMediaCredential",
+        "tags": [
+          "Call Media & Sessions"
+        ],
         "summary": "Issue a media credential for a session",
         "description": "Requires calls.write. Issues a short-lived join credential for one session whose media access the server authorized (the initiator's session, or a participant's single winning device) while the Call is in a media state. Capabilities derive from server state only; the body must be empty. A losing, removed or ended session, or a terminal Call, is 409.",
         "security": [
@@ -1194,6 +1381,9 @@
     "/v1/calls/{call_id}/sessions/{session_id}/remove": {
       "post": {
         "operationId": "removeCallSession",
+        "tags": [
+          "Call Media & Sessions"
+        ],
         "summary": "Remove one session from a call",
         "description": "Requires calls.write. Ends the session and revokes its media access for ever: its credentials stop working, the provider connection is removed (or queued for enforcement) and any re-entry is evicted. The Call's state is not changed; removing a removed session again is a no-op.",
         "security": [
@@ -1274,6 +1464,9 @@
     "/v1/calling/endpoints": {
       "post": {
         "operationId": "registerEndpoint",
+        "tags": [
+          "Calling Devices"
+        ],
         "summary": "Register an application endpoint of a principal",
         "description": "Requires calls.write. The principal is resolved inside the credential's scope (unknown, foreign or inactive: 404). Registering the same endpointKey again for the same principal refreshes the endpoint (200); a key held by another principal is 409.",
         "security": [
@@ -1356,6 +1549,9 @@
       },
       "get": {
         "operationId": "listEndpoints",
+        "tags": [
+          "Calling Devices"
+        ],
         "summary": "List a principal's endpoints",
         "description": "Requires calls.read. Only endpoints of the credential's scope; a foreign principal has none.",
         "security": [
@@ -1425,6 +1621,9 @@
     "/v1/calling/endpoints/{endpoint_id}": {
       "delete": {
         "operationId": "revokeEndpoint",
+        "tags": [
+          "Calling Devices"
+        ],
         "summary": "Revoke an endpoint",
         "description": "Requires calls.write. The endpoint is never rung again; its live offers are cancelled and its signaling credentials stop working. Revoking a revoked endpoint is a no-op.",
         "security": [
@@ -1480,6 +1679,9 @@
     "/v1/calling/signaling-credentials": {
       "post": {
         "operationId": "mintSignalingCredential",
+        "tags": [
+          "Calling Signaling"
+        ],
         "summary": "Mint a signaling credential for one endpoint",
         "description": "Requires calls.write. Called by the application backend, which hands the short-lived credential to the device. The device never receives the platform API credential.",
         "security": [
@@ -1543,6 +1745,9 @@
     "/v1/calling/signaling": {
       "get": {
         "operationId": "openSignalingChannel",
+        "tags": [
+          "Calling Signaling"
+        ],
         "summary": "Open the endpoint's realtime signaling channel (WebSocket)",
         "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong and closes with code 4001 when the credential expires. Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
         "security": [
@@ -1569,6 +1774,9 @@
     "/v1/calling/invitations": {
       "get": {
         "operationId": "recoverInvitations",
+        "tags": [
+          "Call Invitations"
+        ],
         "summary": "Recover the endpoint's offers",
         "description": "Signaling credential. The endpoint's live and recently finished offers with the authoritative Call state; only unexpired RINGING offers of answerable calls are actionable. Stale client state is never trusted.",
         "security": [
@@ -1607,6 +1815,9 @@
     "/v1/calling/history": {
       "get": {
         "operationId": "recoverCallHistory",
+        "tags": [
+          "Call History"
+        ],
         "summary": "The endpoint's principal's call history",
         "description": "Signaling credential. Recovery after a reconnect: the canonical call history of the credential's principal (every device of it sees the same entries), with the same derivation and filters as GET /v1/calls?principalId= — a client that missed every push and realtime signal reads the authoritative missed / answered outcome here. principalId is not accepted (an endpoint reads its own principal only).",
         "security": [
@@ -1753,6 +1964,9 @@
     "/v1/calling/invitations/{invitation_id}/accept": {
       "post": {
         "operationId": "acceptInvitation",
+        "tags": [
+          "Call Invitations"
+        ],
         "summary": "Accept one's own ring offer",
         "description": "Signaling credential: only an offer addressed to the credential's own endpoint (any other offer is 404). Same arbitration and semantics as POST /v1/calls/{call_id}/accept.",
         "security": [
@@ -1827,6 +2041,9 @@
     "/v1/calling/invitations/{invitation_id}/decline": {
       "post": {
         "operationId": "declineInvitation",
+        "tags": [
+          "Call Invitations"
+        ],
         "summary": "Decline one's own ring offer",
         "description": "Signaling credential: only an offer addressed to the credential's own endpoint (any other offer is 404). Same arbitration and semantics as POST /v1/calls/{call_id}/decline.",
         "security": [
@@ -1901,6 +2118,9 @@
     "/v1/calling/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueOwnMediaCredential",
+        "tags": [
+          "Calling Media & RTC"
+        ],
         "summary": "Issue a media credential for one's own session",
         "description": "Signaling credential: only a session running on the credential's own endpoint (any other session is 404). Same rules as POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials.",
         "security": [
@@ -1969,6 +2189,9 @@
     "/v1/calling/media/rtc": {
       "get": {
         "operationId": "connectMediaLegacy",
+        "tags": [
+          "Calling Media & RTC"
+        ],
         "summary": "Open a media signaling connection (SDK legacy path)",
         "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
         "security": [
@@ -1998,6 +2221,9 @@
     "/v1/calling/media/rtc/v1": {
       "get": {
         "operationId": "connectMedia",
+        "tags": [
+          "Calling Media & RTC"
+        ],
         "summary": "Open a media signaling connection",
         "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
         "security": [
@@ -2027,6 +2253,9 @@
     "/v1/calling/media/rtc/validate": {
       "get": {
         "operationId": "validateMediaLegacy",
+        "tags": [
+          "Calling Media & RTC"
+        ],
         "summary": "Check whether a media credential would be admitted (SDK legacy path)",
         "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
         "security": [
@@ -2056,6 +2285,9 @@
     "/v1/calling/media/rtc/v1/validate": {
       "get": {
         "operationId": "validateMedia",
+        "tags": [
+          "Calling Media & RTC"
+        ],
         "summary": "Check whether a media credential would be admitted",
         "description": "Media connection gateway (WebSocket upgrade; the media SDK's signaling protocol is relayed opaquely). Before anything reaches the media server, the presented media credential is authenticated (edge signature, expiry, resource, identity, generation) and admitted against authoritative state: the session must exist in that Call, hold media access (AUTHORIZED, not removed or ended, participant still in the Call, Call in a media state) and the credential must carry the session's CURRENT media generation. Otherwise the upgrade is refused (401; 503 when the state cannot be read: fail closed). An admitted connection is relayed with a single-use, join-only media-server token; media rights are applied server-side after the join. Every token the media server refreshes is re-checked and re-sealed with the edge key before it reaches the client, so no client ever holds a token the media server accepts directly.",
         "security": [
@@ -2085,6 +2317,9 @@
     "/internal/provider/media/events": {
       "post": {
         "operationId": "receiveMediaProviderEvent",
+        "tags": [
+          "Internal — Media Providers"
+        ],
         "summary": "Media provider callback",
         "description": "Called by the configured media provider only; authenticated by the provider's signature over the exact body (unsigned or forged: 401). Each event is recorded once (deduplicated by the provider's event id) as operational evidence: it can confirm or deny media facts of existing sessions but never creates a participant, authorizes a call, broadens a permission or resolves a principal. An unknown media identity is quarantined and removed; a late event never resurrects a terminal call.",
         "security": [
@@ -2139,6 +2374,9 @@
     "/internal/v1/telephony/enterprise-calls": {
       "post": {
         "operationId": "acceptEnterpriseDialog",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "acceptEnterpriseDialog",
         "description": "Part F: Telephony offers an internal enterprise SIP dialog (contract cfmeet.telephony.enterprise). Requires an internal service token with telephony-enterprise.offer (grantable only to cfmeet.telephony). Calling binds the opaque device reference to its ACTIVE principal in the offer's scope, resolves the extension there, applies the enterprise policy and the environment's configured owner, then creates ONE canonical Call (origin ENTERPRISE_DEVICE, route class ENTERPRISE_INTERNAL; the dialog is a PRIVATE_NETWORK leg) and routes it (ring, ring group, queue, IVR). Idempotent per telephonyLegId. An unknown / foreign device or extension is 404; enterprise calling off is 422.",
         "security": [
@@ -2193,6 +2431,9 @@
     "/internal/v1/telephony/enterprise-keypad": {
       "post": {
         "operationId": "acceptEnterpriseKeypad",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "acceptEnterpriseKeypad",
         "description": "Part F: one key of an enterprise SIP leg's caller for the IVR the Call waits in (contract cfmeet.telephony.enterprise). Requires telephony-enterprise.offer. The key is used once and never stored or logged; accepted=false when the Call does not wait for a key.",
         "security": [
@@ -2247,6 +2488,9 @@
     "/internal/v1/telephony/captures": {
       "post": {
         "operationId": "acceptCaptureReport",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "acceptCaptureReport",
         "description": "Part F: Telephony delivers a finished or failed edge media capture (contract cfmeet.telephony.capture). Requires telephony-capture.deliver (grantable only to cfmeet.telephony). Only a SIP capture Calling asked for, on that leg, is accepted (anything else is 404). The audio is integrity-checked (size, SHA-256, audio/wav, bounded length) and stored in protected object storage; the message becomes READY. 200 = stored or acknowledged (the edge may delete its spool copy); 503 ARTIFACT_STORAGE_UNAVAILABLE = retry later; 400 = refused for good.",
         "security": [
@@ -2301,6 +2545,9 @@
     "/v1/enterprise/policies": {
       "post": {
         "operationId": "createEnterprisePolicy",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "Create an enterprise call policy",
         "description": "Requires enterprise.config.write. Typed rules only. isDefault makes it the environment's baseline (the previous default is cleared, a versioned change). Enabling public forwarding or granting MANAGE_PUBLIC_FORWARDING / MANAGE_RECORDING needs that capability in the current baseline (granted by a CF Meet operator): otherwise 403 ENTERPRISE_POLICY_DENIED. Audited.",
         "security": [
@@ -2362,6 +2609,9 @@
       },
       "get": {
         "operationId": "listEnterprisePolicies",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "List enterprise call policies",
         "description": "Requires enterprise.config.read. Keyset pagination in creation order.",
         "security": [
@@ -2447,6 +2697,9 @@
     "/v1/enterprise/policies/{policy_id}": {
       "get": {
         "operationId": "getEnterprisePolicy",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "Get an enterprise call policy",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -2509,6 +2762,9 @@
       },
       "patch": {
         "operationId": "updateEnterprisePolicy",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "Change an enterprise call policy",
         "description": "Requires enterprise.config.write and the current expectedVersion (409 VERSION_CONFLICT otherwise; nothing changes). Audited.",
         "security": [
@@ -2584,6 +2840,9 @@
       },
       "delete": {
         "operationId": "disableEnterprisePolicy",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "Disable an enterprise call policy",
         "description": "Requires enterprise.config.write and expectedVersion. Never deleted (historical references stay valid); never blocked by a kill switch. Audited.",
         "security": [
@@ -2661,6 +2920,9 @@
     "/v1/enterprise/effective-policy": {
       "get": {
         "operationId": "getEffectiveEnterprisePolicy",
+        "tags": [
+          "Enterprise Policies"
+        ],
         "summary": "The environment's policy in force",
         "description": "Requires enterprise.config.read. The ACTIVE default policy, else the restrictive built-in default (policyId null, version 0).",
         "security": [
@@ -2711,6 +2973,9 @@
     "/v1/enterprise/departments": {
       "post": {
         "operationId": "createDepartment",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "Create a department",
         "description": "Requires enterprise.config.write. Departments group principals for administration and routing; membership grants nothing. Audited.",
         "security": [
@@ -2772,6 +3037,9 @@
       },
       "get": {
         "operationId": "listDepartments",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "List departments",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -2857,6 +3125,9 @@
     "/v1/enterprise/departments/{department_id}": {
       "get": {
         "operationId": "getDepartment",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "Get a department",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -2919,6 +3190,9 @@
       },
       "patch": {
         "operationId": "updateDepartment",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "Change a department",
         "description": "Requires enterprise.config.write and expectedVersion. Audited.",
         "security": [
@@ -2994,6 +3268,9 @@
       },
       "delete": {
         "operationId": "disableDepartment",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "Disable a department",
         "description": "Requires enterprise.config.write and expectedVersion. Membership is kept as history. Audited.",
         "security": [
@@ -3071,6 +3348,9 @@
     "/v1/enterprise/departments/{department_id}/members": {
       "put": {
         "operationId": "replaceDepartmentMembers",
+        "tags": [
+          "Departments & Membership"
+        ],
         "summary": "Replace a department's members",
         "description": "Requires enterprise.config.write and expectedVersion. Atomic, bounded (500), distinct ACTIVE principals of the same scope (a foreign or unknown principal is 404 and nothing changes). Audited.",
         "security": [
@@ -3148,6 +3428,9 @@
     "/v1/enterprise/audit": {
       "get": {
         "operationId": "listEnterpriseAudit",
+        "tags": [
+          "Enterprise Audit"
+        ],
         "summary": "Administrative audit records",
         "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope.",
         "security": [
@@ -3229,6 +3512,9 @@
     "/v1/enterprise/extensions": {
       "post": {
         "operationId": "createExtension",
+        "tags": [
+          "Business Extensions"
+        ],
         "summary": "Create an extension",
         "description": "Requires enterprise.config.write and the MANAGE_ROUTING capability of the organization's baseline policy (403 ENTERPRISE_POLICY_DENIED). The number is normalized to lower case and must match the governing policy's format; a used or ambiguous number is 409 CONFLICT. The destination must be an ACTIVE principal / enterprise member of the same scope (404 otherwise); a raw public number is never accepted. Audited.",
         "security": [
@@ -3293,6 +3579,9 @@
       },
       "get": {
         "operationId": "listExtensions",
+        "tags": [
+          "Business Extensions"
+        ],
         "summary": "List extensions",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -3387,6 +3676,9 @@
     "/v1/enterprise/extensions/{extension_id}": {
       "get": {
         "operationId": "getExtension",
+        "tags": [
+          "Business Extensions"
+        ],
         "summary": "Get an extension",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -3449,6 +3741,9 @@
       },
       "patch": {
         "operationId": "updateExtension",
+        "tags": [
+          "Business Extensions"
+        ],
         "summary": "Change an extension",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Renumbering re-checks uniqueness and ambiguity. Audited.",
         "security": [
@@ -3524,6 +3819,9 @@
       },
       "delete": {
         "operationId": "disableExtension",
+        "tags": [
+          "Business Extensions"
+        ],
         "summary": "Disable (offboard) an extension",
         "description": "Requires enterprise.config.write and expectedVersion. Future routing stops; the extension and every historical Call's reference and number snapshot remain. Never blocked by a kill switch or capability. Audited.",
         "security": [
@@ -3601,6 +3899,9 @@
     "/v1/enterprise/ring-groups": {
       "post": {
         "operationId": "createRingGroup",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "Create a ring group",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. Audited.",
         "security": [
@@ -3665,6 +3966,9 @@
       },
       "get": {
         "operationId": "listRingGroups",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "List ring groups",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -3750,6 +4054,9 @@
     "/v1/enterprise/ring-groups/{ring_group_id}": {
       "get": {
         "operationId": "getRingGroup",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "Get a ring group",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -3812,6 +4119,9 @@
       },
       "patch": {
         "operationId": "updateRingGroup",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "Change a ring group",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -3887,6 +4197,9 @@
       },
       "delete": {
         "operationId": "disableRingGroup",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "Disable a ring group",
         "description": "Requires enterprise.config.write and expectedVersion. Routing to a disabled group fails safe. Never blocked. Audited.",
         "security": [
@@ -3964,6 +4277,9 @@
     "/v1/enterprise/ring-groups/{ring_group_id}/members": {
       "put": {
         "operationId": "replaceRingGroupMembers",
+        "tags": [
+          "Ring Groups"
+        ],
         "summary": "Replace a ring group's members",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic; members in ring order; a member of another scope is 404; a member extension that does not route directly to a principal is 400 (no nesting). Audited.",
         "security": [
@@ -4041,6 +4357,9 @@
     "/v1/enterprise/queues": {
       "post": {
         "operationId": "createQueue",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "Create a call queue",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. Audited.",
         "security": [
@@ -4105,6 +4424,9 @@
       },
       "get": {
         "operationId": "listQueues",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "List call queues",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -4190,6 +4512,9 @@
     "/v1/enterprise/queues/{queue_id}": {
       "get": {
         "operationId": "getQueue",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "Get a call queue",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -4252,6 +4577,9 @@
       },
       "patch": {
         "operationId": "updateQueue",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "Change a call queue",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -4327,6 +4655,9 @@
       },
       "delete": {
         "operationId": "disableQueue",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "Disable a call queue",
         "description": "Requires enterprise.config.write and expectedVersion. No new Call enters a disabled queue; Calls already waiting are still offered until answered, overflowed or timed out. Never blocked. Audited.",
         "security": [
@@ -4404,6 +4735,9 @@
     "/v1/enterprise/queues/{queue_id}/members": {
       "put": {
         "operationId": "replaceQueueMembers",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "Replace a queue's agents",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic; an agent of another scope or not ACTIVE is 404. Audited.",
         "security": [
@@ -4481,6 +4815,9 @@
     "/v1/enterprise/queues/{queue_id}/entries": {
       "get": {
         "operationId": "listQueueEntries",
+        "tags": [
+          "Call Queues"
+        ],
         "summary": "List a queue's entries",
         "description": "Requires enterprise.config.read. state=ACTIVE (default): waiting Calls in FIFO order with their authoritative positions; state=FINISHED: the most recent finished entries.",
         "security": [
@@ -4569,6 +4906,9 @@
     "/v1/enterprise/ivr-flows": {
       "post": {
         "operationId": "createIvrFlow",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Create an IVR flow",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The flow has no version until one is published. Audited.",
         "security": [
@@ -4630,6 +4970,9 @@
       },
       "get": {
         "operationId": "listIvrFlows",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "List IVR flows",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -4715,6 +5058,9 @@
     "/v1/enterprise/ivr-flows/{ivr_flow_id}": {
       "get": {
         "operationId": "getIvrFlow",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Get an IVR flow",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -4777,6 +5123,9 @@
       },
       "patch": {
         "operationId": "renameIvrFlow",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Rename an IVR flow",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -4852,6 +5201,9 @@
       },
       "delete": {
         "operationId": "disableIvrFlow",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Disable an IVR flow",
         "description": "Requires enterprise.config.write and expectedVersion. New Calls routed to it fail safe; Calls already inside finish their version. Never blocked. Audited.",
         "security": [
@@ -4929,6 +5281,9 @@
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions": {
       "post": {
         "operationId": "publishIvrVersion",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Publish an IVR version",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The graph is validated (400 for an unknown node, missing or foreign destination (404), invalid digit mapping, unreachable node, loop without input, excessive size) and stored immutably as the next version number. Audited.",
         "security": [
@@ -5004,6 +5359,9 @@
       },
       "get": {
         "operationId": "listIvrVersions",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "List IVR versions",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5068,6 +5426,9 @@
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions/{version_number}": {
       "get": {
         "operationId": "getIvrVersion",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Get an IVR version",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5141,6 +5502,9 @@
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/activation": {
       "put": {
         "operationId": "activateIvrVersion",
+        "tags": [
+          "IVR Flows"
+        ],
         "summary": "Activate an IVR version",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. NEW Calls run the activated version; a Call already in the IVR keeps the version it started with. Audited (ACTIVATE).",
         "security": [
@@ -5218,6 +5582,9 @@
     "/v1/enterprise/sip-devices": {
       "post": {
         "operationId": "bindSipDevice",
+        "tags": [
+          "SIP Devices"
+        ],
         "summary": "Bind an enterprise SIP device",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. A device reference has at most one ACTIVE binding (409 otherwise); the principal must be ACTIVE in the scope (404). Audited.",
         "security": [
@@ -5282,6 +5649,9 @@
       },
       "get": {
         "operationId": "listSipDevices",
+        "tags": [
+          "SIP Devices"
+        ],
         "summary": "List SIP device bindings",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5367,6 +5737,9 @@
     "/v1/enterprise/sip-devices/{sip_device_id}": {
       "get": {
         "operationId": "getSipDevice",
+        "tags": [
+          "SIP Devices"
+        ],
         "summary": "Get a SIP device binding",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5429,6 +5802,9 @@
       },
       "delete": {
         "operationId": "disableSipDevice",
+        "tags": [
+          "SIP Devices"
+        ],
         "summary": "Unbind a SIP device",
         "description": "Requires enterprise.config.write and expectedVersion. The device's new dialogs are refused. Never blocked. Audited.",
         "security": [
@@ -5506,6 +5882,9 @@
     "/v1/calls/{call_id}/ivr/input": {
       "post": {
         "operationId": "sendIvrInput",
+        "tags": [
+          "IVR & Keypad"
+        ],
         "summary": "Send one key to the IVR (RTC caller)",
         "description": "Part F section 57. Requires calls.write and enterprise.calls.use. Only the Call's initiator endpoint may press keys (another endpoint or scope: 404). The key is used once and never stored or logged. accepted=false when the Call does not wait for a key (stale input is ignored).",
         "security": [
@@ -5581,6 +5960,9 @@
     "/v1/enterprise/business-hours": {
       "post": {
         "operationId": "createBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "Create a business-hours schedule",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The time zone is an IANA identifier; windows never overlap; routes are typed destinations of the same scope. Audited.",
         "security": [
@@ -5645,6 +6027,9 @@
       },
       "get": {
         "operationId": "listBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "List business-hours schedules",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5730,6 +6115,9 @@
     "/v1/enterprise/business-hours/{business_hours_id}": {
       "get": {
         "operationId": "getBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "Get a schedule",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -5792,6 +6180,9 @@
       },
       "put": {
         "operationId": "replaceBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "Replace a schedule",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic. Audited.",
         "security": [
@@ -5867,6 +6258,9 @@
       },
       "delete": {
         "operationId": "disableBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "Disable a schedule",
         "description": "Requires enterprise.config.write and expectedVersion. Routing through a disabled schedule ends in NO_ROUTE / DESTINATION_DISABLED. Never blocked. Audited.",
         "security": [
@@ -5944,6 +6338,9 @@
     "/v1/enterprise/business-hours/{business_hours_id}/evaluation": {
       "post": {
         "operationId": "evaluateBusinessHours",
+        "tags": [
+          "Business Hours"
+        ],
         "summary": "Evaluate a schedule",
         "description": "Requires enterprise.config.read. Deterministic: the same schedule version and instant always give the same result.",
         "security": [
@@ -6018,6 +6415,9 @@
     "/v1/enterprise/public-contacts": {
       "post": {
         "operationId": "createPublicContact",
+        "tags": [
+          "Business Contacts"
+        ],
         "summary": "Register a protected public destination",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting public forwarding (else 403). Opaque references only. Audited.",
         "security": [
@@ -6079,6 +6479,9 @@
       },
       "get": {
         "operationId": "listPublicContacts",
+        "tags": [
+          "Business Contacts"
+        ],
         "summary": "List public contacts",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6164,6 +6567,9 @@
     "/v1/enterprise/public-contacts/{public_contact_id}": {
       "get": {
         "operationId": "getPublicContact",
+        "tags": [
+          "Business Contacts"
+        ],
         "summary": "Get a public contact",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6226,6 +6632,9 @@
       },
       "delete": {
         "operationId": "disablePublicContact",
+        "tags": [
+          "Business Contacts"
+        ],
         "summary": "Disable a public contact",
         "description": "Requires enterprise.config.write and expectedVersion. Stops new forwarding to it. Never blocked. Audited.",
         "security": [
@@ -6303,6 +6712,9 @@
     "/v1/enterprise/forwarding-rules": {
       "post": {
         "operationId": "createForwardingRule",
+        "tags": [
+          "Call Forwarding"
+        ],
         "summary": "Create a forwarding rule",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited.",
         "security": [
@@ -6367,6 +6779,9 @@
       },
       "get": {
         "operationId": "listForwardingRules",
+        "tags": [
+          "Call Forwarding"
+        ],
         "summary": "List forwarding rules",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6461,6 +6876,9 @@
     "/v1/enterprise/forwarding-rules/{forwarding_rule_id}": {
       "get": {
         "operationId": "getForwardingRule",
+        "tags": [
+          "Call Forwarding"
+        ],
         "summary": "Get a forwarding rule",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6523,6 +6941,9 @@
       },
       "patch": {
         "operationId": "updateForwardingRule",
+        "tags": [
+          "Call Forwarding"
+        ],
         "summary": "Change a forwarding rule's target",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -6598,6 +7019,9 @@
       },
       "delete": {
         "operationId": "disableForwardingRule",
+        "tags": [
+          "Call Forwarding"
+        ],
         "summary": "Disable a forwarding rule",
         "description": "Requires enterprise.config.write and expectedVersion. Never blocked. Audited.",
         "security": [
@@ -6675,6 +7099,9 @@
     "/v1/enterprise/voicemail/mailboxes": {
       "post": {
         "operationId": "createVoicemailMailbox",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Create a voicemail mailbox",
         "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and an enterprise policy permitting voicemail. The owner is a typed principal / extension / queue / ring group of the scope. Audited.",
         "security": [
@@ -6739,6 +7166,9 @@
       },
       "get": {
         "operationId": "listVoicemailMailboxes",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "List mailboxes",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6824,6 +7254,9 @@
     "/v1/enterprise/voicemail/mailboxes/{mailbox_id}": {
       "get": {
         "operationId": "getVoicemailMailbox",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Get a mailbox",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -6886,6 +7319,9 @@
       },
       "patch": {
         "operationId": "updateVoicemailMailbox",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Change a mailbox",
         "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and expectedVersion. Audited.",
         "security": [
@@ -6961,6 +7397,9 @@
       },
       "delete": {
         "operationId": "disableVoicemailMailbox",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Disable a mailbox",
         "description": "Requires enterprise.voicemail.manage and expectedVersion. Routing to a disabled mailbox ends in NO_ROUTE; its messages remain (retention still applies). Never blocked. Audited.",
         "security": [
@@ -7038,6 +7477,9 @@
     "/v1/enterprise/voicemail/messages": {
       "get": {
         "operationId": "listVoicemailMessages",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "List a mailbox's messages",
         "description": "Requires enterprise.voicemail.read. Authorization first: the owner (principalId) or a voicemail administrator. Newest first; DELETED messages only with state=DELETED.",
         "security": [
@@ -7161,6 +7603,9 @@
     "/v1/enterprise/voicemail/messages/{message_id}": {
       "get": {
         "operationId": "getVoicemailMessage",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Get a message",
         "description": "Requires enterprise.voicemail.read; owner or voicemail administrator.",
         "security": [
@@ -7232,6 +7677,9 @@
       },
       "delete": {
         "operationId": "deleteVoicemailMessage",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Delete a message",
         "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Asynchronous: DELETING now (audited), the protected object is removed by the worker, then DELETED (calling.voicemail-deleted). A message still being captured is 409. The originating Call is untouched.",
         "security": [
@@ -7318,6 +7766,9 @@
     "/v1/enterprise/voicemail/messages/{message_id}/read-state": {
       "put": {
         "operationId": "setVoicemailReadState",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Mark a message read / unread",
         "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Audited (MARK_READ / MARK_UNREAD).",
         "security": [
@@ -7395,6 +7846,9 @@
     "/v1/enterprise/voicemail/messages/{message_id}/media-access": {
       "post": {
         "operationId": "accessVoicemailMedia",
+        "tags": [
+          "Voicemail"
+        ],
         "summary": "Get short-lived access to a message's audio",
         "description": "Requires enterprise.voicemail.read; owner or voicemail administrator — authorized BEFORE any URL is minted; another scope's message is 404. READY messages only (else 409). Returns a read-only signed URL of ONE object valid for at most 300 s; nothing is stored. Audited (MEDIA_ACCESS).",
         "security": [
@@ -7475,6 +7929,9 @@
     "/v1/enterprise/recording-policies": {
       "post": {
         "operationId": "createRecordingPolicy",
+        "tags": [
+          "Recording Policies"
+        ],
         "summary": "Create a call recording policy",
         "description": "Requires enterprise.recording.manage and the operator-granted MANAGE_RECORDING capability. Typed: mode, notice, consent participants, an opaque jurisdiction reference, retention, maximum length. Audited.",
         "security": [
@@ -7536,6 +7993,9 @@
       },
       "get": {
         "operationId": "listRecordingPolicies",
+        "tags": [
+          "Recording Policies"
+        ],
         "summary": "List recording policies",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -7621,6 +8081,9 @@
     "/v1/enterprise/recording-policies/{recording_policy_id}": {
       "get": {
         "operationId": "getRecordingPolicy",
+        "tags": [
+          "Recording Policies"
+        ],
         "summary": "Get a recording policy",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -7683,6 +8146,9 @@
       },
       "patch": {
         "operationId": "updateRecordingPolicy",
+        "tags": [
+          "Recording Policies"
+        ],
         "summary": "Change a recording policy",
         "description": "Requires enterprise.recording.manage, MANAGE_RECORDING and expectedVersion. A change that stops permitting running recordings stops them (POLICY_REVOKED). Audited.",
         "security": [
@@ -7758,6 +8224,9 @@
       },
       "delete": {
         "operationId": "disableRecordingPolicy",
+        "tags": [
+          "Recording Policies"
+        ],
         "summary": "Disable a recording policy",
         "description": "Requires enterprise.recording.manage and expectedVersion. Never blocked; running recordings under it stop (POLICY_REVOKED). Audited.",
         "security": [
@@ -7835,6 +8304,9 @@
     "/v1/calls/{call_id}/recording-consent": {
       "post": {
         "operationId": "recordRecordingConsent",
+        "tags": [
+          "Call Recording & Consent"
+        ],
         "summary": "Record a participant's recording consent",
         "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay.",
         "security": [
@@ -7913,6 +8385,9 @@
     "/v1/calls/{call_id}/recordings": {
       "post": {
         "operationId": "startRecording",
+        "tags": [
+          "Call Recording & Consent"
+        ],
         "summary": "Start recording a Call",
         "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations).",
         "security": [
@@ -7985,6 +8460,9 @@
       },
       "get": {
         "operationId": "listCallRecordings",
+        "tags": [
+          "Call Recording & Consent"
+        ],
         "summary": "List a Call's recordings",
         "description": "Requires enterprise.recording.read; a participant (principalId) or a recording administrator.",
         "security": [
@@ -8058,6 +8536,9 @@
     "/v1/calls/{call_id}/recordings/{recording_id}/stop": {
       "post": {
         "operationId": "stopRecording",
+        "tags": [
+          "Call Recording & Consent"
+        ],
         "summary": "Stop a recording",
         "description": "Requires enterprise.recording.manage; a participant or a recording administrator. STOPPING (EXPLICIT); the capture is then finalized into protected storage. Never blocked by a kill switch. Audited.",
         "security": [
@@ -8144,6 +8625,9 @@
     "/v1/calls/{call_id}/recording-authorizations": {
       "get": {
         "operationId": "listRecordingAuthorizations",
+        "tags": [
+          "Call Recording & Consent"
+        ],
         "summary": "List a Call's recording decisions",
         "description": "Requires enterprise.recording.read; a participant or a recording administrator.",
         "security": [
@@ -8217,6 +8701,9 @@
     "/v1/enterprise/recordings/{recording_id}": {
       "get": {
         "operationId": "getCallRecording",
+        "tags": [
+          "Call Recordings"
+        ],
         "summary": "Get a recording",
         "description": "Requires enterprise.recording.read; a participant of the Call or a recording administrator. Audited (READ_METADATA; a refused principal is audited DENIED and gets 404).",
         "security": [
@@ -8288,6 +8775,9 @@
       },
       "delete": {
         "operationId": "deleteCallRecording",
+        "tags": [
+          "Call Recordings"
+        ],
         "summary": "Delete a recording",
         "description": "Requires enterprise.recording.manage and expectedVersion; a participant or a recording administrator. Asynchronous: DELETING (audited), the protected object is removed, DELETED (calling.recording-deleted).",
         "security": [
@@ -8374,6 +8864,9 @@
     "/v1/enterprise/recordings/{recording_id}/media-access": {
       "post": {
         "operationId": "accessRecordingMedia",
+        "tags": [
+          "Call Recordings"
+        ],
         "summary": "Get short-lived access to a recording's audio",
         "description": "Requires enterprise.recording.read; a participant or a recording administrator — authorized BEFORE any URL is minted. READY only (else 409). A read-only signed URL of ONE object valid for at most 300 s; nothing is stored. Audited (granted or denied).",
         "security": [
@@ -8454,6 +8947,9 @@
     "/v1/enterprise/recordings/{recording_id}/access-audit": {
       "get": {
         "operationId": "getRecordingAccessAudit",
+        "tags": [
+          "Call Recordings"
+        ],
         "summary": "Get a recording's access-audit trail",
         "description": "Requires enterprise.recording.manage.",
         "security": [
@@ -8518,6 +9014,9 @@
     "/v1/webhooks": {
       "post": {
         "operationId": "createWebhook",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "Create a webhook subscription",
         "description": "Requires webhooks.manage. Every subscribed event type also requires its own read scope (call.* calls.read, voicemail.* enterprise.voicemail.read, recording.* enterprise.recording.read, relay.* privacy.sessions.read, usage.* / limit.* usage.read). The endpoint must be a public https URL (no local, private, link-local, CGNAT or metadata address; re-checked at delivery and connection time; redirects are never followed). The signing secret is returned ONCE.",
         "security": [
@@ -8576,6 +9075,9 @@
       },
       "get": {
         "operationId": "listWebhooks",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "List webhook subscriptions",
         "description": "Requires webhooks.read. Only the application's own subscriptions (scope from the credential).",
         "security": [
@@ -8648,6 +9150,9 @@
     "/v1/webhooks/{webhook_id}": {
       "get": {
         "operationId": "getWebhook",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "Get a webhook subscription",
         "description": "Requires webhooks.read. Another application's subscription is 404.",
         "security": [
@@ -8708,6 +9213,9 @@
       },
       "patch": {
         "operationId": "updateWebhook",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "Update a webhook subscription",
         "description": "Requires webhooks.manage (and the read scope of every event type). expectedVersion is required; a stale one is 409 VERSION_CONFLICT.",
         "security": [
@@ -8784,6 +9292,9 @@
       },
       "delete": {
         "operationId": "deleteWebhook",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "Delete a webhook subscription",
         "description": "Requires webhooks.manage. Open deliveries are CANCELLED; history is kept.",
         "security": [
@@ -8862,6 +9373,9 @@
     "/v1/webhooks/{webhook_id}/rotate-secret": {
       "post": {
         "operationId": "rotateWebhookSecret",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "Rotate a webhook signing secret",
         "description": "Requires webhooks.manage. Deliveries from now on are signed with the new secret, returned ONCE.",
         "security": [
@@ -8940,6 +9454,9 @@
     "/v1/webhooks/{webhook_id}/deliveries": {
       "get": {
         "operationId": "listWebhookDeliveries",
+        "tags": [
+          "Developer Webhooks"
+        ],
         "summary": "List deliveries of a webhook subscription",
         "description": "Requires webhooks.read. Delivery history including dead-lettered (FAILED) deliveries; status class and bounded failure category only (never a response body).",
         "security": [
@@ -9042,6 +9559,9 @@
     "/v1/webhook-deliveries/{delivery_id}/replay": {
       "post": {
         "operationId": "replayWebhookDelivery",
+        "tags": [
+          "Webhook Delivery & Replay"
+        ],
         "summary": "Replay a webhook delivery",
         "description": "Requires webhooks.manage. Creates a NEW delivery (new CF-Webhook-Id) of the same event (same CF-Webhook-Event-Id) to the same active subscription; the domain action is never re-executed.",
         "security": [
@@ -9104,6 +9624,9 @@
     "/internal/v1/platform/events": {
       "post": {
         "operationId": "publishPlatformEvent",
+        "tags": [
+          "Internal — Platform Events"
+        ],
         "summary": "publishPlatformEvent",
         "description": "Part G §67 / Part IV N-O: Privacy Relay (producer cfmeet.privacy-relay), the SMS Gateway (producer cfmeet.sms-gateway) or Messaging (producer cfmeet.messaging, Part V I) publishes a committed domain event from its transactional outbox (platform envelope). Requires platform-event.publish (grantable only to those producers); the envelope's producer must be the authenticated caller. Calling projects it into the public catalog for customer webhooks (relay.*, sms.*, conversation.*, message.*; idempotent on the event id); nothing is stored or forwarded verbatim. 200 = accepted (also for internal-only facts); 503 = retry later.",
         "security": [
@@ -9164,6 +9687,9 @@
     "/v1/usage": {
       "get": {
         "operationId": "listUsage",
+        "tags": [
+          "Usage & Limits"
+        ],
         "summary": "List usage facts",
         "description": "Final consumption facts of the authenticated application environment (Part G §69), oldest first by recording time, keyset-paginated. A ledger, not a bill: public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN — an UNKNOWN cost has no amount). Never a provider identifier, telephone number, SIP URI or object key.",
         "security": [
@@ -9287,6 +9813,9 @@
     "/v1/limits": {
       "get": {
         "operationId": "getLimits",
+        "tags": [
+          "Usage & Limits"
+        ],
         "summary": "Get limit status",
         "description": "The authenticated credential's limits (Part G §70): request rate, concurrent calls and telecom spend (daily / monthly). Each reports every configured level of the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL (the environment's spend policy for spend) and the binding level — the one with the least remaining headroom; the most restrictive applicable ceiling denies first. Tenant, application, service account and credential always come from the authenticated credential and are never parameters. With `principalId` (also needs `principals.read`) the principal's own PRINCIPAL levels are added; the principal must resolve in the caller's own scope, otherwise 404. No level carries an identifier.",
         "security": [
@@ -9352,6 +9881,9 @@
     "/v1/blocks": {
       "post": {
         "operationId": "createBlock",
+        "tags": [
+          "Call Blocking"
+        ],
         "summary": "Create a block / opt-out rule",
         "description": "Part H §70: a principal blocks a principal or a protected ContactReference (calls.write), or the application blocks a ContactReference (enterprise.config.write). Never a raw number. Idempotent for an active pair (200 returns the existing rule).",
         "security": [
@@ -9431,6 +9963,9 @@
       },
       "get": {
         "operationId": "listBlocks",
+        "tags": [
+          "Call Blocking"
+        ],
         "summary": "List block rules",
         "description": "Active block rules of the caller's scope, optionally of one principal.",
         "security": [
@@ -9496,6 +10031,9 @@
     "/v1/blocks/{block_id}": {
       "delete": {
         "operationId": "releaseBlock",
+        "tags": [
+          "Call Blocking"
+        ],
         "summary": "Release a block rule",
         "description": "Releases (never deletes) a rule; a rule of another scope is not found.",
         "security": [
@@ -9561,6 +10099,9 @@
     "/v1/calls/{call_id}/abuse-reports": {
       "post": {
         "operationId": "createAbuseReport",
+        "tags": [
+          "Safety & Abuse"
+        ],
         "summary": "Report an unwanted or abusive call",
         "description": "Part H §69: a participant principal of the call reports it with a bounded category and optional code (no free text, no number). Idempotent per reporter and call.",
         "security": [
@@ -9654,6 +10195,9 @@
     "/v1/abuse-reports": {
       "get": {
         "operationId": "listAbuseReports",
+        "tags": [
+          "Safety & Abuse"
+        ],
         "summary": "List abuse reports",
         "description": "Reports filed in the caller's scope, optionally by one principal.",
         "security": [
@@ -9719,6 +10263,9 @@
     "/internal/v1/telephony/dcn-inbound-calls": {
       "post": {
         "operationId": "acceptTelephonyDcnInboundCall",
+        "tags": [
+          "Internal — Telephony"
+        ],
         "summary": "Inbound DCN call offer (internal)",
         "description": "Part IV L: Telephony offers an inbound call to a Digital Communications Number (contract cfmeet.telephony.inbound-offer, DcnInboundOffer). Requires an internal service token with telephony-inbound.offer (grantable only to cfmeet.telephony). Calling verifies Numbering's INBOUND_VOICE grant against Numbering's CURRENT state (grant-verifications, audience Calling); the relayed scope, number, assignment, routing revision and target must equal the verified ones (403 CALL_NOT_AUTHORIZED otherwise — never corrected). It then routes ONLY to the verified target: a principal (PSTN_TO_APP, no Privacy Relay session) or an enterprise extension / ring group / queue (enterprise router through an extension); any other target 403 PUBLIC_ROUTE_DENIED. Numbering unreachable: 503 (fail closed). Idempotent per telephonyLegId.",
         "security": [

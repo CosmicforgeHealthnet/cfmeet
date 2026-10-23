@@ -5,10 +5,128 @@
     "version": "1.13.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations)."
   },
+  "tags": [
+    {
+      "name": "Blocked Users",
+      "description": "Blocked Users operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Client Sessions",
+      "description": "Client Sessions operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Compliance & Data Exports",
+      "description": "Compliance & Data Exports operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversation Invitations",
+      "description": "Conversation Invitations operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversation Messages",
+      "description": "Conversation Messages operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversation Reports",
+      "description": "Conversation Reports operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversation SMS Bridge",
+      "description": "Conversation SMS Bridge operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversation Search",
+      "description": "Conversation Search operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Conversations",
+      "description": "Conversations operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Device Keys & E2EE",
+      "description": "Device Keys & E2EE operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Encrypted Backups",
+      "description": "Encrypted Backups operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Group Membership & Bans",
+      "description": "Group Membership & Bans operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "History Transfers",
+      "description": "History Transfers operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Legal Holds",
+      "description": "Legal Holds operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "MLS Group Encryption",
+      "description": "MLS Group Encryption operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Message Attachments",
+      "description": "Message Attachments operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Message Reactions",
+      "description": "Message Reactions operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Message Search",
+      "description": "Message Search operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Message Threads",
+      "description": "Message Threads operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Messaging Policies",
+      "description": "Messaging Policies operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Messaging Realtime",
+      "description": "Messaging Realtime operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Messaging Usage",
+      "description": "Messaging Usage operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Moderation & Reports",
+      "description": "Moderation & Reports operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Pinned Messages",
+      "description": "Pinned Messages operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Presence & Notifications",
+      "description": "Presence & Notifications operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Read State & Events",
+      "description": "Read State & Events operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "SMS Bridge",
+      "description": "SMS Bridge operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Service Health & Docs",
+      "description": "Service Health & Docs operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "operationId": "health",
+        "tags": [
+          "Service Health & Docs"
+        ],
+        "summary": "Check service health",
         "security": [],
         "description": "Liveness only.",
         "responses": {
@@ -28,6 +146,10 @@
     "/ready": {
       "get": {
         "operationId": "ready",
+        "tags": [
+          "Service Health & Docs"
+        ],
+        "summary": "Check service readiness",
         "security": [],
         "description": "Readiness: database reachable and every migration applied (503 otherwise). No secret or connection detail.",
         "responses": {
@@ -57,6 +179,10 @@
     "/openapi.json": {
       "get": {
         "operationId": "openapi",
+        "tags": [
+          "Service Health & Docs"
+        ],
+        "summary": "Get OpenAPI specification",
         "security": [],
         "description": "This document.",
         "responses": {
@@ -69,6 +195,10 @@
     "/v1/messaging/devices/registration-challenges": {
       "post": {
         "operationId": "createDeviceRegistrationChallenge",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "create Device Registration Challenge",
         "security": [
           {
             "customerCredential": []
@@ -118,6 +248,10 @@
     "/v1/messaging/devices": {
       "post": {
         "operationId": "registerDevice",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "register Device",
         "security": [
           {
             "customerCredential": []
@@ -186,6 +320,10 @@
     "/v1/messaging/devices/{deviceId}/key-packages": {
       "post": {
         "operationId": "publishKeyPackages",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "publish Key Packages",
         "security": [
           {
             "customerCredential": []
@@ -268,6 +406,10 @@
     "/v1/messaging/devices/{deviceId}/revoke": {
       "post": {
         "operationId": "revokeDevice",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "revoke Device",
         "security": [
           {
             "customerCredential": []
@@ -338,6 +480,10 @@
     "/v1/messaging/principals/{principalId}/devices": {
       "get": {
         "operationId": "listPrincipalDevices",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "list Principal Devices",
         "security": [
           {
             "customerCredential": []
@@ -401,6 +547,10 @@
     "/v1/messaging/key-transparency/proofs": {
       "get": {
         "operationId": "getKeyTransparencyProofs",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "get Key Transparency Proofs",
         "security": [
           {
             "customerCredential": []
@@ -473,6 +623,10 @@
     "/v1/conversations": {
       "post": {
         "operationId": "createConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "create Conversation",
         "security": [
           {
             "customerCredential": []
@@ -545,6 +699,10 @@
       },
       "get": {
         "operationId": "listConversations",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "list Conversations",
         "security": [
           {
             "customerCredential": []
@@ -631,6 +789,10 @@
     "/v1/conversations/{conversationId}": {
       "get": {
         "operationId": "getConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "get Conversation",
         "security": [
           {
             "customerCredential": []
@@ -692,6 +854,10 @@
       },
       "patch": {
         "operationId": "updateConversation",
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "update Conversation",
         "security": [
           {
             "customerCredential": []
@@ -765,6 +931,10 @@
     "/v1/messaging/policy": {
       "get": {
         "operationId": "getMessagingPolicy",
+        "tags": [
+          "Messaging Policies"
+        ],
+        "summary": "get Messaging Policy",
         "security": [
           {
             "customerCredential": []
@@ -799,6 +969,10 @@
       },
       "put": {
         "operationId": "updateMessagingPolicy",
+        "tags": [
+          "Messaging Policies"
+        ],
+        "summary": "update Messaging Policy",
         "security": [
           {
             "customerCredential": []
@@ -851,6 +1025,10 @@
     "/v1/conversations/{conversationId}/members": {
       "get": {
         "operationId": "listMembers",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "list Members",
         "security": [
           {
             "customerCredential": []
@@ -935,6 +1113,10 @@
       },
       "post": {
         "operationId": "addMember",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "add Member",
         "security": [
           {
             "customerCredential": []
@@ -1018,6 +1200,10 @@
     "/v1/conversations/{conversationId}/members/{principalId}": {
       "delete": {
         "operationId": "removeMember",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "remove Member",
         "security": [
           {
             "customerCredential": []
@@ -1103,6 +1289,10 @@
       },
       "patch": {
         "operationId": "changeMemberRole",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "change Member Role",
         "security": [
           {
             "customerCredential": []
@@ -1187,6 +1377,10 @@
     "/v1/conversations/{conversationId}/messages": {
       "get": {
         "operationId": "listMessages",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "list Messages",
         "security": [
           {
             "customerCredential": []
@@ -1289,6 +1483,10 @@
       },
       "post": {
         "operationId": "sendMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "send Message",
         "security": [
           {
             "customerCredential": []
@@ -1378,6 +1576,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}": {
       "get": {
         "operationId": "resolveMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "resolve Message",
         "security": [
           {
             "customerCredential": []
@@ -1450,6 +1652,10 @@
       },
       "patch": {
         "operationId": "editManagedMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "edit Managed Message",
         "security": [
           {
             "customerCredential": []
@@ -1535,6 +1741,10 @@
       },
       "delete": {
         "operationId": "deleteMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "delete Message",
         "security": [
           {
             "customerCredential": []
@@ -1620,6 +1830,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}/revisions": {
       "get": {
         "operationId": "listMessageRevisions",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "list Message Revisions",
         "security": [
           {
             "customerCredential": []
@@ -1697,6 +1911,10 @@
     "/v1/conversations/{conversationId}/read-cursor": {
       "put": {
         "operationId": "setReadCursor",
+        "tags": [
+          "Read State & Events"
+        ],
+        "summary": "set Read Cursor",
         "security": [
           {
             "customerCredential": []
@@ -1773,6 +1991,10 @@
     "/v1/conversations/{conversationId}/events": {
       "get": {
         "operationId": "replayConversationEvents",
+        "tags": [
+          "Read State & Events"
+        ],
+        "summary": "replay Conversation Events",
         "security": [
           {
             "customerCredential": []
@@ -1858,6 +2080,10 @@
     "/v1/conversations/{conversationId}/mls/commits": {
       "post": {
         "operationId": "submitMlsCommit",
+        "tags": [
+          "MLS Group Encryption"
+        ],
+        "summary": "submit MLS Commit",
         "security": [
           {
             "customerCredential": []
@@ -1947,6 +2173,10 @@
     "/v1/conversations/{conversationId}/mls/state": {
       "get": {
         "operationId": "getMlsGroupState",
+        "tags": [
+          "MLS Group Encryption"
+        ],
+        "summary": "get MLS Group State",
         "security": [
           {
             "customerCredential": []
@@ -2013,6 +2243,10 @@
     "/v1/conversations/{conversationId}/mls/key-package-claims": {
       "post": {
         "operationId": "claimKeyPackages",
+        "tags": [
+          "MLS Group Encryption"
+        ],
+        "summary": "claim Key Packages",
         "security": [
           {
             "customerCredential": []
@@ -2089,6 +2323,10 @@
     "/v1/messaging/devices/{deviceId}/welcomes": {
       "get": {
         "operationId": "listWelcomes",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "list Welcomes",
         "security": [
           {
             "customerCredential": []
@@ -2155,6 +2393,10 @@
     "/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume": {
       "post": {
         "operationId": "consumeWelcome",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "consume Welcome",
         "security": [
           {
             "customerCredential": []
@@ -2229,6 +2471,10 @@
     "/v1/messaging/blocks": {
       "get": {
         "operationId": "listBlocks",
+        "tags": [
+          "Blocked Users"
+        ],
+        "summary": "list Blocks",
         "security": [
           {
             "customerCredential": []
@@ -2285,6 +2531,10 @@
       },
       "post": {
         "operationId": "createBlock",
+        "tags": [
+          "Blocked Users"
+        ],
+        "summary": "create Block",
         "security": [
           {
             "customerCredential": []
@@ -2363,6 +2613,10 @@
     "/v1/messaging/blocks/{principalId}": {
       "delete": {
         "operationId": "removeBlock",
+        "tags": [
+          "Blocked Users"
+        ],
+        "summary": "remove Block",
         "security": [
           {
             "customerCredential": []
@@ -2429,6 +2683,10 @@
     "/v1/realtime/tickets": {
       "post": {
         "operationId": "issueRealtimeTicket",
+        "tags": [
+          "Messaging Realtime"
+        ],
+        "summary": "issue Realtime Ticket",
         "security": [
           {
             "clientToken": []
@@ -2465,6 +2723,10 @@
     "/v1/realtime": {
       "get": {
         "operationId": "connectRealtime",
+        "tags": [
+          "Messaging Realtime"
+        ],
+        "summary": "connect Realtime",
         "security": [
           {
             "realtimeTicket": []
@@ -2500,6 +2762,10 @@
     "/v1/messaging/client-tokens": {
       "post": {
         "operationId": "issueClientToken",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "issue Client Token",
         "security": [
           {
             "customerCredential": []
@@ -2565,6 +2831,10 @@
     "/v1/messaging/client-sessions/{sessionId}/revoke": {
       "post": {
         "operationId": "revokeClientSession",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "revoke Client Session",
         "security": [
           {
             "customerCredential": []
@@ -2628,6 +2898,10 @@
     "/v1/messaging/presence/settings": {
       "get": {
         "operationId": "getPresenceSettings",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "get Presence Settings",
         "security": [
           {
             "customerCredential": []
@@ -2684,6 +2958,10 @@
       },
       "put": {
         "operationId": "putPresenceSettings",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "put Presence Settings",
         "security": [
           {
             "customerCredential": []
@@ -2752,6 +3030,10 @@
     "/v1/messaging/devices/{deviceId}/push-registration": {
       "put": {
         "operationId": "registerPush",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "register Push",
         "security": [
           {
             "customerCredential": []
@@ -2826,6 +3108,10 @@
       },
       "delete": {
         "operationId": "unregisterPush",
+        "tags": [
+          "Device Keys & E2EE"
+        ],
+        "summary": "unregister Push",
         "security": [
           {
             "customerCredential": []
@@ -2892,6 +3178,10 @@
     "/v1/conversations/{conversationId}/attachments": {
       "post": {
         "operationId": "createAttachmentIntent",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "create Attachment Intent",
         "security": [
           {
             "customerCredential": []
@@ -2981,6 +3271,10 @@
     "/v1/conversations/{conversationId}/attachments/{attachmentId}": {
       "get": {
         "operationId": "getAttachment",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "get Attachment",
         "security": [
           {
             "customerCredential": []
@@ -3055,6 +3349,10 @@
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize": {
       "post": {
         "operationId": "finalizeAttachment",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "finalize Attachment",
         "security": [
           {
             "customerCredential": []
@@ -3132,6 +3430,10 @@
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants": {
       "post": {
         "operationId": "grantAttachmentDownload",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "grant Attachment Download",
         "security": [
           {
             "customerCredential": []
@@ -3206,6 +3508,10 @@
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/content": {
       "get": {
         "operationId": "readAttachmentContent",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "read Attachment Content",
         "security": [
           {
             "customerCredential": []
@@ -3284,6 +3590,10 @@
     "/v1/messaging/legal-holds": {
       "get": {
         "operationId": "listLegalHolds",
+        "tags": [
+          "Legal Holds"
+        ],
+        "summary": "list Legal Holds",
         "security": [
           {
             "customerCredential": []
@@ -3327,6 +3637,10 @@
       },
       "post": {
         "operationId": "createLegalHold",
+        "tags": [
+          "Legal Holds"
+        ],
+        "summary": "create Legal Hold",
         "security": [
           {
             "customerCredential": []
@@ -3382,6 +3696,10 @@
     "/v1/messaging/legal-holds/{holdId}": {
       "get": {
         "operationId": "getLegalHold",
+        "tags": [
+          "Legal Holds"
+        ],
+        "summary": "get Legal Hold",
         "security": [
           {
             "customerCredential": []
@@ -3436,6 +3754,10 @@
     "/v1/messaging/legal-holds/{holdId}/release": {
       "post": {
         "operationId": "releaseLegalHold",
+        "tags": [
+          "Legal Holds"
+        ],
+        "summary": "release Legal Hold",
         "security": [
           {
             "customerCredential": []
@@ -3500,6 +3822,10 @@
     "/v1/conversations/{conversationId}/search": {
       "get": {
         "operationId": "searchConversation",
+        "tags": [
+          "Conversation Search"
+        ],
+        "summary": "search Conversation",
         "security": [
           {
             "customerCredential": []
@@ -3594,6 +3920,10 @@
     "/v1/messaging/search": {
       "get": {
         "operationId": "searchMessages",
+        "tags": [
+          "Message Search"
+        ],
+        "summary": "search Messages",
         "security": [
           {
             "customerCredential": []
@@ -3672,6 +4002,10 @@
     "/v1/conversations/{conversationId}/reports": {
       "post": {
         "operationId": "createReport",
+        "tags": [
+          "Conversation Reports"
+        ],
+        "summary": "create Report",
         "security": [
           {
             "customerCredential": []
@@ -3748,6 +4082,10 @@
     "/v1/messaging/reports": {
       "get": {
         "operationId": "listReports",
+        "tags": [
+          "Moderation & Reports"
+        ],
+        "summary": "list Reports",
         "security": [
           {
             "customerCredential": []
@@ -3816,6 +4154,10 @@
     "/v1/messaging/reports/{reportId}": {
       "get": {
         "operationId": "getReport",
+        "tags": [
+          "Moderation & Reports"
+        ],
+        "summary": "get Report",
         "security": [
           {
             "customerCredential": []
@@ -3870,6 +4212,10 @@
     "/v1/messaging/moderation/actions": {
       "get": {
         "operationId": "listModerationActions",
+        "tags": [
+          "Moderation & Reports"
+        ],
+        "summary": "list Moderation Actions",
         "security": [
           {
             "customerCredential": []
@@ -3924,6 +4270,10 @@
       },
       "post": {
         "operationId": "applyModerationAction",
+        "tags": [
+          "Moderation & Reports"
+        ],
+        "summary": "apply Moderation Action",
         "security": [
           {
             "customerCredential": []
@@ -3979,6 +4329,10 @@
     "/v1/messaging/exports": {
       "post": {
         "operationId": "requestExport",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "request Export",
         "security": [
           {
             "customerCredential": []
@@ -4034,6 +4388,10 @@
     "/v1/messaging/exports/{exportId}": {
       "get": {
         "operationId": "getExport",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "get Export",
         "security": [
           {
             "customerCredential": []
@@ -4088,6 +4446,10 @@
     "/v1/messaging/exports/{exportId}/download-grants": {
       "post": {
         "operationId": "grantExportDownload",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "grant Export Download",
         "security": [
           {
             "customerCredential": []
@@ -4142,6 +4504,10 @@
     "/v1/messaging/deletion-requests": {
       "post": {
         "operationId": "requestDataDeletion",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "request Data Deletion",
         "security": [
           {
             "customerCredential": []
@@ -4197,6 +4563,10 @@
     "/v1/messaging/deletion-requests/{requestId}": {
       "get": {
         "operationId": "getDataDeletion",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "get Data Deletion",
         "security": [
           {
             "customerCredential": []
@@ -4251,6 +4621,10 @@
     "/v1/messaging/audit": {
       "get": {
         "operationId": "listAudit",
+        "tags": [
+          "Compliance & Data Exports"
+        ],
+        "summary": "list Audit",
         "security": [
           {
             "customerCredential": []
@@ -4342,6 +4716,10 @@
     "/v1/messaging/client-sessions/revoke-all": {
       "post": {
         "operationId": "revokeAllClientSessions",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "revoke All Client Sessions",
         "security": [
           {
             "customerCredential": []
@@ -4397,6 +4775,10 @@
     "/v1/messaging/sms-bridge/disclosure": {
       "get": {
         "operationId": "getSmsBridgeDisclosure",
+        "tags": [
+          "SMS Bridge"
+        ],
+        "summary": "get SMS Bridge Disclosure",
         "security": [
           {
             "customerCredential": []
@@ -4444,6 +4826,10 @@
     "/v1/conversations/{conversationId}/sms-bridges": {
       "get": {
         "operationId": "listSmsBridges",
+        "tags": [
+          "Conversation SMS Bridge"
+        ],
+        "summary": "list SMS Bridges",
         "security": [
           {
             "customerCredential": []
@@ -4508,6 +4894,10 @@
       },
       "post": {
         "operationId": "createSmsBridge",
+        "tags": [
+          "Conversation SMS Bridge"
+        ],
+        "summary": "create SMS Bridge",
         "security": [
           {
             "customerCredential": []
@@ -4584,6 +4974,10 @@
     "/v1/conversations/{conversationId}/sms-bridges/{bridgeId}/close": {
       "post": {
         "operationId": "closeSmsBridge",
+        "tags": [
+          "Conversation SMS Bridge"
+        ],
+        "summary": "close SMS Bridge",
         "security": [
           {
             "customerCredential": []
@@ -4658,6 +5052,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}/sms-transport": {
       "get": {
         "operationId": "getSmsTransport",
+        "tags": [
+          "Conversation SMS Bridge"
+        ],
+        "summary": "get SMS Transport",
         "security": [
           {
             "customerCredential": []
@@ -4735,6 +5133,10 @@
     "/v1/conversations/{conversationId}/bans": {
       "get": {
         "operationId": "listBans",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "list Bans",
         "security": [
           {
             "customerCredential": []
@@ -4799,6 +5201,10 @@
       },
       "post": {
         "operationId": "banMember",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "ban Member",
         "security": [
           {
             "customerCredential": []
@@ -4875,6 +5281,10 @@
     "/v1/conversations/{conversationId}/bans/{principalId}": {
       "delete": {
         "operationId": "unbanMember",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "unban Member",
         "security": [
           {
             "customerCredential": []
@@ -4949,6 +5359,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions": {
       "get": {
         "operationId": "listReactions",
+        "tags": [
+          "Message Reactions"
+        ],
+        "summary": "list Reactions",
         "security": [
           {
             "customerCredential": []
@@ -5026,6 +5440,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}": {
       "put": {
         "operationId": "addReaction",
+        "tags": [
+          "Message Reactions"
+        ],
+        "summary": "add Reaction",
         "security": [
           {
             "customerCredential": []
@@ -5112,6 +5530,10 @@
       },
       "delete": {
         "operationId": "removeReaction",
+        "tags": [
+          "Message Reactions"
+        ],
+        "summary": "remove Reaction",
         "security": [
           {
             "customerCredential": []
@@ -5200,6 +5622,10 @@
     "/v1/conversations/{conversationId}/pins": {
       "get": {
         "operationId": "listPins",
+        "tags": [
+          "Pinned Messages"
+        ],
+        "summary": "list Pins",
         "security": [
           {
             "customerCredential": []
@@ -5269,6 +5695,10 @@
     "/v1/conversations/{conversationId}/pins/{messageId}": {
       "put": {
         "operationId": "pinMessage",
+        "tags": [
+          "Pinned Messages"
+        ],
+        "summary": "pin Message",
         "security": [
           {
             "customerCredential": []
@@ -5351,6 +5781,10 @@
       },
       "delete": {
         "operationId": "unpinMessage",
+        "tags": [
+          "Pinned Messages"
+        ],
+        "summary": "unpin Message",
         "security": [
           {
             "customerCredential": []
@@ -5425,6 +5859,10 @@
     "/v1/conversations/{conversationId}/unread": {
       "get": {
         "operationId": "getUnreadCount",
+        "tags": [
+          "Read State & Events"
+        ],
+        "summary": "get Unread Count",
         "security": [
           {
             "customerCredential": []
@@ -5494,6 +5932,10 @@
     "/v1/messaging/usage": {
       "get": {
         "operationId": "getMessagingUsage",
+        "tags": [
+          "Messaging Usage"
+        ],
+        "summary": "get Messaging Usage",
         "security": [
           {
             "customerCredential": []
@@ -5552,6 +5994,10 @@
     "/v1/messaging/history-transfers": {
       "post": {
         "operationId": "createHistoryTransfer",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "create History Transfer",
         "security": [
           {
             "customerCredential": []
@@ -5618,6 +6064,10 @@
       },
       "get": {
         "operationId": "listHistoryTransfers",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "list History Transfers",
         "security": [
           {
             "customerCredential": []
@@ -5681,6 +6131,10 @@
     "/v1/messaging/history-transfers/{transferId}": {
       "get": {
         "operationId": "getHistoryTransfer",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "get History Transfer",
         "security": [
           {
             "customerCredential": []
@@ -5744,6 +6198,10 @@
     "/v1/messaging/history-transfers/{transferId}/sealed-history": {
       "put": {
         "operationId": "sealHistoryTransfer",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "seal History Transfer",
         "security": [
           {
             "customerCredential": []
@@ -5821,6 +6279,10 @@
       },
       "get": {
         "operationId": "getSealedHistory",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "get Sealed History",
         "security": [
           {
             "customerCredential": []
@@ -5887,6 +6349,10 @@
     "/v1/messaging/history-transfers/{transferId}/complete": {
       "post": {
         "operationId": "completeHistoryTransfer",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "complete History Transfer",
         "security": [
           {
             "customerCredential": []
@@ -5953,6 +6419,10 @@
     "/v1/messaging/history-transfers/{transferId}/cancel": {
       "post": {
         "operationId": "cancelHistoryTransfer",
+        "tags": [
+          "History Transfers"
+        ],
+        "summary": "cancel History Transfer",
         "security": [
           {
             "customerCredential": []
@@ -6029,6 +6499,10 @@
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants": {
       "post": {
         "operationId": "createThumbnailGrant",
+        "tags": [
+          "Message Attachments"
+        ],
+        "summary": "create Thumbnail Grant",
         "security": [
           {
             "customerCredential": []
@@ -6103,6 +6577,10 @@
     "/v1/messaging/backups": {
       "post": {
         "operationId": "createBackupUpload",
+        "tags": [
+          "Encrypted Backups"
+        ],
+        "summary": "create Backup Upload",
         "security": [
           {
             "customerCredential": []
@@ -6174,6 +6652,10 @@
     "/v1/messaging/backups/latest": {
       "get": {
         "operationId": "getLatestBackup",
+        "tags": [
+          "Encrypted Backups"
+        ],
+        "summary": "get Latest Backup",
         "security": [
           {
             "customerCredential": []
@@ -6229,6 +6711,10 @@
     "/v1/messaging/backups/{backupId}": {
       "delete": {
         "operationId": "deleteBackup",
+        "tags": [
+          "Encrypted Backups"
+        ],
+        "summary": "delete Backup",
         "security": [
           {
             "customerCredential": []
@@ -6292,6 +6778,10 @@
     "/v1/messaging/backups/{backupId}/finalize": {
       "post": {
         "operationId": "finalizeBackup",
+        "tags": [
+          "Encrypted Backups"
+        ],
+        "summary": "finalize Backup",
         "security": [
           {
             "customerCredential": []
@@ -6361,6 +6851,10 @@
     "/v1/messaging/backups/{backupId}/download-grants": {
       "post": {
         "operationId": "createBackupDownloadGrant",
+        "tags": [
+          "Encrypted Backups"
+        ],
+        "summary": "create Backup Download Grant",
         "security": [
           {
             "customerCredential": []
@@ -6430,6 +6924,10 @@
     "/v1/conversations/{conversationId}/messages/{messageId}/thread": {
       "get": {
         "operationId": "getThreadSummary",
+        "tags": [
+          "Message Threads"
+        ],
+        "summary": "get Thread Summary",
         "security": [
           {
             "customerCredential": []
@@ -6507,6 +7005,10 @@
     "/v1/conversations/{conversationId}/invitation/accept": {
       "post": {
         "operationId": "acceptInvitation",
+        "tags": [
+          "Conversation Invitations"
+        ],
+        "summary": "accept Invitation",
         "security": [
           {
             "customerCredential": []
@@ -6576,6 +7078,10 @@
     "/v1/conversations/{conversationId}/invitation/decline": {
       "post": {
         "operationId": "declineInvitation",
+        "tags": [
+          "Conversation Invitations"
+        ],
+        "summary": "decline Invitation",
         "security": [
           {
             "customerCredential": []
@@ -6645,6 +7151,10 @@
     "/v1/messaging/invitations": {
       "get": {
         "operationId": "listInvitations",
+        "tags": [
+          "Conversation Invitations"
+        ],
+        "summary": "list Invitations",
         "security": [
           {
             "customerCredential": []

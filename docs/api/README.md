@@ -1,5 +1,44 @@
 # API documentation
 
+## Labeled Swagger operations (all non-Meeting services)
+
+Non-Meeting service API operations are grouped by named OpenAPI `tags`, not
+the Swagger UI catch-all `default` tag. This includes *both* external and
+internal engineering catalogs; the public/private documentation routing remains
+a separate audience-specific filter.
+
+- Calling: **136 operations**, including Call Management, Call Controls,
+  Calling Devices, Calling Signaling, Call History, Recording & Consent, IVR,
+  Voicemail, Call Queues, SIP Devices, Enterprise Policies and internal events.
+- Messaging: **99 operations** grouped by Conversations, Messages, Membership,
+  Attachments, MLS Group Encryption, Device Keys & E2EE, Realtime, Presence,
+  Search, Moderation, SMS Bridges and Compliance; Messaging internal: **7**.
+- Numbering / DCNs: **98 operations**, including Search, Reservations,
+  Assignments, Catalog, KYC, Porting, Risk, and administrative/internal sections.
+- Platform Access internal: **37 operations** grouped by identity, authorization,
+  credentials and administration.
+- Privacy Relay: **22 operations**; Privacy Relay internal: **25**.
+- SMS Gateway: **11 operations**; SMS Gateway internal: **4**.
+- Telephony internal: **17 operations**.
+- Platform internal HTTP conventions: **0 operations**, components-only by design.
+
+**Total: 456 non-Meeting source-documented operations**. Each has an
+`operationId`, concise `summary`, meaningful `description`, and exactly
+one `tag` with a top-level section definition.
+
+The authoritative files in `packages/contracts/**` and the committed
+self-contained `packages/contracts/bundled/**` variants contain identical
+operation labels. Both are checked by
+`python3 scripts/contracts/check_swagger_labels.py` and
+`python3 scripts/contracts/bundle_openapi.py --check` during CI.
+
+This is **documentation-only**. It does not modify endpoint URLs, route
+handlers, authentication/authorization, schemas, SDK behavior, frontend
+deployments, production E2EE, or public/private access controls. The public
+Swagger will show the improved group headings **only after the changed Meeting
+Service documentation image is deployed and verified**.
+
+
 ## Public and private API documentation
 
 **Public:** `https://api.cfmeet.com/swagger-ui/` remains the default read-only
