@@ -164,6 +164,9 @@ async fn creation_is_idempotent_per_actor_and_key() {
         a.json["id"], b.json["id"],
         "the replay returns the original organization"
     );
+    // Only the replay is marked, as on every CF Meet API.
+    assert!(a.headers.get("idempotent-replayed").is_none());
+    assert_eq!(b.headers["idempotent-replayed"], "true");
     assert_eq!(c.pa.tenants.lock().unwrap().len(), 1, "one tenant only");
     let reused = c
         .req_with(

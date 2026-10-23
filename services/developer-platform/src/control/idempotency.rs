@@ -46,13 +46,13 @@ pub async fn run<F, Fut>(
     request_digest: &str,
     redact: fn(&mut Value),
     op: F,
-) -> Result<(StatusCode, Value), ApiError>
+) -> Result<(StatusCode, Value, bool), ApiError>
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<(StatusCode, Value), ApiError>>,
 {
     let Some(key) = key else {
-        return op().await;
+        return op().await.map(|(status, body)| (status, body, false));
     };
     if !valid_key(key) {
         return Err(ApiError(ErrorCode::ValidationError));
@@ -95,6 +95,7 @@ where
         return Ok((
             StatusCode::from_u16(status as u16).unwrap_or(StatusCode::OK),
             body,
+            true,
         ));
     }
     match op().await {
@@ -112,7 +113,7 @@ where
                 ],
             ))
             .await?;
-            Ok((status, body))
+            Ok((status, body, false))
         }
         Err(e) => {
             release(db, &scope, key).await;

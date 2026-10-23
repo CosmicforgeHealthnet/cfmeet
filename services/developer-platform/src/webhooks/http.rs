@@ -505,7 +505,7 @@ async fn console_create(
         idem_scope.as_bytes(),
         &serde_json::to_vec(&raw).unwrap_or_default(),
     ]);
-    let (status, out) = idempotency::run(
+    let (status, out, replayed) = idempotency::run(
         &s.db,
         &idem_scope,
         key.as_deref(),
@@ -519,7 +519,14 @@ async fn console_create(
         },
     )
     .await?;
-    Ok(respond(status, out))
+    let mut r = respond(status, out);
+    if replayed {
+        r.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotent-replayed"),
+            HeaderValue::from_static("true"),
+        );
+    }
+    Ok(r)
 }
 
 async fn console_get(

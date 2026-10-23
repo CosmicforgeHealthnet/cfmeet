@@ -265,8 +265,17 @@ fn idem_key(headers: &HeaderMap) -> Option<String> {
 }
 
 /// `(status, body)` as a response.
-fn reply((status, body): (StatusCode, Value)) -> Response {
-    (status, Json(body)).into_response()
+/// A (possibly replayed) idempotent mutation's response: a replay carries
+/// `Idempotent-Replayed: true`, as every CF Meet API does.
+fn reply((status, body, replayed): (StatusCode, Value, bool)) -> Response {
+    let mut r = (status, Json(body)).into_response();
+    if replayed {
+        r.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotent-replayed"),
+            axum::http::HeaderValue::from_static("true"),
+        );
+    }
+    r
 }
 
 fn body_digest<T: serde::Serialize>(scope: &str, value: &T) -> String {

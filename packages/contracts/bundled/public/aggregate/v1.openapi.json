@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.1.0"
+      "description": "cfmeet.developer-platform.http-api 1.2.0"
     },
     {
       "name": "gateway",
@@ -23415,6 +23415,9 @@
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
               }
             },
             "content": {
@@ -31399,6 +31402,9 @@
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
               }
             },
             "content": {
@@ -31960,6 +31966,9 @@
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
               }
             },
             "content": {
@@ -32545,6 +32554,9 @@
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
               }
             },
             "content": {
@@ -34262,6 +34274,9 @@
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/developer_platform.RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/developer_platform.IdempotentReplayed"
               }
             },
             "content": {
@@ -66189,6 +66204,15 @@
         "description": "Server-generated request id.",
         "schema": {
           "$ref": "#/components/schemas/calling.platform.common.v1.RequestId"
+        }
+      },
+      "developer_platform.IdempotentReplayed": {
+        "description": "`true` when the response is the stored result of an earlier request with the same Idempotency-Key (no new effect).",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "true"
+          ]
         }
       },
       "developer_platform.RequestId": {
