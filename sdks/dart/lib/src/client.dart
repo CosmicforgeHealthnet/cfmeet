@@ -513,7 +513,8 @@ class CfMeetClient {
           delay: delay,
           reason: reason,
           idempotencyKey: key));
-      if (!await cancellableDelay(delay, cancel)) {
+      if (!await cancellableDelay(delay, cancel,
+          sleeper: retryOptions.sleeper)) {
         throw CfMeetCancelledError('cancelled while waiting to retry',
             requestSent: true, idempotencyKey: key);
       }

@@ -21,8 +21,22 @@ class CancelToken {
   }
 }
 
-/// Waits [delay], returning early (with `false`) when [token] is cancelled.
-Future<bool> cancellableDelay(Duration delay, CancelToken? token) async {
+/// Waits [delay], returning early (with `false`) when [token] is cancelled. [sleeper]
+/// replaces the real-time timer (tests: a fake clock); cancellation still wins.
+Future<bool> cancellableDelay(Duration delay, CancelToken? token,
+    {Future<void> Function(Duration delay)? sleeper}) async {
+  if (sleeper != null) {
+    if (token == null) {
+      await sleeper(delay);
+      return true;
+    }
+    if (token.isCancelled) return false;
+    final slept = await Future.any([
+      sleeper(delay).then((_) => true),
+      token.whenCancelled.then((_) => false),
+    ]);
+    return slept && !token.isCancelled;
+  }
   if (token == null) {
     await Future<void>.delayed(delay);
     return true;

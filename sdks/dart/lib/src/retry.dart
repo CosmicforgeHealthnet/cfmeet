@@ -24,6 +24,11 @@ bool shouldRetryStatus(RetryClass retry, int status) => switch (retry) {
 bool shouldRetryNetwork(RetryClass retry) =>
     retry == RetryClass.safe || retry == RetryClass.idempotent;
 
+/// Waits [delay] before a retry or a reconnect. The SDK's default waits in real time;
+/// tests inject a fake (`FakeClock.sleep` of `package:cfmeet_platform_sdk/testing.dart`)
+/// so that backoff and Retry-After are observable without sleeping.
+typedef RetrySleeper = Future<void> Function(Duration delay);
+
 /// Backoff configuration.
 class RetryOptions {
   const RetryOptions({
@@ -31,6 +36,7 @@ class RetryOptions {
     this.baseDelay = const Duration(milliseconds: 250),
     this.maxDelay = const Duration(seconds: 8),
     this.maxRetryAfter = const Duration(seconds: 60),
+    this.sleeper,
   });
 
   /// Retries after the first attempt (0 disables retries for every class).
@@ -46,11 +52,16 @@ class RetryOptions {
   /// the error (with its `retryAfter`) goes to the caller.
   final Duration maxRetryAfter;
 
+  /// Waits between attempts (null: a real-time timer, cancelled by the request's
+  /// `CancelToken`). Cancellation still interrupts an injected sleeper's wait.
+  final RetrySleeper? sleeper;
+
   RetryOptions copyWith({int? maxRetries}) => RetryOptions(
         maxRetries: maxRetries ?? this.maxRetries,
         baseDelay: baseDelay,
         maxDelay: maxDelay,
         maxRetryAfter: maxRetryAfter,
+        sleeper: sleeper,
       );
 
   /// Backoff before retry number [retry] (0-based): uniform in

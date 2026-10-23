@@ -41,6 +41,11 @@ export interface ReconnectOptions {
   readonly initialDelayMs?: number;
   /** Delay cap (default 30 s). */
   readonly maxDelayMs?: number;
+  /**
+   * Waits before a reconnect (default: a real timer). Tests inject a fake clock
+   * (`createFakeClock().sleep` from `@cfmeet/platform-sdk/testing`); close() still wins.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export interface RealtimeOptions {
@@ -291,6 +296,14 @@ export class RealtimeConnection<M = unknown> {
     this.#failures++;
     this.#state = 'reconnecting';
     this.#emit('reconnecting', { attempt: this.#attempt + 1, delayMs });
+    if (r?.sleep) {
+      // #connect() returns at once when close() was called during the wait.
+      r.sleep(delayMs).then(
+        () => void this.#connect(),
+        (error: unknown) => this.#finish({ code: 1006, reason: 'reconnect wait failed', cause: 'reconnect_exhausted', error }),
+      );
+      return;
+    }
     this.#timer = setTimeout(() => {
       this.#timer = null;
       void this.#connect();

@@ -20,6 +20,12 @@ export interface RetryPolicy {
    * daily quota) is not waited for: the typed error is thrown at once.
    */
   readonly maxRetryAfterMs: number;
+  /**
+   * Waits between attempts (default: a real timer). Tests inject a fake clock
+   * (`createFakeClock().sleep` from `@cfmeet/platform-sdk/testing`) so backoff and
+   * Retry-After are recorded instead of slept; an aborted signal still ends the call.
+   */
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {

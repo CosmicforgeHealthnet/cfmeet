@@ -112,6 +112,40 @@ try {
   key-transparency proofs, history transfer) with stable error codes. In browsers run it
   in a dedicated Worker; encrypt exported device state before storing it.
 
+### Testing your integration (TypeScript)
+
+`@cfmeet/platform-sdk/testing` (a separate subpath export, side-effect free, zero
+dependencies; never reachable from the main entry — `npm run check:bundle` verifies it)
+runs YOUR tests against the real client without a network, live CF Meet services, telecom
+providers or real time passing:
+
+```ts
+import { CfMeetClient } from '@cfmeet/platform-sdk';
+import { FakeResponse, createFakeClock, createFakeFetch, createFakeWebSocket } from '@cfmeet/platform-sdk/testing';
+
+const fake = createFakeFetch();   // deterministic request ids req_fake_000001, ...
+const clock = createFakeClock();  // backoff / Retry-After recorded in clock.sleeps, not slept
+const client = new CfMeetClient({ baseUrl: 'https://api.cfmeet.test', auth, fetch: fake.fetch, retry: { sleep: clock.sleep } });
+
+fake.on('sms', 'sendMessage', FakeResponse.error(502));        // names checked (compile + run time)
+fake.on('calling', 'holdCall', FakeResponse.error(503)).thenReply(FakeResponse.networkError(), FakeResponse.json({ id }));
+fake.onPages('sms', 'listMessages', [[m1, m2], [m3]]);          // follows the operation's pagination spec
+fake.onRequest('GET', '/v1/sms/messages/{messageId}', FakeResponse.json(msg, { quota: { remainingThisMinute: 0 } }));
+fake.requests[0].idempotencyKey; fake.requestsFor('sms', 'sendMessage'); fake.unmatched; // default: 404 NOT_FOUND envelope
+
+const sockets = createFakeWebSocket();
+const conn = client.realtime.messaging({ auth, WebSocket: sockets.WebSocket, reconnect: { sleep: clock.sleep } });
+const s1 = await sockets.connection(1);  // s1.ticketSubprotocol, s1.queryTicket, s1.bearer, s1.sentJson()
+s1.message({ type: 'message.created' }); s1.serverClose(1011);  // → reconnect with a fresh ticket
+```
+
+Replies: `FakeResponse.json / empty / bytes / error(status, { code, retryAfter, quota }) /
+page / networkError({ requestSent }) / timeout() / hang()`, with `requestId`,
+`correlationId`, `idempotentReplayed` and `quota` headers; a route's replies are used in
+order and the last one repeats (`thenReplyWith(req => …)` computes one). Sockets:
+`refuseNext(code)`, `drop()`, `autoOpen: false` + `open()`. Helpers: `fakeErrorEnvelope`,
+`fakePageBody`, `fakeQuotaHeaders`. Covered by `test/testing.test.ts`.
+
 ```bash
 cd sdks/typescript
 npm ci
@@ -193,6 +227,45 @@ await for (final m in client.sms.paginate('listMessages', query: {'limit': 50}))
 * **Browsers:** the library compiles with dart2js (CI proves it, and that a browser
   build refuses platform credentials); pass a `transport:` / `connector:` there (no
   `dart:io`), and no `MessagingCrypto` (no `dart:ffi`).
+
+### Testing your integration (Dart)
+
+`package:cfmeet_platform_sdk/testing.dart` (not exported by the main library; no
+`dart:io`) runs YOUR tests against the real `CfMeetClient` / `RealtimeClient` without a
+network, live CF Meet services, telecom providers or real time passing:
+
+```dart
+import 'package:cfmeet_platform_sdk/testing.dart';
+
+final fake = FakeCfMeetTransport();  // deterministic request ids req_fake_000001, ...
+final clock = FakeClock();           // backoff / Retry-After recorded in clock.sleeps, not slept
+final client = CfMeetClient(baseUrl: 'https://api.cfmeet.test', auth: auth,
+    transport: fake, retryOptions: clock.retryOptions());
+
+fake.onOperation('sms', 'sendMessage', const FakeResponse.error(502)); // names checked
+fake.onOperation('calling', 'holdCall', const FakeResponse.error(503))
+    .thenReply(const FakeResponse.networkError())
+    .thenReply(const FakeResponse.json({'id': 'c1'}, idempotentReplayed: true));
+fake.onPages('sms', 'listMessages', [[m1, m2], [m3]]); // the operation's pagination spec
+fake.requests.first.idempotencyKey; fake.requestsFor('sms', 'sendMessage'); fake.unmatched;
+
+final sockets = FakeRealtimeConnector();
+final realtime = RealtimeClient(client,
+    connector: sockets.connector, options: clock.reconnectOptions());
+final conn = realtime.messaging(auth: CfMeetAuth.clientToken(token));
+final s1 = await sockets.connection(1); // s1.ticketSubprotocol, queryTicket, authorization, sentJson
+s1.pushJson({'type': 'message.created'});
+s1.closeFromServer(1011);               // → reconnect with a fresh ticket
+```
+
+Replies: `FakeResponse(...)` / `.json` / `.bytes` / `.error(status, code:, retryAfter:,
+quota:)` / `.page` / `.networkError(requestSent:)` / `.timeout()`, with `requestId`,
+`correlationId`, `idempotentReplayed` and `quota` headers; unregistered calls get the 404
+`NOT_FOUND` envelope; a route's replies are used in order and the last one repeats
+(`thenReplyWith((req) => ...)` computes one). Sockets: `refuseNext(status:)`,
+`failNext()`, `failWithError()`. `RetryOptions.sleeper` / `ReconnectOptions.sleeper` are
+the injection points `FakeClock` uses (default: real timers). Covered by
+`test/testing_fakes_test.dart`.
 
 ```bash
 cd packages/messaging-crypto/ffi && cargo build          # the native library

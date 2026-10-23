@@ -49,7 +49,7 @@ export interface CfMeetClientConfig {
   readonly timeoutMs?: number;
   /** Automatic retries after the first attempt (default 2). NEVER-class operations are never retried. */
   readonly maxRetries?: number;
-  /** Backoff tuning. */
+  /** Backoff tuning (and `sleep`, the wait between attempts, injectable for tests). */
   readonly retry?: Partial<Omit<RetryPolicy, 'maxRetries'>>;
   /** fetch implementation (defaults to the global fetch). */
   readonly fetch?: FetchLike;
@@ -482,7 +482,9 @@ export class CfMeetClient {
       const body = await response.arrayBuffer();
       return { response, body };
     } catch (e) {
-      if (timedOut) throw new CfMeetTimeoutError(op, timeoutMs);
+      // A fetch rejecting with a TimeoutError (e.g. a wrapper using AbortSignal.timeout,
+      // or a test fake) is a timeout too.
+      if (timedOut || (e as { name?: unknown } | null)?.name === 'TimeoutError') throw new CfMeetTimeoutError(op, timeoutMs);
       if (signal?.aborted) throw new CfMeetAbortError(op, signal.reason);
       throw new CfMeetNetworkError(`network error calling ${op.method} ${op.path}`, op, e);
     } finally {
@@ -493,10 +495,11 @@ export class CfMeetClient {
 
   async #pause(ms: number, signal: AbortSignal | undefined, op: OperationRef): Promise<void> {
     try {
-      await sleep(ms, signal);
+      await (this.#policy.sleep ?? sleep)(ms, signal);
     } catch (e) {
       throw new CfMeetAbortError(op, e);
     }
+    if (signal?.aborted) throw new CfMeetAbortError(op, signal.reason);
   }
 
   #apiError(response: Response, raw: ArrayBuffer, op: OperationRef): CfMeetApiError {

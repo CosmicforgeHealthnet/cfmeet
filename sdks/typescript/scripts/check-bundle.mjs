@@ -2,9 +2,11 @@
 // Asserts the built SDK (dist/) is safe to ship to any runtime, browsers included:
 //   * no literal credential or signing secret (cfmk_<env>_<id>..., whsec_<secret>);
 //   * no process.env access (credentials come from the application, never the SDK);
-//   * no Node built-in imports (the runtime code uses only web-standard globals).
+//   * no Node built-in imports (the runtime code uses only web-standard globals);
+//   * the test fakes (testing.js, the `./testing` subpath export) are not reachable from
+//     the main entry, so they never end up in an application bundle by accident.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 const dir = process.argv[2] ?? 'dist';
 const rules = [
@@ -40,8 +42,37 @@ if (count === 0) {
   console.error(`no built files under ${dir}: run npm run build first`);
   process.exit(1);
 }
+// Relative import graph of the main entry.
+const importRe = /(?:^|[\s;])(?:import|export)\s*(?:[^'";]*?\sfrom\s*)?['"](\.{1,2}\/[^'"]+)['"]/g;
+const entry = join(dir, 'index.js');
+const reachable = new Set();
+const pending = [entry];
+while (pending.length) {
+  const f = pending.pop();
+  if (reachable.has(f)) continue;
+  reachable.add(f);
+  let text;
+  try {
+    text = readFileSync(f, 'utf8');
+  } catch {
+    problems++;
+    console.error(`${f}: imported but missing`);
+    continue;
+  }
+  for (const m of text.matchAll(importRe)) pending.push(join(dirname(f), m[1]));
+}
+for (const f of reachable) {
+  if (basename(f) === 'testing.js') {
+    problems++;
+    console.error(`${f}: the test fakes are reachable from the main entry ${entry}`);
+  }
+}
+
 if (problems) {
   console.error(`check-bundle: FAILED — ${problems} problem(s)`);
   process.exit(1);
 }
-console.log(`check-bundle: OK — ${count} file(s): no literal credentials or secrets, no process.env, no Node built-ins`);
+console.log(
+  `check-bundle: OK — ${count} file(s): no literal credentials or secrets, no process.env, no Node built-ins; ` +
+    `main entry graph (${reachable.size} module(s)) excludes the test fakes`,
+);

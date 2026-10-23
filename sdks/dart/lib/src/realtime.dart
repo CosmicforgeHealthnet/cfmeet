@@ -16,6 +16,7 @@ import 'errors.dart';
 import 'operation.dart';
 import 'realtime_io.dart' if (dart.library.js_interop) 'realtime_stub.dart'
     as platform_realtime;
+import 'retry.dart';
 
 /// What a connector needs to open one WebSocket.
 class RealtimeHandshake {
@@ -110,6 +111,7 @@ class ReconnectOptions {
     this.maxConsecutiveFailures,
     this.authFailureCloseCodes = defaultAuthFailureCloseCodes,
     this.handshakeTimeout = const Duration(seconds: 15),
+    this.sleeper,
   });
 
   final Duration baseDelay;
@@ -119,6 +121,10 @@ class ReconnectOptions {
   final int? maxConsecutiveFailures;
   final Set<int> authFailureCloseCodes;
   final Duration handshakeTimeout;
+
+  /// Waits between reconnect attempts (null: a real-time timer). Tests inject a fake
+  /// clock (`FakeClock.sleep`); [RealtimeConnection.close] still interrupts the wait.
+  final RetrySleeper? sleeper;
 
   Duration delay(int failures, Random random) {
     final ceiling = min(maxDelay.inMilliseconds,
@@ -217,8 +223,8 @@ class RealtimeConnection {
           result = RealtimeClosed(error: e, byClient: false);
           break;
         }
-        if (!await cancellableDelay(
-            options.delay(failures - 1, _random), _stop)) {
+        if (!await cancellableDelay(options.delay(failures - 1, _random), _stop,
+            sleeper: options.sleeper)) {
           break;
         }
         continue;
@@ -253,8 +259,8 @@ class RealtimeConnection {
         break;
       }
       failures++;
-      if (!await cancellableDelay(
-          options.delay(failures - 1, _random), _stop)) {
+      if (!await cancellableDelay(options.delay(failures - 1, _random), _stop,
+          sleeper: options.sleeper)) {
         break;
       }
     }
