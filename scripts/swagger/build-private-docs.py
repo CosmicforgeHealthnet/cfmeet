@@ -101,10 +101,15 @@ def build(destination: Path) -> None:
     for name, slug, path in SPECS:
         origin = ROOT / "packages" / "contracts" / path
         obj = json.loads(origin.read_text(encoding="utf-8"))
-        if not isinstance(obj.get("paths"), dict) or not obj.get("openapi", "").startswith("3."):
-            raise SystemExit(f"Invalid bundled OpenAPI: {origin}")
-        # The platform/internal-http contract currently has a zero-operation
-        # schema by design; preserve it in the engineering catalog anyway.
+        if not str(obj.get("openapi", "")).startswith("3."):
+            raise SystemExit(f"Invalid OpenAPI version: {origin}")
+        # A shared conventions-only document intentionally declares components
+        # but no paths. Give the generated Swagger document an explicit empty
+        # paths object; do NOT change the authoritative source contract.
+        if slug == "platform-internal-http" and "paths" not in obj:
+            obj["paths"] = {}
+        if not isinstance(obj.get("paths"), dict):
+            raise SystemExit(f"Invalid bundled OpenAPI paths: {origin}")
         if not obj["paths"] and slug != "platform-internal-http":
             raise SystemExit(f"No paths in: {origin}")
         records.append((slug, obj))
