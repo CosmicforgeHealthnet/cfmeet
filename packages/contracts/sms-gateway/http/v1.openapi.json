@@ -5,9 +5,33 @@
     "version": "1.2.0",
     "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB."
   },
+  "tags": [
+    {
+      "name": "Service Health & Discovery",
+      "description": "Read-only health, readiness and OpenAPI discovery checks."
+    },
+    {
+      "name": "SMS Messages",
+      "description": "Send and inspect SMS messages with authorized credentials."
+    },
+    {
+      "name": "SMS Threads",
+      "description": "Read conversations and messages grouped into SMS threads."
+    },
+    {
+      "name": "Provider Callbacks",
+      "description": "Provider-signed delivery and inbound callbacks, not application UI."
+    },
+    {
+      "name": "SMS Opt-Outs",
+      "description": "Record recipients opting out of SMS communications."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service health",
         "operationId": "health",
         "security": [],
         "description": "Liveness.",
@@ -27,6 +51,8 @@
     },
     "/ready": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service readiness",
         "operationId": "ready",
         "security": [],
         "description": "Readiness: database, migrations, provider configured, outbox / unknown-transport backlog (counts only).",
@@ -56,6 +82,8 @@
     },
     "/openapi.json": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Get OpenAPI specification",
         "operationId": "openapi",
         "security": [],
         "description": "This document (the served contract).",
@@ -75,6 +103,8 @@
     },
     "/v1/sms/messages/{messageId}": {
       "get": {
+        "tags": ["SMS Messages"],
+        "summary": "Get Message",
         "operationId": "getMessage",
         "security": [
           {
@@ -123,6 +153,8 @@
     },
     "/v1/sms/messages": {
       "get": {
+        "tags": ["SMS Messages"],
+        "summary": "List Messages",
         "operationId": "listMessages",
         "security": [
           {
@@ -196,6 +228,8 @@
         }
       },
       "post": {
+        "tags": ["SMS Messages"],
+        "summary": "Send Message",
         "operationId": "sendMessage",
         "security": [
           {
@@ -271,6 +305,8 @@
     },
     "/v1/sms/threads": {
       "get": {
+        "tags": ["SMS Threads"],
+        "summary": "List Threads",
         "operationId": "listThreads",
         "security": [
           {
@@ -338,6 +374,8 @@
     },
     "/v1/sms/threads/{threadId}/messages": {
       "get": {
+        "tags": ["SMS Threads"],
+        "summary": "List Thread Messages",
         "operationId": "listThreadMessages",
         "security": [
           {
@@ -408,6 +446,8 @@
     },
     "/provider-callbacks/v1/sms/{providerId}/inbound": {
       "post": {
+        "tags": ["Provider Callbacks"],
+        "summary": "Provider Inbound Callback",
         "operationId": "providerInboundCallback",
         "security": [
           {
@@ -457,6 +497,8 @@
     },
     "/v1/sms/opt-outs": {
       "post": {
+        "tags": ["SMS Opt-Outs"],
+        "summary": "Create Opt Out",
         "operationId": "createOptOut",
         "security": [
           {
@@ -505,6 +547,8 @@
     },
     "/provider-callbacks/v1/sms/{providerId}/delivery-receipts": {
       "post": {
+        "tags": ["Provider Callbacks"],
+        "summary": "Provider Delivery Receipt Callback",
         "operationId": "providerDeliveryReceiptCallback",
         "security": [
           {
