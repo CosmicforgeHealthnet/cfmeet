@@ -17,8 +17,13 @@ def main() -> None:
         out = Path(tmp) / "catalog"
         proc = subprocess.run(
             [sys.executable, str(HERE / "build-private-docs.py"), "--out", str(out)],
-            cwd=ROOT, capture_output=True, text=True, check=True
+            cwd=ROOT, capture_output=True, text=True, check=False
         )
+        if proc.returncode != 0:
+            raise AssertionError(
+                f"Private Swagger catalog builder failed (exit {proc.returncode}): "
+                f"{proc.stderr.strip()} {proc.stdout.strip()}"
+            )
         config = json.loads((out / "swagger-config.json").read_text())
         assert len(config["urls"]) == 12, config["urls"]
         assert len({doc["name"] for doc in config["urls"]}) == 12
