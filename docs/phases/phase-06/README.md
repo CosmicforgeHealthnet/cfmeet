@@ -41,15 +41,18 @@ production secrets, live Nginx routing, the root compose files, every domain ser
 code, contracts and Swagger documents (two Swagger bundles were regenerated only because
 the shared `cfmeet.platform.common` service-identity description changed).
 
-## 3. Explicitly NOT implemented (later sections)
+## 3. Chapters 6–9 (Sections 50–53)
 
-| Section | Work |
-|---|---|
-| 50 | Developer Platform functional API: projects / applications UX, API key management through Platform Access, usage, logs, webhooks management, console features |
-| 51 | The public route catalogue (every domain service route behind the gateway), receiver-side gateway permissions in each domain service, WebSocket forwarding, edge / Nginx migration |
-| 52 | SDK functionality (typed clients, auth helpers, retries, pagination, WebSockets, publishing) |
-| 53–57 | Quotas / rate limiting on Redis, enterprise features and the remaining Part VI chapters |
-| Part VII | Payments, carrier integration, expansion — out of scope |
+Implemented on `staging` after this foundation: the multi-tenant Developer Platform
+control plane (§50), the public API Gateway with its route catalogue, receivers, quotas,
+usage, WebSockets and public documentation (§51), the TypeScript and Dart SDKs (§52) and
+the central webhook platform with domain producers and the Calling migration tooling
+(§53). Requirement matrix and evidence: [`chapters-6-9.md`](chapters-6-9.md); migration
+runbook: [`webhook-migration-runbook.md`](webhook-migration-runbook.md).
+
+Still later sections: §54 credential self-service, §55 production access / usage
+metering, §56–57 integration models, §18 Developer Console UI. Part VII (payments,
+carriers, expansion) is out of scope.
 
 ## 4. Validation evidence
 
