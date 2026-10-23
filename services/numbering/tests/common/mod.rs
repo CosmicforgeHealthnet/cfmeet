@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 pub mod platform_access;
+pub mod receiver;
 
 use std::sync::Arc;
 

@@ -50,6 +50,7 @@
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
 //! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
 //! | `MESSAGING_UNLINKED_ATTACHMENT_HOURS` | no | READY uploads never referenced by a message are deleted after (default 24) |
+//! | `MESSAGING_PUBLIC_EVENTS_DESTINATION` | no | receivers of relayed public events (Part VI §53): `calling` (default — Calling's platform-event ingress, today's customer webhook delivery, unchanged), `developer-platform` (the central event ingestion only; `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the relay row, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -330,6 +331,8 @@ pub struct MessagingConfig {
     pub attachments: AttachmentSettings,
     pub attachment_store: Option<cf_object_storage::S3Config>,
     pub clamav_address: Option<String>,
+    /// `MESSAGING_PUBLIC_EVENTS_DESTINATION` (Part VI §53).
+    pub public_events: crate::webhook_relay::PublicEventsDestination,
     pub log_format: LogFormat,
 }
 
@@ -380,6 +383,7 @@ impl fmt::Debug for MessagingConfig {
             .field("auth_cache", &self.auth_cache)
             .field("workers", &self.workers)
             .field("transparency", &self.transparency)
+            .field("public_events", &self.public_events)
             .finish_non_exhaustive()
     }
 }
@@ -931,6 +935,16 @@ impl MessagingConfig {
                 ));
             }
         }
+        use crate::webhook_relay::PublicEventsDestination;
+        let public_events = match get(PublicEventsDestination::VARIABLE) {
+            None => PublicEventsDestination::default(),
+            Some(v) => PublicEventsDestination::parse(&v).ok_or_else(|| {
+                ConfigError::invalid(
+                    PublicEventsDestination::VARIABLE,
+                    "must be `calling`, `developer-platform` or `both`",
+                )
+            })?,
+        };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -968,6 +982,7 @@ impl MessagingConfig {
             attachments,
             attachment_store,
             clamav_address,
+            public_events,
             log_format,
         })
     }

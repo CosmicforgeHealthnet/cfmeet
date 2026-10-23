@@ -243,22 +243,57 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => tracing::warn!("MESSAGING_KT_CHECKPOINT_FILE is not set: key-transparency rollback detection relies on external auditors only"),
     }
-    // Part V I: customer webhooks through the existing platform webhook system (Calling).
-    let calling_configured = settings
-        .targets
+    // Part V I: customer webhooks through the existing platform webhook system (Calling);
+    // Part VI §53: and / or directly to the Developer Platform's central event ingestion.
+    let has_target = |service: &str| settings.targets.iter().any(|(s, _)| s.as_str() == service);
+    let destination = config.public_events;
+    if destination
+        .destinations()
+        .contains(&messaging::webhook_relay::EventDestination::DeveloperPlatform)
+        && !has_target(cf_service_auth::services::DEVELOPER_PLATFORM)
+    {
+        anyhow::bail!(
+            "MESSAGING_PUBLIC_EVENTS_DESTINATION={} requires CF_DEVELOPER_PLATFORM_BASE_URL",
+            destination.as_str()
+        );
+    }
+    let webhook_sinks: Vec<(
+        messaging::webhook_relay::EventDestination,
+        Arc<dyn messaging::webhook_relay::PlatformEventSink>,
+    )> = destination
+        .destinations()
         .iter()
-        .any(|(s, _)| s.as_str() == cf_service_auth::services::CALLING);
-    let webhook_sink: Arc<dyn messaging::webhook_relay::PlatformEventSink> = if calling_configured {
-        Arc::new(messaging::webhook_relay::CallingPlatformEvents::new(
-            state.service_auth.client(),
-        ))
-    } else {
-        tracing::warn!("CF_CALLING_BASE_URL is not set: webhook-relayed events wait PENDING");
-        Arc::new(messaging::webhook_relay::UnconfiguredSink)
-    };
+        .map(|d| {
+            let sink: Arc<dyn messaging::webhook_relay::PlatformEventSink> = match d {
+                messaging::webhook_relay::EventDestination::Calling
+                    if has_target(cf_service_auth::services::CALLING) =>
+                {
+                    Arc::new(messaging::webhook_relay::CallingPlatformEvents::new(
+                        state.service_auth.client(),
+                    ))
+                }
+                messaging::webhook_relay::EventDestination::Calling => {
+                    tracing::warn!(
+                        "CF_CALLING_BASE_URL is not set: webhook-relayed events wait PENDING"
+                    );
+                    Arc::new(messaging::webhook_relay::UnconfiguredSink)
+                }
+                messaging::webhook_relay::EventDestination::DeveloperPlatform => {
+                    Arc::new(messaging::webhook_relay::DeveloperPlatformEvents::new(
+                        state.service_auth.client(),
+                    ))
+                }
+            };
+            (*d, sink)
+        })
+        .collect();
+    tracing::info!(
+        public_events_destination = destination.as_str(),
+        "webhook relay receivers"
+    );
     tokio::spawn(messaging::webhook_relay::run(
         state.clone(),
-        webhook_sink,
+        webhook_sinks,
         config.workers.interval,
     ));
     tokio::spawn(messaging::conversations::service::run_expiry(

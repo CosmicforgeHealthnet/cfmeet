@@ -87,7 +87,7 @@ Active-call enforcement goes the other way: Privacy Relay calls Calling's
 | `privacy_relay_sessions` (+ `_participants`, `_channels`, `_directions`) | Sessions; containment trigger keeps validity inside the context |
 | `relay_authorization_decisions` | Every AUTHORIZED / DENIED decision with versions and reason |
 | `relay_audit_events` | Append-only, gap-free per context |
-| `privacy_relay_outbox` | Platform event envelope (`cfmeet.privacy-relay.event`); published to Calling's `POST /internal/v1/platform/events` with a lease, bounded retries, `DEAD_LETTER` and operator replay (Part G, ADR 0028) |
+| `privacy_relay_outbox` | Platform event envelope (`cfmeet.privacy-relay.event`); published to Calling's and / or the Developer Platform's `POST /internal/v1/platform/events` (per-receiver outcome columns) with a lease, bounded retries, `DEAD_LETTER` and operator replay (Part G, ADR 0028) |
 | `privacy_relay_commands` | Idempotency (fingerprint + response) |
 | `privacy_relay_enforcement_jobs` | Durable enforcement (PENDING → APPLIED), retried with backoff min(2ⁿ, 300) s |
 
@@ -166,7 +166,11 @@ and `CONTACT_DELEGATION_TRUST_BUNDLE_FILE` (all three required when enabled — 
 fallback, no generated key), `RELAY_NUMBER_POOL_ENABLED`, `RELAY_NUMBER_COOLDOWN_SECONDS`
 (3600–7776000, default 259200 = 72 h), `RELAY_NUMBER_AUTHORITY` (`LOCAL` default — the
 rollback position — or `NUMBERING`) with `NUMBERING_INTERNAL_BASE_URL` (required in `NUMBERING`
-mode).
+mode), `PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION` (Part VI §53: `calling` default — today's
+behaviour — `developer-platform` or `both`, the latter two requiring
+`CF_DEVELOPER_PLATFORM_BASE_URL`; with `both` every receiver's outcome is recorded on the
+outbox row so a retry re-sends only to the receiver that has not accepted, and a permanent
+refusal dead-letters the event once every receiver settled).
 
 **Relay-number authority (Part IV Part P, [ADR 0044](../../docs/decisions/0044-relay-number-authority-migration.md)).**
 In `NUMBERING` mode Numbering is the single inventory authority: the sweep backfills the local

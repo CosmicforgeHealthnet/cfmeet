@@ -15,6 +15,8 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000 (default 5000) |
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (active-call enforcement, platform event publication) |
+//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
+//! | `PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION` | no | receivers of committed relay events: `calling` (default — today's customer webhook delivery, unchanged), `developer-platform` or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the outbox row, a retry re-sends only to the receiver that has not accepted) |
 //!
 //! | `RELAY_NUMBER_POOL_ENABLED` | no | temporary relay-number assignment kill switch (default `false`) |
 //! | `RELAY_NUMBER_COOLDOWN_SECONDS` | no | quarantine of a released relay number, 3600–7776000 (default 259200 = 72 h; zero is never accepted) |
@@ -108,6 +110,8 @@ pub struct RelayConfig {
     pub relay_number_cooldown: Duration,
     /// `RELAY_NUMBER_AUTHORITY` (Part IV Part P).
     pub relay_number_authority: crate::relay_numbers::authority::AuthorityMode,
+    /// `PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION` (Part VI §53).
+    pub public_events: crate::events::PublicEventsDestination,
 }
 
 /// Default relay-number cooldown: 72 hours. A released number keeps receiving delayed
@@ -216,6 +220,15 @@ impl RelayConfig {
             Some(v) => crate::relay_numbers::authority::AuthorityMode::parse(&v)
                 .ok_or_else(|| invalid("RELAY_NUMBER_AUTHORITY", "must be LOCAL or NUMBERING"))?,
         };
+        let public_events = match value(crate::events::PublicEventsDestination::VARIABLE) {
+            None => crate::events::PublicEventsDestination::default(),
+            Some(v) => crate::events::PublicEventsDestination::parse(&v).ok_or_else(|| {
+                invalid(
+                    crate::events::PublicEventsDestination::VARIABLE,
+                    "must be calling, developer-platform or both",
+                )
+            })?,
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -227,6 +240,7 @@ impl RelayConfig {
             relay_number_pool_enabled,
             relay_number_cooldown,
             relay_number_authority,
+            public_events,
         })
     }
 }
@@ -308,6 +322,8 @@ pub struct ServiceAuthSettings {
     pub numbering_base_url: Option<String>,
     /// Part V H: Messaging's internal API (context authority pushes).
     pub messaging_base_url: Option<String>,
+    /// `CF_DEVELOPER_PLATFORM_BASE_URL`: central event ingestion (Part VI §53).
+    pub developer_platform_base_url: Option<String>,
 }
 
 impl ServiceAuthSettings {
@@ -376,6 +392,7 @@ impl ServiceAuthSettings {
             calling_base_url: value("CALLING_INTERNAL_BASE_URL"),
             numbering_base_url: value("NUMBERING_INTERNAL_BASE_URL"),
             messaging_base_url: value("MESSAGING_INTERNAL_BASE_URL"),
+            developer_platform_base_url: value("CF_DEVELOPER_PLATFORM_BASE_URL"),
         })
     }
 
@@ -410,6 +427,11 @@ impl ServiceAuthSettings {
             targets
                 .insert(ServiceId::messaging(), url)
                 .map_err(|e| invalid("MESSAGING_INTERNAL_BASE_URL", e.to_string()))?;
+        }
+        if let Some(url) = &self.developer_platform_base_url {
+            targets
+                .insert(ServiceId::developer_platform(), url)
+                .map_err(|e| invalid("CF_DEVELOPER_PLATFORM_BASE_URL", e.to_string()))?;
         }
         let client = Arc::new(
             InternalServiceClient::new(signer.clone(), targets, self.http_timeout)

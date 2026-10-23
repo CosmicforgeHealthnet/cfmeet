@@ -13,6 +13,8 @@
 //! requests carry real Ed25519 service tokens verified by the gateway's trust bundle.
 #![allow(dead_code)]
 
+pub mod receiver;
+
 use std::{
     collections::{BTreeSet, HashMap},
     sync::{Arc, Mutex as StdMutex},

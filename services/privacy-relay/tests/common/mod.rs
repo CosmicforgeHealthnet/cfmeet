@@ -10,6 +10,8 @@
 //! Ed25519 service identities and pass the real authentication middleware.
 #![allow(dead_code)]
 
+pub mod receiver;
+
 use std::sync::{Arc, Mutex as StdMutex};
 
 use axum::{

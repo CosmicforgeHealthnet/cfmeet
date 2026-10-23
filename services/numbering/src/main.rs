@@ -218,10 +218,49 @@ async fn main() -> anyhow::Result<()> {
     let acquisition = Arc::new(state.acquisition());
     let stewardship = Arc::new(state.stewardship());
 
+    // Part VI §53: the Developer Platform consumes the outbox (public lifecycle events of
+    // customer scopes; everything else is acknowledged without leaving Numbering).
+    {
+        use numbering::infra::{
+            outbox::{OutboxPublisher, PublisherSettings},
+            platform_events::{DeveloperPlatformEvents, PublicEventsDestination},
+        };
+        let dp_configured = settings
+            .targets
+            .iter()
+            .any(|(s, _)| s.as_str() == cf_service_auth::services::DEVELOPER_PLATFORM);
+        match config.public_events {
+            PublicEventsDestination::DeveloperPlatform if dp_configured => {
+                let publisher = Arc::new(OutboxPublisher::new(
+                    db.clone(),
+                    Arc::new(DeveloperPlatformEvents::new(state.service_auth.client())),
+                    clock.clone(),
+                    PublisherSettings {
+                        lease: config.workers.lease,
+                        max_attempts: config.workers.outbox_max_attempts,
+                        retry: config.workers.retry,
+                        batch: 100,
+                    },
+                    runtime.as_str(),
+                ));
+                tokio::spawn(publisher.run(config.workers.interval));
+                tracing::info!(
+                    "public number lifecycle events are published to the Developer Platform"
+                );
+            }
+            PublicEventsDestination::DeveloperPlatform => tracing::warn!(
+                "CF_DEVELOPER_PLATFORM_BASE_URL is not set: outbox events stay PENDING"
+            ),
+            PublicEventsDestination::None => tracing::info!(
+                "NUMBERING_PUBLIC_EVENTS_DESTINATION=none: outbox events stay PENDING"
+            ),
+        }
+    }
+
     // Worker foundation: lease recovery of interrupted jobs (UNKNOWN_OUTCOME parking for
     // provider-affecting ones) and idempotency-key expiry. Business job handlers are
-    // registered by later workstreams; the outbox publisher starts once a consumer
-    // transport is configured (events stay PENDING and visible in /ready until then).
+    // registered by later workstreams; the outbox publisher (above) starts once its
+    // consumer is configured (events stay PENDING and visible in /ready until then).
     {
         let mut runner = JobRunner::new(
             db.clone(),

@@ -121,6 +121,31 @@ struct ClaimedOutbox {
     application_id: Uuid,
     environment_id: Uuid,
     aggregate_id: Uuid,
+    local_outcome: Option<String>,
+    developer_platform_outcome: Option<String>,
+}
+
+/// A receiver accepted the event (never re-sent there).
+pub const OUTCOME_ACCEPTED: &str = "ACCEPTED";
+/// A receiver refused the event for good (never re-sent there).
+pub const OUTCOME_REJECTED: &str = "REJECTED";
+
+/// The receivers of Calling's outbox (Part VI §53, [`super::publication`]): the
+/// in-process webhook pipeline and / or the Developer Platform. At least one is set.
+#[derive(Clone, Copy, Default)]
+pub struct OutboxDestinations<'a> {
+    pub local: Option<&'a dyn EventTransport>,
+    pub developer_platform: Option<&'a dyn EventTransport>,
+}
+
+impl<'a> OutboxDestinations<'a> {
+    /// The in-process webhook pipeline only (today's single receiver).
+    pub fn local(transport: &'a dyn EventTransport) -> Self {
+        Self {
+            local: Some(transport),
+            developer_platform: None,
+        }
+    }
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -155,12 +180,30 @@ fn outbox_backoff(attempt: i32) -> Duration {
 }
 
 impl WebhookService {
-    /// One publisher pass over Calling's transactional outbox.
+    /// One publisher pass over Calling's transactional outbox, to the in-process webhook
+    /// pipeline only (today's single receiver).
     pub async fn publish_outbox_once(
         &self,
         transport: &dyn EventTransport,
         limit: u64,
     ) -> WebhookResult<PublishReport> {
+        self.publish_outbox_to(OutboxDestinations::local(transport), limit)
+            .await
+    }
+
+    /// One publisher pass over Calling's transactional outbox, to every configured
+    /// receiver. A receiver that already settled a row (accepted / refused) is never sent
+    /// it again; the row is PUBLISHED once every receiver accepted it and DEAD_LETTER
+    /// once every receiver settled with a refusal, or at the attempt cap.
+    pub async fn publish_outbox_to(
+        &self,
+        destinations: OutboxDestinations<'_>,
+        limit: u64,
+    ) -> WebhookResult<PublishReport> {
+        if destinations.local.is_none() && destinations.developer_platform.is_none() {
+            // No receiver: nothing is claimed (never marked published undelivered).
+            return Ok(PublishReport::default());
+        }
         let now = self.now();
         let mut report = PublishReport::default();
         // A claim that reached the attempt cap and whose worker died (lease expired, no
@@ -195,7 +238,7 @@ impl WebhookService {
                                AND attempt_count < $4 \
                              ORDER BY next_attempt_at, created_at LIMIT $3 FOR UPDATE SKIP LOCKED) \
              RETURNING o.id, o.envelope, o.attempt_count, o.tenant_id, o.application_id, \
-               o.environment_id, o.aggregate_id",
+               o.environment_id, o.aggregate_id, o.local_outcome, o.developer_platform_outcome",
             vec![
                 (now + Duration::seconds(OUTBOX_LEASE_SECONDS)).into(),
                 now.into(),
@@ -207,65 +250,123 @@ impl WebhookService {
         .await
         .db()?;
         for row in claimed {
-            let outcome = transport
-                .publish(super::worker::PRODUCER_CALLING, &row.envelope)
-                .await;
+            let mut local = row.local_outcome.clone();
+            let mut developer_platform = row.developer_platform_outcome.clone();
+            let mut refusal: Option<&'static str> = None;
+            let mut transient: Option<&'static str> = None;
+            for (transport, slot) in [
+                (destinations.local, &mut local),
+                (destinations.developer_platform, &mut developer_platform),
+            ] {
+                let Some(transport) = transport else {
+                    continue;
+                };
+                if slot.is_some() {
+                    continue;
+                }
+                match transport
+                    .publish(super::worker::PRODUCER_CALLING, &row.envelope)
+                    .await
+                {
+                    Ok(()) => *slot = Some(OUTCOME_ACCEPTED.to_string()),
+                    Err(code) if super::publication::is_permanent(code) => {
+                        *slot = Some(OUTCOME_REJECTED.to_string());
+                        refusal.get_or_insert(code);
+                    }
+                    Err(code) => {
+                        transient.get_or_insert(code);
+                    }
+                }
+            }
+            let configured = [
+                (destinations.local.is_some(), local.as_deref()),
+                (
+                    destinations.developer_platform.is_some(),
+                    developer_platform.as_deref(),
+                ),
+            ];
+            let all_settled = configured.iter().all(|(on, o)| !on || o.is_some());
+            let any_refused = configured
+                .iter()
+                .any(|(on, o)| *on && *o == Some(OUTCOME_REJECTED));
             let now = self.now();
-            match outcome {
-                Ok(()) => {
-                    self.db()
-                        .execute(stmt(
-                            "UPDATE calling_outbox_events SET status = 'PUBLISHED', published_at = $2, \
-                               lease_until = NULL, last_error_code = NULL, updated_at = $2 \
-                             WHERE id = $1 AND status = 'PENDING' AND attempt_count = $3",
-                            vec![row.id.into(), now.into(), row.attempt_count.into()],
-                        ))
-                        .await
-                        .db()?;
-                    report.published += 1;
-                }
-                Err(code) if row.attempt_count >= OUTBOX_MAX_ATTEMPTS => {
-                    self.db()
-                        .execute(stmt(
-                            "UPDATE calling_outbox_events SET status = 'DEAD_LETTER', lease_until = NULL, \
-                               last_error_code = $2, updated_at = $3 \
-                             WHERE id = $1 AND status = 'PENDING' AND attempt_count = $4",
-                            vec![row.id.into(), code.into(), now.into(), row.attempt_count.into()],
-                        ))
-                        .await
-                        .db()?;
-                    tracing::error!(outbox_id = %row.id, call_id = %row.aggregate_id, code, "outbox event dead-lettered");
-                    self.outbox_dead_letter_incident(
-                        &DeadLettered {
-                            id: row.id,
-                            tenant_id: row.tenant_id,
-                            application_id: row.application_id,
-                            environment_id: row.environment_id,
-                            aggregate_id: row.aggregate_id,
-                        },
-                        code,
-                    )
-                    .await;
-                    report.dead_lettered += 1;
-                }
-                Err(code) => {
-                    self.db()
-                        .execute(stmt(
-                            "UPDATE calling_outbox_events SET next_attempt_at = $2, lease_until = NULL, \
-                               last_error_code = $3, updated_at = $4 \
-                             WHERE id = $1 AND status = 'PENDING' AND attempt_count = $5",
-                            vec![
-                                row.id.into(),
-                                (now + outbox_backoff(row.attempt_count)).into(),
-                                code.into(),
-                                now.into(),
-                                row.attempt_count.into(),
-                            ],
-                        ))
-                        .await
-                        .db()?;
-                    report.retried += 1;
-                }
+            let dead_code = if all_settled && any_refused {
+                Some(refusal.unwrap_or(super::publication::DEVELOPER_PLATFORM_REJECTED))
+            } else if !all_settled && row.attempt_count >= OUTBOX_MAX_ATTEMPTS {
+                Some(transient.unwrap_or("UNAVAILABLE"))
+            } else {
+                None
+            };
+            if all_settled && !any_refused {
+                self.db()
+                    .execute(stmt(
+                        "UPDATE calling_outbox_events SET status = 'PUBLISHED', published_at = $2, \
+                           lease_until = NULL, last_error_code = NULL, updated_at = $2, \
+                           local_outcome = $4, developer_platform_outcome = $5 \
+                         WHERE id = $1 AND status = 'PENDING' AND attempt_count = $3",
+                        vec![
+                            row.id.into(),
+                            now.into(),
+                            row.attempt_count.into(),
+                            local.into(),
+                            developer_platform.into(),
+                        ],
+                    ))
+                    .await
+                    .db()?;
+                report.published += 1;
+            } else if let Some(code) = dead_code {
+                self.db()
+                    .execute(stmt(
+                        "UPDATE calling_outbox_events SET status = 'DEAD_LETTER', lease_until = NULL, \
+                           last_error_code = $2, updated_at = $3, \
+                           local_outcome = $5, developer_platform_outcome = $6 \
+                         WHERE id = $1 AND status = 'PENDING' AND attempt_count = $4",
+                        vec![
+                            row.id.into(),
+                            code.into(),
+                            now.into(),
+                            row.attempt_count.into(),
+                            local.into(),
+                            developer_platform.into(),
+                        ],
+                    ))
+                    .await
+                    .db()?;
+                tracing::error!(outbox_id = %row.id, call_id = %row.aggregate_id, code, "outbox event dead-lettered");
+                self.outbox_dead_letter_incident(
+                    &DeadLettered {
+                        id: row.id,
+                        tenant_id: row.tenant_id,
+                        application_id: row.application_id,
+                        environment_id: row.environment_id,
+                        aggregate_id: row.aggregate_id,
+                    },
+                    code,
+                )
+                .await;
+                report.dead_lettered += 1;
+            } else {
+                let code = transient.unwrap_or("UNAVAILABLE");
+                self.db()
+                    .execute(stmt(
+                        "UPDATE calling_outbox_events SET next_attempt_at = $2, lease_until = NULL, \
+                           last_error_code = $3, updated_at = $4, \
+                           local_outcome = $6, developer_platform_outcome = $7 \
+                         WHERE id = $1 AND status = 'PENDING' AND attempt_count = $5",
+                        vec![
+                            row.id.into(),
+                            (now + outbox_backoff(row.attempt_count)).into(),
+                            code.into(),
+                            now.into(),
+                            row.attempt_count.into(),
+                            local.into(),
+                            developer_platform.into(),
+                        ],
+                    ))
+                    .await
+                    .db()?;
+                report.retried += 1;
             }
         }
         if report.published + report.retried + report.dead_lettered > 0 {
@@ -305,15 +406,17 @@ impl WebhookService {
         incidents::raise(self.db(), &incident, self.now()).await;
     }
 
-    /// Operator replay of a dead-lettered outbox event (it is published again; consumers
-    /// dedupe on the event id).
+    /// Operator replay of a dead-lettered outbox event (it is published again to every
+    /// receiver that has not accepted it; consumers dedupe on the event id).
     pub async fn replay_dead_lettered_outbox(&self, event_id: &str) -> WebhookResult<bool> {
         let now = self.now();
         Ok(self
             .db()
             .execute(stmt(
                 "UPDATE calling_outbox_events SET status = 'PENDING', attempt_count = 0, \
-                   next_attempt_at = $2, lease_until = NULL, last_error_code = NULL, updated_at = $2 \
+                   next_attempt_at = $2, lease_until = NULL, last_error_code = NULL, updated_at = $2, \
+                   local_outcome = NULLIF(local_outcome, 'REJECTED'), \
+                   developer_platform_outcome = NULLIF(developer_platform_outcome, 'REJECTED') \
                  WHERE event_id = $1 AND status = 'DEAD_LETTER'",
                 vec![event_id.into(), now.into()],
             ))

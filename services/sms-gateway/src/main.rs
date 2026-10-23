@@ -15,7 +15,7 @@ use sms_gateway::{
     identity::{PlatformAccessAuthority, PlatformAccessPrincipals},
     infra::{
         outbox::{OutboxPublisher, PublisherSettings},
-        platform_events::PlatformEventTransport,
+        platform_events::{EventDestination, PlatformEventTransport},
     },
     metrics,
     numbering::{HttpNumbering, NumberingPort, UnconfiguredNumbering},
@@ -100,12 +100,31 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_NUMBERING_BASE_URL is not set: every SMS operation fails closed");
         Arc::new(UnconfiguredNumbering)
     };
-    let publish_events = has_target(cf_service_auth::services::CALLING);
+    // Part VI §53: committed events go to Calling, the Developer Platform or both.
+    let destination = config.public_events;
+    if destination
+        .destinations()
+        .contains(&EventDestination::DeveloperPlatform)
+        && !has_target(cf_service_auth::services::DEVELOPER_PLATFORM)
+    {
+        fatal(
+            "configuration error",
+            format!(
+                "SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION={} requires CF_DEVELOPER_PLATFORM_BASE_URL",
+                destination.as_str()
+            ),
+        );
+    }
+    let publish_events = destination
+        .destinations()
+        .iter()
+        .all(|d| has_target(d.service().as_str()));
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime,
         provider = provider.as_ref().map(|p| p.id().to_string()).unwrap_or_else(|| "none".into()),
         publish_events,
+        public_events_destination = destination.as_str(),
         "sms gateway configuration loaded"
     );
 
@@ -153,11 +172,22 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_provider(p);
     }
 
-    // Event publication to the platform's customer webhook delivery (Calling).
+    // Event publication to the platform's customer webhook delivery (Calling and / or the
+    // Developer Platform).
     if publish_events {
-        let publisher = Arc::new(OutboxPublisher::new(
+        let publisher = Arc::new(OutboxPublisher::with_destinations(
             db.clone(),
-            Arc::new(PlatformEventTransport::new(service_auth.client())),
+            destination
+                .destinations()
+                .iter()
+                .map(|d| {
+                    (
+                        *d,
+                        Arc::new(PlatformEventTransport::to(service_auth.client(), *d))
+                            as Arc<dyn sms_gateway::infra::outbox::EventTransport>,
+                    )
+                })
+                .collect(),
             clock.clone(),
             PublisherSettings {
                 lease: config.workers.lease,

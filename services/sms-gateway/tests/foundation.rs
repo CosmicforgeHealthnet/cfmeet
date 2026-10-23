@@ -753,3 +753,307 @@ async fn rate_windows_count_hits_and_the_sweep_purges_only_expired_windows() {
     );
     assert_eq!(h.scalar("SELECT count(*) FROM sms_rate_windows").await, 1);
 }
+
+// ---------------------------------------------------------------------------------------
+// Part VI §53: direct publication to the Developer Platform (destinations)
+// ---------------------------------------------------------------------------------------
+
+mod destinations {
+    use super::*;
+    use cf_service_auth::ServiceId;
+    use common::receiver::{producer_client, signing_key, Receiver};
+    use sms_gateway::infra::platform_events::{
+        EventDestination, PlatformEventTransport, PublicEventsDestination,
+    };
+
+    struct Setup {
+        calling: Receiver,
+        dp: Receiver,
+        publisher: OutboxPublisher,
+    }
+
+    /// Real HTTP receivers verifying the SMS Gateway's real service token; the publisher
+    /// is wired exactly as `main` wires `SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION`.
+    async fn setup(h: &Harness, destination: PublicEventsDestination) -> Setup {
+        let me = ServiceId::sms_gateway();
+        let key = signing_key("sms-gateway-dest-1");
+        let calling = Receiver::calling(&me, &key, RuntimeEnvironment::Test).await;
+        let dp = Receiver::developer_platform(&me, &key, RuntimeEnvironment::Test).await;
+        let client = producer_client(me, key, RuntimeEnvironment::Test, &[&calling, &dp]);
+        let publisher = OutboxPublisher::with_destinations(
+            h.conn().clone(),
+            destination
+                .destinations()
+                .iter()
+                .map(|d| {
+                    (
+                        *d,
+                        Arc::new(PlatformEventTransport::to(client.clone(), *d))
+                            as Arc<dyn EventTransport>,
+                    )
+                })
+                .collect(),
+            Arc::new(h.clock.clone()),
+            PublisherSettings {
+                lease: chrono::Duration::seconds(30),
+                max_attempts: 5,
+                retry: RetryPolicy::default(),
+                batch: 10,
+            },
+            "test",
+        );
+        Setup {
+            calling,
+            dp,
+            publisher,
+        }
+    }
+
+    async fn two_events(h: &Harness) -> TransportRow {
+        let ctx = RequestContext::generate();
+        let t = seed(h, Direction::Outbound).await;
+        for e in [MessageEvent::Requested, MessageEvent::Submitted] {
+            record(h.conn(), &t, e, &ctx, h.now()).await.unwrap();
+        }
+        t
+    }
+
+    fn assert_safe(envelopes: &[Value]) {
+        for e in envelopes {
+            assert_eq!(e["producer_service"], "cfmeet.sms-gateway");
+            assert!(e["event_id"].as_str().unwrap().starts_with("evt_"));
+            assert!(e["ownership"]["application_environment_id"].is_string());
+            common::conforms("platform/events/envelope/v1.schema.json", e);
+            let text = e.to_string();
+            for leak in [
+                REMOTE,
+                TEXT,
+                "sealed",
+                "fingerprint",
+                "provider_message_ref",
+            ] {
+                assert!(!text.contains(leak), "{leak} in {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_destination_is_calling_only() {
+        assert_eq!(
+            PublicEventsDestination::default().destinations(),
+            &[EventDestination::Calling]
+        );
+    }
+
+    #[tokio::test]
+    async fn developer_platform_only_publishes_to_the_developer_platform() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        two_events(&h).await;
+        let s = setup(&h, PublicEventsDestination::DeveloperPlatform).await;
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.published, 1, "{r:?}");
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.published, 1, "{r:?}");
+        assert!(s.calling.attempts().is_empty(), "Calling receives nothing");
+        let seen = s.dp.accepted();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0]["event_type"], "sms-gateway.message.requested");
+        assert_safe(&seen);
+        // The hop continues the committed correlation id.
+        for (e, correlation) in s.dp.attempts() {
+            assert_eq!(e["correlation_id"].as_str().unwrap(), correlation);
+        }
+        assert_eq!(
+            h.scalar(
+                "SELECT count(*) FROM sms_outbox_events WHERE status = 'PUBLISHED' \
+                   AND developer_platform_outcome = 'ACCEPTED' AND calling_outcome IS NULL"
+            )
+            .await,
+            2
+        );
+        // Published once.
+        assert_eq!(s.publisher.publish_due().await.unwrap().claimed, 0);
+    }
+
+    #[tokio::test]
+    async fn the_default_publishes_to_calling_only() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        two_events(&h).await;
+        let s = setup(&h, PublicEventsDestination::default()).await;
+        s.publisher.publish_due().await.unwrap();
+        s.publisher.publish_due().await.unwrap();
+        assert_eq!(s.calling.accepted().len(), 2);
+        assert_safe(&s.calling.accepted());
+        assert!(
+            s.dp.attempts().is_empty(),
+            "the Developer Platform receives nothing"
+        );
+        assert_eq!(
+            h.scalar(
+                "SELECT count(*) FROM sms_outbox_events WHERE status = 'PUBLISHED' \
+                   AND calling_outcome = 'ACCEPTED' AND developer_platform_outcome IS NULL"
+            )
+            .await,
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn both_publishes_once_each_and_a_retry_resends_only_to_the_failed_receiver() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        let t = two_events(&h).await;
+        let s = setup(&h, PublicEventsDestination::Both).await;
+        // The Developer Platform is down for the first attempt.
+        s.dp.script(&[(503, "UNAVAILABLE")]);
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!((r.claimed, r.retried, r.published), (1, 1, 0), "{r:?}");
+        assert_eq!(s.calling.accepted().len(), 1);
+        assert!(s.dp.accepted().is_empty());
+        assert_eq!(
+            h.scalar(
+                "SELECT count(*) FROM sms_outbox_events WHERE status = 'PENDING' AND attempts = 1 \
+                   AND calling_outcome = 'ACCEPTED' AND developer_platform_outcome IS NULL \
+                   AND last_error LIKE 'developer-platform: %503%'"
+            )
+            .await,
+            1
+        );
+        // The retry goes to the Developer Platform only; order is kept per message.
+        h.advance(3600);
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.published, 1, "{r:?}");
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.published, 1, "{r:?}");
+        assert_eq!(
+            s.calling.attempts().len(),
+            2,
+            "exactly once per event at Calling"
+        );
+        assert_eq!(s.dp.accepted().len(), 2);
+        assert_eq!(
+            s.dp.attempts().len(),
+            3,
+            "one failed attempt + once per event"
+        );
+        let ids = |r: &Receiver| -> Vec<String> {
+            r.accepted()
+                .iter()
+                .map(|e| e["event_id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(ids(&s.calling), ids(&s.dp), "the same envelopes, same ids");
+        assert_eq!(s.calling.accepted(), s.dp.accepted());
+        assert_safe(&s.dp.accepted());
+        assert_eq!(
+            h.scalar(&format!(
+                "SELECT count(*) FROM sms_outbox_events WHERE aggregate_id = '{}' AND status = 'PUBLISHED' \
+                   AND calling_outcome = 'ACCEPTED' AND developer_platform_outcome = 'ACCEPTED'",
+                t.id
+            ))
+            .await,
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn refusals_dead_letter_as_before_and_throttling_retries() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        two_events(&h).await;
+        // Single receiver: a 4xx refusal dead-letters at once (unchanged semantics).
+        let s = setup(&h, PublicEventsDestination::DeveloperPlatform).await;
+        s.dp.script(&[(429, "RATE_LIMITED"), (422, "INVALID_EVENT")]);
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.retried, 1, "RATE_LIMITED is transient: {r:?}");
+        h.advance(3600);
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.dead_lettered, 1, "{r:?}");
+        assert_eq!(
+            h.scalar(
+                "SELECT count(*) FROM sms_outbox_events WHERE status = 'DEAD_LETTER' \
+                   AND developer_platform_outcome = 'REJECTED' \
+                   AND last_error = 'developer-platform: REFUSED INVALID_EVENT'"
+            )
+            .await,
+            1
+        );
+        // The message's next event is no longer held back by the dead letter.
+        assert_eq!(s.publisher.publish_due().await.unwrap().published, 1);
+        // Both: Calling accepts, the Developer Platform refuses -> Calling is not held
+        // back, the event dead-letters once both settled, and nothing is re-sent.
+        let ctx = RequestContext::generate();
+        let t = seed(&h, Direction::Outbound).await;
+        record(h.conn(), &t, MessageEvent::Requested, &ctx, h.now())
+            .await
+            .unwrap();
+        let s = setup(&h, PublicEventsDestination::Both).await;
+        s.dp.script(&[(400, "INVALID_EVENT")]);
+        let r = s.publisher.publish_due().await.unwrap();
+        assert_eq!(r.dead_lettered, 1, "{r:?}");
+        assert_eq!(
+            h.scalar(&format!(
+                "SELECT count(*) FROM sms_outbox_events WHERE aggregate_id = '{}' AND status = 'DEAD_LETTER' \
+                   AND calling_outcome = 'ACCEPTED' AND developer_platform_outcome = 'REJECTED'",
+                t.id
+            ))
+            .await,
+            1
+        );
+        h.advance(3600);
+        s.publisher.publish_due().await.unwrap();
+        let calling_ids: Vec<Value> = s
+            .calling
+            .attempts()
+            .iter()
+            .map(|(e, _)| e["event_id"].clone())
+            .collect();
+        let unique: std::collections::BTreeSet<String> =
+            calling_ids.iter().map(|v| v.to_string()).collect();
+        assert_eq!(unique.len(), calling_ids.len(), "never re-sent to Calling");
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_producer_key_is_refused_by_the_receiver() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        two_events(&h).await;
+        let me = ServiceId::sms_gateway();
+        let trusted = signing_key("sms-gateway-dest-1");
+        let dp = Receiver::developer_platform(&me, &trusted, RuntimeEnvironment::Test).await;
+        let rogue = producer_client(
+            me,
+            signing_key("sms-gateway-dest-2"),
+            RuntimeEnvironment::Test,
+            &[&dp],
+        );
+        let publisher = OutboxPublisher::with_destinations(
+            h.conn().clone(),
+            vec![(
+                EventDestination::DeveloperPlatform,
+                Arc::new(PlatformEventTransport::to(
+                    rogue,
+                    EventDestination::DeveloperPlatform,
+                )) as Arc<dyn EventTransport>,
+            )],
+            Arc::new(h.clock.clone()),
+            PublisherSettings {
+                lease: chrono::Duration::seconds(30),
+                max_attempts: 5,
+                retry: RetryPolicy::default(),
+                batch: 10,
+            },
+            "test",
+        );
+        publisher.publish_due().await.unwrap();
+        assert_eq!(dp.unauthenticated(), 1);
+        assert!(dp.accepted().is_empty());
+    }
+}

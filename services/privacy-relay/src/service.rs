@@ -41,8 +41,12 @@ pub struct RelayService {
     pub(crate) contact_feature: FeatureFlag,
     /// RELAY_NUMBER_POOL_ENABLED + cooldown (§34).
     pub(crate) relay_numbers: crate::relay_numbers::RelayNumberPoolSettings,
-    /// Durable event publication transport (Part G §67).
+    /// Durable event publication transport to Calling (Part G §67).
     pub(crate) events: Arc<dyn crate::events::EventPublisher>,
+    /// Publication transport to the Developer Platform (Part VI §53).
+    pub(crate) developer_events: Arc<dyn crate::events::EventPublisher>,
+    /// `PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION`: the receivers of committed events.
+    pub(crate) public_events: crate::events::PublicEventsDestination,
     /// `RELAY_NUMBER_AUTHORITY` (Part IV Part P): LOCAL (default / rollback) or NUMBERING.
     pub(crate) authority_mode: crate::relay_numbers::authority::AuthorityMode,
     /// Numbering's relay-number authority (leases); None = not configured.
@@ -79,6 +83,8 @@ impl RelayService {
             contact_feature: FeatureFlag::new(false),
             relay_numbers: Default::default(),
             events: Arc::new(crate::events::NoEventPublisher),
+            developer_events: Arc::new(crate::events::NoEventPublisher),
+            public_events: Default::default(),
             authority_mode: Default::default(),
             number_authority: None,
             numbering_cutover: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -119,6 +125,24 @@ impl RelayService {
     /// The transport committed outbox events are published through (Part G §67).
     pub fn with_event_publisher(mut self, events: Arc<dyn crate::events::EventPublisher>) -> Self {
         self.events = events;
+        self
+    }
+
+    /// The transport to the Developer Platform's event ingestion (Part VI §53).
+    pub fn with_developer_event_publisher(
+        mut self,
+        events: Arc<dyn crate::events::EventPublisher>,
+    ) -> Self {
+        self.developer_events = events;
+        self
+    }
+
+    /// The receivers committed events are published to (default: Calling only).
+    pub fn with_public_events_destination(
+        mut self,
+        destination: crate::events::PublicEventsDestination,
+    ) -> Self {
+        self.public_events = destination;
         self
     }
 

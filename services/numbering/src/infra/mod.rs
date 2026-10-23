@@ -5,11 +5,14 @@
 //! * [`jobs`] — a generic leased job queue: claim tokens, lease expiry recovery, bounded
 //!   retry, DEAD_LETTER for exhausted work and UNKNOWN_OUTCOME parking for work that may
 //!   have reached an external provider (never blindly repeated);
-//! * [`idempotency`] — scoped idempotency keys with request fingerprints.
+//! * [`idempotency`] — scoped idempotency keys with request fingerprints;
+//! * [`platform_events`] — the Developer Platform as the outbox's consumer: public number
+//!   lifecycle events of customer scopes (Part VI §53).
 
 pub mod idempotency;
 pub mod jobs;
 pub mod outbox;
+pub mod platform_events;
 
 use chrono::Duration;
 

@@ -96,6 +96,13 @@ Platform Access must run too (`make platform-access`); its trust bundle must gra
 operations then refuse every caller). SMS Gateway / Calling are optional
 (`CF_SMS_GATEWAY_BASE_URL`, `CF_CALLING_BASE_URL`); without them bridges are refused and
 webhook relays wait, in-app messaging is unaffected.
+`MESSAGING_PUBLIC_EVENTS_DESTINATION` (Part VI §53) chooses the receivers of relayed
+public events: `calling` (default — today's behaviour), `developer-platform` (the
+Developer Platform's central event ingestion, `developer-event.publish`; requires
+`CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each
+receiver's outcome is recorded on the `messaging_webhook_relay` row, so a retry re-sends
+only to the receiver that has not accepted, and a refusal dead-letters the event once every
+receiver settled).
 
 Operator CLI (no network API):
 

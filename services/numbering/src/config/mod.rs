@@ -11,6 +11,7 @@
 //! | `NUMBERING_OUTBOX_MAX_ATTEMPTS` | no | publication attempts before DEAD_LETTER (1–100, default 12) |
 //! | `NUMBERING_RETRY_BASE_MS` / `NUMBERING_RETRY_MAX_MS` | no | exponential backoff bounds (default 1000 / 300000) |
 //! | `NUMBERING_IDEMPOTENCY_TTL_HOURS` | no | how long idempotency keys are kept (1–720, default 24) |
+//! | `NUMBERING_PUBLIC_EVENTS_DESTINATION` | no | `developer-platform` (default) publishes the public number lifecycle events of customer scopes (reservation, assignment, suspension / restoration, release, port) to the Developer Platform (Part VI §53; shadow ingestion until the webhook cutover, so nothing customer-visible changes; without `CF_DEVELOPER_PLATFORM_BASE_URL` events stay PENDING as before); `none` publishes nothing |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Acquisition limits (`NUMBERING_SEARCH_*`, `NUMBERING_RESERVATION_TTL_SECONDS`,
@@ -88,6 +89,8 @@ pub struct NumberingConfig {
     pub bind_address: SocketAddr,
     pub metrics_address: Option<SocketAddr>,
     pub workers: WorkerSettings,
+    /// Receiver of public lifecycle events (Part VI §53).
+    pub public_events: crate::infra::platform_events::PublicEventsDestination,
     pub log_format: LogFormat,
 }
 
@@ -99,6 +102,7 @@ impl fmt::Debug for NumberingConfig {
             .field("bind_address", &self.bind_address)
             .field("metrics_address", &self.metrics_address)
             .field("workers", &self.workers)
+            .field("public_events", &self.public_events)
             .field("log_format", &self.log_format)
             .finish()
     }
@@ -207,6 +211,16 @@ impl NumberingConfig {
                 720,
             )?),
         };
+        use crate::infra::platform_events::PublicEventsDestination;
+        let public_events = match get(PublicEventsDestination::VARIABLE) {
+            None => PublicEventsDestination::default(),
+            Some(v) => PublicEventsDestination::parse(&v).ok_or_else(|| {
+                ConfigError::invalid(
+                    PublicEventsDestination::VARIABLE,
+                    "must be `developer-platform` or `none`",
+                )
+            })?,
+        };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -223,6 +237,7 @@ impl NumberingConfig {
             bind_address,
             metrics_address,
             workers,
+            public_events,
             log_format,
         })
     }

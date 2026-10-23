@@ -5,8 +5,9 @@
 //! privacy_relay_outbox ─▶ Privacy Relay publisher ─▶ POST /internal/v1/platform/events
 //!            │                                             │
 //!            ▼                                             ▼
-//!   publisher (SKIP LOCKED + lease, bounded retry, DEAD_LETTER, replay) ─▶ EventTransport
-//!            │   (local transport: project ─▶ webhook_events ─▶ matching subscriptions)
+//!   publisher (SKIP LOCKED + lease, bounded retry, DEAD_LETTER, replay) ─▶ EventTransport(s)
+//!            │   (local transport: project ─▶ webhook_events ─▶ matching subscriptions;
+//!            │    Part VI §53: and / or the Developer Platform, see [`publication`])
 //!            ▼
 //!   webhook_deliveries (one per subscription × event) ─▶ delivery worker (SKIP LOCKED +
 //!   lease) ─▶ SSRF-safe signed POST ─▶ SUCCEEDED | RETRY_SCHEDULED (jittered backoff)
@@ -21,6 +22,7 @@ pub mod http;
 pub mod ingest;
 pub mod keys;
 pub mod notices;
+pub mod publication;
 pub mod worker;
 
 use std::{sync::Arc, time::Duration};

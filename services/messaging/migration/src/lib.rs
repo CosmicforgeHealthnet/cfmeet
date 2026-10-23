@@ -38,6 +38,7 @@ mod m20261127_000025_usage_jobs_incidents;
 mod m20261128_000026_conversation_successors;
 mod m20261129_000027_member_roles_invitations;
 mod m20261130_000028_privacy_controls;
+mod m20261201_000029_public_event_destinations;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -76,6 +77,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261128_000026_conversation_successors::Migration),
             Box::new(m20261129_000027_member_roles_invitations::Migration),
             Box::new(m20261130_000028_privacy_controls::Migration),
+            Box::new(m20261201_000029_public_event_destinations::Migration),
         ]
     }
 

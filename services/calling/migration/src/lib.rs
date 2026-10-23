@@ -52,6 +52,7 @@ mod m20261015_000043_calling_operational_safeguards;
 mod m20261016_000044_platform_access_projection;
 mod m20261025_000045_sms_webhook_producer;
 mod m20261113_000046_messaging_webhook_producer;
+mod m20261201_000047_public_event_destinations;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -107,6 +108,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_000044_platform_access_projection::Migration),
             Box::new(m20261025_000045_sms_webhook_producer::Migration),
             Box::new(m20261113_000046_messaging_webhook_producer::Migration),
+            Box::new(m20261201_000047_public_event_destinations::Migration),
         ]
     }
 

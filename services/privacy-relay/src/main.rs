@@ -158,6 +158,34 @@ async fn main() -> anyhow::Result<()> {
     } else {
         relay
     };
+    // Part VI §53: Calling, the Developer Platform or both (shadow comparison).
+    let destination = config.public_events;
+    if destination
+        .destinations()
+        .contains(&privacy_relay::events::EventDestination::DeveloperPlatform)
+        && settings.developer_platform_base_url.is_none()
+    {
+        eprintln!(
+            "privacy-relay: PRIVACY_RELAY_PUBLIC_EVENTS_DESTINATION={} requires CF_DEVELOPER_PLATFORM_BASE_URL",
+            destination.as_str()
+        );
+        std::process::exit(2);
+    }
+    let relay = if settings.developer_platform_base_url.is_some() {
+        relay.with_developer_event_publisher(Arc::new(
+            privacy_relay::events::HttpEventPublisher::to(
+                service_auth.client().clone(),
+                privacy_relay::events::EventDestination::DeveloperPlatform,
+            ),
+        ))
+    } else {
+        relay
+    }
+    .with_public_events_destination(destination);
+    tracing::info!(
+        public_events_destination = destination.as_str(),
+        "public event receivers"
+    );
     // Part IV Part P: the relay-number authority. NUMBERING without Numbering's address
     // is a configuration error (it would refuse every assignment).
     if config.relay_number_authority

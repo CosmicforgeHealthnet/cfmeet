@@ -14,6 +14,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20261025_000001_sms_foundation;
 mod m20261027_000002_sms_outbound;
 mod m20261028_000003_sms_bridge;
+mod m20261101_000004_public_event_destinations;
 
 /// Name of the table recording which SMS Gateway migrations have been applied.
 pub const MIGRATION_TABLE: &str = "sms_gateway_seaql_migrations";
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261025_000001_sms_foundation::Migration),
             Box::new(m20261027_000002_sms_outbound::Migration),
             Box::new(m20261028_000003_sms_bridge::Migration),
+            Box::new(m20261101_000004_public_event_destinations::Migration),
         ]
     }
 

@@ -13,6 +13,7 @@
 pub mod flows;
 pub mod gate;
 pub mod realtime;
+pub mod receiver;
 
 use std::{
     collections::{BTreeSet, HashMap},

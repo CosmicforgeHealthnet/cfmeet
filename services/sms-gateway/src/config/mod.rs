@@ -34,6 +34,7 @@
 //! | `SMS_GATEWAY_MAX_SEGMENTS` | no | segments per message (1–10, default 10) |
 //! | `SMS_GATEWAY_COST_SPIKE_FACTOR` / `SMS_GATEWAY_COST_SPIKE_MIN_SAMPLES` | no | cost-spike circuit (confirmed cost per segment > factor × estimate over the last hour; defaults 3 / 5) |
 //! | `SMS_GATEWAY_PROVIDER_ANOMALY_PERCENT` / `SMS_GATEWAY_PROVIDER_ANOMALY_MIN_ATTEMPTS` | no | provider anomaly circuit (rejected / unknown share of the last 15 minutes' attempts; defaults 50 / 10) |
+//! | `SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION` | no | where committed events are published (Part VI §53): `calling` (default — today's customer webhook delivery, unchanged), `developer-platform` (the central receiver only; needs `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. Keys are read from FILES
@@ -206,6 +207,8 @@ pub struct SmsGatewayConfig {
     pub provider: ProviderChoice,
     pub transport: TransportSettings,
     pub controls: ControlSettings,
+    /// Receivers of committed events (Part VI §53).
+    pub public_events: crate::infra::platform_events::PublicEventsDestination,
     pub log_format: LogFormat,
 }
 
@@ -219,6 +222,7 @@ impl fmt::Debug for SmsGatewayConfig {
             .field("provider", &self.provider)
             .field("transport", &self.transport)
             .field("controls", &self.controls)
+            .field("public_events", &self.public_events)
             .finish_non_exhaustive()
     }
 }
@@ -556,6 +560,16 @@ impl SmsGatewayConfig {
                 100_000,
             )?,
         };
+        use crate::infra::platform_events::PublicEventsDestination;
+        let public_events = match get(PublicEventsDestination::VARIABLE) {
+            None => PublicEventsDestination::default(),
+            Some(v) => PublicEventsDestination::parse(&v).ok_or_else(|| {
+                ConfigError::invalid(
+                    PublicEventsDestination::VARIABLE,
+                    "must be `calling`, `developer-platform` or `both`",
+                )
+            })?,
+        };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -576,6 +590,7 @@ impl SmsGatewayConfig {
             provider,
             transport,
             controls,
+            public_events,
             log_format,
         })
     }

@@ -12,6 +12,7 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
 //! | `CF_NUMBERING_BASE_URL` | no | Numbering (unset: every SMS operation fails closed) |
 //! | `CF_CALLING_BASE_URL` | no | Calling's platform-event ingress (unset: events stay in the outbox) |
+//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's event ingestion (`developer-event.publish`, Part VI §53) |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer the SMS Gateway's
 //! own trust bundle grants the route's permission. Outbound, the SMS Gateway calls Platform
@@ -107,6 +108,12 @@ const TARGETS: &[(&str, &str)] = &[
     ("CF_CALLING_BASE_URL", services::CALLING),
     // Messaging receives inbound SMS of bridged parties (messaging-sms-bridge.deliver).
     ("CF_MESSAGING_BASE_URL", services::MESSAGING),
+    // Part VI §53: the Developer Platform's central event ingestion
+    // (developer-event.publish).
+    (
+        "CF_DEVELOPER_PLATFORM_BASE_URL",
+        services::DEVELOPER_PLATFORM,
+    ),
 ];
 
 #[derive(Debug, Clone)]

@@ -312,6 +312,17 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
 * **Durable events** — the outbox publisher (lease, bounded retry, `DEAD_LETTER`, replay)
   runs in the service loop with the webhook delivery worker; Privacy Relay pushes its own
   outbox to `POST /internal/v1/platform/events` (`platform-event.publish`).
+* **Direct publication to the Developer Platform (Part VI §53)** —
+  `CALLING_PUBLIC_EVENTS_DESTINATION` = `local` (default: the in-process webhook pipeline
+  only, unchanged), `developer-platform` or `both` (shadow comparison). With the Developer
+  Platform (`CF_DEVELOPER_PLATFORM_BASE_URL`, `developer-event.publish`) Calling's own
+  committed `call.*` / `recording.*` / `voicemail.*` envelopes are published unchanged
+  (producer `cfmeet.calling`, the outbox `event_id`, the committed correlation id); internal
+  facts and `usage.*` are not. Each receiver's outcome (`local_outcome` /
+  `developer_platform_outcome`) is recorded on the outbox row, so a retry re-sends only to
+  the receiver that has not accepted; a Developer Platform 4xx other than `RATE_LIMITED`
+  dead-letters the event once both settled (an operator replay re-sends it there only).
+  Customer delivery stays governed by Calling's webhook settings.
 * **Customer webhooks** — `/v1/webhooks` (create / list / get / update / delete /
   rotate-secret, `webhooks.read` / `webhooks.manage`), `/v1/webhooks/{id}/deliveries`,
   `/v1/webhook-deliveries/{id}/replay`. Events are the public catalog

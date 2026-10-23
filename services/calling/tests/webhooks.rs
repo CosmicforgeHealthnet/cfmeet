@@ -6,6 +6,8 @@
 //! and Privacy Relay events — never a provider payload verbatim.
 
 mod common;
+#[path = "support/dp_receiver.rs"]
+mod dp_receiver;
 
 use std::{
     sync::{Arc, Mutex},
@@ -1558,4 +1560,333 @@ async fn operator_reseal_writes_one_audit_row_with_counts_only() {
         .await,
         ["2"]
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Part VI §53: Calling's own public events to the Developer Platform (receivers)
+// ---------------------------------------------------------------------------------------
+
+mod developer_platform {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use calling::webhooks::{
+        publication::{
+            is_published_to_developer_platform, DeveloperPlatformTransport, PublicEventsDestination,
+        },
+        worker::OutboxDestinations,
+    };
+    use cf_service_auth::RuntimeEnvironment;
+
+    use super::*;
+    use crate::dp_receiver::{producer_client, signing_key, Receiver as DpReceiver};
+
+    /// Counts the envelopes handed to the in-process pipeline.
+    struct Counting<T>(T, AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl<T: EventTransport> EventTransport for Counting<T> {
+        async fn publish(&self, producer: &str, envelope: &Value) -> Result<(), &'static str> {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            self.0.publish(producer, envelope).await
+        }
+    }
+
+    struct Wired {
+        dp: DpReceiver,
+        local: Counting<LocalWebhookTransport>,
+        transport: DeveloperPlatformTransport,
+    }
+
+    impl Wired {
+        async fn new(w: &World) -> Self {
+            let me = ServiceId::calling();
+            let key = signing_key("calling-dest-1");
+            let dp = DpReceiver::developer_platform(&me, &key, RuntimeEnvironment::Test).await;
+            let client = producer_client(me, key, RuntimeEnvironment::Test, &[&dp]);
+            let svc = w.e.h().state.webhooks.clone();
+            Self {
+                dp,
+                local: Counting(
+                    LocalWebhookTransport::new((*svc).clone()),
+                    AtomicUsize::new(0),
+                ),
+                transport: DeveloperPlatformTransport::new(client),
+            }
+        }
+
+        /// The receivers `main` wires for `destination`.
+        fn destinations(&self, destination: PublicEventsDestination) -> OutboxDestinations<'_> {
+            OutboxDestinations {
+                local: destination
+                    .includes_local()
+                    .then_some(&self.local as &dyn EventTransport),
+                developer_platform: destination
+                    .includes_developer_platform()
+                    .then_some(&self.transport as &dyn EventTransport),
+            }
+        }
+
+        fn local_calls(&self) -> usize {
+            self.local.1.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn count(w: &World, sql: &str) -> i64 {
+        w.one(sql).await.parse().unwrap()
+    }
+
+    async fn public_envelopes(w: &World) -> Vec<Value> {
+        strings(
+            w.e.h().conn(),
+            "SELECT envelope::text FROM calling_outbox_events ORDER BY created_at",
+        )
+        .await
+        .iter()
+        .map(|e| serde_json::from_str::<Value>(e).unwrap())
+        .filter(is_published_to_developer_platform)
+        .collect()
+    }
+
+    fn assert_safe(envelopes: &[Value]) {
+        for e in envelopes {
+            assert_eq!(e["producer_service"], "cfmeet.calling");
+            assert!(e["event_id"].as_str().unwrap().starts_with("evt_"));
+            assert!(e["ownership"]["application_environment_id"].is_string());
+            common::contracts::check("platform/events/envelope/v1.schema.json", e);
+            let text = e.to_string();
+            for leak in ["sip:", "+234", "+1555", "token", "secret", "provider_call"] {
+                assert!(!text.contains(leak), "{leak} in {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_destination_is_the_local_pipeline_only() {
+        let unset = |_: &str| None;
+        let d = PublicEventsDestination::from_lookup(&unset).unwrap();
+        assert_eq!(d, PublicEventsDestination::Local);
+        assert!(d.includes_local() && !d.includes_developer_platform());
+    }
+
+    #[tokio::test]
+    async fn the_default_never_contacts_the_developer_platform() {
+        let Some(w) = World::new(dev_settings()).await else {
+            return;
+        };
+        w.call().await;
+        let x = Wired::new(&w).await;
+        let svc = w.e.h().state.webhooks.clone();
+        let pending = count(
+            &w,
+            "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PENDING'",
+        )
+        .await;
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::default()), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.published as i64, pending);
+        assert_eq!(x.local_calls() as i64, pending);
+        assert!(x.dp.attempts().is_empty());
+        assert_eq!(
+            count(
+                &w,
+                "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PUBLISHED' \
+                         AND local_outcome = 'ACCEPTED' AND developer_platform_outcome IS NULL"
+            )
+            .await,
+            pending
+        );
+    }
+
+    #[tokio::test]
+    async fn developer_platform_only_publishes_public_call_events_there_and_nothing_locally() {
+        let Some(w) = World::new(dev_settings()).await else {
+            return;
+        };
+        w.call().await;
+        let x = Wired::new(&w).await;
+        let svc = w.e.h().state.webhooks.clone();
+        let pending = count(
+            &w,
+            "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PENDING'",
+        )
+        .await;
+        let expected = public_envelopes(&w).await;
+        assert!(!expected.is_empty());
+        let r = svc
+            .publish_outbox_to(
+                x.destinations(PublicEventsDestination::DeveloperPlatform),
+                1000,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r.published as i64, pending,
+            "internal facts are acknowledged"
+        );
+        assert_eq!(x.local_calls(), 0);
+        assert_eq!(
+            count(&w, "SELECT count(*)::text FROM webhook_events").await,
+            0
+        );
+        let seen = x.dp.accepted();
+        let by_id = |mut v: Vec<Value>| {
+            v.sort_by_key(|e| e["event_id"].as_str().unwrap().to_string());
+            v
+        };
+        assert_eq!(
+            by_id(seen.clone()),
+            by_id(expected),
+            "the stored envelopes, unchanged, once each"
+        );
+        assert_eq!(x.dp.attempts().len(), seen.len());
+        assert_safe(&seen);
+        for e in &seen {
+            let t = calling::webhooks::catalog::project_calling(e)
+                .unwrap()
+                .event_type;
+            assert!(
+                t.starts_with("call.")
+                    || t.starts_with("recording.")
+                    || t.starts_with("voicemail."),
+                "{t}"
+            );
+        }
+        for (e, correlation) in x.dp.attempts() {
+            assert_eq!(e["correlation_id"].as_str().unwrap(), correlation);
+        }
+        assert_eq!(
+            count(
+                &w,
+                "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PUBLISHED' \
+                         AND developer_platform_outcome = 'ACCEPTED' AND local_outcome IS NULL"
+            )
+            .await,
+            pending
+        );
+        // Once.
+        let r = svc
+            .publish_outbox_to(
+                x.destinations(PublicEventsDestination::DeveloperPlatform),
+                1000,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.published, 0);
+    }
+
+    #[tokio::test]
+    async fn both_publishes_once_each_and_a_retry_resends_only_to_the_failed_receiver() {
+        let Some(w) = World::new(dev_settings()).await else {
+            return;
+        };
+        w.call().await;
+        let x = Wired::new(&w).await;
+        let svc = w.e.h().state.webhooks.clone();
+        let pending = count(
+            &w,
+            "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PENDING'",
+        )
+        .await;
+        let public = public_envelopes(&w).await.len();
+        // The Developer Platform is down for every first attempt.
+        x.dp.script(&vec![(503, "UNAVAILABLE"); public]);
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::Both), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.retried, public, "{r:?}");
+        assert_eq!(r.published as i64, pending - public as i64);
+        assert_eq!(x.local_calls() as i64, pending);
+        assert_eq!(
+            count(
+                &w,
+                "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PENDING' \
+                         AND local_outcome = 'ACCEPTED' AND developer_platform_outcome IS NULL \
+                         AND last_error_code = 'DEVELOPER_PLATFORM_UNAVAILABLE'"
+            )
+            .await,
+            public as i64
+        );
+        let local_events = count(&w, "SELECT count(*)::text FROM webhook_events").await;
+        // The retry goes to the Developer Platform only.
+        w.e.h().clock.advance(chrono::Duration::minutes(10));
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::Both), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.published, public, "{r:?}");
+        assert_eq!(x.local_calls() as i64, pending, "never re-sent locally");
+        assert_eq!(
+            count(&w, "SELECT count(*)::text FROM webhook_events").await,
+            local_events
+        );
+        assert_eq!(x.dp.accepted().len(), public);
+        assert_eq!(x.dp.attempts().len(), 2 * public);
+        assert_safe(&x.dp.accepted());
+        assert_eq!(
+            count(
+                &w,
+                "SELECT count(*)::text FROM calling_outbox_events WHERE status <> 'PUBLISHED'"
+            )
+            .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_dead_letters_without_holding_local_delivery_back_and_replay_resends_it_there_only(
+    ) {
+        let Some(w) = World::new(dev_settings()).await else {
+            return;
+        };
+        w.call().await;
+        let x = Wired::new(&w).await;
+        let svc = w.e.h().state.webhooks.clone();
+        let pending = count(
+            &w,
+            "SELECT count(*)::text FROM calling_outbox_events WHERE status = 'PENDING'",
+        )
+        .await;
+        x.dp.script(&[(422, "INVALID_EVENT")]);
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::Both), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.dead_lettered, 1, "{r:?}");
+        assert_eq!(x.local_calls() as i64, pending);
+        let dead = w
+            .one(
+                "SELECT event_id FROM calling_outbox_events WHERE status = 'DEAD_LETTER' \
+                    AND local_outcome = 'ACCEPTED' AND developer_platform_outcome = 'REJECTED' \
+                    AND last_error_code = 'DEVELOPER_PLATFORM_REJECTED'",
+            )
+            .await;
+        assert!(dead.starts_with("evt_"), "{dead}");
+        // A throttled Developer Platform is transient, not a refusal.
+        assert!(svc.replay_dead_lettered_outbox(&dead).await.unwrap());
+        x.dp.script(&[(429, "RATE_LIMITED")]);
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::Both), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.retried, 1, "{r:?}");
+        w.e.h().clock.advance(chrono::Duration::minutes(10));
+        let r = svc
+            .publish_outbox_to(x.destinations(PublicEventsDestination::Both), 1000)
+            .await
+            .unwrap();
+        assert_eq!(r.published, 1, "{r:?}");
+        assert_eq!(
+            x.local_calls() as i64,
+            pending,
+            "the replay never re-sends locally"
+        );
+        assert!(x
+            .dp
+            .accepted()
+            .iter()
+            .any(|e| e["event_id"].as_str() == Some(dead.as_str())));
+    }
 }

@@ -34,7 +34,18 @@ It owns, in its own PostgreSQL database:
   (platform envelope, leased multi-instance publication, per-aggregate order, bounded
   backoff, dead-letter), a **leased job queue** (restart recovery by retry safety;
   provider-affecting work interrupted mid-flight is parked `UNKNOWN_OUTCOME`, never
-  blindly repeated) and **scoped idempotency keys**.
+  blindly repeated) and **scoped idempotency keys**;
+* **public lifecycle events** (Part VI §53): the Developer Platform consumes the outbox
+  (`developer-event.publish`, producer `cfmeet.numbering`). Only reservation, assignment,
+  suspension / restoration, release and port events of a customer scope (tenant,
+  application and application environment) are published — unchanged registered
+  envelopes, CF Meet ids and codes only; KYC, eligibility, provider, risk, usage, routing
+  and relay facts, and unscoped inventory events (resource lifecycle, quarantine), never
+  leave Numbering. `NUMBERING_PUBLIC_EVENTS_DESTINATION` = `developer-platform` (default:
+  the Developer Platform ingests in shadow mode until the webhook cutover, so nothing a
+  customer sees changes; without `CF_DEVELOPER_PLATFORM_BASE_URL` events stay PENDING as
+  before) or `none`. A 4xx refusal other than `RATE_LIMITED` dead-letters the event;
+  anything else is retried.
 
 It does NOT own logical calls, SIP / PSTN execution, relay sessions or SMS transport
 (Calling, Telephony, Privacy Relay, the SMS Gateway), and it never reads another service's
@@ -153,6 +164,7 @@ start the real Platform Access binary with its own database.
 | `startup` | the real binary: fail-closed configuration, pending migrations refused, serving once migrated |
 | `migrations` | fresh / down / re-up, upgrade with data, exact table set, no cross-service FK, least-privilege runtime role |
 | `outbox` | atomicity, immutability, ordering, backoff, dead-letter, concurrent publishers, lease takeover, envelope conformance |
+| `public_events` | Part VI §53: public lifecycle events of customer scopes reach a token-verifying Developer Platform receiver exactly once (contract-conformant, no provider / KYC data), internal / unscoped events are not published, retries, refusals → dead letter, the default destination |
 | `workers` | lease exclusivity, retry / dead-letter, restart recovery, UNKNOWN_OUTCOME parking, idempotency keys |
 | `number_resources` | D10.1–D10.7: identity, E.164, lifecycle policy (Rust = SQL), version conflicts, bindings, capabilities, inventory |
 | `allocation` | D10.8–D10.17: reservation contention and expiry, ownership, exclusivity, isolation, history, routing revisions, premature activation, quarantine / uncertainty, rollback |

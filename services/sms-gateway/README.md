@@ -35,6 +35,16 @@ reads another service's database.
 | Numbering | `number-sms-sender.authorize`, `number-grant.verify` | single-use SMS_SENDER grant per outbound message, consumed before AUTHORIZED |
 | Numbering | `number-sms-route.resolve` | the destination of a received message (`sms-destination-resolutions`, SMS only) |
 | Calling | `platform-event.publish` | message events → `sms.*` customer webhooks |
+| Developer Platform | `developer-event.publish` | the same message event envelopes, published directly to the central event ingestion (Part VI §53) when `SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION` is `developer-platform` or `both` |
+
+`SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION` chooses the receivers of committed events:
+`calling` (default — today's behaviour), `developer-platform` (requires
+`CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison before
+the webhook cutover). Each receiver's outcome (`calling_outcome` /
+`developer_platform_outcome`) is recorded durably on the outbox row: an event is
+`PUBLISHED` once every receiver accepted it, a retry re-sends only to a receiver that has not
+accepted it, and a permanent refusal (4xx except `RATE_LIMITED`) dead-letters it once every
+receiver has settled.
 
 `/internal/v1/**` is authenticated for every path (unknown paths included); each route
 requires the permission its trust bundle grants the caller (Messaging:
