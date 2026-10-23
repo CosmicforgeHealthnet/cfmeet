@@ -1011,6 +1011,20 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
+        for forbidden in [
+            "/api-docs/platform-access.json",
+            "/api-docs/privacy-relay-internal.json",
+            "/api-docs/telephony.json",
+            "/api-docs/messaging-internal.json",
+            "/api-docs/sms-gateway-internal.json",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(forbidden).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{forbidden}");
+        }
     }
 
     #[test]
