@@ -304,7 +304,11 @@ async fn ws_handler(headers: HeaderMap, upgrade: WebSocketUpgrade) -> axum::resp
                             .await;
                         break;
                     }
-                    Message::Close(_) => break,
+                    // Answers the close handshake, like a real service.
+                    Message::Close(c) => {
+                        let _ = socket.send(Message::Close(c)).await;
+                        break;
+                    }
                     other => {
                         if socket.send(other).await.is_err() {
                             break;

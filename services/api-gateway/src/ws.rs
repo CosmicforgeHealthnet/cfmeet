@@ -177,21 +177,33 @@ async fn pump<S>(
     let (mut client_tx, mut client_rx) = client.split();
     let (mut up_tx, mut up_rx) = upstream.split();
     let client_to_upstream = async {
+        let mut client_closed = false;
         while let Some(Ok(m)) = client_rx.next().await {
             let closing = matches!(m, AxumMessage::Close(_));
-            if up_tx.send(to_upstream(m)).await.is_err() || closing {
+            if client_closed {
+                // After the client's Close, keep reading only so the queued close reply
+                // is flushed (tungstenite writes it on the next socket operation); the
+                // stream then ends. Nothing more is relayed.
+                continue;
+            }
+            if up_tx.send(to_upstream(m)).await.is_err() && !closing {
                 break;
             }
+            client_closed = closing;
         }
         let _ = up_tx.close().await;
     };
     let upstream_to_client = async {
         let mut relayed_close = false;
+        let mut client_gone = false;
         while let Some(Ok(m)) = up_rx.next().await {
             let closing = matches!(m, WsMessage::Close(_));
             if let Some(m) = to_client(m) {
                 if client_tx.send(m).await.is_err() {
-                    return;
+                    // The client already closed (its close reply is flushed by the
+                    // other direction) or went away.
+                    client_gone = true;
+                    break;
                 }
                 if closing {
                     relayed_close = true;
@@ -199,7 +211,7 @@ async fn pump<S>(
                 }
             }
         }
-        if !relayed_close {
+        if !relayed_close && !client_gone {
             // The owning service went away without a closing handshake.
             let _ = client_tx
                 .send(AxumMessage::Close(Some(AxumClose {

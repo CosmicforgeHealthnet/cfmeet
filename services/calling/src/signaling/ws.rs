@@ -158,7 +158,16 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
                     Some(Ok(Message::Ping(payload))) => {
                         let _ = socket.send(Message::Pong(payload)).await;
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    // Complete the closing handshake: reading on flushes the queued close
+                    // reply, then the client ends the stream (bounded wait).
+                    Some(Ok(Message::Close(_))) => {
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                            while let Some(Ok(_)) = socket.recv().await {}
+                        })
+                        .await;
+                        break;
+                    }
+                    None | Some(Err(_)) => break,
                     Some(Ok(_)) => {}
                 }
             }

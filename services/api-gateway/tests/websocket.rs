@@ -104,3 +104,37 @@ async fn oversized_frames_are_refused() {
         "{next:?}"
     );
 }
+
+/// A client-initiated close completes the closing handshake through the gateway every
+/// time (the queued close reply is flushed, never a TCP reset).
+#[tokio::test]
+async fn client_initiated_close_completes_the_handshake() {
+    let g = Gateway::new().await;
+    let addr = g.serve().await;
+    for i in 0..25 {
+        let (mut ws, _) = connect(&addr, "cfmeet.messaging.v1, cfmeet.ticket.good")
+            .await
+            .unwrap();
+        ws.send(Message::Text(format!("m{i}"))).await.unwrap();
+        assert_eq!(
+            ws.next().await.unwrap().unwrap(),
+            Message::Text(format!("m{i}"))
+        );
+        ws.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+            code: CloseCode::Normal,
+            reason: "done".into(),
+        }))
+        .await
+        .unwrap();
+        let mut clean = false;
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(_))) => clean = true,
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => panic!("iteration {i}: {e:?}"),
+                None => break,
+            }
+        }
+        assert!(clean, "iteration {i}: no close reply");
+    }
+}
