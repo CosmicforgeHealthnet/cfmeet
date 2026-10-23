@@ -77,6 +77,18 @@ pub async fn spawn(launch: Launch<'_>, http: &reqwest::Client) -> anyhow::Result
             Some(url) => {
                 if let Ok(r) = http.get(url).send().await {
                     if r.status().is_success() {
+                        // A process that failed to bind may exit just after another
+                        // listener answered on its port: it must still be running.
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        if let Ok(Some(status)) = child.try_wait() {
+                            bail!(
+                                "{} exited during startup ({status}) although {url} answered; \
+                                 log {}:\n{}",
+                                launch.name,
+                                log.display(),
+                                tail(&log, 60)
+                            );
+                        }
                         break;
                     }
                 }

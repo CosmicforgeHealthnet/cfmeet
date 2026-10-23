@@ -123,11 +123,23 @@ impl StackConfig {
     }
 }
 
+/// A free local port that no other service of this test process was given. A stack
+/// chooses every port before any service starts and releases each at once, so the kernel
+/// can offer the same port twice (within one stack or across journeys); a duplicate let
+/// one service answer for another, its readiness probe included.
 fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .expect("a free local port")
+    static GIVEN: std::sync::Mutex<std::collections::BTreeSet<u16>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let mut given = GIVEN.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .expect("a free local port");
+        if given.insert(port) {
+            return port;
+        }
+    }
 }
 
 fn random_text(n: usize) -> String {
