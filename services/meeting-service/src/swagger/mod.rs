@@ -824,12 +824,66 @@ fn swagger_config() -> serde_json::Value {
     urls.extend(
         PEER_DOCS
             .iter()
+            .filter(|(name, _, _)| !name.ends_with("(internal)"))
             .map(|(name, path, _)| serde_json::json!({ "name": name, "url": path })),
     );
     serde_json::json!({ "urls": urls, "primaryName": "Meetings" })
 }
 
-fn contract_doc(body: &'static str) -> impl IntoResponse {
+/// Public API documentation is an audience-specific view of the canonical contract.
+/// Filtering happens before the JSON reaches a public endpoint (not just in the UI).
+/// The original contracts remain unchanged for tests, SDK generation and the private portal.
+fn public_doc(service: &str, raw: &str) -> String {
+    let mut doc: serde_json::Value =
+        serde_json::from_str(raw).expect("checked-in OpenAPI contract must be valid JSON");
+    let paths = doc["paths"]
+        .as_object_mut()
+        .expect("checked-in OpenAPI must have paths");
+    paths.retain(|path, item| {
+        if path.starts_with("/internal/")
+            || path.starts_with("/provider-")
+            || path.starts_with("/v1/admin/")
+            || path.starts_with("/api/v1/admin/")
+            || path.starts_with("/api/v2/admin/")
+            || matches!(path.as_str(), "/health" | "/ready" | "/openapi.json")
+        {
+            return false;
+        }
+        // Restrict operational compliance and credential-minting endpoints to the
+        // private engineering catalog. This is discoverability policy, not API auth.
+        if (service == "Messaging"
+            && [
+                "/v1/messaging/policy",
+                "/v1/messaging/legal-holds",
+                "/v1/messaging/reports",
+                "/v1/messaging/moderation",
+                "/v1/messaging/exports",
+                "/v1/messaging/deletion-requests",
+                "/v1/messaging/audit",
+            ]
+            .iter()
+            .any(|prefix| path.starts_with(prefix)))
+            || (service == "Calling" && path == "/v1/abuse-reports")
+            || (service == "Privacy Relay"
+                && (path == "/v1/privacy-relay/contact-access-grants"
+                    || path.ends_with("/verification")))
+        {
+            return false;
+        }
+        let methods = item
+            .as_object()
+            .expect("checked-in OpenAPI path item must be an object");
+        methods.keys().any(|method| {
+            matches!(
+                method.as_str(),
+                "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+            )
+        })
+    });
+    serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
+}
+
+fn contract_doc(body: String) -> impl IntoResponse {
     (
         [
             (CONTENT_TYPE, "application/json"),
@@ -852,7 +906,10 @@ pub fn swagger_router(server_addr: &str) -> Router {
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
     openapi.servers = Some(vec![current_server, public_server]);
-    let meeting_doc = openapi.to_json().expect("OpenAPI document serializes");
+    let meeting_doc = public_doc(
+        "Meetings",
+        &openapi.to_json().expect("OpenAPI document serializes"),
+    );
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
@@ -870,7 +927,15 @@ pub fn swagger_router(server_addr: &str) -> Router {
             get(move || {
                 let page = page.clone();
                 let csp = csp.clone();
-                async move { ([(CONTENT_SECURITY_POLICY, csp), (CACHE_CONTROL, "no-store, max-age=0".to_string())], Html(page)) }
+                async move {
+                    (
+                        [
+                            (CONTENT_SECURITY_POLICY, csp),
+                            (CACHE_CONTROL, "no-store, max-age=0".to_string()),
+                        ],
+                        Html(page),
+                    )
+                }
             }),
         )
         .route(
@@ -887,8 +952,18 @@ pub fn swagger_router(server_addr: &str) -> Router {
                 async move { ([(CONTENT_TYPE, "application/json")], doc) }
             }),
         );
-    for (_, path, body) in PEER_DOCS {
-        router = router.route(path, get(move || async move { contract_doc(body) }));
+    for (name, path, body) in PEER_DOCS {
+        if name.ends_with("(internal)") {
+            continue;
+        }
+        let public_body = public_doc(name, body);
+        router = router.route(
+            path,
+            get(move || {
+                let doc = public_body.clone();
+                async move { contract_doc(doc) }
+            }),
+        );
     }
     router
 }
@@ -921,7 +996,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn swagger_serves_all_peer_contracts_from_the_doc_host() {
+    async fn swagger_serves_only_public_contracts_from_the_doc_host() {
         use axum::{
             body::Body,
             http::{Request, StatusCode},
@@ -932,11 +1007,8 @@ mod tests {
         for path in [
             "/api-docs/openapi.json",
             "/api-docs/calling.json",
-            "/api-docs/platform-access.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
-            "/api-docs/privacy-relay-internal.json",
-            "/api-docs/telephony.json",
             "/api-docs/sms-gateway.json",
             "/api-docs/messaging.json",
             "/api-docs/swagger-config.json",
@@ -949,6 +1021,59 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
+        for forbidden in [
+            "/api-docs/platform-access.json",
+            "/api-docs/privacy-relay-internal.json",
+            "/api-docs/telephony.json",
+            "/api-docs/messaging-internal.json",
+            "/api-docs/sms-gateway-internal.json",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(forbidden)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{forbidden}");
+        }
+    }
+
+    #[test]
+    fn public_specs_exclude_internal_and_privileged_operations() {
+        for (name, _, raw) in PEER_DOCS {
+            if name.ends_with("(internal)") {
+                continue;
+            }
+            let public: serde_json::Value = serde_json::from_str(&public_doc(name, raw)).unwrap();
+            let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+            assert!(!public["paths"].as_object().unwrap().is_empty(), "{name}");
+            assert!(
+                public["paths"].as_object().unwrap().len()
+                    <= original["paths"].as_object().unwrap().len(),
+                "{name}"
+            );
+            for key in public["paths"].as_object().unwrap().keys() {
+                assert!(!key.starts_with("/internal/"), "{name}: {key}");
+                assert!(!key.starts_with("/provider-"), "{name}: {key}");
+                assert!(!key.starts_with("/v1/admin/"), "{name}: {key}");
+            }
+        }
+        let public_calling: serde_json::Value =
+            serde_json::from_str(&public_doc("Calling", CALLING_API)).unwrap();
+        assert!(public_calling["paths"]["/v1/calls"].is_object());
+        assert!(public_calling["paths"]["/internal/v1/telephony/events"].is_null());
+        let public_numbering: serde_json::Value =
+            serde_json::from_str(&public_doc("Numbering / DCNs", NUMBERING_API)).unwrap();
+        assert!(public_numbering["paths"]["/v1/numbers/search"].is_object());
+        assert!(public_numbering["paths"]["/v1/admin/controls"].is_null());
+        let public_messaging: serde_json::Value =
+            serde_json::from_str(&public_doc("Messaging", MESSAGING_API)).unwrap();
+        assert!(public_messaging["paths"]["/v1/conversations"].is_object());
+        assert!(public_messaging["paths"]["/v1/messaging/legal-holds"].is_null());
     }
 
     /// Every `$ref` of every document Swagger renders resolves INSIDE that document: no
@@ -1015,7 +1140,11 @@ mod tests {
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS.len() + 1
+            PEER_DOCS
+                .iter()
+                .filter(|(name, _, _)| !name.ends_with("(internal)"))
+                .count()
+                + 1
         );
     }
 

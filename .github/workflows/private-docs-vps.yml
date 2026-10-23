@@ -1,0 +1,163 @@
+name: Provision Private Swagger on VPS
+
+# Explicit one-time bootstrapping; a pull request never changes the VPS.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/private-docs-vps.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cfmeet-private-swagger-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(docs): bootstrap private CF Meet Swagger on VPS')) }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate complete source contracts
+        run: |
+          python3 scripts/swagger/test_private_docs.py
+          python3 scripts/swagger/build-private-docs.py --out "$RUNNER_TEMP/cfmeet-private-catalog"
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY" || {
+            echo "::error::Missing VPS SSH secret — no production changes"; exit 1;
+          }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy private static files to protected VPS release directory
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          tar -C "$RUNNER_TEMP/cfmeet-private-catalog" -czf - . | ssh \
+            -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+            "$VPS_USER@$VPS_HOST" \
+            "umask 022; install -d -m 0755 /opt/cfmeet-private-api-docs-releases/$RUN_ID && tar -xzf - -C /opt/cfmeet-private-api-docs-releases/$RUN_ID"
+
+      - name: Configure loopback-only Nginx and verify authenticated access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+            "$VPS_USER@$VPS_HOST" "bash -s -- $RUN_ID" <<'REMOTE'
+          set -Eeuo pipefail
+          RUN_ID="$1"
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [ "$(id -u)" = 0 ] || { echo "ERROR: root required"; exit 1; }
+          for executable in nginx openssl systemctl curl python3; do command -v "$executable" >/dev/null; done
+          RELEASE="/opt/cfmeet-private-api-docs-releases/$RUN_ID"
+          CONFIG="/etc/nginx/sites-available/cfmeet-private-api-docs"
+          ENABLED="/etc/nginx/sites-enabled/cfmeet-private-api-docs"
+          HT="/etc/nginx/private-docs.htpasswd"
+          RECOVERY="/root/cfmeet-private-docs-credentials"
+          TARGET="/opt/cfmeet-private-api-docs"
+          python3 - "$RELEASE" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          c=json.loads((p/"swagger-config.json").read_text())
+          assert len(c["urls"])==12
+          for item in c["urls"]:
+              target=(p/item["url"]).resolve()
+              assert target.is_relative_to(p.resolve())
+              spec=json.loads(target.read_text())
+              assert isinstance(spec["paths"], dict)
+              if item["name"] != "Platform internal HTTP":
+                  assert spec["paths"]
+          print("Private Swagger static catalog verified: 12 complete specifications")
+          PY
+          if [ -e "$CONFIG" ] && ! grep -q 'CF Meet private engineering API catalog' "$CONFIG"; then
+            echo "ERROR: Nginx config collision"; exit 1
+          fi
+          if [ ! -f "$HT" ]; then
+            umask 077
+            PASS="$(openssl rand -hex 24)"
+            HASH="$(printf '%s\n' "$PASS" | openssl passwd -6 -stdin)"
+            printf 'cfmeet-engineer:%s\n' "$HASH" > "$HT"
+            printf 'Username: cfmeet-engineer\nPassword: %s\n' "$PASS" > "$RECOVERY"
+            unset PASS HASH
+            chown root:www-data "$HT"
+            chmod 0640 "$HT"
+            chmod 0600 "$RECOVERY"
+          fi
+          if [ ! -f "$CONFIG" ]; then
+            cat > "$CONFIG" <<'NGINX'
+          # CF Meet private engineering API catalog; loopback+SSH+HTTP auth ONLY.
+          server {
+              listen 127.0.0.1:18099;
+              server_name localhost;
+              root /opt/cfmeet-private-api-docs;
+              index index.html;
+              auth_basic "CF Meet engineering — private docs";
+              auth_basic_user_file /etc/nginx/private-docs.htpasswd;
+              autoindex off;
+              location / {
+                  limit_except GET HEAD { deny all; }
+                  try_files $uri $uri/ =404;
+                  add_header Cache-Control "private, no-store" always;
+                  add_header X-Content-Type-Options "nosniff" always;
+                  add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+                  add_header Referrer-Policy "no-referrer" always;
+                  add_header Content-Security-Policy "default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+              }
+          }
+          NGINX
+          fi
+          if [ -e "$TARGET" ] && [ ! -L "$TARGET" ]; then
+            echo "ERROR: preexisting private target is not a symlink"; exit 1
+          fi
+          PREVIOUS="$(readlink "$TARGET" || true)"
+          ln -sfn "$RELEASE" "$TARGET.next"
+          mv -Tf "$TARGET.next" "$TARGET"
+          if [ ! -e "$ENABLED" ]; then ln -s "$CONFIG" "$ENABLED"; fi
+          if ! nginx -t; then
+            if [ -n "$PREVIOUS" ]; then
+              ln -sfn "$PREVIOUS" "$TARGET.next"; mv -Tf "$TARGET.next" "$TARGET"
+            fi
+            rm -f "$ENABLED"
+            echo "ERROR: nginx test failed"; exit 1
+          fi
+          systemctl reload nginx
+          UNAUTH="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18099/swagger-config.json)"
+          [ "$UNAUTH" = "401" ] || { echo "ERROR: private HTTP auth missing"; exit 1; }
+          PASS="$(sed -n 's/^Password: //p' "$RECOVERY")"
+          [ -n "$PASS" ] || { echo "ERROR: credential file missing"; exit 1; }
+          AUTH="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' -u "cfmeet-engineer:$PASS" --max-time 5 http://127.0.0.1:18099/swagger-config.json)"
+          unset PASS
+          [ "$AUTH" = "200" ] || { echo "ERROR: authenticated read failed"; exit 1; }
+          echo "PRIVATE_SWAGGER_PROVISIONED=YES"
+          echo "PRIVATE_DOCS_COUNT=12"
+          echo "PRIVATE_UNAUTH_HTTP=401 PRIVATE_AUTH_HTTP=200"
+          echo "PRIVATE_LISTENER=127.0.0.1:18099"
+          echo "Read root-only credentials over approved SSH: sudo cat /root/cfmeet-private-docs-credentials"
+          REMOTE
+
+      - name: Error summary
+        if: failure()
+        run: echo "::error::Private Swagger setup failed; no public API route changed."
