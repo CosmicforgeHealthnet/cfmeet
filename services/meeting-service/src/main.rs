@@ -188,12 +188,25 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = app_config.server_addr();
 
+    // Part VI §50: Developer Console session bridge (DEVELOPER_SESSION_BRIDGE_ENABLED).
+    let session_bridge = backend::services::session_bridge::SessionBridgeConfig::from_env()
+        .and_then(|c| c.map(|c| c.verifier()).transpose())
+        .unwrap_or_else(|e| panic!("session bridge configuration error: {e}"));
+    let bridge_router = session_bridge
+        .map(|verifier| backend::services::session_bridge::router(state.clone(), verifier));
+    if bridge_router.is_some() {
+        tracing::info!("Part VI: Developer Console session bridge enabled");
+    }
+
     // Build application with routes
-    let app = Router::new()
+    let mut app = Router::new()
         .merge(routes::create_routes(state))
         .merge(swagger::swagger_router(&addr))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
+    if let Some(bridge) = bridge_router {
+        app = app.merge(bridge);
+    }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("🚀 Server running on http://{}", addr);

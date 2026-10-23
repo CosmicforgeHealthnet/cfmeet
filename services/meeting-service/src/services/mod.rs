@@ -34,6 +34,7 @@ pub mod rtc_metrics;
 pub mod rtc_provider;
 pub mod rtc_webhooks;
 pub mod secrets;
+pub mod session_bridge;
 pub mod specialized;
 pub mod unified_messaging;
 
