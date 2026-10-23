@@ -305,9 +305,21 @@
       }
     }
   },
+  "tags": [
+    {
+      "name": "Internal - SMS Bridge Bindings",
+      "description": "SMS Bridge Bindings operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - SMS Bridge Messages",
+      "description": "SMS Bridge Messages operations requiring internal service authorization."
+    }
+  ],
   "paths": {
     "/internal/v1/sms-bridge/bindings": {
       "post": {
+        "tags": ["Internal - SMS Bridge Bindings"],
+        "summary": "Create Bridge Binding",
         "operationId": "createBridgeBinding",
         "security": [
           {
@@ -375,6 +387,8 @@
     },
     "/internal/v1/sms-bridge/bindings/{bridgeRef}/close": {
       "post": {
+        "tags": ["Internal - SMS Bridge Bindings"],
+        "summary": "Close Bridge Binding",
         "operationId": "closeBridgeBinding",
         "security": [
           {
@@ -432,6 +446,8 @@
     },
     "/internal/v1/sms-bridge/messages": {
       "post": {
+        "tags": ["Internal - SMS Bridge Messages"],
+        "summary": "Submit Bridge Message",
         "operationId": "submitBridgeMessage",
         "security": [
           {
@@ -499,6 +515,8 @@
     },
     "/internal/v1/sms-bridge/messages/{smsMessageId}": {
       "get": {
+        "tags": ["Internal - SMS Bridge Messages"],
+        "summary": "Get Bridge Transport",
         "operationId": "getBridgeTransport",
         "security": [
           {

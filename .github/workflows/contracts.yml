@@ -79,6 +79,10 @@ jobs:
         working-directory: .
         run: python3 scripts/contracts/bundle_openapi.py --check
 
+      - name: every peer OpenAPI operation is labelled and summarized
+        working-directory: .
+        run: python3 scripts/contracts/check_openapi_labels.py
+
       - name: complete private engineering catalog is buildable off-repository
         working-directory: .
         run: python3 scripts/swagger/test_private_docs.py

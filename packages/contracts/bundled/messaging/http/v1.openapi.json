@@ -5,9 +5,109 @@
     "version": "1.13.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations)."
   },
+  "tags": [
+    {
+      "name": "Service Health & Discovery",
+      "description": "Read-only liveness, readiness, and OpenAPI discovery operations."
+    },
+    {
+      "name": "Devices & E2EE",
+      "description": "Register devices and handle key packages and Welcome messages."
+    },
+    {
+      "name": "Key Transparency",
+      "description": "Read key transparency proofs for end-to-end encryption."
+    },
+    {
+      "name": "Conversations",
+      "description": "Create, list and manage conversations."
+    },
+    {
+      "name": "Messaging Policy",
+      "description": "Read and manage messaging mode and retention policy."
+    },
+    {
+      "name": "Group Membership & Safety",
+      "description": "Manage conversation members, roles and bans."
+    },
+    {
+      "name": "Messages",
+      "description": "Send, retrieve, edit and delete conversation messages."
+    },
+    {
+      "name": "Message Features & Threads",
+      "description": "Manage message edits, reactions, pins and threaded replies."
+    },
+    {
+      "name": "Read State & Unread",
+      "description": "Manage read cursors and unread message counts."
+    },
+    {
+      "name": "Realtime Messaging",
+      "description": "Subscribe to realtime events and recover missed updates."
+    },
+    {
+      "name": "E2EE & MLS",
+      "description": "MLS group commits and end-to-end encryption state."
+    },
+    {
+      "name": "Safety & Blocks",
+      "description": "User safety controls, blocks and abuse reports."
+    },
+    {
+      "name": "Messaging Client Sessions",
+      "description": "Create and revoke short-lived messaging client sessions."
+    },
+    {
+      "name": "Presence & Notifications",
+      "description": "Manage presence and device notification registration."
+    },
+    {
+      "name": "Attachments & Media",
+      "description": "Upload, finalize and retrieve conversation attachments."
+    },
+    {
+      "name": "Legal Hold & Compliance",
+      "description": "Manage legal holds and their audited lifecycle."
+    },
+    {
+      "name": "Search",
+      "description": "Search messages and conversations under applicable mode and access rules."
+    },
+    {
+      "name": "Safety & Moderation",
+      "description": "Submit and review reports and moderation actions."
+    },
+    {
+      "name": "Data Governance & Exports",
+      "description": "Handle exports, deletion requests and audit records."
+    },
+    {
+      "name": "SMS Bridge",
+      "description": "Disclose and manage messaging-to-SMS bridge operations."
+    },
+    {
+      "name": "Usage & Limits",
+      "description": "Inspect usage and effective platform limits."
+    },
+    {
+      "name": "History Transfer",
+      "description": "Move encrypted messaging history between devices."
+    },
+    {
+      "name": "Encrypted Backups",
+      "description": "Create and retrieve encrypted messaging backups."
+    },
+    {
+      "name": "Messaging Invitations",
+      "description": "List and accept or decline invitations."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service health",
         "operationId": "health",
         "security": [],
         "description": "Liveness only.",
@@ -27,6 +127,8 @@
     },
     "/ready": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service readiness",
         "operationId": "ready",
         "security": [],
         "description": "Readiness: database reachable and every migration applied (503 otherwise). No secret or connection detail.",
@@ -56,6 +158,8 @@
     },
     "/openapi.json": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Get OpenAPI specification",
         "operationId": "openapi",
         "security": [],
         "description": "This document.",
@@ -68,6 +172,8 @@
     },
     "/v1/messaging/devices/registration-challenges": {
       "post": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Create Device Registration Challenge",
         "operationId": "createDeviceRegistrationChallenge",
         "security": [
           {
@@ -117,6 +223,8 @@
     },
     "/v1/messaging/devices": {
       "post": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Register Device",
         "operationId": "registerDevice",
         "security": [
           {
@@ -185,6 +293,8 @@
     },
     "/v1/messaging/devices/{deviceId}/key-packages": {
       "post": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Publish Key Packages",
         "operationId": "publishKeyPackages",
         "security": [
           {
@@ -267,6 +377,8 @@
     },
     "/v1/messaging/devices/{deviceId}/revoke": {
       "post": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Revoke Device",
         "operationId": "revokeDevice",
         "security": [
           {
@@ -337,6 +449,8 @@
     },
     "/v1/messaging/principals/{principalId}/devices": {
       "get": {
+        "tags": ["Devices & E2EE"],
+        "summary": "List Principal Devices",
         "operationId": "listPrincipalDevices",
         "security": [
           {
@@ -400,6 +514,8 @@
     },
     "/v1/messaging/key-transparency/proofs": {
       "get": {
+        "tags": ["Key Transparency"],
+        "summary": "Get Key Transparency Proofs",
         "operationId": "getKeyTransparencyProofs",
         "security": [
           {
@@ -472,6 +588,8 @@
     },
     "/v1/conversations": {
       "post": {
+        "tags": ["Conversations"],
+        "summary": "Create Conversation",
         "operationId": "createConversation",
         "security": [
           {
@@ -544,6 +662,8 @@
         }
       },
       "get": {
+        "tags": ["Conversations"],
+        "summary": "List Conversations",
         "operationId": "listConversations",
         "security": [
           {
@@ -630,6 +750,8 @@
     },
     "/v1/conversations/{conversationId}": {
       "get": {
+        "tags": ["Conversations"],
+        "summary": "Get Conversation",
         "operationId": "getConversation",
         "security": [
           {
@@ -691,6 +813,8 @@
         }
       },
       "patch": {
+        "tags": ["Conversations"],
+        "summary": "Update Conversation",
         "operationId": "updateConversation",
         "security": [
           {
@@ -764,6 +888,8 @@
     },
     "/v1/messaging/policy": {
       "get": {
+        "tags": ["Messaging Policy"],
+        "summary": "Get Messaging Policy",
         "operationId": "getMessagingPolicy",
         "security": [
           {
@@ -798,6 +924,8 @@
         }
       },
       "put": {
+        "tags": ["Messaging Policy"],
+        "summary": "Update Messaging Policy",
         "operationId": "updateMessagingPolicy",
         "security": [
           {
@@ -850,6 +978,8 @@
     },
     "/v1/conversations/{conversationId}/members": {
       "get": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "List Members",
         "operationId": "listMembers",
         "security": [
           {
@@ -934,6 +1064,8 @@
         }
       },
       "post": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "Add Member",
         "operationId": "addMember",
         "security": [
           {
@@ -1017,6 +1149,8 @@
     },
     "/v1/conversations/{conversationId}/members/{principalId}": {
       "delete": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "Remove Member",
         "operationId": "removeMember",
         "security": [
           {
@@ -1102,6 +1236,8 @@
         }
       },
       "patch": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "Change Member Role",
         "operationId": "changeMemberRole",
         "security": [
           {
@@ -1186,6 +1322,8 @@
     },
     "/v1/conversations/{conversationId}/messages": {
       "get": {
+        "tags": ["Messages"],
+        "summary": "List Messages",
         "operationId": "listMessages",
         "security": [
           {
@@ -1288,6 +1426,8 @@
         }
       },
       "post": {
+        "tags": ["Messages"],
+        "summary": "Send Message",
         "operationId": "sendMessage",
         "security": [
           {
@@ -1377,6 +1517,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}": {
       "get": {
+        "tags": ["Messages"],
+        "summary": "Resolve Message",
         "operationId": "resolveMessage",
         "security": [
           {
@@ -1449,6 +1591,8 @@
         }
       },
       "patch": {
+        "tags": ["Messages"],
+        "summary": "Edit Managed Message",
         "operationId": "editManagedMessage",
         "security": [
           {
@@ -1534,6 +1678,8 @@
         }
       },
       "delete": {
+        "tags": ["Messages"],
+        "summary": "Delete Message",
         "operationId": "deleteMessage",
         "security": [
           {
@@ -1619,6 +1765,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/revisions": {
       "get": {
+        "tags": ["Message Features & Threads"],
+        "summary": "List Message Revisions",
         "operationId": "listMessageRevisions",
         "security": [
           {
@@ -1696,6 +1844,8 @@
     },
     "/v1/conversations/{conversationId}/read-cursor": {
       "put": {
+        "tags": ["Read State & Unread"],
+        "summary": "Set Read Cursor",
         "operationId": "setReadCursor",
         "security": [
           {
@@ -1772,6 +1922,8 @@
     },
     "/v1/conversations/{conversationId}/events": {
       "get": {
+        "tags": ["Realtime Messaging"],
+        "summary": "Replay Conversation Events",
         "operationId": "replayConversationEvents",
         "security": [
           {
@@ -1857,6 +2009,8 @@
     },
     "/v1/conversations/{conversationId}/mls/commits": {
       "post": {
+        "tags": ["E2EE & MLS"],
+        "summary": "Submit MLS Commit",
         "operationId": "submitMlsCommit",
         "security": [
           {
@@ -1946,6 +2100,8 @@
     },
     "/v1/conversations/{conversationId}/mls/state": {
       "get": {
+        "tags": ["E2EE & MLS"],
+        "summary": "Get MLS Group State",
         "operationId": "getMlsGroupState",
         "security": [
           {
@@ -2012,6 +2168,8 @@
     },
     "/v1/conversations/{conversationId}/mls/key-package-claims": {
       "post": {
+        "tags": ["E2EE & MLS"],
+        "summary": "Claim Key Packages",
         "operationId": "claimKeyPackages",
         "security": [
           {
@@ -2088,6 +2246,8 @@
     },
     "/v1/messaging/devices/{deviceId}/welcomes": {
       "get": {
+        "tags": ["Devices & E2EE"],
+        "summary": "List Welcomes",
         "operationId": "listWelcomes",
         "security": [
           {
@@ -2154,6 +2314,8 @@
     },
     "/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume": {
       "post": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Consume Welcome",
         "operationId": "consumeWelcome",
         "security": [
           {
@@ -2228,6 +2390,8 @@
     },
     "/v1/messaging/blocks": {
       "get": {
+        "tags": ["Safety & Blocks"],
+        "summary": "List Blocks",
         "operationId": "listBlocks",
         "security": [
           {
@@ -2284,6 +2448,8 @@
         }
       },
       "post": {
+        "tags": ["Safety & Blocks"],
+        "summary": "Create Block",
         "operationId": "createBlock",
         "security": [
           {
@@ -2362,6 +2528,8 @@
     },
     "/v1/messaging/blocks/{principalId}": {
       "delete": {
+        "tags": ["Safety & Blocks"],
+        "summary": "Remove Block",
         "operationId": "removeBlock",
         "security": [
           {
@@ -2428,6 +2596,8 @@
     },
     "/v1/realtime/tickets": {
       "post": {
+        "tags": ["Realtime Messaging"],
+        "summary": "Issue Realtime Ticket",
         "operationId": "issueRealtimeTicket",
         "security": [
           {
@@ -2464,6 +2634,8 @@
     },
     "/v1/realtime": {
       "get": {
+        "tags": ["Realtime Messaging"],
+        "summary": "Connect Realtime",
         "operationId": "connectRealtime",
         "security": [
           {
@@ -2499,6 +2671,8 @@
     },
     "/v1/messaging/client-tokens": {
       "post": {
+        "tags": ["Messaging Client Sessions"],
+        "summary": "Issue Client Token",
         "operationId": "issueClientToken",
         "security": [
           {
@@ -2564,6 +2738,8 @@
     },
     "/v1/messaging/client-sessions/{sessionId}/revoke": {
       "post": {
+        "tags": ["Messaging Client Sessions"],
+        "summary": "Revoke Client Session",
         "operationId": "revokeClientSession",
         "security": [
           {
@@ -2627,6 +2803,8 @@
     },
     "/v1/messaging/presence/settings": {
       "get": {
+        "tags": ["Presence & Notifications"],
+        "summary": "Get Presence Settings",
         "operationId": "getPresenceSettings",
         "security": [
           {
@@ -2683,6 +2861,8 @@
         }
       },
       "put": {
+        "tags": ["Presence & Notifications"],
+        "summary": "Put Presence Settings",
         "operationId": "putPresenceSettings",
         "security": [
           {
@@ -2751,6 +2931,8 @@
     },
     "/v1/messaging/devices/{deviceId}/push-registration": {
       "put": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Register Push",
         "operationId": "registerPush",
         "security": [
           {
@@ -2825,6 +3007,8 @@
         }
       },
       "delete": {
+        "tags": ["Devices & E2EE"],
+        "summary": "Unregister Push",
         "operationId": "unregisterPush",
         "security": [
           {
@@ -2891,6 +3075,8 @@
     },
     "/v1/conversations/{conversationId}/attachments": {
       "post": {
+        "tags": ["Attachments & Media"],
+        "summary": "Create Attachment Intent",
         "operationId": "createAttachmentIntent",
         "security": [
           {
@@ -2980,6 +3166,8 @@
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}": {
       "get": {
+        "tags": ["Attachments & Media"],
+        "summary": "Get Attachment",
         "operationId": "getAttachment",
         "security": [
           {
@@ -3054,6 +3242,8 @@
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize": {
       "post": {
+        "tags": ["Attachments & Media"],
+        "summary": "Finalize Attachment",
         "operationId": "finalizeAttachment",
         "security": [
           {
@@ -3131,6 +3321,8 @@
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants": {
       "post": {
+        "tags": ["Attachments & Media"],
+        "summary": "Grant Attachment Download",
         "operationId": "grantAttachmentDownload",
         "security": [
           {
@@ -3205,6 +3397,8 @@
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/content": {
       "get": {
+        "tags": ["Attachments & Media"],
+        "summary": "Read Attachment Content",
         "operationId": "readAttachmentContent",
         "security": [
           {
@@ -3283,6 +3477,8 @@
     },
     "/v1/messaging/legal-holds": {
       "get": {
+        "tags": ["Legal Hold & Compliance"],
+        "summary": "List Legal Holds",
         "operationId": "listLegalHolds",
         "security": [
           {
@@ -3326,6 +3522,8 @@
         }
       },
       "post": {
+        "tags": ["Legal Hold & Compliance"],
+        "summary": "Create Legal Hold",
         "operationId": "createLegalHold",
         "security": [
           {
@@ -3381,6 +3579,8 @@
     },
     "/v1/messaging/legal-holds/{holdId}": {
       "get": {
+        "tags": ["Legal Hold & Compliance"],
+        "summary": "Get Legal Hold",
         "operationId": "getLegalHold",
         "security": [
           {
@@ -3435,6 +3635,8 @@
     },
     "/v1/messaging/legal-holds/{holdId}/release": {
       "post": {
+        "tags": ["Legal Hold & Compliance"],
+        "summary": "Release Legal Hold",
         "operationId": "releaseLegalHold",
         "security": [
           {
@@ -3499,6 +3701,8 @@
     },
     "/v1/conversations/{conversationId}/search": {
       "get": {
+        "tags": ["Search"],
+        "summary": "Search Conversation",
         "operationId": "searchConversation",
         "security": [
           {
@@ -3593,6 +3797,8 @@
     },
     "/v1/messaging/search": {
       "get": {
+        "tags": ["Search"],
+        "summary": "Search Messages",
         "operationId": "searchMessages",
         "security": [
           {
@@ -3671,6 +3877,8 @@
     },
     "/v1/conversations/{conversationId}/reports": {
       "post": {
+        "tags": ["Safety & Moderation"],
+        "summary": "Create Report",
         "operationId": "createReport",
         "security": [
           {
@@ -3747,6 +3955,8 @@
     },
     "/v1/messaging/reports": {
       "get": {
+        "tags": ["Safety & Moderation"],
+        "summary": "List Reports",
         "operationId": "listReports",
         "security": [
           {
@@ -3815,6 +4025,8 @@
     },
     "/v1/messaging/reports/{reportId}": {
       "get": {
+        "tags": ["Safety & Moderation"],
+        "summary": "Get Report",
         "operationId": "getReport",
         "security": [
           {
@@ -3869,6 +4081,8 @@
     },
     "/v1/messaging/moderation/actions": {
       "get": {
+        "tags": ["Safety & Moderation"],
+        "summary": "List Moderation Actions",
         "operationId": "listModerationActions",
         "security": [
           {
@@ -3923,6 +4137,8 @@
         }
       },
       "post": {
+        "tags": ["Safety & Moderation"],
+        "summary": "Apply Moderation Action",
         "operationId": "applyModerationAction",
         "security": [
           {
@@ -3978,6 +4194,8 @@
     },
     "/v1/messaging/exports": {
       "post": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "Request Export",
         "operationId": "requestExport",
         "security": [
           {
@@ -4033,6 +4251,8 @@
     },
     "/v1/messaging/exports/{exportId}": {
       "get": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "Get Export",
         "operationId": "getExport",
         "security": [
           {
@@ -4087,6 +4307,8 @@
     },
     "/v1/messaging/exports/{exportId}/download-grants": {
       "post": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "Grant Export Download",
         "operationId": "grantExportDownload",
         "security": [
           {
@@ -4141,6 +4363,8 @@
     },
     "/v1/messaging/deletion-requests": {
       "post": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "Request Data Deletion",
         "operationId": "requestDataDeletion",
         "security": [
           {
@@ -4196,6 +4420,8 @@
     },
     "/v1/messaging/deletion-requests/{requestId}": {
       "get": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "Get Data Deletion",
         "operationId": "getDataDeletion",
         "security": [
           {
@@ -4250,6 +4476,8 @@
     },
     "/v1/messaging/audit": {
       "get": {
+        "tags": ["Data Governance & Exports"],
+        "summary": "List Audit",
         "operationId": "listAudit",
         "security": [
           {
@@ -4341,6 +4569,8 @@
     },
     "/v1/messaging/client-sessions/revoke-all": {
       "post": {
+        "tags": ["Messaging Client Sessions"],
+        "summary": "Revoke All Client Sessions",
         "operationId": "revokeAllClientSessions",
         "security": [
           {
@@ -4396,6 +4626,8 @@
     },
     "/v1/messaging/sms-bridge/disclosure": {
       "get": {
+        "tags": ["SMS Bridge"],
+        "summary": "Get SMS Bridge Disclosure",
         "operationId": "getSmsBridgeDisclosure",
         "security": [
           {
@@ -4443,6 +4675,8 @@
     },
     "/v1/conversations/{conversationId}/sms-bridges": {
       "get": {
+        "tags": ["SMS Bridge"],
+        "summary": "List SMS Bridges",
         "operationId": "listSmsBridges",
         "security": [
           {
@@ -4507,6 +4741,8 @@
         }
       },
       "post": {
+        "tags": ["SMS Bridge"],
+        "summary": "Create SMS Bridge",
         "operationId": "createSmsBridge",
         "security": [
           {
@@ -4583,6 +4819,8 @@
     },
     "/v1/conversations/{conversationId}/sms-bridges/{bridgeId}/close": {
       "post": {
+        "tags": ["SMS Bridge"],
+        "summary": "Close SMS Bridge",
         "operationId": "closeSmsBridge",
         "security": [
           {
@@ -4657,6 +4895,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/sms-transport": {
       "get": {
+        "tags": ["SMS Bridge"],
+        "summary": "Get SMS Transport",
         "operationId": "getSmsTransport",
         "security": [
           {
@@ -4734,6 +4974,8 @@
     },
     "/v1/conversations/{conversationId}/bans": {
       "get": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "List Bans",
         "operationId": "listBans",
         "security": [
           {
@@ -4798,6 +5040,8 @@
         }
       },
       "post": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "Ban Member",
         "operationId": "banMember",
         "security": [
           {
@@ -4874,6 +5118,8 @@
     },
     "/v1/conversations/{conversationId}/bans/{principalId}": {
       "delete": {
+        "tags": ["Group Membership & Safety"],
+        "summary": "Unban Member",
         "operationId": "unbanMember",
         "security": [
           {
@@ -4948,6 +5194,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions": {
       "get": {
+        "tags": ["Message Features & Threads"],
+        "summary": "List Reactions",
         "operationId": "listReactions",
         "security": [
           {
@@ -5025,6 +5273,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}": {
       "put": {
+        "tags": ["Message Features & Threads"],
+        "summary": "Add Reaction",
         "operationId": "addReaction",
         "security": [
           {
@@ -5111,6 +5361,8 @@
         }
       },
       "delete": {
+        "tags": ["Message Features & Threads"],
+        "summary": "Remove Reaction",
         "operationId": "removeReaction",
         "security": [
           {
@@ -5199,6 +5451,8 @@
     },
     "/v1/conversations/{conversationId}/pins": {
       "get": {
+        "tags": ["Message Features & Threads"],
+        "summary": "List Pins",
         "operationId": "listPins",
         "security": [
           {
@@ -5268,6 +5522,8 @@
     },
     "/v1/conversations/{conversationId}/pins/{messageId}": {
       "put": {
+        "tags": ["Message Features & Threads"],
+        "summary": "Pin Message",
         "operationId": "pinMessage",
         "security": [
           {
@@ -5350,6 +5606,8 @@
         }
       },
       "delete": {
+        "tags": ["Message Features & Threads"],
+        "summary": "Unpin Message",
         "operationId": "unpinMessage",
         "security": [
           {
@@ -5424,6 +5682,8 @@
     },
     "/v1/conversations/{conversationId}/unread": {
       "get": {
+        "tags": ["Read State & Unread"],
+        "summary": "Get Unread Count",
         "operationId": "getUnreadCount",
         "security": [
           {
@@ -5493,6 +5753,8 @@
     },
     "/v1/messaging/usage": {
       "get": {
+        "tags": ["Usage & Limits"],
+        "summary": "Get Messaging Usage",
         "operationId": "getMessagingUsage",
         "security": [
           {
@@ -5551,6 +5813,8 @@
     },
     "/v1/messaging/history-transfers": {
       "post": {
+        "tags": ["History Transfer"],
+        "summary": "Create History Transfer",
         "operationId": "createHistoryTransfer",
         "security": [
           {
@@ -5617,6 +5881,8 @@
         }
       },
       "get": {
+        "tags": ["History Transfer"],
+        "summary": "List History Transfers",
         "operationId": "listHistoryTransfers",
         "security": [
           {
@@ -5680,6 +5946,8 @@
     },
     "/v1/messaging/history-transfers/{transferId}": {
       "get": {
+        "tags": ["History Transfer"],
+        "summary": "Get History Transfer",
         "operationId": "getHistoryTransfer",
         "security": [
           {
@@ -5743,6 +6011,8 @@
     },
     "/v1/messaging/history-transfers/{transferId}/sealed-history": {
       "put": {
+        "tags": ["History Transfer"],
+        "summary": "Seal History Transfer",
         "operationId": "sealHistoryTransfer",
         "security": [
           {
@@ -5820,6 +6090,8 @@
         }
       },
       "get": {
+        "tags": ["History Transfer"],
+        "summary": "Get Sealed History",
         "operationId": "getSealedHistory",
         "security": [
           {
@@ -5886,6 +6158,8 @@
     },
     "/v1/messaging/history-transfers/{transferId}/complete": {
       "post": {
+        "tags": ["History Transfer"],
+        "summary": "Complete History Transfer",
         "operationId": "completeHistoryTransfer",
         "security": [
           {
@@ -5952,6 +6226,8 @@
     },
     "/v1/messaging/history-transfers/{transferId}/cancel": {
       "post": {
+        "tags": ["History Transfer"],
+        "summary": "Cancel History Transfer",
         "operationId": "cancelHistoryTransfer",
         "security": [
           {
@@ -6028,6 +6304,8 @@
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants": {
       "post": {
+        "tags": ["Attachments & Media"],
+        "summary": "Create Thumbnail Grant",
         "operationId": "createThumbnailGrant",
         "security": [
           {
@@ -6102,6 +6380,8 @@
     },
     "/v1/messaging/backups": {
       "post": {
+        "tags": ["Encrypted Backups"],
+        "summary": "Create Backup Upload",
         "operationId": "createBackupUpload",
         "security": [
           {
@@ -6173,6 +6453,8 @@
     },
     "/v1/messaging/backups/latest": {
       "get": {
+        "tags": ["Encrypted Backups"],
+        "summary": "Get Latest Backup",
         "operationId": "getLatestBackup",
         "security": [
           {
@@ -6228,6 +6510,8 @@
     },
     "/v1/messaging/backups/{backupId}": {
       "delete": {
+        "tags": ["Encrypted Backups"],
+        "summary": "Delete Backup",
         "operationId": "deleteBackup",
         "security": [
           {
@@ -6291,6 +6575,8 @@
     },
     "/v1/messaging/backups/{backupId}/finalize": {
       "post": {
+        "tags": ["Encrypted Backups"],
+        "summary": "Finalize Backup",
         "operationId": "finalizeBackup",
         "security": [
           {
@@ -6360,6 +6646,8 @@
     },
     "/v1/messaging/backups/{backupId}/download-grants": {
       "post": {
+        "tags": ["Encrypted Backups"],
+        "summary": "Create Backup Download Grant",
         "operationId": "createBackupDownloadGrant",
         "security": [
           {
@@ -6429,6 +6717,8 @@
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/thread": {
       "get": {
+        "tags": ["Message Features & Threads"],
+        "summary": "Get Thread Summary",
         "operationId": "getThreadSummary",
         "security": [
           {
@@ -6506,6 +6796,8 @@
     },
     "/v1/conversations/{conversationId}/invitation/accept": {
       "post": {
+        "tags": ["Messaging Invitations"],
+        "summary": "Accept Invitation",
         "operationId": "acceptInvitation",
         "security": [
           {
@@ -6575,6 +6867,8 @@
     },
     "/v1/conversations/{conversationId}/invitation/decline": {
       "post": {
+        "tags": ["Messaging Invitations"],
+        "summary": "Decline Invitation",
         "operationId": "declineInvitation",
         "security": [
           {
@@ -6644,6 +6938,8 @@
     },
     "/v1/messaging/invitations": {
       "get": {
+        "tags": ["Messaging Invitations"],
+        "summary": "List Invitations",
         "operationId": "listInvitations",
         "security": [
           {

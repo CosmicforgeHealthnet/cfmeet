@@ -5,9 +5,45 @@
     "version": "1.4.0",
     "description": "Internal HTTP surface of services/privacy-relay: GET /health (public) and the service-authenticated /internal/v1 API used by the authenticated platform ingress (Calling) and by Calling's protected-call authorization. Every /internal/v1 path — including unknown ones — requires a valid service token; customer credentials are refused. Scope comes only from the signed delegated platform context; bodies refuse unknown members (tenantId, applicationId, environmentId, status, version, authorization results). Commands carry {idempotencyKey, request}."
   },
+  "tags": [
+    {
+      "name": "Service Health & Discovery",
+      "description": "Service health and readiness probes."
+    },
+    {
+      "name": "Internal - Communication Contexts",
+      "description": "Communication Contexts operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Context Evidence",
+      "description": "Context Evidence operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Relay Sessions",
+      "description": "Relay Sessions operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Communication Authorization",
+      "description": "Communication Authorization operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Contact Resolution",
+      "description": "Contact Resolution operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Relay Number Assignment",
+      "description": "Relay Number Assignment operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Relay Routing",
+      "description": "Relay Routing operations requiring internal service authorization."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service health",
         "operationId": "health",
         "description": "Liveness and database reachability. Public; reveals no configuration.",
         "security": [],
@@ -37,6 +73,8 @@
     },
     "/internal/v1/contexts": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Create Context",
         "operationId": "createContext",
         "description": "Create a communication context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -115,6 +153,8 @@
     },
     "/internal/v1/contexts/query": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "List Contexts",
         "operationId": "listContexts",
         "description": "List contexts (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
         "security": [
@@ -198,6 +238,8 @@
     },
     "/internal/v1/contexts/{context_id}": {
       "get": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Get Context",
         "operationId": "getContext",
         "description": "Get a context. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
         "security": [
@@ -261,6 +303,8 @@
     },
     "/internal/v1/contexts/{context_id}/evidence": {
       "get": {
+        "tags": ["Internal - Context Evidence"],
+        "summary": "Get Context Evidence",
         "operationId": "getContextEvidence",
         "description": "Privacy-safe evidence. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.read and a signed delegated platform context (the only scope).",
         "security": [
@@ -324,6 +368,8 @@
     },
     "/internal/v1/contexts/{context_id}/update": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Update Context",
         "operationId": "updateContext",
         "description": "Typed versioned update. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -410,6 +456,8 @@
     },
     "/internal/v1/contexts/{context_id}/suspend": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Suspend Context",
         "operationId": "suspendContext",
         "description": "Suspend. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -496,6 +544,8 @@
     },
     "/internal/v1/contexts/{context_id}/resume": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Resume Context",
         "operationId": "resumeContext",
         "description": "Resume. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -582,6 +632,8 @@
     },
     "/internal/v1/contexts/{context_id}/complete": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Complete Context",
         "operationId": "completeContext",
         "description": "Complete. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -668,6 +720,8 @@
     },
     "/internal/v1/contexts/{context_id}/revoke": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Revoke Context",
         "operationId": "revokeContext",
         "description": "Revoke. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication-context.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -754,6 +808,8 @@
     },
     "/internal/v1/contexts/{context_id}/sessions": {
       "post": {
+        "tags": ["Internal - Communication Contexts"],
+        "summary": "Create Relay Session",
         "operationId": "createRelaySession",
         "description": "Create a relay session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -840,6 +896,8 @@
     },
     "/internal/v1/sessions/query": {
       "post": {
+        "tags": ["Internal - Relay Sessions"],
+        "summary": "List Relay Sessions",
         "operationId": "listRelaySessions",
         "description": "List sessions (keyset). Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
         "security": [
@@ -923,6 +981,8 @@
     },
     "/internal/v1/sessions/{session_id}": {
       "get": {
+        "tags": ["Internal - Relay Sessions"],
+        "summary": "Get Relay Session",
         "operationId": "getRelaySession",
         "description": "Get a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.read and a signed delegated platform context (the only scope).",
         "security": [
@@ -986,6 +1046,8 @@
     },
     "/internal/v1/sessions/{session_id}/suspend": {
       "post": {
+        "tags": ["Internal - Relay Sessions"],
+        "summary": "Suspend Relay Session",
         "operationId": "suspendRelaySession",
         "description": "Suspend a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -1072,6 +1134,8 @@
     },
     "/internal/v1/sessions/{session_id}/resume": {
       "post": {
+        "tags": ["Internal - Relay Sessions"],
+        "summary": "Resume Relay Session",
         "operationId": "resumeRelaySession",
         "description": "Resume a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -1158,6 +1222,8 @@
     },
     "/internal/v1/sessions/{session_id}/revoke": {
       "post": {
+        "tags": ["Internal - Relay Sessions"],
+        "summary": "Revoke Relay Session",
         "operationId": "revokeRelaySession",
         "description": "Revoke a session. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission relay-session.write and a signed delegated platform context (the only scope).",
         "security": [
@@ -1244,6 +1310,8 @@
     },
     "/internal/v1/communication/authorize": {
       "post": {
+        "tags": ["Internal - Communication Authorization"],
+        "summary": "Authorize Communication",
         "operationId": "authorizeCommunication",
         "description": "Decide (and record) whether source may communicate with every target, on channel, over route, under the relay session NOW: evaluates the current context AND the current session (their intersection) at server time. Every decision is recorded. Used by Calling before every protected call creation and transfer introduction; Calling fails closed without an answer. Requires an internal service token (X-CF-Service-Authorization), the receiver-granted permission communication.authorize and a signed delegated platform context (the only scope).",
         "security": [
@@ -1309,6 +1377,8 @@
     },
     "/internal/v1/contacts/{contact_reference}/resolution-grants": {
       "post": {
+        "tags": ["Internal - Contact Resolution"],
+        "summary": "Grant Contact Resolution",
         "operationId": "grantContactResolution",
         "description": "Calling only: issue a short-lived Contact Resolution Grant for one authorized public-network call leg. Reveals no contact value. Every attempt is audited.",
         "security": [
@@ -1382,6 +1452,8 @@
     },
     "/internal/v1/contacts/{contact_reference}/resolve-for-execution": {
       "post": {
+        "tags": ["Internal - Contact Resolution"],
+        "summary": "Resolve Contact For Execution",
         "operationId": "resolveContactForExecution",
         "description": "Telephony only: exchange a valid, unexpired, unconsumed grant (same scope, contact, call, leg; unchanged authority; enabled and effectively VERIFIED contact) for the canonical E.164 value of that one execution. The response is never logged or persisted; every attempt is audited without the number.",
         "security": [
@@ -1455,6 +1527,8 @@
     },
     "/internal/v1/sessions/{session_id}/relay-number-assignment": {
       "post": {
+        "tags": ["Internal - Relay Number Assignment"],
+        "summary": "Assign Relay Number",
         "operationId": "assignRelayNumber",
         "description": "Lend a temporary relay number to the session (deterministic, SKIP LOCKED selection; idempotent per session). 201 new, 200 the existing assignment (Idempotent-Replayed: true).",
         "security": [
@@ -1536,6 +1610,8 @@
         }
       },
       "get": {
+        "tags": ["Internal - Relay Number Assignment"],
+        "summary": "Get Relay Number Assignment",
         "operationId": "getRelayNumberAssignment",
         "description": "The session's assignment in any status (RELAY_ASSIGNMENT_NOT_FOUND when it never had one).",
         "security": [
@@ -1587,6 +1663,8 @@
     },
     "/internal/v1/sessions/{session_id}/relay-number-assignment/release": {
       "post": {
+        "tags": ["Internal - Relay Number Assignment"],
+        "summary": "Release Relay Number Assignment",
         "operationId": "releaseRelayNumberAssignment",
         "description": "Restrictive (never gated by a kill switch) and idempotent: routing authority ends now, the number enters cooldown.",
         "security": [
@@ -1638,6 +1716,8 @@
     },
     "/internal/v1/relay-routing/resolve-inbound": {
       "post": {
+        "tags": ["Internal - Relay Routing"],
+        "summary": "Resolve Inbound Relay Mapping",
         "operationId": "resolveInboundRelayMapping",
         "description": "Telephony only, no delegated context: canonicalize the called relay number, require exactly one ACTIVE assignment (more is an incident, never a choice), matching correlation metadata, an event not older than the assignment, and CALLBACK_RELAY authority of the bound session and context now. Every attempt is recorded (relay_inbound_resolutions) without any number.",
         "security": [
@@ -1694,6 +1774,8 @@
     },
     "/internal/v1/relay-routing/protect-inbound-caller": {
       "post": {
+        "tags": ["Internal - Relay Routing"],
+        "summary": "Protect Inbound Caller",
         "operationId": "protectInboundCaller",
         "description": "Telephony only, no delegated context: the presented caller number goes straight into the Contact Vault in the scope of a recent RESOLVED inbound resolution; the answer is its ContactReference (201 new, 200 an existing contact of that scope) and whom it may reach now.",
         "security": [
@@ -1766,6 +1848,8 @@
     },
     "/internal/v1/relay-routing/protect-dcn-caller": {
       "post": {
+        "tags": ["Internal - Relay Routing"],
+        "summary": "Protect DCN Caller",
         "operationId": "protectDcnCaller",
         "description": "Part IV L — Telephony only, no delegated context: the caller of an inbound call to a Digital Communications Number goes straight into the Contact Vault in the scope proven by Numbering's signed INBOUND_VOICE grant (verified against Privacy Relay's dedicated routing-grant trust bundle, NUMBER_GRANT_TRUST_BUNDLE_FILE; kind INBOUND_VOICE, issuer Numbering, audience Calling). 201 new / 200 existing contact. An invalid grant is 409 RELAY_MAPPING_NOT_ACTIVE; no configured trust 503.",
         "security": [

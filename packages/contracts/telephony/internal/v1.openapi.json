@@ -147,9 +147,37 @@
       "cfServiceAuth": []
     }
   ],
+  "tags": [
+    {
+      "name": "Service Health & Discovery",
+      "description": "Service health and readiness probes."
+    },
+    {
+      "name": "Provider Callbacks",
+      "description": "Provider-adapter callbacks that require provider authentication."
+    },
+    {
+      "name": "Internal - Call Legs",
+      "description": "Call Legs operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Media Bridges",
+      "description": "Media Bridges operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Routing & Readiness",
+      "description": "Routing & Readiness operations requiring internal service authorization."
+    },
+    {
+      "name": "Internal - Media Capture & Prompts",
+      "description": "Media Capture & Prompts operations requiring internal service authorization."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service health",
         "operationId": "health",
         "security": [],
         "description": "Liveness and database reachability.",
@@ -179,6 +207,8 @@
     },
     "/provider-callbacks/{provider_id}": {
       "post": {
+        "tags": ["Provider Callbacks"],
+        "summary": "Provider Callback",
         "operationId": "providerCallback",
         "security": [],
         "description": "Provider event callback. Authenticated by the adapter (signature / token / peer) BEFORE parsing; bodies over 16 KiB are refused unread; a strict parser; dedupe by (provider, provider event id). The body is provider-specific (adapter-internal, not a CF Meet contract).",
@@ -231,6 +261,8 @@
     },
     "/provider-callbacks/{provider_id}/{token}": {
       "post": {
+        "tags": ["Provider Callbacks"],
+        "summary": "Provider Callback With Token",
         "operationId": "providerCallbackWithToken",
         "security": [],
         "description": "Provider callback for adapters that authenticate with a path token (compared in constant time).",
@@ -293,6 +325,8 @@
     },
     "/internal/v1/legs/originate": {
       "post": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Originate Leg",
         "operationId": "originateLeg",
         "parameters": [
           {
@@ -360,6 +394,8 @@
     },
     "/internal/v1/legs/{leg_id}": {
       "get": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Get Leg",
         "operationId": "getLeg",
         "parameters": [
           {
@@ -403,6 +439,8 @@
     },
     "/internal/v1/legs/{leg_id}/terminate": {
       "post": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Terminate Leg",
         "operationId": "terminateLeg",
         "description": "Idempotent termination (an unresolved one is reconciled until the provider confirms). Permission telephony-leg.terminate.",
         "parameters": [
@@ -478,6 +516,8 @@
     },
     "/internal/v1/legs/{leg_id}/hold": {
       "post": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Hold Leg",
         "operationId": "holdLeg",
         "description": "Hold (media anchored at the edge). Permission telephony-leg.hold.",
         "parameters": [
@@ -553,6 +593,8 @@
     },
     "/internal/v1/legs/{leg_id}/resume": {
       "post": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Resume Leg",
         "operationId": "resumeLeg",
         "description": "Resume. Permission telephony-leg.resume.",
         "parameters": [
@@ -628,6 +670,8 @@
     },
     "/internal/v1/bridges": {
       "post": {
+        "tags": ["Internal - Media Bridges"],
+        "summary": "Create Bridge",
         "operationId": "createBridge",
         "parameters": [
           {
@@ -689,6 +733,8 @@
     },
     "/internal/v1/bridges/{bridge_id}": {
       "get": {
+        "tags": ["Internal - Media Bridges"],
+        "summary": "Get Bridge",
         "operationId": "getBridge",
         "parameters": [
           {
@@ -730,6 +776,8 @@
         }
       },
       "delete": {
+        "tags": ["Internal - Media Bridges"],
+        "summary": "End Bridge",
         "operationId": "endBridge",
         "parameters": [
           {
@@ -773,6 +821,8 @@
     },
     "/internal/v1/routes/availability": {
       "get": {
+        "tags": ["Internal - Routing & Readiness"],
+        "summary": "Route Availability",
         "operationId": "routeAvailability",
         "description": "Normalized route availability (permission telephony-status.read).",
         "parameters": [
@@ -827,6 +877,8 @@
     },
     "/internal/v1/readiness": {
       "get": {
+        "tags": ["Internal - Routing & Readiness"],
+        "summary": "Readiness",
         "operationId": "readiness",
         "parameters": [
           {
@@ -859,6 +911,8 @@
     },
     "/internal/v1/legs/{leg_id}/answer": {
       "post": {
+        "tags": ["Internal - Call Legs"],
+        "summary": "Answer Leg",
         "operationId": "answerLeg",
         "description": "Part F: answer an internal enterprise SIP leg (an IVR / voicemail needs media). Permission telephony-leg.media; refused (LEG_NOT_ACTIVE) for any public-network leg and while ENTERPRISE_SIP_ENABLED is off.",
         "parameters": [
@@ -934,6 +988,8 @@
     },
     "/internal/v1/legs/{leg_id}/prompt": {
       "post": {
+        "tags": ["Internal - Media Capture & Prompts"],
+        "summary": "Prompt Leg",
         "operationId": "promptLeg",
         "description": "Part F: play one BUILT-IN prompt (body `prompt`) on an internal enterprise SIP leg; playbacks of a leg run in order. Permission telephony-leg.media.",
         "parameters": [
@@ -1009,6 +1065,8 @@
     },
     "/internal/v1/legs/{leg_id}/capture": {
       "post": {
+        "tags": ["Internal - Media Capture & Prompts"],
+        "summary": "Capture Leg",
         "operationId": "captureLeg",
         "description": "Part F: capture the caller audio of an internal enterprise SIP leg (body `capture`: Calling's capture id, purpose, maximum length, beep) into the edge's transient spool; on completion Telephony delivers it to Calling (cfmeet.telephony.capture) and then deletes the spool copy. Permission telephony-leg.media; refused (LEG_NOT_ACTIVE) for public-network legs and while ENTERPRISE_SIP_ENABLED is off.",
         "parameters": [
@@ -1084,6 +1142,8 @@
     },
     "/internal/v1/legs/{leg_id}/capture-stop": {
       "post": {
+        "tags": ["Internal - Media Capture & Prompts"],
+        "summary": "Stop Capture Leg",
         "operationId": "stopCaptureLeg",
         "description": "Part F: stop a running capture of an internal enterprise SIP leg early (body `capture`: the capture to stop) — a call recording's explicit / policy stop. The edge then delivers it like any finished capture. Never blocked by a kill switch; a capture that already finished makes it a no-op. Permission telephony-leg.media.",
         "parameters": [

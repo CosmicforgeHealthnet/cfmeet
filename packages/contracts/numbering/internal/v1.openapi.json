@@ -146,9 +146,109 @@
       }
     }
   },
+  "tags": [
+    {
+      "name": "Service Health & Discovery",
+      "description": "Read-only health, readiness and OpenAPI discovery checks."
+    },
+    {
+      "name": "Assignments & Routing",
+      "description": "Inspect and configure owned number assignments and routing."
+    },
+    {
+      "name": "Reservations & Acquisitions",
+      "description": "Reserve telephone numbers and manage their acquisition lifecycle."
+    },
+    {
+      "name": "Internal - Number Resources",
+      "description": "Service-only resource and capability lookups."
+    },
+    {
+      "name": "Number Search & Catalog",
+      "description": "Search countries, number types and available telephone number inventory."
+    },
+    {
+      "name": "Admin - Number Catalog",
+      "description": "Privileged catalog publication and withdrawal operations."
+    },
+    {
+      "name": "Admin - Number Resources",
+      "description": "Privileged number resource controls, lifecycle and audit."
+    },
+    {
+      "name": "KYC & Eligibility",
+      "description": "Manage identification checks, KYC cases, supporting evidence and number eligibility."
+    },
+    {
+      "name": "Admin - KYC Verification",
+      "description": "Privileged verification decisions and access to KYC evidence."
+    },
+    {
+      "name": "Internal - Number Assignments",
+      "description": "Service-only number assignment status and authority."
+    },
+    {
+      "name": "Provider Callbacks",
+      "description": "Provider-signed delivery and inbound callbacks, not application UI."
+    },
+    {
+      "name": "Number Lifecycle",
+      "description": "Suspend, restore, release and reassign assigned numbers."
+    },
+    {
+      "name": "Number Pools",
+      "description": "Manage tenant number pools and membership."
+    },
+    {
+      "name": "Internal - Number Routing",
+      "description": "Service-only call and SMS number routing resolution."
+    },
+    {
+      "name": "Number Usage",
+      "description": "Read number usage and entitlement information."
+    },
+    {
+      "name": "Number Risk & Appeals",
+      "description": "Inspect risk decisions and submit authorized appeals."
+    },
+    {
+      "name": "Number Porting",
+      "description": "Manage telephone number portability and associated evidence."
+    },
+    {
+      "name": "Admin - Number Lifecycle",
+      "description": "Privileged quarantine and number lifecycle actions."
+    },
+    {
+      "name": "Admin - Number Risk",
+      "description": "Privileged number risk and appeal decisions."
+    },
+    {
+      "name": "Admin - Platform Controls",
+      "description": "Privileged numbering platform configuration controls."
+    },
+    {
+      "name": "Admin - Reconciliation",
+      "description": "Privileged reconciliation and lifecycle audit."
+    },
+    {
+      "name": "Admin - Relay Inventory",
+      "description": "Privileged relay number inventory management."
+    },
+    {
+      "name": "Internal - Usage & Risk",
+      "description": "Service-to-service usage and risk signals."
+    },
+    {
+      "name": "Internal - Relay Inventory",
+      "description": "Service-only relay number leases and inventory operations."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service health",
         "operationId": "health",
         "security": [],
         "description": "Liveness.",
@@ -168,6 +268,8 @@
     },
     "/ready": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Check service readiness",
         "operationId": "ready",
         "security": [],
         "description": "Readiness: database reachable and migrations current; outbox backlog, dead letters and jobs awaiting reconciliation (counts only).",
@@ -197,6 +299,8 @@
     },
     "/v1/numbers/assignments": {
       "get": {
+        "tags": ["Assignments & Routing"],
+        "summary": "List Assignments",
         "operationId": "listAssignments",
         "security": [
           {
@@ -277,6 +381,8 @@
         }
       },
       "post": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Create Assignment",
         "operationId": "createAssignment",
         "security": [
           {
@@ -359,6 +465,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}": {
       "get": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Get Assignment",
         "operationId": "getAssignment",
         "security": [
           {
@@ -410,6 +518,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/history": {
       "get": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Get Assignment History",
         "operationId": "getAssignmentHistory",
         "security": [
           {
@@ -461,6 +571,8 @@
     },
     "/v1/numbers/reservations/{reservationId}": {
       "get": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Get Reservation",
         "operationId": "getReservation",
         "security": [
           {
@@ -512,6 +624,8 @@
     },
     "/internal/v1/number-resources/{numberResourceId}": {
       "get": {
+        "tags": ["Internal - Number Resources"],
+        "summary": "Get Number Resource",
         "operationId": "getNumberResource",
         "security": [
           {
@@ -566,6 +680,8 @@
     },
     "/v1/numbers/catalog/countries/{countryCode}": {
       "get": {
+        "tags": ["Number Search & Catalog"],
+        "summary": "Get Catalog Country",
         "operationId": "getCatalogCountry",
         "security": [
           {
@@ -617,6 +733,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/capabilities": {
       "get": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Get Assignment Capabilities",
         "operationId": "getAssignmentCapabilities",
         "security": [
           {
@@ -668,6 +786,8 @@
     },
     "/v1/admin/catalog/countries": {
       "post": {
+        "tags": ["Admin - Number Catalog"],
+        "summary": "Publish Catalog Country",
         "operationId": "publishCatalogCountry",
         "security": [
           {
@@ -730,6 +850,8 @@
     },
     "/v1/admin/catalog/number-types": {
       "post": {
+        "tags": ["Admin - Number Catalog"],
+        "summary": "Publish Catalog Number Type",
         "operationId": "publishCatalogNumberType",
         "security": [
           {
@@ -792,6 +914,8 @@
     },
     "/v1/admin/catalog/number-types/{entryId}/withdraw": {
       "post": {
+        "tags": ["Admin - Number Catalog"],
+        "summary": "Withdraw Catalog Number Type",
         "operationId": "withdrawCatalogNumberType",
         "security": [
           {
@@ -862,6 +986,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/capabilities/{capability}/revoke": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Revoke Capability",
         "operationId": "revokeCapability",
         "security": [
           {
@@ -940,6 +1066,8 @@
     },
     "/internal/v1/number-resources/{numberResourceId}/capabilities": {
       "get": {
+        "tags": ["Internal - Number Resources"],
+        "summary": "Get Number Resource Capabilities",
         "operationId": "getNumberResourceCapabilities",
         "security": [
           {
@@ -994,6 +1122,8 @@
     },
     "/v1/numbers/kyc/requirements/{countryCode}/{numberType}/{ownershipClass}": {
       "get": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Get KYC Requirements",
         "operationId": "getKycRequirements",
         "security": [
           {
@@ -1075,6 +1205,8 @@
     },
     "/v1/numbers/kyc/cases": {
       "post": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Create KYC Case",
         "operationId": "createKycCase",
         "security": [
           {
@@ -1150,6 +1282,8 @@
     },
     "/v1/numbers/kyc/cases/{caseId}": {
       "get": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Get KYC Case",
         "operationId": "getKycCase",
         "security": [
           {
@@ -1210,6 +1344,8 @@
     },
     "/v1/numbers/kyc/cases/{caseId}/history": {
       "get": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Get KYC Case History",
         "operationId": "getKycCaseHistory",
         "security": [
           {
@@ -1270,6 +1406,8 @@
     },
     "/v1/numbers/kyc/cases/{caseId}/evidence": {
       "post": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Submit KYC Evidence",
         "operationId": "submitKycEvidence",
         "security": [
           {
@@ -1353,6 +1491,8 @@
     },
     "/v1/numbers/kyc/cases/{caseId}/submit": {
       "post": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Submit KYC Case",
         "operationId": "submitKycCase",
         "security": [
           {
@@ -1426,6 +1566,8 @@
     },
     "/v1/numbers/kyc/cases/{caseId}/appeals": {
       "post": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Appeal KYC Case",
         "operationId": "appealKycCase",
         "security": [
           {
@@ -1509,6 +1651,8 @@
     },
     "/v1/numbers/eligibility": {
       "post": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Evaluate Eligibility",
         "operationId": "evaluateEligibility",
         "security": [
           {
@@ -1570,6 +1714,8 @@
     },
     "/v1/numbers/eligibility/{decisionId}": {
       "get": {
+        "tags": ["KYC & Eligibility"],
+        "summary": "Get Eligibility Decision",
         "operationId": "getEligibilityDecision",
         "security": [
           {
@@ -1630,6 +1776,8 @@
     },
     "/v1/admin/kyc/requirements": {
       "post": {
+        "tags": ["Admin - KYC Verification"],
+        "summary": "Publish KYC Requirements",
         "operationId": "publishKycRequirements",
         "security": [
           {
@@ -1692,6 +1840,8 @@
     },
     "/v1/admin/kyc/cases/{caseId}": {
       "get": {
+        "tags": ["Admin - KYC Verification"],
+        "summary": "Get Admin KYC Case",
         "operationId": "getAdminKycCase",
         "security": [
           {
@@ -1752,6 +1902,8 @@
     },
     "/v1/admin/kyc/cases/{caseId}/decisions": {
       "post": {
+        "tags": ["Admin - KYC Verification"],
+        "summary": "Review KYC Case",
         "operationId": "reviewKycCase",
         "security": [
           {
@@ -1822,6 +1974,8 @@
     },
     "/v1/admin/kyc/cases/{caseId}/revoke": {
       "post": {
+        "tags": ["Admin - KYC Verification"],
+        "summary": "Revoke KYC Case",
         "operationId": "revokeKycCase",
         "security": [
           {
@@ -1892,6 +2046,8 @@
     },
     "/v1/admin/kyc/evidence/{evidenceId}/access": {
       "post": {
+        "tags": ["Admin - KYC Verification"],
+        "summary": "Read KYC Evidence",
         "operationId": "readKycEvidence",
         "security": [
           {
@@ -1962,6 +2118,8 @@
     },
     "/internal/v1/assignments/{assignmentId}/kyc-status": {
       "get": {
+        "tags": ["Internal - Number Assignments"],
+        "summary": "Get Assignment KYC Status",
         "operationId": "getAssignmentKycStatus",
         "security": [
           {
@@ -2016,6 +2174,8 @@
     },
     "/provider-callbacks/v1/{providerId}": {
       "post": {
+        "tags": ["Provider Callbacks"],
+        "summary": "Receive Provider Callback",
         "operationId": "receiveProviderCallback",
         "security": [],
         "description": "Provider callback ingress. Authenticated by the provider adapter (HMAC signature over the raw body with timestamp and delivery id, replay window) — never by a customer credential or service token. A refused callback is 401 and nothing is stored; a redelivery is 200 with duplicate: true. The body is the provider's own format.",
@@ -2071,6 +2231,8 @@
     },
     "/v1/numbers/countries": {
       "get": {
+        "tags": ["Number Search & Catalog"],
+        "summary": "List Number Countries",
         "operationId": "listNumberCountries",
         "security": [
           {
@@ -2106,6 +2268,8 @@
     },
     "/v1/numbers/countries/{countryCode}/number-types": {
       "get": {
+        "tags": ["Number Search & Catalog"],
+        "summary": "List Number Types",
         "operationId": "listNumberTypes",
         "security": [
           {
@@ -2157,6 +2321,8 @@
     },
     "/v1/numbers/search": {
       "get": {
+        "tags": ["Number Search & Catalog"],
+        "summary": "Search Numbers",
         "operationId": "searchNumbers",
         "security": [
           {
@@ -2277,6 +2443,8 @@
     },
     "/v1/numbers/reservations": {
       "get": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "List Reservations",
         "operationId": "listReservations",
         "security": [
           {
@@ -2348,6 +2516,8 @@
         }
       },
       "post": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Create Reservation",
         "operationId": "createReservation",
         "security": [
           {
@@ -2430,6 +2600,8 @@
     },
     "/v1/numbers/reservations/{reservationId}/cancel": {
       "post": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Cancel Reservation",
         "operationId": "cancelReservation",
         "security": [
           {
@@ -2487,6 +2659,8 @@
     },
     "/openapi.json": {
       "get": {
+        "tags": ["Service Health & Discovery"],
+        "summary": "Get OpenAPI specification",
         "operationId": "getOpenApi",
         "security": [],
         "description": "This API description (the checked-in contract cfmeet.numbering.internal-api, served as is). Public like the probes; it describes, never authorizes.",
@@ -2506,6 +2680,8 @@
     },
     "/v1/numbers/acquisitions": {
       "get": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "List Acquisitions",
         "operationId": "listAcquisitions",
         "security": [
           {
@@ -2568,6 +2744,8 @@
         }
       },
       "post": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Create Acquisition",
         "operationId": "createAcquisition",
         "security": [
           {
@@ -2650,6 +2828,8 @@
     },
     "/v1/numbers/acquisitions/{acquisitionId}": {
       "get": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Get Acquisition",
         "operationId": "getAcquisition",
         "security": [
           {
@@ -2701,6 +2881,8 @@
     },
     "/v1/numbers/acquisitions/{acquisitionId}/routes": {
       "post": {
+        "tags": ["Reservations & Acquisitions"],
+        "summary": "Configure Acquisition Routes",
         "operationId": "configureAcquisitionRoutes",
         "security": [
           {
@@ -2791,6 +2973,8 @@
     },
     "/internal/v1/number-resources/{numberResourceId}/routes": {
       "get": {
+        "tags": ["Internal - Number Resources"],
+        "summary": "Get Number Routes",
         "operationId": "getNumberRoutes",
         "security": [
           {
@@ -2845,6 +3029,8 @@
     },
     "/internal/v1/number-resources/{numberResourceId}/route-readiness": {
       "post": {
+        "tags": ["Internal - Number Resources"],
+        "summary": "Acknowledge Route Readiness",
         "operationId": "acknowledgeRouteReadiness",
         "security": [
           {
@@ -2915,6 +3101,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/activate": {
       "post": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Activate Assignment",
         "operationId": "activateAssignment",
         "security": [
           {
@@ -2972,6 +3160,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/routing": {
       "get": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Get Assignment Routing",
         "operationId": "getAssignmentRouting",
         "security": [
           {
@@ -3021,6 +3211,8 @@
         }
       },
       "post": {
+        "tags": ["Assignments & Routing"],
+        "summary": "Update Assignment Routing",
         "operationId": "updateAssignmentRouting",
         "security": [
           {
@@ -3091,6 +3283,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/offboarding": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Offboard Employee",
         "operationId": "offboardEmployee",
         "security": [
           {
@@ -3161,6 +3355,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/transfer": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Transfer Assignment",
         "operationId": "transferAssignment",
         "security": [
           {
@@ -3241,6 +3437,8 @@
     },
     "/v1/numbers/pools": {
       "get": {
+        "tags": ["Number Pools"],
+        "summary": "List Pools",
         "operationId": "listPools",
         "security": [
           {
@@ -3280,6 +3478,8 @@
         }
       },
       "post": {
+        "tags": ["Number Pools"],
+        "summary": "Create Pool",
         "operationId": "createPool",
         "security": [
           {
@@ -3340,6 +3540,8 @@
     },
     "/v1/numbers/pools/{poolId}": {
       "get": {
+        "tags": ["Number Pools"],
+        "summary": "Get Pool",
         "operationId": "getPool",
         "security": [
           {
@@ -3391,6 +3593,8 @@
     },
     "/v1/numbers/pools/{poolId}/members": {
       "post": {
+        "tags": ["Number Pools"],
+        "summary": "Add Pool Member",
         "operationId": "addPoolMember",
         "security": [
           {
@@ -3461,6 +3665,8 @@
     },
     "/v1/numbers/pools/{poolId}/members/{assignmentId}": {
       "delete": {
+        "tags": ["Number Pools"],
+        "summary": "Remove Pool Member",
         "operationId": "removePoolMember",
         "security": [
           {
@@ -3523,6 +3729,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/assignment-history": {
       "get": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Get Number Assignment History",
         "operationId": "getNumberAssignmentHistory",
         "security": [
           {
@@ -3577,6 +3785,8 @@
     },
     "/internal/v1/routing/inbound-resolutions": {
       "post": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Resolve Inbound",
         "operationId": "resolveInbound",
         "security": [
           {
@@ -3642,6 +3852,8 @@
     },
     "/internal/v1/routing/caller-identity-grants": {
       "post": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Authorize Caller Identity",
         "operationId": "authorizeCallerIdentity",
         "security": [
           {
@@ -3707,6 +3919,8 @@
     },
     "/internal/v1/routing/sms-sender-grants": {
       "post": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Authorize SMS Sender",
         "operationId": "authorizeSmsSender",
         "security": [
           {
@@ -3772,6 +3986,8 @@
     },
     "/internal/v1/routing/grant-verifications": {
       "post": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Verify Routing Grant",
         "operationId": "verifyRoutingGrant",
         "security": [
           {
@@ -3828,6 +4044,8 @@
     },
     "/internal/v1/routing/number-assignments/{numberResourceId}": {
       "get": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Read Current Assignment",
         "operationId": "readCurrentAssignment",
         "security": [
           {
@@ -3879,6 +4097,8 @@
     },
     "/internal/v1/routing/sms-destination-resolutions": {
       "post": {
+        "tags": ["Internal - Number Routing"],
+        "summary": "Resolve SMS Destination",
         "operationId": "resolveSmsDestination",
         "security": [
           {
@@ -3944,6 +4164,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/suspend": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Suspend Assignment",
         "operationId": "suspendAssignment",
         "security": [
           {
@@ -4014,6 +4236,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/restore": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Restore Assignment",
         "operationId": "restoreAssignment",
         "security": [
           {
@@ -4074,6 +4298,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/suspension": {
       "get": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Get Assignment Suspension",
         "operationId": "getAssignmentSuspension",
         "security": [
           {
@@ -4125,6 +4351,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/release": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Release Assignment",
         "operationId": "releaseAssignment",
         "security": [
           {
@@ -4208,6 +4436,8 @@
     },
     "/v1/numbers/assignments/{assignmentId}/quarantine": {
       "get": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Get Assignment Quarantine",
         "operationId": "getAssignmentQuarantine",
         "security": [
           {
@@ -4259,6 +4489,8 @@
     },
     "/v1/numbers/releases/{releaseId}": {
       "get": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Get Release",
         "operationId": "getRelease",
         "security": [
           {
@@ -4310,6 +4542,8 @@
     },
     "/v1/numbers/reassignments": {
       "post": {
+        "tags": ["Number Lifecycle"],
+        "summary": "Reassign Number",
         "operationId": "reassignNumber",
         "security": [
           {
@@ -4385,6 +4619,8 @@
     },
     "/v1/numbers/usage": {
       "get": {
+        "tags": ["Number Usage"],
+        "summary": "Get Number Usage",
         "operationId": "getNumberUsage",
         "security": [
           {
@@ -4446,6 +4682,8 @@
     },
     "/v1/numbers/risk-decisions/{decisionId}": {
       "get": {
+        "tags": ["Number Risk & Appeals"],
+        "summary": "Get Risk Decision",
         "operationId": "getRiskDecision",
         "security": [
           {
@@ -4497,6 +4735,8 @@
     },
     "/v1/numbers/risk-decisions/{decisionId}/appeals": {
       "post": {
+        "tags": ["Number Risk & Appeals"],
+        "summary": "Appeal Risk Decision",
         "operationId": "appealRiskDecision",
         "security": [
           {
@@ -4567,6 +4807,8 @@
     },
     "/v1/numbers/ports": {
       "get": {
+        "tags": ["Number Porting"],
+        "summary": "List Port Requests",
         "operationId": "listPortRequests",
         "security": [
           {
@@ -4604,6 +4846,8 @@
         }
       },
       "post": {
+        "tags": ["Number Porting"],
+        "summary": "Create Port Request",
         "operationId": "createPortRequest",
         "security": [
           {
@@ -4679,6 +4923,8 @@
     },
     "/v1/numbers/ports/{portId}": {
       "get": {
+        "tags": ["Number Porting"],
+        "summary": "Get Port Request",
         "operationId": "getPortRequest",
         "security": [
           {
@@ -4730,6 +4976,8 @@
     },
     "/v1/numbers/ports/{portId}/evidence": {
       "post": {
+        "tags": ["Number Porting"],
+        "summary": "Add Port Evidence",
         "operationId": "addPortEvidence",
         "security": [
           {
@@ -4800,6 +5048,8 @@
     },
     "/v1/numbers/ports/{portId}/submit": {
       "post": {
+        "tags": ["Number Porting"],
+        "summary": "Submit Port Request",
         "operationId": "submitPortRequest",
         "security": [
           {
@@ -4860,6 +5110,8 @@
     },
     "/v1/numbers/ports/{portId}/cancel": {
       "post": {
+        "tags": ["Number Porting"],
+        "summary": "Cancel Port Request",
         "operationId": "cancelPortRequest",
         "security": [
           {
@@ -4920,6 +5172,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/suspend": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Suspend Number",
         "operationId": "adminSuspendNumber",
         "security": [
           {
@@ -4993,6 +5247,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/restore": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Restore Number",
         "operationId": "adminRestoreNumber",
         "security": [
           {
@@ -5056,6 +5312,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/release": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Release Number",
         "operationId": "adminReleaseNumber",
         "security": [
           {
@@ -5142,6 +5400,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/quarantine": {
       "get": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Get Quarantine",
         "operationId": "adminGetQuarantine",
         "security": [
           {
@@ -5196,6 +5456,8 @@
     },
     "/v1/admin/quarantines/{quarantineId}/review": {
       "post": {
+        "tags": ["Admin - Number Lifecycle"],
+        "summary": "Admin Review Quarantine",
         "operationId": "adminReviewQuarantine",
         "security": [
           {
@@ -5269,6 +5531,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/ownership-periods": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Ownership Periods",
         "operationId": "adminOwnershipPeriods",
         "security": [
           {
@@ -5342,6 +5606,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/ownership-verifications": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Verify Ownership",
         "operationId": "adminVerifyOwnership",
         "security": [
           {
@@ -5415,6 +5681,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/lifecycle-evidence": {
       "post": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Lifecycle Evidence",
         "operationId": "adminLifecycleEvidence",
         "security": [
           {
@@ -5488,6 +5756,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/usage": {
       "get": {
+        "tags": ["Admin - Number Resources"],
+        "summary": "Admin Number Usage",
         "operationId": "adminNumberUsage",
         "security": [
           {
@@ -5542,6 +5812,8 @@
     },
     "/v1/admin/number-resources/{numberResourceId}/risk-decisions": {
       "get": {
+        "tags": ["Admin - Number Risk"],
+        "summary": "Admin Risk Decisions",
         "operationId": "adminRiskDecisions",
         "security": [
           {
@@ -5596,6 +5868,8 @@
     },
     "/v1/admin/risk-decisions/{decisionId}/appeal-decisions": {
       "post": {
+        "tags": ["Admin - Number Risk"],
+        "summary": "Admin Decide Appeal",
         "operationId": "adminDecideAppeal",
         "security": [
           {
@@ -5669,6 +5943,8 @@
     },
     "/v1/admin/controls": {
       "get": {
+        "tags": ["Admin - Platform Controls"],
+        "summary": "Admin List Controls",
         "operationId": "adminListControls",
         "security": [
           {
@@ -5712,6 +5988,8 @@
     },
     "/v1/admin/controls/{control}": {
       "post": {
+        "tags": ["Admin - Platform Controls"],
+        "summary": "Admin Set Control",
         "operationId": "adminSetControl",
         "security": [
           {
@@ -5785,6 +6063,8 @@
     },
     "/v1/admin/reconciliation/lifecycle": {
       "post": {
+        "tags": ["Admin - Reconciliation"],
+        "summary": "Admin Reconcile Lifecycle",
         "operationId": "adminReconcileLifecycle",
         "security": [
           {
@@ -5828,6 +6108,8 @@
     },
     "/v1/admin/relay-numbers/{relayInventoryRef}/retire": {
       "post": {
+        "tags": ["Admin - Relay Inventory"],
+        "summary": "Admin Retire Relay Number",
         "operationId": "adminRetireRelayNumber",
         "security": [
           {
@@ -5882,6 +6164,8 @@
     },
     "/internal/v1/number-usage": {
       "post": {
+        "tags": ["Internal - Usage & Risk"],
+        "summary": "Report Number Usage",
         "operationId": "reportNumberUsage",
         "security": [
           {
@@ -5957,6 +6241,8 @@
     },
     "/internal/v1/number-risk-signals": {
       "post": {
+        "tags": ["Internal - Usage & Risk"],
+        "summary": "Report Number Risk Signal",
         "operationId": "reportNumberRiskSignal",
         "security": [
           {
@@ -6019,6 +6305,8 @@
     },
     "/internal/v1/relay-inventory/imports": {
       "post": {
+        "tags": ["Internal - Relay Inventory"],
+        "summary": "Import Relay Number",
         "operationId": "importRelayNumber",
         "security": [
           {
@@ -6091,6 +6379,8 @@
     },
     "/internal/v1/relay-leases": {
       "post": {
+        "tags": ["Internal - Relay Inventory"],
+        "summary": "Lease Relay Number",
         "operationId": "leaseRelayNumber",
         "security": [
           {
@@ -6166,6 +6456,8 @@
     },
     "/internal/v1/relay-leases/{leaseId}/release": {
       "post": {
+        "tags": ["Internal - Relay Inventory"],
+        "summary": "Release Relay Lease",
         "operationId": "releaseRelayLease",
         "security": [
           {
@@ -6239,6 +6531,8 @@
     },
     "/internal/v1/relay-numbers/{relayInventoryRef}/resolution": {
       "get": {
+        "tags": ["Internal - Relay Inventory"],
+        "summary": "Resolve Relay Number",
         "operationId": "resolveRelayNumber",
         "security": [
           {
