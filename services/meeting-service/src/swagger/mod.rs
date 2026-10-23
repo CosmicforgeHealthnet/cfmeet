@@ -870,7 +870,15 @@ pub fn swagger_router(server_addr: &str) -> Router {
             get(move || {
                 let page = page.clone();
                 let csp = csp.clone();
-                async move { ([(CONTENT_SECURITY_POLICY, csp), (CACHE_CONTROL, "no-store, max-age=0".to_string())], Html(page)) }
+                async move {
+                    (
+                        [
+                            (CONTENT_SECURITY_POLICY, csp),
+                            (CACHE_CONTROL, "no-store, max-age=0".to_string()),
+                        ],
+                        Html(page),
+                    )
+                }
             }),
         )
         .route(
