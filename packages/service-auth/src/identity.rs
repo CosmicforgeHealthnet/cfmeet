@@ -23,6 +23,13 @@ pub mod services {
     /// first-party backend, meeting sync), Privacy Relay (context authority) and the SMS
     /// Gateway (bridge delivery), each with its own narrow permission.
     pub const MESSAGING: &str = "cfmeet.messaging";
+    /// Developer Platform (Part VI): the developer / enterprise control plane. References
+    /// Platform Access's canonical tenant / application / environment ids; never an
+    /// identity or credential authority of its own.
+    pub const DEVELOPER_PLATFORM: &str = "cfmeet.developer-platform";
+    /// Public API Gateway (Part VI): customer ingress. Authenticates customer credentials
+    /// through Platform Access and forwards a signed delegated context; owns no data.
+    pub const API_GATEWAY: &str = "cfmeet.api-gateway";
     /// Operator administration tooling. Not a deployable service: an issuer identity
     /// that only Platform Access trusts, for identity administration.
     pub const OPERATOR_CONSOLE: &str = "cfmeet.operator-console";
@@ -104,6 +111,14 @@ impl ServiceId {
 
     pub fn meeting_service() -> Self {
         Self(services::MEETING_SERVICE.to_string())
+    }
+
+    pub fn developer_platform() -> Self {
+        Self(services::DEVELOPER_PLATFORM.to_string())
+    }
+
+    pub fn api_gateway() -> Self {
+        Self(services::API_GATEWAY.to_string())
     }
 
     pub fn operator_console() -> Self {
@@ -204,6 +219,8 @@ mod tests {
             services::NUMBERING,
             services::SMS_GATEWAY,
             services::MESSAGING,
+            services::DEVELOPER_PLATFORM,
+            services::API_GATEWAY,
             "cfmeet.a1",
         ] {
             assert_eq!(ServiceId::parse(id).unwrap().as_str(), id);

@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.9.1",
+      "version": "1.10.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -739,6 +739,50 @@
       "authority": "generated",
       "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
       "description": "Self-contained rendering of cfmeet.telephony.internal-http-api (telephony/internal/v1.openapi.json) for Swagger UI and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.telephony.internal-http-api stays the authority."
+    },
+    {
+      "id": "cfmeet.developer-platform.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform-developer/common/v1.schema.json",
+      "owner": "developer-platform",
+      "visibility": "public",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Developer Platform vocabulary (Part VI §§1–5 foundation): error envelope, probes and the gateway-forwarded canonical context (canonical Platform Access ids only; no identity attributes, scopes or credentials)."
+    },
+    {
+      "id": "cfmeet.developer-platform.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "platform-developer/internal/v1.openapi.json",
+      "owner": "developer-platform",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "HTTP surface of services/developer-platform, served at /openapi.json: GET /health, GET /ready and the service-authenticated /internal/v1 API (GET /internal/v1/gateway/context: developer-request.forward, API Gateway only, delegated context re-validated by Platform Access). Sections 50+ not included."
+    },
+    {
+      "id": "cfmeet.api-gateway.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform-developer/gateway/common/v1.schema.json",
+      "owner": "api-gateway",
+      "visibility": "public",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "API Gateway vocabulary (Part VI §§1–5 foundation): public error envelope (default-deny NOT_FOUND, authentication, scope, rate, upstream availability / timeout) and probes."
+    },
+    {
+      "id": "cfmeet.api-gateway.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "platform-developer/gateway/http/v1.openapi.json",
+      "owner": "api-gateway",
+      "visibility": "public",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Customer ingress of services/api-gateway: probes and the flag-gated foundation route GET /v1/developer-platform/context. Default deny; internal, provider-callback, operator and Telephony surfaces are never routable. The Section 51 route catalogue is not included."
     }
   ]
 }

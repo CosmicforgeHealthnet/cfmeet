@@ -23,3 +23,10 @@ Phase 2 — Meeting & Conference Platform — is implemented primarily in:
 Future calling, Privacy Relay, messaging, telephony and numbering services are outside the Phase 2 meeting-service implementation unless the Phase 2 specification explicitly defines an integration boundary.
 
 The repository migration/restructure that preceded Phase 2 is recorded in [`../migration/MONOREPO_MIGRATION.md`](../migration/MONOREPO_MIGRATION.md).
+
+## Part VI — Developer & Enterprise Platform
+
+Chapters 1–5 (foundation) are recorded in [`phase-06/`](phase-06/README.md):
+`services/developer-platform/`, `services/api-gateway/`,
+`packages/contracts/platform-developer/`, `sdks/`, `infra/api-gateway/` and
+[ADR 0055](../decisions/0055-developer-platform-and-api-gateway-foundation.md).

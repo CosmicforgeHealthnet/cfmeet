@@ -1,0 +1,157 @@
+name: Developer Platform service
+
+# services/developer-platform — the Part VI developer / enterprise control plane
+# foundation (ADR 0055). It owns its own PostgreSQL database (devplat_ tables, canonical
+# Platform Access ids only) and depends only on packages/service-auth and its contracts
+# (packages/contracts/platform-developer). Platform Access is reached over authenticated
+# internal HTTP only; it remains the only identity / credential authority.
+#
+# Staging-only validation: nothing here deploys anywhere.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/developer-platform/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/developer-platform.yml"
+  pull_request:
+    paths:
+      - "services/developer-platform/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "infra/deployment/**"
+      - ".github/workflows/developer-platform.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: developer-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/developer-platform
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/developer-platform -> target
+          key: lint
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Repository guards (no other service's source; devplat_ tables only)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E '"\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway|messaging|api-gateway)' \
+               services/developer-platform/Cargo.toml services/developer-platform/migration/Cargo.toml; then
+            echo "::error::services/developer-platform depends on another service"; exit 1
+          fi
+          if grep -rn -i -P 'CREATE TABLE (?!devplat_)' services/developer-platform/migration/src; then
+            echo "::error::services/developer-platform creates a table outside its domain"; exit 1
+          fi
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/developer-platform -> target
+          key: test
+      - name: Foundation — probes, migrations, ownership isolation, internal auth, forwarded context, served contract
+        run: cargo test --locked --test foundation --test architecture
+      - name: Startup and worker — real binaries, fail-closed configuration
+        run: cargo test --locked --test startup --test worker
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/developer-platform -> target
+          key: build
+      - name: cargo build
+        run: cargo build --workspace --locked
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/developer_platform_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE developer_platform_migration_smoke"
+          ./target/debug/developer-platform-migration up
+          ./target/debug/developer-platform-migration reset
+          ./target/debug/developer-platform-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d developer_platform_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM developer_platform_seaql_migrations")" = "$(grep -c '^mod m20' migration/src/lib.rs)"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'developer_platform_seaql_migrations' AND tablename !~ '^devplat_'")" = "0"
+      - name: Per-service database roles with the real migrations
+        env:
+          DEVELOPER_PLATFORM_MIGRATION_BIN: ${{ github.workspace }}/services/developer-platform/target/debug/developer-platform-migration
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/developer-platform/Dockerfile -t cfmeet-developer-platform:ci .
+      - name: image contains only the Developer Platform binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-developer-platform:ci /app | tr '\n' ' ')" = "developer-platform developer-platform-migration developer-platform-worker "
+          if docker run --rm --entrypoint /bin/sh cfmeet-developer-platform:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

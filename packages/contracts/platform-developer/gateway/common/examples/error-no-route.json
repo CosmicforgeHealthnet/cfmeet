@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "No such route.",
+    "requestId": "req_0123456789abcdef0123456789abcdef"
+  }
+}

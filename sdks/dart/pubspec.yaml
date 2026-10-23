@@ -1,0 +1,10 @@
+name: cfmeet_platform_sdk
+description: CF Meet platform SDK for Dart — Part VI scaffolding, generated from the published contracts in packages/contracts. The full SDK is Section 52.
+version: 0.0.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dev_dependencies:
+  test: ^1.25.0

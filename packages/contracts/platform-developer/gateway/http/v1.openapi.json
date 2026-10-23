@@ -1,0 +1,113 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet public API Gateway",
+    "version": "1.0.0",
+    "description": "Customer ingress of services/api-gateway (Part VI §§1–5 foundation). Default deny: only routes in the gateway's compiled route catalogue are served and only when API_GATEWAY_PUBLIC_ROUTING_ENABLED is true; every other path is NOT_FOUND. Internal (/internal/**), provider-callback, operator-administration and Telephony surfaces are never routable. Credentials are verified by Platform Access only; tenant / application / environment come from its authority chain, never from the request. Upstreams receive a short-lived signed service token carrying the delegated platform context and keep final resource authorization. The Section 51 route catalogue is not part of this version."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: route catalogue loaded (counts only).",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/ReadinessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/developer-platform/context": {
+      "get": {
+        "operationId": "getDeveloperPlatformContext",
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "description": "Foundation route (catalogue id developer-platform.context): authenticates the credential through Platform Access and forwards to the Developer Platform (GET /internal/v1/gateway/context) with the signed delegated context. Served only when API_GATEWAY_PUBLIC_ROUTING_ENABLED is true.",
+        "responses": {
+          "200": {
+            "description": "Canonical context of the credential's application environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/GatewayContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A CF Meet API credential issued by Platform Access (Authorization: Bearer). X-CF-* headers supplied by a client are stripped; a client X-CF-Service-Authorization is refused."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

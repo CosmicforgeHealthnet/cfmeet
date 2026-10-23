@@ -204,6 +204,11 @@ pub enum InternalPermission {
     /// request for a MANAGED bridge copy (Messaging only; never E2EE ciphertext).
     #[serde(rename = "sms-bridge.submit")]
     SmsBridgeSubmit,
+    /// Developer Platform (Part VI §§1–5): receive a customer request the API Gateway
+    /// authenticated through Platform Access, with the signed delegated context the
+    /// gateway derived from the authority chain. API Gateway only.
+    #[serde(rename = "developer-request.forward")]
+    DeveloperRequestForward,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -424,7 +429,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformCredentialAuthenticate,
         name: "platform-credential.authenticate",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING, services::API_GATEWAY],
         sensitive: false,
         description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
     },
@@ -448,7 +453,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformIdentityRead,
         name: "platform-identity.read",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING, services::DEVELOPER_PLATFORM],
         sensitive: false,
         description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
     },
@@ -588,6 +593,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Submit one authorized outbound SMS Bridge transport request (MANAGED copies only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperRequestForward,
+        name: "developer-request.forward",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Forward a customer request the API Gateway authenticated through Platform Access (signed delegated context derived from the authority chain only)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -641,6 +654,7 @@ impl InternalPermission {
         InternalPermission::MessagingContextAuthorityApply,
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
+        InternalPermission::DeveloperRequestForward,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -954,6 +968,58 @@ mod tests {
         "platform-identity.read",
         "sms-bridge.submit",
     ];
+
+    #[test]
+    fn part_vi_developer_platform_and_gateway_flows_are_least_privilege() {
+        let granted = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.grantable_to.contains(&service))
+                .map(|d| d.name)
+                .collect()
+        };
+        let received = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.receiver == service)
+                .map(|d| d.name)
+                .collect()
+        };
+        // The gateway authenticates customers through Platform Access and forwards to the
+        // Developer Platform; it receives nothing (customer ingress only, no internal API).
+        assert_eq!(
+            granted(services::API_GATEWAY),
+            [
+                "platform-credential.authenticate",
+                "developer-request.forward"
+            ]
+        );
+        assert!(received(services::API_GATEWAY).is_empty());
+        // The Developer Platform only READS identity; it never administers, registers or
+        // authenticates credentials (Platform Access stays the only authority).
+        assert_eq!(
+            granted(services::DEVELOPER_PLATFORM),
+            ["platform-identity.read"]
+        );
+        assert_eq!(
+            received(services::DEVELOPER_PLATFORM),
+            ["developer-request.forward"]
+        );
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            for s in [services::API_GATEWAY, services::DEVELOPER_PLATFORM] {
+                assert!(!d.grantable_to.contains(&s), "{} -> {s}", d.name);
+            }
+        }
+        // Telephony, Platform Access administration and operator tooling are never
+        // reachable from the customer ingress.
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::API_GATEWAY))
+        {
+            assert_ne!(d.receiver, services::TELEPHONY, "{}", d.name);
+            assert_ne!(d.permission, InternalPermission::PlatformIdentityAdminister);
+        }
+    }
 
     #[test]
     fn wildcard_like_values_are_detected() {

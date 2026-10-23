@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json",
+  "title": "CF Meet Developer Platform common v1",
+  "description": "Developer Platform vocabulary (Part VI §§1–5 foundation): the error envelope, probes and the gateway-forwarded canonical context. Platform Access is the only identity authority: every identifier here is a canonical Platform Access id and no identity attribute (name, slug, status, scope, credential, verifier, secret) is ever part of a Developer Platform message.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/GatewayContext"
+    },
+    {
+      "$ref": "#/$defs/HealthStatus"
+    },
+    {
+      "$ref": "#/$defs/ReadinessStatus"
+    }
+  ],
+  "$defs": {
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "VALIDATION_ERROR",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "PAYLOAD_TOO_LARGE",
+        "INTERNAL_AUTHENTICATION_FAILED",
+        "INTERNAL_PERMISSION_DENIED",
+        "DELEGATED_CONTEXT_REQUIRED",
+        "DELEGATED_CONTEXT_INVALID",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "Error": {
+      "description": "Error envelope (Cache-Control: no-store). Messages never contain an identifier, credential, token or database text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "EnvironmentKind": {
+      "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/ApplicationEnvironmentKind"
+    },
+    "AuthorityMode": {
+      "type": "string",
+      "enum": [
+        "FULL",
+        "SAFETY_ONLY"
+      ]
+    },
+    "GatewayContext": {
+      "description": "GET /internal/v1/gateway/context: the canonical Platform Access ids of the caller's application environment, as Platform Access re-validated them from the API Gateway's signed delegated context.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "environmentKind",
+        "serviceAccountId",
+        "authorityMode",
+        "authority",
+        "forwardedBy",
+        "correlationId"
+      ],
+      "properties": {
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "$ref": "#/$defs/EnvironmentKind"
+        },
+        "serviceAccountId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "authorityMode": {
+          "$ref": "#/$defs/AuthorityMode"
+        },
+        "authority": {
+          "const": "PLATFORM_ACCESS"
+        },
+        "forwardedBy": {
+          "const": "cfmeet.api-gateway"
+        },
+        "correlationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/CorrelationId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "HealthStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service"
+      ],
+      "properties": {
+        "status": {
+          "const": "ok"
+        },
+        "service": {
+          "const": "developer-platform"
+        }
+      }
+    },
+    "ReadinessStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service",
+        "database",
+        "migrations",
+        "gatewayApi"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "not_ready"
+          ]
+        },
+        "service": {
+          "const": "developer-platform"
+        },
+        "database": {
+          "enum": [
+            "ok",
+            "unavailable"
+          ]
+        },
+        "migrations": {
+          "enum": [
+            "current",
+            "pending",
+            "unknown"
+          ]
+        },
+        "gatewayApi": {
+          "enum": [
+            "enabled",
+            "disabled"
+          ]
+        }
+      }
+    }
+  }
+}

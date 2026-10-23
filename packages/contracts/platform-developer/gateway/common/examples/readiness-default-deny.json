@@ -1,0 +1,8 @@
+{
+  "status": "ready",
+  "service": "api-gateway",
+  "publicRouting": "disabled",
+  "routes": 0,
+  "websockets": "disabled",
+  "quotas": "not_enforced"
+}

@@ -1,0 +1,148 @@
+name: API Gateway service
+
+# services/api-gateway — the Part VI public customer ingress foundation (ADR 0055):
+# default-deny routing, Platform Access credential authentication, short-lived signed
+# delegated contexts (packages/service-auth), client authority-header stripping. It owns
+# NO database. The integration job runs the real Platform Access and Developer Platform
+# binaries.
+#
+# Staging-only validation: nothing here deploys or changes live Nginx routing.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/api-gateway/**"
+      - "services/developer-platform/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "sdks/**"
+      - "infra/api-gateway/**"
+      - ".github/workflows/api-gateway.yml"
+  pull_request:
+    paths:
+      - "services/api-gateway/**"
+      - "services/developer-platform/**"
+      - "services/platform-access/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/**"
+      - "sdks/**"
+      - "infra/api-gateway/**"
+      - ".github/workflows/api-gateway.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: api-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/api-gateway
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / clippy / guards / SDK scaffolding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/api-gateway -> target
+          key: lint
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: The gateway owns no data and depends on no service
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test ! -d services/api-gateway/migration
+          if grep -n -E '"\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway|messaging|developer-platform)' services/api-gateway/Cargo.toml; then
+            echo "::error::services/api-gateway depends on another service"; exit 1
+          fi
+      - name: SDK generation is current (TypeScript + Dart scaffolding)
+        working-directory: .
+        run: python3 sdks/generate.py --check
+
+  test:
+    name: test (unit, routing, ingress, startup)
+    runs-on: ubuntu-latest
+    env:
+      # The cross-service journey runs in its own job below.
+      CFMEET_SKIP_DB_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/api-gateway -> target
+          key: test
+      - name: Default deny, forged contexts and headers, Platform Access failure modes
+        run: cargo test --locked --test routing --test ingress --test startup
+      - name: cargo test (all)
+        run: cargo test --no-fail-fast --locked
+
+  integration:
+    name: integration (real Platform Access + Developer Platform)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PLATFORM_ACCESS_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access
+      PLATFORM_ACCESS_MIGRATION_BIN: ${{ github.workspace }}/services/platform-access/target/debug/platform-access-migration
+      DEVELOPER_PLATFORM_BIN: ${{ github.workspace }}/services/developer-platform/target/debug/developer-platform
+      DEVELOPER_PLATFORM_MIGRATION_BIN: ${{ github.workspace }}/services/developer-platform/target/debug/developer-platform-migration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/api-gateway -> target
+            services/platform-access -> target
+            services/developer-platform -> target
+          key: integration
+      - name: Build Platform Access
+        working-directory: services/platform-access
+        run: cargo build --workspace --bins --locked
+      - name: Build the Developer Platform
+        working-directory: services/developer-platform
+        run: cargo build --workspace --bins --locked
+      - name: Gateway <-> Platform Access <-> Developer Platform journey
+        run: cargo test --locked --test platform_access_e2e -- --nocapture
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/api-gateway/Dockerfile -t cfmeet-api-gateway:ci .
+      - name: image contains only the gateway binary and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-api-gateway:ci /app | tr '\n' ' ')" = "api-gateway "
+          if docker run --rm --entrypoint /bin/sh cfmeet-api-gateway:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

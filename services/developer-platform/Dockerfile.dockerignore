@@ -1,0 +1,15 @@
+# Build-context filter for services/developer-platform/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!packages/contracts/platform-developer
+!services/developer-platform
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/developer-platform/Dockerfile
+services/developer-platform/Dockerfile.dockerignore

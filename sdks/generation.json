@@ -1,0 +1,17 @@
+{
+  "description": "Single source of truth of the CF Meet platform SDKs (Part VI §4 scaffolding). Both SDKs are generated from these PUBLIC published contracts only; first-party CosmicForge products and external customers use the same SDKs and differ only through authorized scopes and trust classification. The full Section 52 SDK (typed clients, auth helpers, retries, pagination, WebSockets) is not implemented yet.",
+  "status": "scaffold",
+  "contracts": [
+    "cfmeet.api-gateway.http-api",
+    "cfmeet.api-gateway.common",
+    "cfmeet.developer-platform.common"
+  ],
+  "typescript": {
+    "package": "@cfmeet/platform-sdk",
+    "output": "typescript/src/generated/contracts.ts"
+  },
+  "dart": {
+    "package": "cfmeet_platform_sdk",
+    "output": "dart/lib/src/generated/contracts.dart"
+  }
+}

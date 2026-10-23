@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json",
+  "title": "CF Meet API Gateway common v1",
+  "description": "API Gateway vocabulary (Part VI §§1–5 foundation): the public error envelope and probes. The gateway owns no communications data; upstream responses are relayed, never stored.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Error"
+    },
+    {
+      "$ref": "#/$defs/HealthStatus"
+    },
+    {
+      "$ref": "#/$defs/ReadinessStatus"
+    }
+  ],
+  "$defs": {
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED",
+        "PAYLOAD_TOO_LARGE",
+        "VALIDATION_ERROR",
+        "AUTHENTICATION_FAILED",
+        "INSUFFICIENT_SCOPE",
+        "RATE_LIMITED",
+        "PROTOCOL_NOT_ENABLED",
+        "UPSTREAM_UNAVAILABLE",
+        "UPSTREAM_TIMEOUT",
+        "SERVICE_UNAVAILABLE",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "Error": {
+      "description": "Public error envelope (Cache-Control: no-store). An unknown route is NOT_FOUND (default deny); messages never echo input, credentials or upstream text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "requestId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/RequestId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "HealthStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service"
+      ],
+      "properties": {
+        "status": {
+          "const": "ok"
+        },
+        "service": {
+          "const": "api-gateway"
+        }
+      }
+    },
+    "ReadinessStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "service",
+        "publicRouting",
+        "routes",
+        "websockets",
+        "quotas"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "not_ready"
+          ]
+        },
+        "service": {
+          "const": "api-gateway"
+        },
+        "publicRouting": {
+          "enum": [
+            "enabled",
+            "disabled"
+          ]
+        },
+        "routes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "websockets": {
+          "enum": [
+            "enabled",
+            "disabled"
+          ]
+        },
+        "quotas": {
+          "enum": [
+            "not_enforced",
+            "configured"
+          ]
+        }
+      }
+    }
+  }
+}

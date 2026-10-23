@@ -1,0 +1,134 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Developer Platform internal API",
+    "version": "1.0.0",
+    "description": "HTTP surface of services/developer-platform (Part VI §§1–5 foundation): GET /health, GET /ready and the service-authenticated /internal/v1 API. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them through Platform Access and forwards a signed delegated context. The functional Developer Platform API (Sections 50+) is not part of this version."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: own database reachable and every migration applied.",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/ReadinessStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/ReadinessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "security": [],
+        "description": "This document.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/gateway/context": {
+      "get": {
+        "operationId": "getGatewayContext",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Foundation route of the customer path. Permission developer-request.forward (API Gateway only); requires the signed delegated platform context, which Platform Access re-validates (platform-identity.read) before the canonical ids are returned and the environment is anchored. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED (default off: 404).",
+        "responses": {
+          "200": {
+            "description": "Canonical context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/GatewayContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Ed25519 compact JWS (typ cf-service+jwt) from packages/service-auth, audience cfmeet.developer-platform."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

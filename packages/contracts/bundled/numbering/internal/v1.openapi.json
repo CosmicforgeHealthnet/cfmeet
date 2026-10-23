@@ -7927,7 +7927,7 @@
         "pattern": "^req_[0-9a-f]{32}$"
       },
       "platform.common.v1.ServiceId": {
-        "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging. Never a wildcard.",
+        "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway. Never a wildcard.",
         "type": "string",
         "maxLength": 64,
         "pattern": "^cfmeet\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$"

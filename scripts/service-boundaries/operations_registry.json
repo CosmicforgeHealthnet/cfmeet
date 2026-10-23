@@ -5,6 +5,8 @@
     "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
   ],
   "responsibilities": [
+    {"id": "developer-platform-worker-heartbeat", "owner": "developer-platform", "source": "src/worker.rs", "entry": "run_once",
+     "tests": ["tests/worker.rs::worker_heartbeats_are_per_instance_and_monotonic", "tests/worker.rs::the_worker_loop_runs_until_shutdown"]},
     {"id": "messaging-kt-rollback-monitor", "owner": "messaging", "source": "src/operations.rs", "entry": "kt_monitor_once",
      "tests": ["tests/operations.rs::a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_closed",
                "tests/disaster_recovery.rs::a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_rollback"]},

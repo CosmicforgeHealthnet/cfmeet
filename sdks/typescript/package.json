@@ -1,0 +1,20 @@
+{
+  "name": "@cfmeet/platform-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CF Meet platform SDK for TypeScript — Part VI scaffolding. Generated from the published contracts in packages/contracts; the full SDK is Section 52.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "generate": "python3 ../generate.py",
+    "generate:check": "python3 ../generate.py --check",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  }
+}

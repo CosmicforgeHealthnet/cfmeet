@@ -1,0 +1,14 @@
+# Build-context filter for services/api-gateway/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!services/api-gateway
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/api-gateway/Dockerfile
+services/api-gateway/Dockerfile.dockerignore

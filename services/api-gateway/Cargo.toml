@@ -1,0 +1,43 @@
+[package]
+name = "api-gateway"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "api-gateway"
+description = "CF Meet public API Gateway (Part VI): default-deny customer ingress. Authenticates credentials through Platform Access, forwards a short-lived signed delegated context to domain services and owns no data"
+
+# Stand-alone workspace (independently buildable; no database, no migrations).
+[workspace]
+
+[lib]
+name = "api_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "api-gateway"
+path = "src/main.rs"
+
+[dependencies]
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+secrecy = "0.10"
+async-trait = "0.1"
+url = "2"
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.42", features = ["process"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }

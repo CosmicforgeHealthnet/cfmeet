@@ -1,7 +1,8 @@
 # CF Meet — root developer commands.
 # Each target delegates to the app/service's own toolchain. services/meeting-service/,
 # services/calling/, services/platform-access/, services/numbering/, services/privacy-relay/,
-# services/telephony/, services/sms-gateway/, services/messaging/ and apps/web/ remain independently buildable
+# services/telephony/, services/sms-gateway/, services/messaging/, services/developer-platform/,
+# services/api-gateway/ and apps/web/ remain independently buildable
 # and deployable.
 # Shared code lives in packages/ (contracts, service-auth); no service depends on another.
 
@@ -17,6 +18,8 @@ MESSAGING_CRYPTO := packages/messaging-crypto
 WEB             := apps/web
 SERVICE_AUTH    := packages/service-auth
 CONTRACTS       := packages/contracts
+DEVELOPER_PLATFORM := services/developer-platform
+API_GATEWAY     := services/api-gateway
 
 # Binaries of a service workspace (honours a shared CARGO_TARGET_DIR).
 bin_dir = $(or $(CARGO_TARGET_DIR),$(CURDIR)/$(1)/target)/debug
@@ -38,7 +41,11 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         sms-gateway sms-gateway-migrate sms-gateway-test sms-gateway-lint sms-gateway-build \
         messaging messaging-migrate messaging-test messaging-lint messaging-build messaging-crypto-test \
         service-auth-test service-auth-lint contracts-validate contracts-test contracts-lint \
-        service-boundaries secret-scan
+        service-boundaries secret-scan \
+        developer-platform developer-platform-worker developer-platform-migrate developer-platform-test \
+        developer-platform-lint developer-platform-build developer-platform-bins \
+        api-gateway api-gateway-test api-gateway-lint api-gateway-build api-gateway-integration \
+        sdks-check
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -226,6 +233,52 @@ communications-e2e: platform-access-bins ## Cross-service SMS + voice journeys a
 		CALLING_RTC_CLIENT=$(CURDIR)/$(CALLING)/tests/rtc/rtc_client.py \
 		cargo test --test communications_e2e --test relay_cutover_e2e -- --nocapture
 
+# Part VI (§§1–5 foundation): the Developer Platform (own database) and the public API
+# Gateway (no database). Both authenticate through Platform Access only.
+developer-platform-migrate: ## Apply Developer Platform migrations (services/developer-platform/.env)
+	cd $(DEVELOPER_PLATFORM) && cargo run -p developer-platform-migration -- up
+
+developer-platform: ## Run the Developer Platform API (Platform Access required)
+	cd $(DEVELOPER_PLATFORM) && cargo run --bin developer-platform
+
+developer-platform-worker: ## Run the Developer Platform worker
+	cd $(DEVELOPER_PLATFORM) && cargo run --bin developer-platform-worker
+
+developer-platform-test: ## Run Developer Platform tests (requires TEST_DATABASE_URL; no Docker needed)
+	cd $(DEVELOPER_PLATFORM) && cargo test --workspace --no-fail-fast
+
+developer-platform-lint: ## fmt + clippy for the Developer Platform
+	cd $(DEVELOPER_PLATFORM) && cargo fmt --all -- --check
+	cd $(DEVELOPER_PLATFORM) && cargo clippy --workspace --all-targets -- -D warnings
+
+developer-platform-build: ## Build the Developer Platform
+	cd $(DEVELOPER_PLATFORM) && cargo build --workspace
+
+developer-platform-bins: ## Build the Developer Platform server + migration binaries (used by the gateway journey)
+	cd $(DEVELOPER_PLATFORM) && cargo build --workspace --bins
+
+api-gateway: ## Run the API Gateway (default deny; Platform Access required)
+	cd $(API_GATEWAY) && cargo run --bin api-gateway
+
+api-gateway-test: ## API Gateway unit / ingress / routing / startup tests (no database, no Docker)
+	cd $(API_GATEWAY) && CFMEET_SKIP_DB_TESTS=1 cargo test --no-fail-fast
+
+api-gateway-integration: platform-access-bins developer-platform-bins ## Gateway <-> Platform Access <-> Developer Platform journey against the real binaries (requires TEST_DATABASE_URL)
+	cd $(API_GATEWAY) && $(PLATFORM_ACCESS_TEST_ENV) \
+		DEVELOPER_PLATFORM_BIN=$(call bin_dir,$(DEVELOPER_PLATFORM))/developer-platform \
+		DEVELOPER_PLATFORM_MIGRATION_BIN=$(call bin_dir,$(DEVELOPER_PLATFORM))/developer-platform-migration \
+		cargo test --test platform_access_e2e -- --nocapture
+
+api-gateway-lint: ## fmt + clippy for the API Gateway
+	cd $(API_GATEWAY) && cargo fmt --all -- --check
+	cd $(API_GATEWAY) && cargo clippy --all-targets -- -D warnings
+
+api-gateway-build: ## Build the API Gateway
+	cd $(API_GATEWAY) && cargo build
+
+sdks-check: ## SDK workspace scaffolding check (TypeScript + Dart; generation is Section 52)
+	python3 sdks/generate.py --check
+
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast --features client
@@ -265,11 +318,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test sms-gateway-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
+test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test sms-gateway-test developer-platform-test api-gateway-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
 
-lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint sms-gateway-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
+lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint sms-gateway-lint developer-platform-lint api-gateway-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
-build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build sms-gateway-build frontend-build ## Build all applications and services
+build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build sms-gateway-build developer-platform-build api-gateway-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace
