@@ -10,6 +10,8 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (`platform-identity.read`) |
+//! | `CF_MEETING_SERVICE_BASE_URL` | for the console | Meeting Service session bridge (`user-session.verify`); unset: Developer Console sessions are refused |
+//! | `CF_CALLING_BASE_URL` | for the webhook migration | Calling's controlled webhook export (`webhook-migration.export`) |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer the Developer Platform's
 //! own trust bundle grants the route's permission (the API Gateway:
@@ -102,6 +104,11 @@ impl ServiceAuthRuntime {
 const TARGETS: &[(&str, &str)] = &[
     // The identity authority: trusted-context re-validation and the scope registry.
     ("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS),
+    // The CF Meet session bridge: Developer Console sessions (`user-session.verify`).
+    // Unset: every DEVELOPER_SESSION request is refused (fail closed).
+    ("CF_MEETING_SERVICE_BASE_URL", services::MEETING_SERVICE),
+    // Calling: the controlled webhook migration export (`webhook-migration.export`).
+    ("CF_CALLING_BASE_URL", services::CALLING),
 ];
 
 #[derive(Debug, Clone)]
@@ -294,5 +301,19 @@ mod tests {
         assert!(ServiceAuthSettings::from_lookup(&lookup(&with_pa))
             .unwrap()
             .has_platform_access());
+    }
+
+    /// The session bridge and the webhook migration source are configurable peers
+    /// (without them the console refuses sessions; nothing else is reachable).
+    #[test]
+    fn session_bridge_and_migration_source_are_registered_targets() {
+        let mut pairs = BASE.to_vec();
+        pairs.push(("CF_MEETING_SERVICE_BASE_URL", "https://meeting.internal"));
+        pairs.push(("CF_CALLING_BASE_URL", "https://calling.internal"));
+        let settings = ServiceAuthSettings::from_lookup(&lookup(&pairs)).unwrap();
+        assert!(settings.has_target(services::MEETING_SERVICE));
+        assert!(settings.has_target(services::CALLING));
+        let none = ServiceAuthSettings::from_lookup(&lookup(BASE)).unwrap();
+        assert!(!none.has_target(services::MEETING_SERVICE));
     }
 }
