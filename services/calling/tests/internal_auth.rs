@@ -264,7 +264,9 @@ async fn customer_and_service_credentials_never_fall_through() {
     both.push(("authorization".into(), format!("Bearer {cfmk}")));
     assert_internal_auth_failure(&call(&h, Method::GET, "/internal/v1/test/caller", &both).await);
 
-    // Service token on a customer route: in the service header, or in Authorization.
+    // Service token of an issuer without `calling-request.forward` (only the API Gateway
+    // may forward, see gateway_forwarding.rs) on a customer route: in the service header,
+    // or in Authorization.
     let service_headers = to_calling(&h.peers.telephony);
     let r = call(&h, Method::POST, "/test/context", &service_headers).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);

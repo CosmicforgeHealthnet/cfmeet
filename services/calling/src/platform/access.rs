@@ -209,6 +209,25 @@ enum AuthenticateWire {
     },
 }
 
+impl From<AuthenticateWire> for AuthenticationOutcome {
+    fn from(wire: AuthenticateWire) -> Self {
+        match wire {
+            AuthenticateWire::Authenticated { authority } => {
+                AuthenticationOutcome::Authenticated(authority)
+            }
+            AuthenticateWire::Rejected {
+                reason,
+                public_id,
+                throttle,
+            } => AuthenticationOutcome::Rejected {
+                reason,
+                public_id,
+                throttle,
+            },
+        }
+    }
+}
+
 /// One change of the identity change feed.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -287,6 +306,18 @@ pub trait IdentityAuthority: Send + Sync {
         correlation: &CorrelationId,
     ) -> Result<AuthenticationOutcome, AuthorityError>;
 
+    /// Re-verifies, live, the credential an authenticated API Gateway named in its signed
+    /// delegated context (`initiating_credential_id`). Platform Access fetches the
+    /// credential's current authority chain and answers it only when it still matches the
+    /// delegated tenant / application / environment / service account — otherwise (and for
+    /// a revoked, expired, superseded or inactive credential) it answers REJECTED. The
+    /// delegated context travels inside Calling's own outbound service token.
+    async fn delegated_authority(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+    ) -> Result<AuthenticationOutcome, AuthorityError>;
+
     /// Registers (idempotently) the TELEPHONE_ENDPOINT principal of a protected public
     /// party in the signed delegated scope; the reference is the opaque ContactReference.
     async fn ensure_telephone_endpoint(
@@ -349,20 +380,28 @@ impl IdentityAuthority for HttpIdentityAuthority {
                 &Body { credential },
             )
             .await?;
-        match response.json::<AuthenticateWire>()? {
-            AuthenticateWire::Authenticated { authority } => {
-                Ok(AuthenticationOutcome::Authenticated(authority))
-            }
-            AuthenticateWire::Rejected {
-                reason,
-                public_id,
-                throttle,
-            } => Ok(AuthenticationOutcome::Rejected {
-                reason,
-                public_id,
-                throttle,
-            }),
-        }
+        Ok(response.json::<AuthenticateWire>()?.into())
+    }
+
+    async fn delegated_authority(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        correlation: &CorrelationId,
+    ) -> Result<AuthenticationOutcome, AuthorityError> {
+        // The credential id is read by Platform Access from the delegated context signed
+        // into this request's service token; the handler takes no body (an empty JSON
+        // object is sent because the transport always posts JSON).
+        let request = OutboundServiceRequest::continuing(target(), correlation)
+            .with_delegated_context(delegated.clone());
+        let response = self
+            .client
+            .post_json(
+                &request,
+                "/internal/v1/credentials/delegated-authority",
+                &json!({}),
+            )
+            .await?;
+        Ok(response.json::<AuthenticateWire>()?.into())
     }
 
     async fn ensure_telephone_endpoint(
@@ -445,6 +484,16 @@ impl IdentityAuthority for UnconfiguredIdentityAuthority {
     async fn authenticate(
         &self,
         _: &str,
+        _: &CorrelationId,
+    ) -> Result<AuthenticationOutcome, AuthorityError> {
+        Err(AuthorityError::Unavailable(
+            "platform access is not configured".into(),
+        ))
+    }
+
+    async fn delegated_authority(
+        &self,
+        _: &DelegatedPlatformContext,
         _: &CorrelationId,
     ) -> Result<AuthenticationOutcome, AuthorityError> {
         Err(AuthorityError::Unavailable(

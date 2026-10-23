@@ -1,16 +1,33 @@
 //! Platform credential authentication middleware.
 //!
-//! Accepts only `Authorization: Bearer <credential>`, verified by Platform Access (the
-//! shared identity authority, ADR 0032). A request that also carries an
-//! internal service token (`X-CF-Service-Authorization`) is rejected: customer routes
-//! never accept service credentials and the two mechanisms never fall through into each
-//! other. On success a
-//! [`PlatformAuthContext`] built from persisted state is inserted into the request
-//! extensions (handlers extract it), the request-rate limit is enforced, and the
-//! platform identifiers are recorded on the request span. On failure the client receives
-//! the normalized `AUTHENTICATION_FAILED` response; the specific reason is logged for
-//! operators together with the non-secret public credential id. The raw header value is
-//! never logged.
+//! A customer route accepts exactly one of two authentication paths, both answered by
+//! Platform Access (the shared identity authority, ADR 0032):
+//!
+//! 1. **Direct** — `Authorization: Bearer <credential>`, verified by Platform Access
+//!    (`/internal/v1/credentials/authenticate`).
+//! 2. **Gateway-forwarded** (Part VI §51) — no `Authorization` header and an internal
+//!    service token (`X-CF-Service-Authorization`, with the signed request / correlation
+//!    id headers) that verifies against Calling's own trust bundle, whose issuer is
+//!    granted `calling-request.forward` (grantable only to `cfmeet.api-gateway`), and
+//!    whose signed delegated context names the credential the gateway authenticated
+//!    (`initiating_credential_id`). Calling then has Platform Access re-verify that
+//!    credential live (`/internal/v1/credentials/delegated-authority`); the delegated
+//!    identifiers are never trusted as authority on their own. The request continues the
+//!    gateway's signed correlation id.
+//!
+//! The two mechanisms never fall through into each other: a request carrying both
+//! headers is refused, a service token from any other issuer (or without the grant, or
+//! without the credential id) is refused, and a customer credential is never accepted
+//! in the service header. On success either path yields the same [`PlatformAuthContext`]
+//! built from the authority chain; it is inserted into the request extensions (handlers
+//! extract it), the request-rate limit is enforced, and the platform identifiers are
+//! recorded on the request span — identically for both paths. On failure the client
+//! receives the normalized `AUTHENTICATION_FAILED` response; the specific bounded reason
+//! is logged for operators together with the non-secret public credential id (or, for a
+//! rejected service token, the verifier's failure code, kid and issuer). Neither raw
+//! header value is ever logged.
+//!
+//! [`PlatformAuthContext`]: crate::platform::context::PlatformAuthContext
 //!
 //! Safety-only authority (Part H §72 / §74): a credential whose tenant, application or
 //! environment is SUSPENDED authenticates into [`AuthorityMode::SafetyOnly`] and may
@@ -24,6 +41,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use cf_service_auth::{DelegatedPlatformContext, InternalPermission, ServiceId};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -98,6 +116,69 @@ fn reject(reason: AuthFailureReason, public_id: Option<&str>) -> Response {
     CallingError::AuthenticationFailed.into_response()
 }
 
+/// A request forwarded by the API Gateway: its verified delegated context, and the
+/// request context continuing the gateway's signed correlation id.
+struct GatewayForward {
+    delegated: DelegatedPlatformContext,
+    request: RequestContext,
+}
+
+/// Verifies the service token of a gateway-forwarded request (the caller has checked that
+/// no `Authorization` header is present). Every failure is a bounded reason; the token is
+/// never logged.
+fn gateway_forward(
+    state: &AppState,
+    headers: &HeaderMap,
+    local: &RequestContext,
+) -> Result<GatewayForward, AuthFailureReason> {
+    let caller = state
+        .service_auth
+        .verifier()
+        .verify_headers(headers)
+        .map_err(|error| {
+            let d = &error.diagnostics;
+            tracing::info!(
+                failure = error.failure.as_str(),
+                kid = d.kid.as_ref().map(|k| k.as_str()).unwrap_or(""),
+                issuer = d.issuer.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                "service token on a customer route did not verify"
+            );
+            AuthFailureReason::ServiceTokenInvalid
+        })?;
+    // The trust bundle can grant the permission only to the API Gateway; the identity is
+    // checked as well so no other issuer can ever reach this path.
+    if caller.authenticated_service() != &ServiceId::api_gateway()
+        || caller
+            .require_permission(InternalPermission::CallingRequestForward)
+            .is_err()
+    {
+        tracing::info!(
+            caller = %caller.authenticated_service(),
+            kid = %caller.key_id(),
+            "service token on a customer route without calling-request.forward"
+        );
+        return Err(AuthFailureReason::ForwardNotPermitted);
+    }
+    let delegated = caller
+        .delegated_platform_context()
+        .filter(|d| d.initiating_credential_id().is_some())
+        .cloned()
+        .ok_or_else(|| {
+            tracing::info!(
+                caller = %caller.authenticated_service(),
+                "gateway-forwarded request without a delegated credential"
+            );
+            AuthFailureReason::DelegatedCredentialMissing
+        })?;
+    Ok(GatewayForward {
+        delegated,
+        request: RequestContext {
+            request_id: local.request_id.clone(),
+            correlation_id: caller.correlation_id().clone(),
+        },
+    })
+}
+
 pub async fn require_platform_credential(
     State(state): State<AppState>,
     mut request: Request,
@@ -108,21 +189,31 @@ pub async fn require_platform_credential(
         .get::<RequestContext>()
         .cloned()
         .unwrap_or_else(RequestContext::generate);
-    if request
-        .headers()
-        .contains_key(&cf_service_auth::headers::SERVICE_AUTHORIZATION)
-    {
-        return reject(AuthFailureReason::ServiceCredentialPresented, None);
-    }
-    let Some(credential) = bearer_credential(request.headers()) else {
-        return reject(AuthFailureReason::MissingCredential, None);
+    let headers = request.headers();
+    let authenticated = if headers.contains_key(&cf_service_auth::headers::SERVICE_AUTHORIZATION) {
+        // A service token AND a customer credential: never forwarded, never mixed.
+        if headers.contains_key(header::AUTHORIZATION) {
+            return reject(AuthFailureReason::ServiceCredentialPresented, None);
+        }
+        let forward = match gateway_forward(&state, headers, &request_context) {
+            Ok(forward) => forward,
+            Err(reason) => return reject(reason, None),
+        };
+        state
+            .authenticator
+            .authenticate_delegated(&forward.delegated, forward.request)
+            .await
+    } else {
+        let Some(credential) = bearer_credential(headers) else {
+            return reject(AuthFailureReason::MissingCredential, None);
+        };
+        state
+            .authenticator
+            .authenticate(&credential, request_context)
+            .await
     };
 
-    let ctx = match state
-        .authenticator
-        .authenticate(&credential, request_context)
-        .await
-    {
+    let ctx = match authenticated {
         Ok(ctx) => ctx,
         Err(AuthenticationError::Rejected { reason, public_id }) => {
             return reject(reason, public_id.as_deref());
@@ -150,7 +241,6 @@ pub async fn require_platform_credential(
             return CallingError::ServiceUnavailable.into_response();
         }
     };
-    drop(credential);
 
     if let AuthorityMode::SafetyOnly(link) = ctx.authority_mode() {
         // Only the matched route template decides (never the raw path), and a request
