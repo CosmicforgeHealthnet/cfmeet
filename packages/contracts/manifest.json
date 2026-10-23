@@ -753,7 +753,7 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
@@ -891,7 +891,7 @@
     },
     {
       "id": "cfmeet.developer-platform.public-api",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "bundled/public/developer-platform/v1.openapi.json",
       "owner": "developer-platform",

@@ -100,7 +100,47 @@ pub trait QuotaAuthority: Send + Sync {
         correlation: &CorrelationId,
     ) -> Option<Limits>;
     async fn durable_count(&self, environment: Uuid, day: &str) -> Option<u64>;
-    async fn record(&self, batch: Uuid, entries: &[(Uuid, String, u64)]) -> bool;
+    /// Records one idempotent batch (`batch` is reused verbatim on retry).
+    async fn record(&self, batch: Uuid, usage: &UsageBatch) -> bool;
+}
+
+/// `(environment, UTC day, domain, operation id, status class)`.
+type OperationKey = (Uuid, String, String, String, &'static str);
+
+/// One normalized API_OPERATION count (Appendix D): an accepted public operation of an
+/// application environment by owning domain, contract operation id and status class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationCount {
+    pub environment: Uuid,
+    pub day: String,
+    pub domain: String,
+    pub operation: String,
+    pub status_class: &'static str,
+    pub count: u64,
+}
+
+/// What one durable accounting batch carries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UsageBatch {
+    /// `(environment, UTC day, accepted requests)`.
+    pub entries: Vec<UsageEntry>,
+    pub operations: Vec<OperationCount>,
+}
+
+impl UsageBatch {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.operations.is_empty()
+    }
+}
+
+/// The status class of a final response.
+pub fn status_class(status: u16) -> &'static str {
+    match status {
+        200..=299 => "2xx",
+        300..=399 => "3xx",
+        400..=499 => "4xx",
+        _ => "5xx",
+    }
 }
 
 /// The Developer Platform over authenticated internal HTTP.
@@ -162,11 +202,15 @@ impl QuotaAuthority for DeveloperPlatformQuotas {
         r.json::<Value>().ok()?.get("count")?.as_u64()
     }
 
-    async fn record(&self, batch: Uuid, entries: &[(Uuid, String, u64)]) -> bool {
+    async fn record(&self, batch: Uuid, usage: &UsageBatch) -> bool {
         let req = OutboundServiceRequest::new_operation(ServiceId::developer_platform());
         let body = json!({
             "batchId": batch,
-            "entries": entries.iter().map(|(e, d, c)| json!({ "environmentId": e, "day": d, "count": c })).collect::<Vec<_>>(),
+            "entries": usage.entries.iter().map(|(e, d, c)| json!({ "environmentId": e, "day": d, "count": c })).collect::<Vec<_>>(),
+            "operations": usage.operations.iter().map(|o| json!({
+                "environmentId": o.environment, "day": o.day, "domain": o.domain,
+                "operationId": o.operation, "statusClass": o.status_class, "count": o.count,
+            })).collect::<Vec<_>>(),
         });
         self.client
             .post_json(&req, "/internal/v1/usage/api-requests", &body)
@@ -207,7 +251,8 @@ pub struct QuotaEngine {
     seeded: Mutex<HashSet<(Uuid, String)>>,
     local: Mutex<HashMap<String, u64>>,
     pending: Mutex<HashMap<(Uuid, String), u64>>,
-    unacknowledged: Mutex<Option<(Uuid, Vec<UsageEntry>)>>,
+    pending_operations: Mutex<HashMap<OperationKey, u64>>,
+    unacknowledged: Mutex<Option<(Uuid, UsageBatch)>>,
     degraded: std::sync::atomic::AtomicBool,
 }
 
@@ -227,6 +272,7 @@ impl QuotaEngine {
             seeded: Mutex::new(HashSet::new()),
             local: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
+            pending_operations: Mutex::new(HashMap::new()),
             unacknowledged: Mutex::new(None),
             degraded: std::sync::atomic::AtomicBool::new(false),
         }
@@ -423,13 +469,34 @@ impl QuotaEngine {
         (true, m + 1, 0)
     }
 
+    /// Counts one finally classified public operation of a credential request
+    /// (normalized API_OPERATION usage), flushed with the request counters.
+    pub fn record_operation(&self, environment: Uuid, domain: &str, operation: &str, status: u16) {
+        let day = Utc::now().format("%Y-%m-%d").to_string();
+        let mut p = self.pending_operations.lock().unwrap();
+        // Bounded memory: at most one entry per (environment, day, operation, class).
+        if p.len() >= 100_000 {
+            tracing::warn!("API operation usage buffer full; counting deferred to the next flush");
+            return;
+        }
+        *p.entry((
+            environment,
+            day,
+            domain.to_string(),
+            operation.to_string(),
+            status_class(status),
+        ))
+        .or_insert(0) += 1;
+    }
+
     /// Flushes accumulated accepted counts to the durable store (idempotent batch). A
     /// batch whose outcome is unknown (timeout, outage) is retried under the SAME batch
     /// id until acknowledged, so it is counted exactly once; new counts wait behind it.
+    /// Returns the number of entries (request counters + operation counts) recorded.
     pub async fn flush(&self) -> usize {
         let retry = self.unacknowledged.lock().unwrap().clone();
-        if let Some((batch, entries)) = retry {
-            if !self.authority.record(batch, &entries).await {
+        if let Some((batch, usage)) = retry {
+            if !self.authority.record(batch, &usage).await {
                 tracing::warn!(
                     "durable API request accounting deferred (developer platform unavailable)"
                 );
@@ -437,21 +504,40 @@ impl QuotaEngine {
             }
             *self.unacknowledged.lock().unwrap() = None;
         }
-        let entries: Vec<(Uuid, String, u64)> = {
-            let mut p = self.pending.lock().unwrap();
-            p.drain().map(|((e, d), c)| (e, d, c)).collect()
+        let usage = UsageBatch {
+            entries: {
+                let mut p = self.pending.lock().unwrap();
+                p.drain().map(|((e, d), c)| (e, d, c)).collect()
+            },
+            operations: {
+                let mut p = self.pending_operations.lock().unwrap();
+                p.drain()
+                    .map(
+                        |((environment, day, domain, operation, status_class), count)| {
+                            OperationCount {
+                                environment,
+                                day,
+                                domain,
+                                operation,
+                                status_class,
+                                count,
+                            }
+                        },
+                    )
+                    .collect()
+            },
         };
-        if entries.is_empty() {
+        if usage.is_empty() {
             return 0;
         }
         let batch = Uuid::new_v4();
-        if self.authority.record(batch, &entries).await {
-            entries.len()
+        if self.authority.record(batch, &usage).await {
+            usage.entries.len() + usage.operations.len()
         } else {
             tracing::warn!(
                 "durable API request accounting deferred (developer platform unavailable)"
             );
-            *self.unacknowledged.lock().unwrap() = Some((batch, entries));
+            *self.unacknowledged.lock().unwrap() = Some((batch, usage));
             0
         }
     }
@@ -484,7 +570,7 @@ mod tests {
         async fn durable_count(&self, _e: Uuid, _d: &str) -> Option<u64> {
             Some(0)
         }
-        async fn record(&self, _b: Uuid, _e: &[(Uuid, String, u64)]) -> bool {
+        async fn record(&self, _b: Uuid, _u: &UsageBatch) -> bool {
             true
         }
     }
@@ -584,11 +670,11 @@ mod tests {
         async fn durable_count(&self, _e: Uuid, _d: &str) -> Option<u64> {
             Some(self.durable)
         }
-        async fn record(&self, b: Uuid, e: &[(Uuid, String, u64)]) -> bool {
+        async fn record(&self, b: Uuid, u: &UsageBatch) -> bool {
             self.seen
                 .lock()
                 .unwrap()
-                .push((b, e.iter().map(|x| x.2).sum()));
+                .push((b, u.entries.iter().map(|x| x.2).sum()));
             self.fail
                 .fetch_update(
                     std::sync::atomic::Ordering::SeqCst,

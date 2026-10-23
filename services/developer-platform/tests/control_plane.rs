@@ -1510,10 +1510,42 @@ async fn api_request_usage_batches_are_counted_exactly_once() {
         .await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
     }
+    // Normalized API_OPERATION counts ride the same idempotent batches.
+    let ops = json!({ "batchId": Uuid::new_v4(), "operations": [
+        { "environmentId": env, "day": "2026-10-23", "domain": "sms", "operationId": "sendMessage", "statusClass": "2xx", "count": 4 },
+        { "environmentId": env, "day": "2026-10-23", "domain": "sms", "operationId": "sendMessage", "statusClass": "4xx", "count": 1 } ] });
+    for _ in 0..2 {
+        let r = gw(
+            Method::POST,
+            "/internal/v1/usage/api-requests".into(),
+            Some(ops.clone()),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    }
+    assert_eq!(
+        c.count(&format!("SELECT COALESCE(SUM(request_count), 0)::bigint FROM devplat_api_operation_usage WHERE environment_id = '{env}'")).await,
+        5,
+        "a replayed operations batch is counted once"
+    );
+    for bad in [
+        json!({ "batchId": Uuid::new_v4() }),
+        json!({ "batchId": Uuid::new_v4(), "operations": [{ "environmentId": env, "day": "2026-10-23", "domain": "sms", "operationId": "sendMessage", "statusClass": "2XX", "count": 1 }] }),
+        json!({ "batchId": Uuid::new_v4(), "operations": [{ "environmentId": env, "day": "2026-10-23", "domain": "SMS", "operationId": "x", "statusClass": "2xx", "count": 1 }] }),
+        json!({ "batchId": Uuid::new_v4(), "operations": [{ "environmentId": env, "day": "2026-10-23", "domain": "sms", "operationId": "/v1/sms/messages", "statusClass": "2xx", "count": 1 }] }),
+    ] {
+        let r = gw(
+            Method::POST,
+            "/internal/v1/usage/api-requests".into(),
+            Some(bad),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    }
     assert_eq!(
         c.count("SELECT count(*) FROM devplat_api_usage_batches")
             .await,
-        2
+        3
     );
     // Only the gateway's developer-usage.record grant reaches these routes.
     let r = c

@@ -486,6 +486,20 @@ async fn customers_reach_the_developer_platform_only_with_platform_access_author
         durable, 2,
         "accepted requests are durably accounted exactly once"
     );
+    // ...and as normalized API_OPERATION usage (domain / operation / status class).
+    let ops = count(
+        &dp,
+        &format!(
+            "SELECT COALESCE(SUM(request_count), 0)::bigint FROM devplat_api_operation_usage \
+             WHERE environment_id = '{env_id}' AND domain = 'gateway' \
+               AND operation_id = 'getDeveloperPlatformContext' AND status_class = '2xx'"
+        ),
+    )
+    .await;
+    assert_eq!(
+        ops, 2,
+        "API_OPERATION usage recorded once per accepted operation"
+    );
     assert_eq!(
         count(&dp, "SELECT count(*) FROM devplat_environment_refs").await,
         2

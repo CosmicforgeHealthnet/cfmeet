@@ -523,7 +523,10 @@ async fn cors_allows_only_configured_origins() {
     assert!(other.headers.get("access-control-allow-origin").is_none());
 }
 
-struct Tight;
+#[derive(Default)]
+struct Tight {
+    batches: std::sync::Mutex<Vec<api_gateway::quota::UsageBatch>>,
+}
 
 #[async_trait::async_trait]
 impl QuotaAuthority for Tight {
@@ -543,16 +546,18 @@ impl QuotaAuthority for Tight {
     async fn durable_count(&self, _e: Uuid, _d: &str) -> Option<u64> {
         Some(0)
     }
-    async fn record(&self, _b: Uuid, _e: &[(Uuid, String, u64)]) -> bool {
+    async fn record(&self, _b: Uuid, u: &api_gateway::quota::UsageBatch) -> bool {
+        self.batches.lock().unwrap().push(u.clone());
         true
     }
 }
 
 #[tokio::test]
 async fn platform_request_quotas_aggregate_across_service_families() {
-    let quota = Arc::new(QuotaEngine::new(None, "t:".into(), Arc::new(Tight)));
+    let tight = Arc::new(Tight::default());
+    let quota = Arc::new(QuotaEngine::new(None, "t:".into(), tight.clone()));
     let g = Gateway::with(Options {
-        quota: Some(quota),
+        quota: Some(quota.clone()),
         ..Options::default()
     })
     .await;
@@ -589,6 +594,24 @@ async fn platform_request_quotas_aggregate_across_service_families() {
             .status,
         StatusCode::OK
     );
+    // Normalized API_OPERATION usage: the two forwarded requests of the environment are
+    // counted by domain / operation / status class (the quota refusal and end-user
+    // token requests are not platform operations of a credential).
+    assert!(quota.flush().await > 0);
+    let batches = tight.batches.lock().unwrap().clone();
+    let ops: Vec<_> = batches
+        .iter()
+        .flat_map(|b| b.operations.iter())
+        .filter(|o| o.environment == c.environment_id)
+        .collect();
+    assert_eq!(ops.iter().map(|o| o.count).sum::<u64>(), 2, "{ops:?}");
+    assert!(
+        ops.iter()
+            .all(|o| o.status_class == "2xx" && !o.operation.contains('/')),
+        "{ops:?}"
+    );
+    let domains: std::collections::BTreeSet<_> = ops.iter().map(|o| o.domain.as_str()).collect();
+    assert_eq!(domains.len(), 2, "two service families: {ops:?}");
 }
 
 #[tokio::test]

@@ -320,7 +320,27 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
     if !bytes.is_empty() && matches!(parts.method, Method::GET | Method::HEAD) {
         return ApiError::Code(ErrorCode::ValidationError).into_response();
     }
+    let credential_environment = match &forward {
+        Forward::Credential(customer) => Some(customer.environment_id),
+        _ => None,
+    };
     let mut response = forward_rest(&state, &context, &route, &parts, bytes, forward).await;
+    // Normalized API_OPERATION usage after final response classification (credential
+    // requests: the application environment is known).
+    if let (Some(environment), Some(engine)) = (credential_environment, &state.quota) {
+        let definition = route.definition;
+        let operation = definition
+            .id
+            .split_once('.')
+            .map(|(_, o)| o)
+            .unwrap_or(&definition.id);
+        engine.record_operation(
+            environment,
+            &definition.domain,
+            operation,
+            response.status().as_u16(),
+        );
+    }
     for (k, v) in quota_headers {
         if let Ok(v) = HeaderValue::from_str(&v) {
             response.headers_mut().insert(k, v);

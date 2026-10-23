@@ -131,6 +131,8 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         .map(|r| r.try_get::<String>("", "c").unwrap())
         .collect();
     const ALLOWED: &[&str] = &[
+        // Section 51 normalized API_OPERATION usage: response status class (2xx..5xx).
+        "devplat_api_operation_usage.status_class",
         // Section 50 billing-account reference metadata (never Platform Access identity):
         // RETAIL / CONTRACT / INTERNAL_COST_CENTER and its own lifecycle.
         "devplat_billing_accounts.classification",
