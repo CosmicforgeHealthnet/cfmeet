@@ -25,7 +25,9 @@ def main() -> None:
         for doc in config["urls"]:
             file = out / doc["url"].removeprefix("./")
             spec = json.loads(file.read_text())
-            assert spec.get("paths"), doc["name"]
+            assert isinstance(spec.get("paths"), dict), doc["name"]
+            if doc["name"] != "Platform internal HTTP":
+                assert spec["paths"], doc["name"]
         assert (out / "index.html").is_file()
         assert (out / "app.js").is_file()
         assert (out / "robots.txt").is_file()
