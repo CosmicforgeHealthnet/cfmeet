@@ -1,6 +1,7 @@
 name: Provision Private Swagger on VPS
 
 # Explicit one-time bootstrapping; a pull request never changes the VPS.
+# Corrected components-only OpenAPI handling is validated before any SSH deployment.
 on:
   push:
     branches: [main]
