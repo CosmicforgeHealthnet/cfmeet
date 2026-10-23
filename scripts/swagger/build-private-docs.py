@@ -103,7 +103,9 @@ def build(destination: Path) -> None:
         obj = json.loads(origin.read_text(encoding="utf-8"))
         if not isinstance(obj.get("paths"), dict) or not obj.get("openapi", "").startswith("3."):
             raise SystemExit(f"Invalid bundled OpenAPI: {origin}")
-        if not obj["paths"]:
+        # The platform/internal-http contract currently has a zero-operation
+        # schema by design; preserve it in the engineering catalog anyway.
+        if not obj["paths"] and slug != "platform-internal-http":
             raise SystemExit(f"No paths in: {origin}")
         records.append((slug, obj))
         entries.append({"name": name, "url": f"./docs/{slug}.json"})
