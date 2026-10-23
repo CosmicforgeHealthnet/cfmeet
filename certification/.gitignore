@@ -1,0 +1,3 @@
+# Written by `make certification-stack` / `cfmeet-cert-stack up` (contains test secrets).
+stack-env.json
+target/

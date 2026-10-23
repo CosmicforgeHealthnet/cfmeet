@@ -1,0 +1,40 @@
+[package]
+name = "cfmeet-certification"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "CF Meet Part VI cross-service certification harness: starts the REAL services as processes (real Ed25519 service auth, one PostgreSQL database per service, real Redis, deterministic provider adapters) behind the real API Gateway and runs the developer journeys against them"
+
+# Stand-alone, NON-deployable test workspace (like packages/messaging-crypto). It depends
+# only on shared packages (packages/service-auth, packages/messaging-crypto), never on a
+# service crate: every service is exercised as its own built binary, over HTTP.
+[workspace]
+
+[lib]
+name = "cfmeet_certification"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "cfmeet-cert-stack"
+path = "src/bin/cfmeet-cert-stack.rs"
+
+[dependencies]
+# Real service keys, signed operator calls and trust bundles derived from the registry.
+cf-service-auth = { path = "../packages/service-auth" }
+# Messaging device registration (MLS KeyPackage) for client tokens / realtime tickets.
+cf-messaging-crypto = { path = "../packages/messaging-crypto", features = ["client"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "process", "io-util", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+anyhow = "1.0"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

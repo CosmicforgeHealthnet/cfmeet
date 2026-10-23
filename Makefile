@@ -20,6 +20,7 @@ SERVICE_AUTH    := packages/service-auth
 CONTRACTS       := packages/contracts
 DEVELOPER_PLATFORM := services/developer-platform
 API_GATEWAY     := services/api-gateway
+CERTIFICATION   := certification
 
 # Binaries of a service workspace (honours a shared CARGO_TARGET_DIR).
 bin_dir = $(or $(CARGO_TARGET_DIR),$(CURDIR)/$(1)/target)/debug
@@ -45,7 +46,7 @@ PLATFORM_ACCESS_TEST_ENV = PLATFORM_ACCESS_BIN=$(call bin_dir,$(PLATFORM_ACCESS)
         developer-platform developer-platform-worker developer-platform-migrate developer-platform-test \
         developer-platform-lint developer-platform-build developer-platform-bins \
         api-gateway api-gateway-test api-gateway-lint api-gateway-build api-gateway-integration \
-        sdks-check
+        sdks-check certification certification-bins certification-stack certification-lint
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -278,6 +279,29 @@ api-gateway-build: ## Build the API Gateway
 
 sdks-check: ## SDK workspace scaffolding check (TypeScript + Dart; generation is Section 52)
 	python3 sdks/generate.py --check
+
+# Part VI cross-service certification (certification/, a stand-alone non-deployable test
+# workspace): the REAL service binaries, built into ONE shared target directory.
+CERT_TARGET_DIR := $(or $(CARGO_TARGET_DIR),$(CURDIR)/target)
+CERTIFICATION_SERVICES := $(PLATFORM_ACCESS) $(DEVELOPER_PLATFORM) $(API_GATEWAY) $(MEETING_SERVICE) \
+	$(CALLING) $(MESSAGING) $(NUMBERING) $(SMS_GATEWAY) $(PRIVACY_RELAY)
+CERT_ENV = CARGO_TARGET_DIR=$(CERT_TARGET_DIR) CFMEET_BIN_DIR=$(CERT_TARGET_DIR)/debug
+
+certification-bins: ## Build every service binary the certification stack runs (one shared CARGO_TARGET_DIR)
+	@set -e; for s in $(CERTIFICATION_SERVICES); do \
+		echo "==> $$s"; (cd $$s && CARGO_TARGET_DIR=$(CERT_TARGET_DIR) cargo build --workspace --bins); \
+	done
+
+certification: certification-bins ## Part VI certification journeys against the real processes (requires TEST_DATABASE_URL, TEST_REDIS_URL)
+	cd $(CERTIFICATION) && $(CERT_ENV) cargo test --locked --no-fail-fast -- --test-threads=1
+
+certification-stack: certification-bins ## Run the certification stack for SDK integration tests (ENV_OUT=<path>, default certification/stack-env.json)
+	cd $(CERTIFICATION) && $(CERT_ENV) cargo run --locked --bin cfmeet-cert-stack -- up \
+		--env-out $(or $(ENV_OUT),$(CURDIR)/$(CERTIFICATION)/stack-env.json)
+
+certification-lint: ## fmt + clippy for the certification harness
+	cd $(CERTIFICATION) && cargo fmt --check
+	cd $(CERTIFICATION) && cargo clippy --locked --all-targets -- -D warnings
 
 service-auth-test: ## Test packages/service-auth (core and client feature sets)
 	cd $(SERVICE_AUTH) && cargo test --no-fail-fast
