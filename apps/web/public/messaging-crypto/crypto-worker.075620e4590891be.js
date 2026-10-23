@@ -19,8 +19,8 @@
 //   would fork it.
 import init, * as core from "./cf-messaging-crypto.44076f63c6687d75.js";
 
-const WASM_URL = new URL("./cf-messaging-crypto.c6424ca27bf848cb.wasm", import.meta.url);
-const WASM_SHA384 = "KTvyBhEhU5HRVMhBSCYEj6+dL8F5ASHHnD3CnvMLqmEq6lCK+WwPCoQ0clZy5Zbw";
+const WASM_URL = new URL("./cf-messaging-crypto.ada8ce28b47f00bb.wasm", import.meta.url);
+const WASM_SHA384 = "7XYEvPatzN1jlFkr/hj0XDNdKKtpihlzeQOnBIyex3eqmruixf6WjRDTT5kE/f30";
 const DB_NAME = "cfmeet-messaging";
 const DB_VERSION = 1;
 const MAX_TEXT = 16384;
