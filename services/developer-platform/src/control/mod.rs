@@ -178,7 +178,7 @@ pub async fn membership<C: ConnectionTrait>(
     })
 }
 
-fn state_error(state: OrganizationState) -> ApiError {
+pub(crate) fn state_error(state: OrganizationState) -> ApiError {
     ApiError(match state {
         OrganizationState::Restricted => ErrorCode::OrganizationRestricted,
         OrganizationState::Suspended => ErrorCode::OrganizationSuspended,

@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "attemptNumber": 1,
+      "startedAt": "2026-11-04T10:00:00.000Z",
+      "finishedAt": "2026-11-04T10:00:01.000Z",
+      "httpStatus": 503,
+      "outcome": "RETRY",
+      "errorClass": "HTTP_5XX"
+    },
+    {
+      "attemptNumber": 2,
+      "startedAt": "2026-11-04T10:01:00.000Z",
+      "finishedAt": "2026-11-04T10:01:10.000Z",
+      "httpStatus": null,
+      "outcome": "RETRY",
+      "errorClass": "TIMEOUT"
+    }
+  ],
+  "nextCursor": null
+}

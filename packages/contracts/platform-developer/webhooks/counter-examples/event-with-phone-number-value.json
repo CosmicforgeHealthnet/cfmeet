@@ -1,0 +1,9 @@
+{
+  "id": "whe_0123456789abcdef0123456789abcdef",
+  "type": "number.assignment_changed",
+  "apiVersion": "v1",
+  "occurredAt": "2026-11-04T10:00:00.000Z",
+  "data": {
+    "numberResourceId": "+15550100123"
+  }
+}

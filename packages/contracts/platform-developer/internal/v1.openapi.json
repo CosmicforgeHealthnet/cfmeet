@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.2.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request."
+    "version": "1.3.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over."
   },
   "paths": {
     "/health": {
@@ -822,6 +822,522 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/internal/v1/platform/events": {
+      "post": {
+        "operationId": "publishPlatformEvent",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 53: a producer (Meeting Service, Calling, Privacy Relay, Messaging, Numbering, SMS Gateway) publishes a committed domain event from its transactional outbox (platform envelope). Permission `developer-event.publish`; the envelope's producer_service must be the authenticated caller and its runtime_environment the receiver's; its type must belong to the producer's own domain (unknown families are refused). The event is projected into the public catalog (allow-listed safe keys only; never stored or forwarded verbatim), deduplicated on (producer, event_id) — a duplicate returns the same eventId and creates no delivery — and fanned out to the ACTIVE matching subscriptions of the SAME application environment (recorded SHADOW in shadow mode). 200 = accepted (also for internal-only facts, eventId null); 400 = refused (do not retry); 503 = retry later. Behind DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform/events/envelope/v1.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/PublishEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "post": {
+        "operationId": "forwardedCreateWebhook",
+        "summary": "Create a webhook subscription",
+        "description": "Requires webhooks.manage. Every subscribed event type also requires its own read scope (call.* calls.read, voicemail.* enterprise.voicemail.read, recording.* / artifact.* enterprise.recording.read, relay.* privacy.sessions.read, usage.* / limit.* usage.read, sms.* sms.read, conversation.* / message.* messages.read, number.* numbers.read, credential.* credentials.manage, production_access.* production_access.request; meeting.* / participant.* need webhooks.manage only). The endpoint must be a public https URL (re-checked at delivery and connection time; redirects never followed). The signing secret is returned ONCE. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/CreateWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The subscription and its signing secret (only time it is returned).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.manage"
+      },
+      "get": {
+        "operationId": "forwardedListWebhooks",
+        "summary": "List webhook subscriptions",
+        "description": "Requires webhooks.read. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of subscriptions (never a secret).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/WebhookList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.read"
+      }
+    },
+    "/v1/webhooks/{webhook_id}": {
+      "get": {
+        "operationId": "forwardedGetWebhook",
+        "summary": "Get a webhook subscription",
+        "description": "Requires webhooks.read. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscription (never the secret).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/Webhook"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.read"
+      },
+      "patch": {
+        "operationId": "forwardedUpdateWebhook",
+        "summary": "Update a webhook subscription",
+        "description": "Requires webhooks.manage (and the read scope of every event type). expectedVersion is required; a stale one is 409 VERSION_CONFLICT. Re-enabling resets the endpoint health. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/UpdateWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/Webhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.manage"
+      },
+      "delete": {
+        "operationId": "forwardedDeleteWebhook",
+        "summary": "Delete a webhook subscription",
+        "description": "Requires webhooks.manage. Soft delete: open deliveries are CANCELLED; history is kept. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "expectedVersion",
+            "in": "query",
+            "required": true,
+            "description": "The subscription version the change is based on (stale: 409 VERSION_CONFLICT).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deleted subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/Webhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.manage"
+      }
+    },
+    "/v1/webhooks/{webhook_id}/rotate-secret": {
+      "post": {
+        "operationId": "forwardedRotateWebhookSecret",
+        "summary": "Rotate a webhook signing secret",
+        "description": "Requires webhooks.manage. Deliveries from now on are signed with the new secret, returned ONCE. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/RotateWebhookSecretRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The subscription and its new signing secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.manage"
+      }
+    },
+    "/v1/webhooks/{webhook_id}/deliveries": {
+      "get": {
+        "operationId": "forwardedListWebhookDeliveries",
+        "summary": "List deliveries of a webhook subscription",
+        "description": "Requires webhooks.read. Delivery history including dead-lettered (FAILED) deliveries; status class and bounded failure category only (never a response body). Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only deliveries in this status.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/DeliveryStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/WebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.read"
+      }
+    },
+    "/v1/webhook-deliveries/{delivery_id}/replay": {
+      "post": {
+        "operationId": "forwardedReplayWebhookDelivery",
+        "summary": "Replay a webhook delivery",
+        "description": "Requires webhooks.manage. Creates a NEW delivery (new CF-Webhook-Id) of the same event (same CF-Webhook-Event-Id) to the same active subscription — dead-lettered deliveries included; the domain action is never re-executed. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "description": "Delivery id.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The new delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/webhooks/v1.schema.json#/$defs/WebhookDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "webhooks.manage"
       }
     }
   },

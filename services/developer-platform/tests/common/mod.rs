@@ -449,6 +449,7 @@ pub fn conforms(reference: &str, value: &Value) {
 use developer_platform::{
     platform_access::{Delegated, DelegationActor, DelegationCall},
     session::{HumanSessions, HumanUser, SessionAuthorityUnavailable, SessionOutcome},
+    webhooks::{WebhookService, WebhookSettings},
 };
 
 #[derive(Debug, Clone)]
@@ -775,24 +776,96 @@ pub enum As<'a> {
     Nobody,
 }
 
+/// Section 53 webhook fixtures of a [`Control`] harness.
+pub struct Webhooks {
+    /// The service the router uses (same settings, clock and database).
+    pub service: WebhookService,
+    pub producers: Producers,
+    /// Seconds added to the wall clock (tests advance time).
+    pub offset: Arc<std::sync::atomic::AtomicI64>,
+}
+
+impl Webhooks {
+    pub fn advance(&self, seconds: i64) {
+        self.offset
+            .fetch_add(seconds, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl Control {
     pub async fn new() -> Option<Self> {
+        Self::build(None).await.map(|(c, _)| c)
+    }
+
+    /// A harness whose router serves central webhooks with `settings` (enabled).
+    pub async fn with_webhooks(mut settings: WebhookSettings) -> Option<(Self, Webhooks)> {
+        settings.enabled = true;
+        Self::build(Some(settings))
+            .await
+            .map(|(c, w)| (c, w.expect("webhooks configured")))
+    }
+
+    /// A harness whose webhook service is configured but NOT enabled (the flag off).
+    pub async fn with_webhooks_disabled(mut settings: WebhookSettings) -> Option<(Self, Webhooks)> {
+        settings.enabled = false;
+        Self::build(Some(settings))
+            .await
+            .map(|(c, w)| (c, w.expect("webhooks configured")))
+    }
+
+    async fn build(webhooks: Option<WebhookSettings>) -> Option<(Self, Option<Webhooks>)> {
         let db = TestDb::new().await?;
-        let (runtime, peers, operator) = service_auth_with_operator();
+        let (runtime, peers, operator, producers) = service_auth_with_producers();
         let pa = Arc::new(MemoryPlatformAccess::default());
         let sessions = Arc::new(MemorySessions::default());
-        let state = AppState::new(db.conn.clone(), runtime)
+        let mut state = AppState::new(db.conn.clone(), runtime)
             .with_platform_access(pa.clone())
             .with_sessions(sessions.clone())
             .with_flags(FeatureFlags { gateway_api: true });
-        Some(Self {
-            router: http::app(state),
-            db,
-            peers,
-            pa,
-            sessions,
-            operator,
-        })
+        let webhooks = webhooks.map(|settings| {
+            let offset = Arc::new(std::sync::atomic::AtomicI64::new(0));
+            let o = offset.clone();
+            let service =
+                WebhookService::new(db.conn.clone(), settings).with_clock(Arc::new(move || {
+                    chrono::Utc::now()
+                        + chrono::Duration::seconds(o.load(std::sync::atomic::Ordering::SeqCst))
+                }));
+            state = state.clone().with_webhooks(service.clone());
+            Webhooks {
+                service,
+                producers,
+                offset,
+            }
+        });
+        Some((
+            Self {
+                router: http::app(state),
+                db,
+                peers,
+                pa,
+                sessions,
+                operator,
+            },
+            webhooks,
+        ))
+    }
+
+    /// A service-to-service request signed by `signer` (internal routes).
+    pub async fn internal(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Response {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        self.send(method, path, headers, body).await
     }
 
     async fn send(
@@ -902,6 +975,111 @@ impl Control {
             .try_get_by_index::<i64>(0)
             .unwrap()
     }
+}
+
+/// Producers of platform events (Section 53), each granted `developer-event.publish`.
+pub struct Producers {
+    pub calling: Arc<ServiceTokenSigner>,
+    pub messaging: Arc<ServiceTokenSigner>,
+    pub numbering: Arc<ServiceTokenSigner>,
+    pub meeting: Arc<ServiceTokenSigner>,
+    pub privacy_relay: Arc<ServiceTokenSigner>,
+    pub sms: Arc<ServiceTokenSigner>,
+}
+
+/// [`service_auth_with_operator`] plus the event producers.
+pub fn service_auth_with_producers() -> (
+    ServiceAuthRuntime,
+    Peers,
+    Arc<ServiceTokenSigner>,
+    Producers,
+) {
+    use cf_service_auth::services as svc;
+    let clock: SharedClock = Arc::new(SystemClock);
+    let me = key("developer-platform-test-1");
+    let gateway = key("api-gateway-test-1");
+    let messaging = key("messaging-test-1");
+    let operator = key("operator-test-1");
+    let producer_keys: Vec<(&str, ServiceSigningKey)> = [
+        svc::CALLING,
+        svc::MESSAGING,
+        svc::NUMBERING,
+        svc::MEETING_SERVICE,
+        svc::PRIVACY_RELAY,
+        svc::SMS_GATEWAY,
+    ]
+    .into_iter()
+    .map(|s| {
+        (
+            s,
+            key(&format!("{}-producer-1", s.trim_start_matches("cfmeet."))),
+        )
+    })
+    .collect();
+    let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
+        json!({
+        "issuer": id, "audience": svc::DEVELOPER_PLATFORM, "runtime_environment": ENV,
+        "keys": [k.public_jwk()], "permissions": perms })
+    };
+    let mut issuers = vec![
+        issuer(
+            svc::API_GATEWAY,
+            &gateway,
+            &[
+                "developer-request.forward",
+                "developer-entitlement.read",
+                "developer-usage.record",
+            ],
+        ),
+        issuer(
+            svc::OPERATOR_CONSOLE,
+            &operator,
+            &["developer-platform.administer"],
+        ),
+    ];
+    for (s, k) in &producer_keys {
+        issuers.push(issuer(s, k, &["developer-event.publish"]));
+    }
+    let bundle = json!({
+        "bundle_version": 1, "receiver": svc::DEVELOPER_PLATFORM, "runtime_environment": ENV,
+        "trusted_issuers": issuers,
+    })
+    .to_string();
+    let policy = TrustPolicy::from_json(&bundle, &ServiceId::developer_platform(), ENV).unwrap();
+    let own = signer(ServiceId::developer_platform(), me);
+    let verifier = Arc::new(ServiceTokenVerifier::new(policy, clock));
+    let client = Arc::new(
+        InternalServiceClient::new(
+            own.clone(),
+            InternalTargets::new(ENV),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap(),
+    );
+    let runtime = ServiceAuthRuntime::new(own, verifier, client).unwrap();
+    let mut keys = producer_keys.into_iter();
+    let mut next = || {
+        let (s, k) = keys.next().unwrap();
+        signer(ServiceId::parse(s).unwrap(), k)
+    };
+    let producers = Producers {
+        calling: next(),
+        messaging: next(),
+        numbering: next(),
+        meeting: next(),
+        privacy_relay: next(),
+        sms: next(),
+    };
+    (
+        runtime,
+        Peers {
+            gateway: signer(ServiceId::api_gateway(), gateway),
+            messaging: signer(ServiceId::messaging(), messaging),
+            rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+        },
+        signer(ServiceId::operator_console(), operator),
+        producers,
+    )
 }
 
 /// [`service_auth`] plus an operator-console signer granted `developer-platform.administer`

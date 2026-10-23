@@ -742,25 +742,25 @@
     },
     {
       "id": "cfmeet.developer-platform.common",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform-developer/common/v1.schema.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Developer Platform vocabulary (Part VI): error envelope (1.1.0: Section 50 authorization, lifecycle, invitation, idempotency and policy codes), probes and the gateway-forwarded canonical context (canonical Platform Access ids only; no identity attributes, scopes or credentials)."
+      "description": "Developer Platform vocabulary (Part VI): error envelope (1.1.0: Section 50 authorization, lifecycle, invitation, idempotency and policy codes), probes and the gateway-forwarded canonical context (canonical Platform Access ids only; no identity attributes, scopes or credentials). 1.2.0: CAPABILITY_UNAVAILABLE (Section 53: central webhooks without a configured sealing key, fail closed)."
     },
     {
       "id": "cfmeet.developer-platform.internal-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only)."
+      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes."
     },
     {
       "id": "cfmeet.developer-platform.control",
@@ -774,15 +774,26 @@
       "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (applications), environments, commercial plans / assignments / billing-account references, immutable activity events and effective entitlements. No identity attribute, credential, scope grant, price or payment data."
     },
     {
-      "id": "cfmeet.developer-platform.http-api",
+      "id": "cfmeet.developer-platform.webhooks",
       "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "platform-developer/webhooks/v1.schema.json",
+      "owner": "developer-platform",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Section 53 central customer webhooks: subscription requests and views (Calling's Part G §68 customer shapes, unchanged, plus the Developer Console view with environment, origin and endpoint health), the public event catalog (Part G families plus meeting, participant, artifact, number, credential and production-access), delivery records (FAILED dead letter, SHADOW in shadow mode), attempt history (status / error class only), the signed event body and the internal ingestion acknowledgement. Never a signing secret after create / rotation, never a provider, storage or content field."
+    },
+    {
+      "id": "cfmeet.developer-platform.http-api",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "platform-developer/http/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted."
+      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted. 1.1.0: Section 53 Developer Console webhook operations under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/* (subscriptions with a once-shown signing secret, secret rotation, delivery and attempt history, replay; OWNER / ADMIN / DEVELOPER manage, ANALYST reads)."
     },
     {
       "id": "cfmeet.api-gateway.common",
@@ -880,7 +891,7 @@
     },
     {
       "id": "cfmeet.developer-platform.public-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "bundled/public/developer-platform/v1.openapi.json",
       "owner": "developer-platform",

@@ -4,17 +4,20 @@
 #
 #   docker build -f services/developer-platform/Dockerfile -t cfmeet-developer-platform .
 #
-# Only packages/service-auth, packages/contracts/platform-developer and
-# services/developer-platform enter the build context (Dockerfile.dockerignore).
+# Only packages/service-auth, packages/webhooks (Section 53: the shared webhook
+# primitives), packages/contracts/platform-developer and services/developer-platform enter
+# the build context (Dockerfile.dockerignore).
 #
 # The image contains the API (`developer-platform`), the worker
 # (`developer-platform-worker`) and the migration runner (`developer-platform-migration`).
-# DATABASE_URL, the signing key FILE, the trust bundle FILE and the Platform Access URL are
-# supplied at runtime only; nothing secret is baked in. Not deployed by any workflow yet.
+# DATABASE_URL, the signing key FILE, the trust bundle FILE, the Platform Access URL and the
+# webhook sealing key (DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_FILE) are supplied at runtime
+# only; nothing secret is baked in. Not deployed by any workflow yet.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+COPY packages/webhooks packages/webhooks
 COPY packages/contracts/platform-developer packages/contracts/platform-developer
 COPY services/developer-platform services/developer-platform
 WORKDIR /src/services/developer-platform

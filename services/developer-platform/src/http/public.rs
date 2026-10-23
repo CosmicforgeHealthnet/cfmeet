@@ -41,6 +41,7 @@ pub const USER_SESSION_HEADER: &str = "x-cf-user-session";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .merge(crate::webhooks::http::customer_routes())
         .route("/organizations", get(list_orgs).post(create_org))
         .route(
             "/organizations/:organization_id",

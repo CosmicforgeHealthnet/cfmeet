@@ -8,6 +8,8 @@
 //!   the hierarchy or verifies a credential.
 //! * [`http`]: health / readiness, the served OpenAPI and the service-authenticated
 //!   `/internal/v1` API (the API Gateway's forwarded requests).
+//! * [`webhooks`]: Section 53 central customer webhooks (event ingestion, subscriptions,
+//!   signed SSRF-safe delivery through the shared `cf_webhooks` primitives).
 //! * [`worker`]: the Developer Platform's own background loop.
 //!
 //! It owns no communications data, no E2EE material and no product-specific endpoint, and
@@ -21,6 +23,7 @@ pub mod http;
 pub mod platform_access;
 pub mod session;
 pub mod state;
+pub mod webhooks;
 pub mod worker;
 
 use std::time::Duration;

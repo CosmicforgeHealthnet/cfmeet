@@ -1,11 +1,13 @@
 //! Worker foundation: the Developer Platform's own background loop (no generic
 //! mega-worker). Each pass records the instance's heartbeat; Section 50+ jobs plug into
-//! [`run_once`].
+//! [`run_once_with`] (Section 53: the central webhook delivery pass).
 
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
+
+use crate::webhooks::WebhookService;
 
 /// Records one heartbeat of `instance` (first beat inserts, later beats advance).
 pub async fn heartbeat_once<C: ConnectionTrait>(
@@ -28,16 +30,45 @@ pub async fn heartbeat_once<C: ConnectionTrait>(
     Ok(())
 }
 
+/// Deliveries handled per webhook pass.
+pub const WEBHOOK_BATCH: u64 = 100;
+
 /// One worker pass: heartbeat, then the Section 50 sweeps (expired invitations).
 pub async fn run_once(
     db: &DatabaseConnection,
     instance: &str,
     runtime_environment: &str,
 ) -> Result<(), DbErr> {
+    run_once_with(db, instance, runtime_environment, None).await
+}
+
+/// [`run_once`] plus, when central webhooks are enabled, one Section 53 delivery pass.
+pub async fn run_once_with(
+    db: &DatabaseConnection,
+    instance: &str,
+    runtime_environment: &str,
+    webhooks: Option<&WebhookService>,
+) -> Result<(), DbErr> {
     heartbeat_once(db, instance, runtime_environment, Utc::now()).await?;
     let expired = crate::control::members::expire_due(db).await?;
     if expired > 0 {
         tracing::info!(expired, "pending invitations expired");
+    }
+    if let Some(w) = webhooks.filter(|w| w.settings().enabled) {
+        let r = w.deliver_due_once(WEBHOOK_BATCH).await?;
+        if r != Default::default() {
+            tracing::info!(
+                succeeded = r.succeeded,
+                retried = r.retried,
+                failed = r.failed,
+                cancelled = r.cancelled,
+                shadowed = r.shadowed,
+                stale = r.stale,
+                disabled = r.disabled,
+                mode = w.settings().mode.as_str(),
+                "webhook delivery pass"
+            );
+        }
     }
     Ok(())
 }
@@ -51,9 +82,22 @@ pub async fn run(
     interval: Duration,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
+    run_with(db, instance, runtime_environment, interval, None, shutdown).await
+}
+
+/// [`run`] with the central webhook delivery worker.
+pub async fn run_with(
+    db: DatabaseConnection,
+    instance: String,
+    runtime_environment: String,
+    interval: Duration,
+    webhooks: Option<WebhookService>,
+    shutdown: impl std::future::Future<Output = ()>,
+) {
     tokio::pin!(shutdown);
     loop {
-        if let Err(e) = run_once(&db, &instance, &runtime_environment).await {
+        if let Err(e) = run_once_with(&db, &instance, &runtime_environment, webhooks.as_ref()).await
+        {
             tracing::warn!(summary = %crate::db::summarize_db_error(&e), "worker pass failed");
         }
         tokio::select! {

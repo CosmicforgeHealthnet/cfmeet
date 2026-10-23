@@ -8,13 +8,16 @@
 //! environments, service accounts, API credentials, scopes and principals. This schema
 //! stores their canonical Platform Access ids as opaque references and nothing else about
 //! them — no name, slug, status, classification, scope, credential, verifier or secret —
-//! and no communications content and no E2EE material.
+//! and no communications content and no E2EE material. The only secret it holds is its
+//! OWN: customer webhook signing secrets (Section 53), stored sealed under a deployment
+//! key and never returned after creation / rotation.
 
 pub use sea_orm_migration::prelude::*;
 
 mod m20261101_000001_developer_platform_foundation;
 mod m20261102_000002_control_plane;
 mod m20261103_000003_api_usage;
+mod m20261104_000004_webhooks;
 
 /// Name of the table recording which Developer Platform migrations have been applied.
 pub const MIGRATION_TABLE: &str = "developer_platform_seaql_migrations";
@@ -28,6 +31,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261101_000001_developer_platform_foundation::Migration),
             Box::new(m20261102_000002_control_plane::Migration),
             Box::new(m20261103_000003_api_usage::Migration),
+            Box::new(m20261104_000004_webhooks::Migration),
         ]
     }
 

@@ -1,0 +1,6 @@
+{
+  "url": "https://169.254.169.254/latest",
+  "eventTypes": [
+    "call.ended"
+  ]
+}

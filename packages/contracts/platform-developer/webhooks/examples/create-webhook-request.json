@@ -1,0 +1,8 @@
+{
+  "url": "https://hooks.example.com/cfmeet",
+  "eventTypes": [
+    "call.ended",
+    "number.assignment_changed"
+  ],
+  "description": "CRM sync"
+}

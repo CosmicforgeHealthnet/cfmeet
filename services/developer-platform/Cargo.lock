@@ -347,6 +347,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-webhooks"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "hmac",
+ "rand 0.8.8",
+ "reqwest",
+ "ring",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -626,7 +642,9 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bytes",
  "cf-service-auth",
+ "cf-webhooks",
  "chrono",
  "developer-platform-migration",
  "dotenvy",

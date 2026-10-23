@@ -151,6 +151,16 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         "devplat_project_profiles.display_name",
         "devplat_project_profiles.status",
         "devplat_project_profiles.status_reason",
+        // Section 53 webhooks: attempt / delivery status classes, the subscription's own
+        // lifecycle, and its signing secret stored ONLY sealed (AES-256-GCM through
+        // cf_webhooks, CHECK-enforced `v2.<kid>.` format) with the sealing key's id.
+        "devplat_webhook_attempts.http_status",
+        "devplat_webhook_deliveries.last_http_status",
+        "devplat_webhook_deliveries.status",
+        "devplat_webhook_subscriptions.secret_key_id",
+        "devplat_webhook_subscriptions.secret_sealed",
+        "devplat_webhook_subscriptions.secret_version",
+        "devplat_webhook_subscriptions.status",
         "devplat_workspace_members.status",
     ];
     assert_eq!(
@@ -387,8 +397,13 @@ async fn the_served_openapi_is_the_contract_and_every_listed_route_exists() {
     assert_eq!(r.json, contract);
     for (path, ops) in contract["paths"].as_object().unwrap() {
         for method in ops.as_object().unwrap().keys() {
-            // Parameterised and operator routes are covered by the control-plane suite.
-            if method != "get" || path.contains('{') || path.contains("/operator/") {
+            // Parameterised and operator routes are covered by the control-plane suite;
+            // gateway-forwarded customer routes (`/v1/**`) by the webhook suite.
+            if method != "get"
+                || path.contains('{')
+                || path.contains("/operator/")
+                || path.starts_with("/v1/")
+            {
                 continue;
             }
             let r = if path.starts_with("/internal/") {

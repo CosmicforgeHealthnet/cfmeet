@@ -18,6 +18,18 @@ implemented.
   `GET /internal/v1/gateway/context` — `developer-request.forward` (API Gateway only),
   signed delegated context required, behind `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED`
   (default off).
+* **Central webhooks (Section 53):** `POST /internal/v1/platform/events`
+  (`developer-event.publish`; the envelope's producer is the authenticated service) ingests
+  committed producer events, projects them into the public catalog (allow-listed safe keys
+  only), dedupes on (producer, source event id) and fans out to the matching ACTIVE
+  subscriptions of the same environment; the worker delivers them signed
+  (`cf_webhooks::signing`), SSRF-safe, with bounded retries, dead letters, replay, endpoint
+  health and automatic disablement. The customer API is Calling's (`/v1/webhooks*`,
+  `/v1/webhook-deliveries/{id}/replay`; served once the API Gateway re-points it with
+  `API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED`); the console manages subscriptions under
+  `/v1/environments/{environmentId}/webhooks*`. Behind `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED`
+  (default off) and `DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE` (default `shadow`: nothing is
+  sent). Signing secrets are stored sealed only (`DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY*`).
 * **Developer Console:** `apps/web/src/app/dashboard/developers/` stays the future console
   UI; it will call the published gateway API with the same contracts as every customer
   (see `docs/phases/phase-06/developer-console-boundary.md`).

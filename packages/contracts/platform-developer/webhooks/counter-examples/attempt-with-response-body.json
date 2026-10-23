@@ -1,0 +1,9 @@
+{
+  "attemptNumber": 1,
+  "startedAt": "2026-11-04T10:00:00.000Z",
+  "finishedAt": "2026-11-04T10:00:01.000Z",
+  "httpStatus": 500,
+  "outcome": "FAILED",
+  "errorClass": "HTTP_5XX",
+  "responseBody": "stack trace with token=abc"
+}

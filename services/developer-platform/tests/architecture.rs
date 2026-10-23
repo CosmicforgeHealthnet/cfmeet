@@ -1,7 +1,8 @@
 //! Developer Platform architecture boundaries (Part VI §§1–6): no other service's source
 //! or database; Platform Access stays the ONLY identity / credential authority (no
-//! credential verification, no identity hierarchy tables); no webhook cryptography of its
-//! own; no communications, E2EE or product-specific domain; no Part VII expansion.
+//! credential verification, no identity hierarchy tables); webhook signing and sealing only
+//! through the shared `cf_webhooks` primitives (no cryptography of its own); no
+//! communications, E2EE or product-specific domain; no Part VII expansion.
 
 use std::{fs, path::Path};
 
@@ -110,13 +111,11 @@ fn platform_access_remains_the_only_identity_and_credential_authority() {
 }
 
 #[test]
-fn no_webhook_cryptography_communications_e2ee_or_product_domain() {
+fn no_communications_e2ee_or_product_domain() {
     for (file, code) in sources() {
         let lower = code.to_lowercase();
         for term in [
             "hmac",
-            "secret_box",
-            "cf_webhooks",
             "openmls",
             "decrypt",
             "plaintext",
@@ -133,6 +132,84 @@ fn no_webhook_cryptography_communications_e2ee_or_product_domain() {
             );
         }
     }
+}
+
+/// Whether `term` occurs at a word start (`ring::` but not `String::`).
+fn has_word(code: &str, term: &str) -> bool {
+    code.match_indices(term).any(|(i, _)| {
+        !code[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Section 53: webhook signing and the sealing of signing secrets come ONLY from the
+/// shared `cf_webhooks` primitives (one signature scheme platform-wide); the Developer
+/// Platform links no cryptographic primitive crate for them and implements none.
+#[test]
+fn webhook_cryptography_comes_only_from_cf_webhooks() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(base.join("Cargo.toml")).unwrap();
+    let deps: String = manifest
+        .split("[dev-dependencies]")
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(deps.contains("cf-webhooks = { path = \"../../packages/webhooks\" }"));
+    for krate in [
+        "hmac",
+        "aes-gcm",
+        "aes",
+        "ring",
+        "chacha20poly1305",
+        "openssl",
+    ] {
+        assert!(
+            !deps
+                .lines()
+                .any(|l| l.trim_start().starts_with(&format!("{krate} "))
+                    || l.trim_start().starts_with(&format!("{krate}="))),
+            "Cargo.toml depends on the crypto primitive `{krate}`"
+        );
+    }
+    let mut signs = false;
+    let mut seals = false;
+    for (file, code) in sources() {
+        let lower = code.to_lowercase();
+        for term in ["ring::", "aes_gcm", "aes::", "hmac", "sha2::"] {
+            if file.starts_with("src/webhooks/") || file.starts_with("src/config/webhooks") {
+                assert!(
+                    !has_word(&lower, term),
+                    "{file}: webhook crypto `{term}` outside cf_webhooks"
+                );
+            } else if term != "sha2::" {
+                // sha2 digests (idempotency keys, invitation tokens) are not webhook crypto.
+                assert!(!has_word(&lower, term), "{file}: `{term}`");
+            }
+        }
+        if code.contains("cf_webhooks::signing::sign(") {
+            signs = true;
+            assert_eq!(
+                file, "src/webhooks/worker.rs",
+                "signing happens in the worker only"
+            );
+        }
+        if code.contains(".seal(&secret") {
+            seals = true;
+            assert_eq!(file, "src/webhooks/mod.rs");
+        }
+        if file.starts_with("src/") && code.contains("cf_webhooks::") {
+            assert!(
+                file.starts_with("src/webhooks/") || file == "src/config/webhooks.rs",
+                "{file}: cf_webhooks outside the webhook module"
+            );
+        }
+    }
+    assert!(
+        signs && seals,
+        "the webhook module signs and seals through cf_webhooks"
+    );
 }
 
 #[test]

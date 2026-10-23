@@ -9,11 +9,17 @@
 //! | `DEVELOPER_PLATFORM_WORKER_INTERVAL_MS` | no | worker loop interval (100–600000, default 5000) |
 //! | `DEVELOPER_PLATFORM_WORKER_INSTANCE_ID` | no | worker instance id (default `worker-<pid>`) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
+//! | `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED` | no | feature flag (default `false`): central customer webhooks (Section 53); off, every webhook route is 404 |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE` | no | `shadow` (default: ingest and record, never send) / `active` |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY` (`_ID`, `_PREVIOUS`, `_PREVIOUS_ID`, `_FILE` variants) | no | signing-secret sealing key ring; unset = webhook subscription routes 503 (fail closed) |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` | no | http / private endpoints, `local` runtime only |
+//! | `DEVELOPER_PLATFORM_WEBHOOK_REQUEST_TIMEOUT_MS`, `_MAX_ATTEMPTS`, `_AUTO_DISABLE_AFTER` | no | delivery timeout, attempts before dead letter, consecutive failures before automatic disablement |
 //!
-//! Service authentication (`CF_*`) is read by [`service_auth`]. Error messages never echo
-//! a value.
+//! The webhook variables are detailed in [`webhooks`]. Service authentication (`CF_*`) is
+//! read by [`service_auth`]. Error messages never echo a value.
 
 pub mod service_auth;
+pub mod webhooks;
 
 use std::{fmt, net::SocketAddr, time::Duration};
 
@@ -58,6 +64,8 @@ pub struct DeveloperPlatformConfig {
     pub worker_interval: Duration,
     pub worker_instance_id: String,
     pub log_format: LogFormat,
+    /// Central customer webhooks (Section 53).
+    pub webhooks: crate::webhooks::WebhookSettings,
 }
 
 impl fmt::Debug for DeveloperPlatformConfig {
@@ -69,6 +77,7 @@ impl fmt::Debug for DeveloperPlatformConfig {
             .field("flags", &self.flags)
             .field("worker_interval", &self.worker_interval)
             .field("worker_instance_id", &self.worker_instance_id)
+            .field("webhooks", &self.webhooks)
             .finish_non_exhaustive()
     }
 }
@@ -182,6 +191,7 @@ impl DeveloperPlatformConfig {
                 ))
             }
         };
+        let webhooks = webhooks::from_lookup(&get)?;
         Ok(Self {
             database_url,
             database_max_connections,
@@ -190,6 +200,7 @@ impl DeveloperPlatformConfig {
             worker_interval,
             worker_instance_id,
             log_format,
+            webhooks,
         })
     }
 

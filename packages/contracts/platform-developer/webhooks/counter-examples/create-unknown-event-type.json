@@ -1,0 +1,6 @@
+{
+  "url": "https://hooks.example.com/x",
+  "eventTypes": [
+    "meeting.everything"
+  ]
+}

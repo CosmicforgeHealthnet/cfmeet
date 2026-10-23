@@ -6,6 +6,7 @@
 //! | `GET /internal/v1/entitlements/environments/{id}` | `developer-entitlement.read` | — |
 //! | `POST /internal/v1/usage/api-requests` | `developer-usage.record` | idempotent batch |
 //! | `GET /internal/v1/usage/api-requests/{environmentId}/{day}` | `developer-usage.record` | — |
+//! | `POST /internal/v1/platform/events` | `developer-event.publish` (producers; the envelope's producer is the caller) | Section 53, behind `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED` |
 //!
 //! `gateway/context` is the Part VI foundation route of the customer path: it returns the
 //! canonical Platform Access ids of the caller's application environment as Platform
@@ -32,6 +33,7 @@ use crate::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .merge(crate::webhooks::http::internal_routes())
         .route("/gateway/context", get(gateway_context))
         .route(
             "/entitlements/environments/:environment_id",

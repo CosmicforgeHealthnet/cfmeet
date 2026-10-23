@@ -8,6 +8,7 @@ use crate::{
     config::{service_auth::ServiceAuthRuntime, FeatureFlags},
     platform_access::{PlatformAccessPort, UnconfiguredPlatformAccess},
     session::{HumanSessions, UnconfiguredSessions},
+    webhooks::WebhookService,
 };
 
 #[derive(Clone)]
@@ -17,6 +18,8 @@ pub struct AppState {
     pub platform_access: Arc<dyn PlatformAccessPort>,
     pub sessions: Arc<dyn HumanSessions>,
     pub flags: FeatureFlags,
+    /// Central customer webhooks (Section 53); `None`: every webhook route is 404.
+    pub webhooks: Option<WebhookService>,
 }
 
 impl AppState {
@@ -27,6 +30,7 @@ impl AppState {
             platform_access: Arc::new(UnconfiguredPlatformAccess),
             sessions: Arc::new(UnconfiguredSessions),
             flags: FeatureFlags::default(),
+            webhooks: None,
         }
     }
 
@@ -42,6 +46,11 @@ impl AppState {
 
     pub fn with_flags(mut self, flags: FeatureFlags) -> Self {
         self.flags = flags;
+        self
+    }
+
+    pub fn with_webhooks(mut self, webhooks: WebhookService) -> Self {
+        self.webhooks = Some(webhooks);
         self
     }
 }

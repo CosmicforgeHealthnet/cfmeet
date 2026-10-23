@@ -25,8 +25,13 @@ path = "src/bin/developer-platform-worker.rs"
 developer-platform-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Shared customer-webhook primitives (signing, sealed secrets at rest, SSRF-safe endpoint
+# policy, retry classification): Section 53 central webhooks reuse them; the Developer
+# Platform implements no webhook cryptography of its own.
+cf-webhooks = { path = "../../packages/webhooks" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
-sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -50,3 +55,4 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1.42", features = ["process"] }
+bytes = "1"

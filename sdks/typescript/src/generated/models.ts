@@ -2223,6 +2223,36 @@ export namespace DeveloperPlatform {
     items: Array<CommercialPlan>;
     nextCursor: string | null;
   };
+  export type ConsoleDeliveryList = {
+    items: Array<WebhookDelivery>;
+    nextCursor: string | null;
+  };
+  /** The Developer Console view: the customer view plus environment, origin and endpoint health (never the signing secret). */
+  export type ConsoleWebhook = {
+    webhookId: string;
+    url: string;
+    eventTypes: Array<WebhookEventType>;
+    description: string | null;
+    status: "ACTIVE" | "DISABLED" | "DELETED";
+    secretVersion: number;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    environmentId: string;
+    environmentKind: "SANDBOX" | "TEST" | "PRODUCTION";
+    /** NATIVE, or migrated from Calling's legacy webhook store (id preserved). */
+    origin: "NATIVE" | "MIGRATED_FROM_CALLING";
+    health: EndpointHealth;
+  };
+  export type ConsoleWebhookList = {
+    items: Array<ConsoleWebhook>;
+    nextCursor: string | null;
+  };
+  export type ConsoleWebhookWithSecret = {
+    webhook: ConsoleWebhook;
+    /** Returned ONLY by create and rotate-secret; absent from an Idempotency-Key replay of a create (never stored). */
+    signingSecret?: string;
+  };
   export type CreateEnvironmentRequest = {
     /** PRODUCTION environments are activated by the production-access workflow (Section 55). */
     kind: "SANDBOX" | "TEST";
@@ -2241,6 +2271,21 @@ export namespace DeveloperPlatform {
     description?: string;
     supportEmail?: string;
     labels?: { [key: string]: string };
+  };
+  export type CreateWebhookRequest = {
+    /** Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed. */
+    url: string;
+    eventTypes: Array<WebhookEventType>;
+    description?: string | null;
+  };
+  /** FAILED is the dead letter (replayable). SHADOW: recorded while the platform ran in shadow mode before the cut-over; deliberately not sent. */
+  export type DeliveryStatus = "PENDING" | "DELIVERING" | "RETRY_SCHEDULED" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "SHADOW";
+  export type EndpointHealth = {
+    consecutiveFailures: number;
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    /** CONSECUTIVE_FAILURES: disabled automatically; re-enabling resets the health. */
+    disabledReason: "CONSECUTIVE_FAILURES" | null;
   };
   export type EntitlementValues = {
     apiRequestsPerMinute?: number;
@@ -2304,7 +2349,7 @@ export namespace DeveloperPlatform {
       requestId: RequestId | null;
     };
   };
-  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
+  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "CAPABILITY_UNAVAILABLE" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
   export type Invitation = {
     id: Uuid;
     organizationId: Uuid;
@@ -2436,6 +2481,9 @@ export namespace DeveloperPlatform {
   export type RequestId = string;
   /** Part VI workspace role (Section 50 permission matrix). */
   export type Role = "OWNER" | "ADMIN" | "DEVELOPER" | "ANALYST" | "BILLING";
+  export type RotateWebhookSecretRequest = {
+    expectedVersion: number;
+  };
   export type TransferOwnershipRequest = {
     memberId: Uuid;
   };
@@ -2451,8 +2499,45 @@ export namespace DeveloperPlatform {
     supportEmail?: string | null;
     labels?: { [key: string]: string };
   };
+  export type UpdateWebhookRequest = {
+    expectedVersion: number;
+    /** Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed. */
+    url?: string;
+    eventTypes?: Array<WebhookEventType>;
+    description?: string | null;
+    status?: "ACTIVE" | "DISABLED";
+  };
   /** Lower-case hyphenated UUID. */
   export type Uuid = string;
+  /** One delivery attempt: status class and bounded error class only (never a response body). */
+  export type WebhookAttempt = {
+    attemptNumber: number;
+    startedAt: string;
+    finishedAt: string;
+    httpStatus: number | null;
+    outcome: "SUCCEEDED" | "RETRY" | "FAILED";
+    errorClass: string | null;
+  };
+  export type WebhookAttemptList = {
+    items: Array<WebhookAttempt>;
+    nextCursor: string | null;
+  };
+  export type WebhookDelivery = {
+    deliveryId: string;
+    webhookId: string;
+    eventId: string;
+    eventType: WebhookEventType;
+    replayOf: string | null;
+    status: DeliveryStatus;
+    attemptCount: number;
+    nextAttemptAt: string | null;
+    lastHttpStatus: number | null;
+    failureCategory: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  };
+  /** The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. */
+  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired" | "meeting.started" | "meeting.ended" | "participant.joined" | "participant.left" | "artifact.ready" | "artifact.deleted" | "number.reservation_changed" | "number.assignment_changed" | "number.binding_changed" | "number.port_changed" | "number.release_changed" | "number.lifecycle_changed" | "number.suspended" | "number.restored" | "credential.created" | "credential.rotated" | "credential.revoked" | "production_access.requested" | "production_access.approved" | "production_access.rejected";
 
   /** Typed parameters and response of every REST operation of this domain. */
   export interface Operations {
@@ -2481,6 +2566,11 @@ export namespace DeveloperPlatform {
       params: { path: { projectId: Uuid }; body: CreateEnvironmentRequest; idempotencyKey?: string };
       response: Environment;
     };
+    /** POST /v1/environments/{environmentId}/webhooks; auth DEVELOPER_SESSION; retry IDEMPOTENT */
+    createEnvironmentWebhook: {
+      params: { path: { environmentId: Uuid }; body: CreateWebhookRequest; idempotencyKey?: string };
+      response: ConsoleWebhookWithSecret;
+    };
     /** POST /v1/organizations/{organizationId}/invitations; auth DEVELOPER_SESSION; retry IDEMPOTENT */
     createInvitation: {
       params: { path: { organizationId: Uuid }; body: CreateInvitationRequest; idempotencyKey?: string };
@@ -2496,6 +2586,11 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid }; body: CreateProjectRequest; idempotencyKey?: string };
       response: Project;
     };
+    /** DELETE /v1/environments/{environmentId}/webhooks/{webhookId}; auth DEVELOPER_SESSION; retry IDEMPOTENT */
+    deleteEnvironmentWebhook: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid }; query: { expectedVersion: number } };
+      response: ConsoleWebhook;
+    };
     /** GET /v1/environments/{environmentId} — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     getEnvironment: {
       params: { path: { environmentId: Uuid } };
@@ -2505,6 +2600,11 @@ export namespace DeveloperPlatform {
     getEnvironmentEntitlements: {
       params: { path: { environmentId: Uuid } };
       response: Entitlements;
+    };
+    /** GET /v1/environments/{environmentId}/webhooks/{webhookId}; auth DEVELOPER_SESSION; retry SAFE */
+    getEnvironmentWebhook: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid } };
+      response: ConsoleWebhook;
     };
     /** GET /v1/organizations/{organizationId} — scope organizations.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     getOrganization: {
@@ -2531,6 +2631,18 @@ export namespace DeveloperPlatform {
     listCommercialPlans: {
       params: {};
       response: CommercialPlanList;
+    };
+    /** GET /v1/environments/{environmentId}/webhooks/{webhookId}/deliveries; auth DEVELOPER_SESSION; retry SAFE */
+    listEnvironmentWebhookDeliveries: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid }; query?: { limit?: number; cursor?: string; status?: DeliveryStatus } };
+      response: ConsoleDeliveryList;
+      item: NonNullable<(ConsoleDeliveryList)["items"]>[number];
+    };
+    /** GET /v1/environments/{environmentId}/webhooks; auth DEVELOPER_SESSION; retry SAFE */
+    listEnvironmentWebhooks: {
+      params: { path: { environmentId: Uuid }; query?: { limit?: number; cursor?: string } };
+      response: ConsoleWebhookList;
+      item: NonNullable<(ConsoleWebhookList)["items"]>[number];
     };
     /** GET /v1/projects/{projectId}/environments — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listEnvironments: {
@@ -2573,6 +2685,12 @@ export namespace DeveloperPlatform {
       response: ProjectList;
       item: NonNullable<(ProjectList)["items"]>[number];
     };
+    /** GET /v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts; auth DEVELOPER_SESSION; retry SAFE */
+    listWebhookDeliveryAttempts: {
+      params: { path: { environmentId: Uuid; deliveryId: Uuid }; query?: { limit?: number; cursor?: string } };
+      response: WebhookAttemptList;
+      item: NonNullable<(WebhookAttemptList)["items"]>[number];
+    };
     /** PUT /v1/organizations/{organizationId}/billing-account; auth DEVELOPER_SESSION; retry IDEMPOTENT */
     putBillingAccount: {
       params: { path: { organizationId: Uuid }; body: PutBillingAccountRequest };
@@ -2582,6 +2700,11 @@ export namespace DeveloperPlatform {
     removeMember: {
       params: { path: { organizationId: Uuid; memberId: Uuid } };
       response: void;
+    };
+    /** POST /v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/replay; auth DEVELOPER_SESSION; retry NO_RETRY */
+    replayEnvironmentWebhookDelivery: {
+      params: { path: { environmentId: Uuid; deliveryId: Uuid } };
+      response: WebhookDelivery;
     };
     /** POST /v1/environments/{environmentId}/resume — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     resumeEnvironment: {
@@ -2598,6 +2721,11 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid; invitationId: Uuid } };
       response: Invitation;
     };
+    /** POST /v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret; auth DEVELOPER_SESSION; retry NO_RETRY */
+    rotateEnvironmentWebhookSecret: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid }; body: RotateWebhookSecretRequest };
+      response: ConsoleWebhookWithSecret;
+    };
     /** POST /v1/environments/{environmentId}/suspend — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     suspendEnvironment: {
       params: { path: { environmentId: Uuid } };
@@ -2612,6 +2740,11 @@ export namespace DeveloperPlatform {
     transferOwnership: {
       params: { path: { organizationId: Uuid }; body: TransferOwnershipRequest };
       response: Member;
+    };
+    /** PATCH /v1/environments/{environmentId}/webhooks/{webhookId}; auth DEVELOPER_SESSION; retry NO_RETRY */
+    updateEnvironmentWebhook: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid }; body: UpdateWebhookRequest };
+      response: ConsoleWebhook;
     };
     /** PATCH /v1/organizations/{organizationId} — scope organizations.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     updateOrganization: {

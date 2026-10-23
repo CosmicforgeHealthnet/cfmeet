@@ -8,6 +8,7 @@ use developer_platform::{
     platform_access::HttpPlatformAccess,
     session::MeetingServiceSessions,
     state::AppState,
+    webhooks::WebhookService,
 };
 
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
@@ -37,6 +38,8 @@ async fn main() -> anyhow::Result<()> {
         service = %service_auth.signer().issuer(),
         runtime_environment = %service_auth.signer().runtime_environment(),
         gateway_api = config.flags.gateway_api,
+        webhooks = config.webhooks.enabled,
+        webhook_mode = config.webhooks.mode.as_str(),
         "developer platform configuration loaded"
     );
     let db =
@@ -44,6 +47,13 @@ async fn main() -> anyhow::Result<()> {
     let mut state = AppState::new(db, service_auth.clone())
         .with_platform_access(Arc::new(HttpPlatformAccess::new(service_auth.client())))
         .with_flags(config.flags);
+    if config.webhooks.enabled {
+        developer_platform::webhooks::require_signable(&state.db, &config.webhooks)
+            .await
+            .unwrap_or_else(|e| fatal("webhook configuration error", e));
+        let service = WebhookService::new(state.db.clone(), config.webhooks.clone());
+        state = state.with_webhooks(service);
+    }
     if settings.has_target(cf_service_auth::services::MEETING_SERVICE) {
         state = state.with_sessions(Arc::new(MeetingServiceSessions::new(service_auth.client())));
     } else {

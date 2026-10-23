@@ -14,6 +14,7 @@ on:
     paths:
       - "services/developer-platform/**"
       - "packages/service-auth/**"
+      - "packages/webhooks/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/developer-platform.yml"
@@ -21,6 +22,7 @@ on:
     paths:
       - "services/developer-platform/**"
       - "packages/service-auth/**"
+      - "packages/webhooks/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/developer-platform.yml"

@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 25,
     "OPERATOR_ADMIN": 36,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 456,
+    "PUBLIC_CUSTOMER": 465,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -4398,6 +4398,123 @@
       "requiredScope": "projects.manage"
     },
     {
+      "id": "developer-platform.listWebhookDeliveryAttempts",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.replayEnvironmentWebhookDelivery",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/replay",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/replay",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.listEnvironmentWebhooks",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/webhooks",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.createEnvironmentWebhook",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/webhooks",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.deleteEnvironmentWebhook",
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "pattern": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.getEnvironmentWebhook",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.updateEnvironmentWebhook",
+      "domain": "developer-platform",
+      "method": "PATCH",
+      "pattern": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.listEnvironmentWebhookDeliveries",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "developer-platform.rotateEnvironmentWebhookSecret",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret",
+      "auth": [
+        "DEVELOPER_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "developer-platform.acceptInvitation",
       "domain": "developer-platform",
       "method": "POST",
@@ -7848,6 +7965,78 @@
       "operationId": "suspendEnvironment",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listWebhookDeliveryAttempts",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/attempts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "replayEnvironmentWebhookDelivery",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/webhook-deliveries/{deliveryId}/replay",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listEnvironmentWebhooks",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/webhooks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "createEnvironmentWebhook",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/webhooks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "deleteEnvironmentWebhook",
+      "method": "DELETE",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getEnvironmentWebhook",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "updateEnvironmentWebhook",
+      "method": "PATCH",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listEnvironmentWebhookDeliveries",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "rotateEnvironmentWebhookSecret",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret",
       "class": "PUBLIC_CUSTOMER"
     },
     {
