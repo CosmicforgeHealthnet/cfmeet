@@ -830,7 +830,6 @@ fn swagger_config() -> serde_json::Value {
     serde_json::json!({ "urls": urls, "primaryName": "Meetings" })
 }
 
-
 /// Public API documentation is an audience-specific view of the canonical contract.
 /// Filtering happens before the JSON reaches a public endpoint (not just in the UI).
 /// The original contracts remain unchanged for tests, SDK generation and the private portal.
@@ -928,7 +927,15 @@ pub fn swagger_router(server_addr: &str) -> Router {
             get(move || {
                 let page = page.clone();
                 let csp = csp.clone();
-                async move { ([(CONTENT_SECURITY_POLICY, csp), (CACHE_CONTROL, "no-store, max-age=0".to_string())], Html(page)) }
+                async move {
+                    (
+                        [
+                            (CONTENT_SECURITY_POLICY, csp),
+                            (CACHE_CONTROL, "no-store, max-age=0".to_string()),
+                        ],
+                        Html(page),
+                    )
+                }
             }),
         )
         .route(
@@ -1023,7 +1030,12 @@ mod tests {
         ] {
             let response = router
                 .clone()
-                .oneshot(Request::builder().uri(forbidden).body(Body::empty()).unwrap())
+                .oneshot(
+                    Request::builder()
+                        .uri(forbidden)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{forbidden}");
@@ -1036,8 +1048,7 @@ mod tests {
             if name.ends_with("(internal)") {
                 continue;
             }
-            let public: serde_json::Value =
-                serde_json::from_str(&public_doc(name, raw)).unwrap();
+            let public: serde_json::Value = serde_json::from_str(&public_doc(name, raw)).unwrap();
             let original: serde_json::Value = serde_json::from_str(raw).unwrap();
             assert!(!public["paths"].as_object().unwrap().is_empty(), "{name}");
             assert!(
@@ -1129,7 +1140,11 @@ mod tests {
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS.iter().filter(|(name, _, _)| !name.ends_with("(internal)")).count() + 1
+            PEER_DOCS
+                .iter()
+                .filter(|(name, _, _)| !name.ends_with("(internal)"))
+                .count()
+                + 1
         );
     }
 
