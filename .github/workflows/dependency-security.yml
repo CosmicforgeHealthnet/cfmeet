@@ -80,6 +80,10 @@ jobs:
           # Part K final gap closure: the browser crypto core and its Chromium harness.
           - packages/messaging-crypto/wasm
           - packages/messaging-crypto/web-harness
+          # The other lockfiles that link the Messaging crypto core: its C ABI (Dart SDK)
+          # and the cross-service certification workspace.
+          - packages/messaging-crypto/ffi
+          - certification
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
