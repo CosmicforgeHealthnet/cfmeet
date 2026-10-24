@@ -1787,9 +1787,49 @@
                   "type": "null"
                 }
               ]
+            },
+            "apiRequestsPerMinute": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "apiRequestsPerDay": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limitingLevel": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "apiRequestsPerMinute",
+                "apiRequestsPerDay"
+              ],
+              "properties": {
+                "apiRequestsPerMinute": {
+                  "enum": [
+                    "PLATFORM_DEFAULT",
+                    "ORGANIZATION_PLAN",
+                    "OPERATOR_OVERRIDE",
+                    "PROJECT_PLAN",
+                    "ENVIRONMENT",
+                    "SERVICE_ACCOUNT",
+                    "CREDENTIAL"
+                  ]
+                },
+                "apiRequestsPerDay": {
+                  "enum": [
+                    "PLATFORM_DEFAULT",
+                    "ORGANIZATION_PLAN",
+                    "OPERATOR_OVERRIDE",
+                    "PROJECT_PLAN",
+                    "ENVIRONMENT",
+                    "SERVICE_ACCOUNT",
+                    "CREDENTIAL"
+                  ]
+                }
+              }
             }
           },
-          "description": "The caller whose service-account / credential restrictions were applied (null: environment level)."
+          "description": "Internal reads with serviceAccountId / credentialId: the caller's own (never higher) limits and levels; the top-level values stay the environment's."
         },
         "snapshotVersion": {
           "type": "integer",

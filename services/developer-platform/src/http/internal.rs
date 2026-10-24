@@ -166,14 +166,15 @@ async fn environment_entitlements(
             query.credential_id,
         )
         .await?;
-        for k in [
-            "apiRequestsPerMinute",
-            "apiRequestsPerDay",
-            "limitingLevel",
-            "subject",
-        ] {
-            v[k] = subject[k].clone();
-        }
+        // Environment-level values stay on top (shared environment counters); the
+        // caller's own (never higher) values are in `subject` (its own counters).
+        v["subject"] = json!({
+            "serviceAccountId": query.service_account_id,
+            "credentialId": query.credential_id,
+            "apiRequestsPerMinute": subject["apiRequestsPerMinute"],
+            "apiRequestsPerDay": subject["apiRequestsPerDay"],
+            "limitingLevel": subject["limitingLevel"],
+        });
     }
     Ok(Json(v))
 }

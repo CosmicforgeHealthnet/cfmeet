@@ -256,6 +256,7 @@ impl ApiGatewayConfig {
             }
         }
         controls.central_webhooks = flag(&get, "API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED")?;
+        controls.central_usage = flag(&get, "API_GATEWAY_CENTRAL_USAGE_ENABLED")?;
         let mut cors_allowed_origins = Vec::new();
         if let Some(v) = get("API_GATEWAY_CORS_ALLOWED_ORIGINS") {
             for o in v.split(',').map(str::trim).filter(|o| !o.is_empty()) {

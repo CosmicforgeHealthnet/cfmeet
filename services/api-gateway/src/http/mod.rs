@@ -208,6 +208,7 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         "websockets": if state.flags.websockets { "enabled" } else { "disabled" },
         "quotas": state.quota.as_ref().map(|q| q.mode()).unwrap_or("not_enforced"),
         "centralWebhooks": state.controls.central_webhooks,
+        "centralUsage": state.controls.central_usage,
         "disabledFamilies": state.controls.disabled_domains.iter().collect::<Vec<_>>(),
         "upstreams": upstreams,
     }))

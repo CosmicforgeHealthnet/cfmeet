@@ -96,7 +96,9 @@ pub fn definitions(controls: &RoutingControls) -> Result<Vec<RouteDefinition>, R
             forward_headers: r.forward_headers,
             timeout: r.timeout_ms.map(Duration::from_millis),
         };
-        if controls.central_webhooks && crate::routing::is_webhook_route(&d) {
+        if (controls.central_webhooks && crate::routing::is_webhook_route(&d))
+            || (controls.central_usage && crate::routing::is_usage_route(&d))
+        {
             d.upstream = cf_service_auth::services::DEVELOPER_PLATFORM.to_string();
         }
         out.push(d);
@@ -168,5 +170,20 @@ mod tests {
             .iter()
             .filter(|d| crate::routing::is_webhook_route(d))
             .all(|d| d.upstream == "cfmeet.developer-platform"));
+        // §55: usage / limits stay Calling's until the flag, then move (and only them).
+        let usage = |c: &RoutingControls| -> Vec<String> {
+            definitions(c)
+                .unwrap()
+                .into_iter()
+                .filter(crate::routing::is_usage_route)
+                .map(|d| d.upstream)
+                .collect()
+        };
+        assert_eq!(usage(&c), ["cfmeet.calling", "cfmeet.calling"]);
+        c.central_usage = true;
+        assert_eq!(
+            usage(&c),
+            ["cfmeet.developer-platform", "cfmeet.developer-platform"]
+        );
     }
 }

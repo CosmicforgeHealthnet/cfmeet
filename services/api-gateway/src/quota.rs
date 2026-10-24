@@ -64,6 +64,9 @@ fn level(v: &Value) -> &'static str {
         Some("ORGANIZATION_PLAN") => "ORGANIZATION_PLAN",
         Some("PROJECT_PLAN") => "PROJECT_PLAN",
         Some("ENVIRONMENT") => "ENVIRONMENT",
+        Some("OPERATOR_OVERRIDE") => "OPERATOR_OVERRIDE",
+        Some("SERVICE_ACCOUNT") => "SERVICE_ACCOUNT",
+        Some("CREDENTIAL") => "CREDENTIAL",
         _ => "PLATFORM_DEFAULT",
     }
 }
@@ -99,13 +102,40 @@ pub trait QuotaAuthority: Send + Sync {
         kind: ApplicationEnvironmentKind,
         correlation: &CorrelationId,
     ) -> Option<Limits>;
+    /// Part VI §54: the stricter limits of one caller (service-account / credential
+    /// restrictions), `None` when the caller has no restriction of its own.
+    async fn subject_limits(
+        &self,
+        environment: Uuid,
+        kind: ApplicationEnvironmentKind,
+        subject: &Subject,
+        correlation: &CorrelationId,
+    ) -> Option<Limits> {
+        let _ = (environment, kind, subject, correlation);
+        None
+    }
     async fn durable_count(&self, environment: Uuid, day: &str) -> Option<u64>;
     /// Records one idempotent batch (`batch` is reused verbatim on retry).
     async fn record(&self, batch: Uuid, usage: &UsageBatch) -> bool;
 }
 
-/// `(environment, UTC day, domain, operation id, status class)`.
-type OperationKey = (Uuid, String, String, String, &'static str);
+/// The authenticated caller of a request (its quota restrictions apply too).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Subject {
+    pub service_account_id: Uuid,
+    pub credential_id: Uuid,
+}
+
+/// `(environment, UTC day, domain, operation id, status class, caller, kind)`.
+type OperationKey = (
+    Uuid,
+    String,
+    String,
+    String,
+    &'static str,
+    Option<Subject>,
+    Option<&'static str>,
+);
 
 /// One normalized API_OPERATION count (Appendix D): an accepted public operation of an
 /// application environment by owning domain, contract operation id and status class.
@@ -117,6 +147,10 @@ pub struct OperationCount {
     pub operation: String,
     pub status_class: &'static str,
     pub count: u64,
+    /// The authenticated caller (API_OPERATION credential / service-account dimension).
+    pub subject: Option<Subject>,
+    /// The environment kind Platform Access confirmed.
+    pub environment_kind: Option<&'static str>,
 }
 
 /// What one durable accounting batch carries.
@@ -189,6 +223,45 @@ impl QuotaAuthority for DeveloperPlatformQuotas {
         })
     }
 
+    async fn subject_limits(
+        &self,
+        environment: Uuid,
+        kind: ApplicationEnvironmentKind,
+        subject: &Subject,
+        correlation: &CorrelationId,
+    ) -> Option<Limits> {
+        let req = OutboundServiceRequest::continuing(ServiceId::developer_platform(), correlation);
+        let sa = subject.service_account_id.to_string();
+        let cred = subject.credential_id.to_string();
+        let r = self
+            .client
+            .get_query(
+                &req,
+                &format!("/internal/v1/entitlements/environments/{environment}"),
+                &[
+                    ("kind", kind_name(kind)),
+                    ("serviceAccountId", sa.as_str()),
+                    ("credentialId", cred.as_str()),
+                ],
+            )
+            .await
+            .ok()?;
+        let v: Value = r.json().ok()?;
+        let s = v.get("subject")?;
+        let limits = Limits {
+            per_minute: s.get("apiRequestsPerMinute")?.as_u64()?,
+            per_day: s.get("apiRequestsPerDay")?.as_u64()?,
+            minute_level: level(&s["limitingLevel"]["apiRequestsPerMinute"]),
+            day_level: level(&s["limitingLevel"]["apiRequestsPerDay"]),
+        };
+        // Only a stricter caller-level limit needs its own counters.
+        matches!(limits.minute_level, "SERVICE_ACCOUNT" | "CREDENTIAL")
+            .then_some(limits)
+            .or_else(|| {
+                matches!(limits.day_level, "SERVICE_ACCOUNT" | "CREDENTIAL").then_some(limits)
+            })
+    }
+
     async fn durable_count(&self, environment: Uuid, day: &str) -> Option<u64> {
         let req = OutboundServiceRequest::new_operation(ServiceId::developer_platform());
         let r = self
@@ -207,10 +280,20 @@ impl QuotaAuthority for DeveloperPlatformQuotas {
         let body = json!({
             "batchId": batch,
             "entries": usage.entries.iter().map(|(e, d, c)| json!({ "environmentId": e, "day": d, "count": c })).collect::<Vec<_>>(),
-            "operations": usage.operations.iter().map(|o| json!({
-                "environmentId": o.environment, "day": o.day, "domain": o.domain,
-                "operationId": o.operation, "statusClass": o.status_class, "count": o.count,
-            })).collect::<Vec<_>>(),
+            "operations": usage.operations.iter().map(|o| {
+                let mut v = json!({
+                    "environmentId": o.environment, "day": o.day, "domain": o.domain,
+                    "operationId": o.operation, "statusClass": o.status_class, "count": o.count,
+                });
+                if let Some(s) = o.subject {
+                    v["credentialId"] = json!(s.credential_id);
+                    v["serviceAccountId"] = json!(s.service_account_id);
+                }
+                if let Some(k) = o.environment_kind {
+                    v["environmentKind"] = json!(k);
+                }
+                v
+            }).collect::<Vec<_>>(),
         });
         self.client
             .post_json(&req, "/internal/v1/usage/api-requests", &body)
@@ -219,17 +302,34 @@ impl QuotaAuthority for DeveloperPlatformQuotas {
     }
 }
 
+/// One atomic check-and-increment of the environment's minute / day windows and — when
+/// the caller has a stricter restriction (`ARGV[6] ~= '-1'`) — the caller's own windows
+/// (KEYS[3] / KEYS[4]). Codes: 1 / 2 environment minute / day, 3 / 4 caller minute / day.
 const SCRIPT: &str = r#"
 if ARGV[5] ~= '-1' then redis.call('SET', KEYS[2], ARGV[5], 'NX', 'EX', ARGV[4]) end
 local m = tonumber(redis.call('GET', KEYS[1]) or '0')
 local d = tonumber(redis.call('GET', KEYS[2]) or '0')
-if m >= tonumber(ARGV[1]) then return {0, m, d, 1} end
-if d >= tonumber(ARGV[2]) then return {0, m, d, 2} end
+if m >= tonumber(ARGV[1]) then return {0, m, d, 1, 0} end
+if d >= tonumber(ARGV[2]) then return {0, m, d, 2, 0} end
+local sub = ARGV[6] ~= '-1'
+local cm = 0
+if sub then
+  cm = tonumber(redis.call('GET', KEYS[3]) or '0')
+  local cd = tonumber(redis.call('GET', KEYS[4]) or '0')
+  if cm >= tonumber(ARGV[6]) then return {0, m, d, 3, cm} end
+  if cd >= tonumber(ARGV[7]) then return {0, m, d, 4, cm} end
+end
 m = redis.call('INCR', KEYS[1])
 if m == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
 d = redis.call('INCR', KEYS[2])
 if d == 1 then redis.call('EXPIRE', KEYS[2], ARGV[4]) end
-return {1, m, d, 0}
+if sub then
+  cm = redis.call('INCR', KEYS[3])
+  if cm == 1 then redis.call('EXPIRE', KEYS[3], ARGV[3]) end
+  local cd = redis.call('INCR', KEYS[4])
+  if cd == 1 then redis.call('EXPIRE', KEYS[4], ARGV[4]) end
+end
+return {1, m, d, 0, cm}
 "#;
 
 /// `(environment, UTC day, accepted count)`.
@@ -247,6 +347,8 @@ pub struct QuotaEngine {
     prefix: String,
     authority: Arc<dyn QuotaAuthority>,
     cache: Mutex<HashMap<Uuid, CachedLimits>>,
+    /// Caller restrictions (`None` cached too: no restriction).
+    subject_cache: Mutex<HashMap<Subject, (Instant, Option<Limits>)>>,
     cache_ttl: Duration,
     seeded: Mutex<HashSet<(Uuid, String)>>,
     local: Mutex<HashMap<String, u64>>,
@@ -268,6 +370,7 @@ impl QuotaEngine {
             prefix,
             authority,
             cache: Mutex::new(HashMap::new()),
+            subject_cache: Mutex::new(HashMap::new()),
             cache_ttl: Duration::from_secs(30),
             seeded: Mutex::new(HashSet::new()),
             local: Mutex::new(HashMap::new()),
@@ -334,6 +437,30 @@ impl QuotaEngine {
         }
     }
 
+    async fn subject_limits_for(
+        &self,
+        environment: Uuid,
+        kind: ApplicationEnvironmentKind,
+        subject: &Subject,
+        correlation: &CorrelationId,
+    ) -> Option<Limits> {
+        if let Some((at, l)) = self.subject_cache.lock().unwrap().get(subject) {
+            if at.elapsed() < self.cache_ttl {
+                return *l;
+            }
+        }
+        let l = self
+            .authority
+            .subject_limits(environment, kind, subject, correlation)
+            .await;
+        let mut cache = self.subject_cache.lock().unwrap();
+        if cache.len() > 100_000 {
+            cache.clear();
+        }
+        cache.insert(*subject, (Instant::now(), l));
+        l
+    }
+
     /// Checks and (when allowed) counts one request of `environment`.
     pub async fn check(
         &self,
@@ -341,12 +468,47 @@ impl QuotaEngine {
         kind: ApplicationEnvironmentKind,
         correlation: &CorrelationId,
     ) -> Decision {
+        self.check_for(environment, kind, None, correlation).await
+    }
+
+    /// [`check`](Self::check) for an authenticated caller: the environment's shared
+    /// windows AND, when the caller has a stricter restriction (§54 precedence), its own.
+    pub async fn check_for(
+        &self,
+        environment: Uuid,
+        kind: ApplicationEnvironmentKind,
+        subject: Option<Subject>,
+        correlation: &CorrelationId,
+    ) -> Decision {
         let limits = self.limits_for(environment, kind, correlation).await;
+        let caller = match &subject {
+            Some(s) => {
+                self.subject_limits_for(environment, kind, s, correlation)
+                    .await
+            }
+            None => None,
+        };
         let now = Utc::now();
         let minute = now.timestamp() / 60;
         let day = now.format("%Y-%m-%d").to_string();
         let reset = (60 - (now.timestamp() % 60)).max(1) as u64;
         let until_tomorrow = (86_400 - (now.timestamp() % 86_400)).max(1) as u64;
+        if let Some(c) = caller.filter(|c| c.per_minute == 0 || c.per_day == 0) {
+            return Decision::Exceeded {
+                window: if c.per_minute == 0 {
+                    Window::Minute
+                } else {
+                    Window::Day
+                },
+                level: if c.per_minute == 0 {
+                    c.minute_level
+                } else {
+                    c.day_level
+                },
+                retry_after_seconds: reset,
+                limits: c,
+            };
+        }
         if limits.per_minute == 0 || limits.per_day == 0 {
             return Decision::Exceeded {
                 window: if limits.per_minute == 0 {
@@ -372,25 +534,30 @@ impl QuotaEngine {
                         .unwrap_or(-1)
                 };
                 let mut conn = conn.clone();
+                let cred = subject.map(|s| s.credential_id).unwrap_or_default();
                 let r: Result<Vec<i64>, _> = self
                     .script
                     .key(format!("{}rpm:{environment}:{minute}", self.prefix))
                     .key(format!("{}rpd:{environment}:{day}", self.prefix))
+                    .key(format!("{}crpm:{cred}:{minute}", self.prefix))
+                    .key(format!("{}crpd:{cred}:{day}", self.prefix))
                     .arg(limits.per_minute)
                     .arg(limits.per_day)
                     .arg(120)
                     .arg(172_800)
                     .arg(seed)
+                    .arg(caller.map(|c| c.per_minute as i64).unwrap_or(-1))
+                    .arg(caller.map(|c| c.per_day as i64).unwrap_or(-1))
                     .invoke_async(&mut conn)
                     .await;
                 match r {
-                    Ok(v) if v.len() == 4 => {
+                    Ok(v) if v.len() == 5 => {
                         self.degraded
                             .store(false, std::sync::atomic::Ordering::Relaxed);
                         if seed >= 0 {
                             self.seeded.lock().unwrap().insert(key);
                         }
-                        Some((v[0] == 1, v[1].max(0) as u64, v[3]))
+                        Some((v[0] == 1, v[1].max(0) as u64, v[3], v[4].max(0) as u64))
                     }
                     _ => {
                         if !self
@@ -407,9 +574,16 @@ impl QuotaEngine {
             }
             None => None,
         };
-        let (allowed, used_minute, which) = match outcome {
+        let (allowed, used_minute, which, caller_minute) = match outcome {
             Some(o) => o,
-            None => self.local_check(environment, minute, &day, &limits),
+            None => self.local_check(
+                environment,
+                subject.as_ref(),
+                minute,
+                &day,
+                &limits,
+                caller.as_ref(),
+            ),
         };
         if allowed {
             *self
@@ -418,10 +592,51 @@ impl QuotaEngine {
                 .unwrap()
                 .entry((environment, day))
                 .or_insert(0) += 1;
-            Decision::Allowed {
-                limits,
-                remaining_minute: limits.per_minute.saturating_sub(used_minute),
-                reset_seconds: reset,
+            let env_remaining = limits.per_minute.saturating_sub(used_minute);
+            match caller {
+                Some(c) => {
+                    let binding = Limits {
+                        per_minute: c.per_minute.min(limits.per_minute),
+                        per_day: c.per_day.min(limits.per_day),
+                        minute_level: if c.per_minute < limits.per_minute {
+                            c.minute_level
+                        } else {
+                            limits.minute_level
+                        },
+                        day_level: if c.per_day < limits.per_day {
+                            c.day_level
+                        } else {
+                            limits.day_level
+                        },
+                    };
+                    Decision::Allowed {
+                        limits: binding,
+                        remaining_minute: env_remaining
+                            .min(c.per_minute.saturating_sub(caller_minute)),
+                        reset_seconds: reset,
+                    }
+                }
+                None => Decision::Allowed {
+                    limits,
+                    remaining_minute: env_remaining,
+                    reset_seconds: reset,
+                },
+            }
+        } else if which == 3 || which == 4 {
+            let c = caller.unwrap_or(limits);
+            Decision::Exceeded {
+                window: if which == 3 {
+                    Window::Minute
+                } else {
+                    Window::Day
+                },
+                level: if which == 3 {
+                    c.minute_level
+                } else {
+                    c.day_level
+                },
+                retry_after_seconds: if which == 3 { reset } else { until_tomorrow },
+                limits: c,
             }
         } else if which == 2 {
             Decision::Exceeded {
@@ -443,20 +658,38 @@ impl QuotaEngine {
     fn local_check(
         &self,
         environment: Uuid,
+        subject: Option<&Subject>,
         minute: i64,
         day: &str,
         limits: &Limits,
-    ) -> (bool, u64, i64) {
+        caller: Option<&Limits>,
+    ) -> (bool, u64, i64, u64) {
         let mut local = self.local.lock().unwrap();
         let mk = format!("m:{environment}:{minute}");
         let dk = format!("d:{environment}:{day}");
         let m = *local.get(&mk).unwrap_or(&0);
         let d = *local.get(&dk).unwrap_or(&0);
         if m >= limits.per_minute {
-            return (false, m, 1);
+            return (false, m, 1, 0);
         }
         if d >= limits.per_day {
-            return (false, m, 2);
+            return (false, m, 2, 0);
+        }
+        let mut cm = 0;
+        if let (Some(s), Some(c)) = (subject, caller) {
+            let cmk = format!("cm:{}:{minute}", s.credential_id);
+            let cdk = format!("cd:{}:{day}", s.credential_id);
+            cm = *local.get(&cmk).unwrap_or(&0);
+            let cd = *local.get(&cdk).unwrap_or(&0);
+            if cm >= c.per_minute {
+                return (false, m, 3, cm);
+            }
+            if cd >= c.per_day {
+                return (false, m, 4, cm);
+            }
+            cm += 1;
+            local.insert(cmk, cm);
+            local.insert(cdk, cd + 1);
         }
         local.insert(mk, m + 1);
         local.insert(dk, d + 1);
@@ -466,12 +699,26 @@ impl QuotaEngine {
                 k.ends_with(&format!(":{minute}")) || k.ends_with(&format!(":{day}"))
             });
         }
-        (true, m + 1, 0)
+        (true, m + 1, 0, cm)
     }
 
     /// Counts one finally classified public operation of a credential request
     /// (normalized API_OPERATION usage), flushed with the request counters.
     pub fn record_operation(&self, environment: Uuid, domain: &str, operation: &str, status: u16) {
+        self.record_caller_operation(environment, None, None, domain, operation, status)
+    }
+
+    /// [`record_operation`](Self::record_operation) with the authenticated caller and the
+    /// confirmed environment kind (API_OPERATION credential / service-account dimensions).
+    pub fn record_caller_operation(
+        &self,
+        environment: Uuid,
+        subject: Option<Subject>,
+        kind: Option<ApplicationEnvironmentKind>,
+        domain: &str,
+        operation: &str,
+        status: u16,
+    ) {
         let day = Utc::now().format("%Y-%m-%d").to_string();
         let mut p = self.pending_operations.lock().unwrap();
         // Bounded memory: at most one entry per (environment, day, operation, class).
@@ -485,6 +732,8 @@ impl QuotaEngine {
             domain.to_string(),
             operation.to_string(),
             status_class(status),
+            subject,
+            kind.map(kind_name),
         ))
         .or_insert(0) += 1;
     }
@@ -513,7 +762,10 @@ impl QuotaEngine {
                 let mut p = self.pending_operations.lock().unwrap();
                 p.drain()
                     .map(
-                        |((environment, day, domain, operation, status_class), count)| {
+                        |(
+                            (environment, day, domain, operation, status_class, subject, kind),
+                            count,
+                        )| {
                             OperationCount {
                                 environment,
                                 day,
@@ -521,6 +773,8 @@ impl QuotaEngine {
                                 operation,
                                 status_class,
                                 count,
+                                subject,
+                                environment_kind: kind,
                             }
                         },
                     )
@@ -607,6 +861,86 @@ mod tests {
         ));
         assert_eq!(q.mode(), "local");
         assert_eq!(q.flush().await, 2);
+    }
+
+    /// A caller restriction (§54: service account / credential) below the environment.
+    struct Restricted;
+
+    #[async_trait::async_trait]
+    impl QuotaAuthority for Restricted {
+        async fn limits(
+            &self,
+            _e: Uuid,
+            _k: ApplicationEnvironmentKind,
+            _c: &CorrelationId,
+        ) -> Option<Limits> {
+            Some(Limits {
+                per_minute: 5,
+                per_day: 100,
+                minute_level: "ENVIRONMENT",
+                day_level: "ENVIRONMENT",
+            })
+        }
+        async fn subject_limits(
+            &self,
+            _e: Uuid,
+            _k: ApplicationEnvironmentKind,
+            s: &Subject,
+            _c: &CorrelationId,
+        ) -> Option<Limits> {
+            (s.credential_id.as_u128() % 2 == 0).then_some(Limits {
+                per_minute: 2,
+                per_day: 100,
+                minute_level: "CREDENTIAL",
+                day_level: "ENVIRONMENT",
+            })
+        }
+        async fn durable_count(&self, _e: Uuid, _d: &str) -> Option<u64> {
+            Some(0)
+        }
+        async fn record(&self, _b: Uuid, _u: &UsageBatch) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn caller_restrictions_have_their_own_counters_inside_the_environment_budget() {
+        let q = QuotaEngine::new(None, "t:".into(), Arc::new(Restricted));
+        let env = Uuid::new_v4();
+        let c = CorrelationId::generate();
+        let k = ApplicationEnvironmentKind::Sandbox;
+        let restricted = Subject {
+            service_account_id: Uuid::new_v4(),
+            credential_id: Uuid::from_u128(2),
+        };
+        let free = Subject {
+            service_account_id: Uuid::new_v4(),
+            credential_id: Uuid::from_u128(3),
+        };
+        for _ in 0..2 {
+            assert!(
+                matches!(q.check_for(env, k, Some(restricted), &c).await, Decision::Allowed { limits, .. } if limits.per_minute == 2)
+            );
+        }
+        match q.check_for(env, k, Some(restricted), &c).await {
+            Decision::Exceeded {
+                window: Window::Minute,
+                level,
+                ..
+            } => assert_eq!(level, "CREDENTIAL"),
+            d => panic!("{d:?}"),
+        }
+        // Another credential of the environment keeps the environment budget (5 - 2).
+        for _ in 0..3 {
+            assert!(matches!(
+                q.check_for(env, k, Some(free), &c).await,
+                Decision::Allowed { .. }
+            ));
+        }
+        match q.check_for(env, k, Some(free), &c).await {
+            Decision::Exceeded { level, .. } => assert_eq!(level, "ENVIRONMENT"),
+            d => panic!("{d:?}"),
+        }
     }
 
     #[tokio::test]

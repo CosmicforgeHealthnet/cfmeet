@@ -424,6 +424,17 @@ pub struct RoutingControls {
     /// `true`: `/v1/webhooks*` and `/v1/webhook-deliveries*` go to the Developer
     /// Platform (central webhooks); `false` (default): Calling (legacy owner).
     pub central_webhooks: bool,
+    /// Part VI §55 ownership migration: `true`: `GET /v1/usage` and `GET /v1/limits` go
+    /// to the Developer Platform (unified usage ledger); `false` (default): Calling
+    /// (legacy owner, kept intact for rollback).
+    pub central_usage: bool,
+}
+
+/// Whether a Calling-contract route is the customer usage / limits route (§55).
+pub fn is_usage_route(definition: &RouteDefinition) -> bool {
+    definition.domain == "calling"
+        && definition.method == Method::GET
+        && (definition.pattern == "/v1/usage" || definition.pattern == "/v1/limits")
 }
 
 /// Whether a Calling-contract route is a customer webhook route.

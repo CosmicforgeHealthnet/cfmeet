@@ -558,24 +558,31 @@ async fn quotas_follow_organization_project_environment_service_account_credenti
     let e = c
         .internal(&gateway, Method::GET, &ent(Some(sa), None), None)
         .await;
+    let s = &e.json["subject"];
     assert_eq!(
         (
-            e.json["apiRequestsPerMinute"].as_u64(),
-            e.json["limitingLevel"]["apiRequestsPerMinute"].as_str()
+            s["apiRequestsPerMinute"].as_u64(),
+            s["limitingLevel"]["apiRequestsPerMinute"].as_str()
         ),
         (Some(50), Some("SERVICE_ACCOUNT"))
     );
     let e = c
         .internal(&gateway, Method::GET, &ent(Some(sa), Some(cred)), None)
         .await;
+    conforms(&format!("{CTRL}Entitlements"), &e.json);
+    let s = &e.json["subject"];
     assert_eq!(
         (
-            e.json["apiRequestsPerMinute"].as_u64(),
-            e.json["limitingLevel"]["apiRequestsPerMinute"].as_str()
+            s["apiRequestsPerMinute"].as_u64(),
+            s["limitingLevel"]["apiRequestsPerMinute"].as_str()
         ),
         (Some(10), Some("CREDENTIAL"))
     );
-    assert_eq!(e.json["apiRequestsPerDay"], 3);
+    assert_eq!(s["apiRequestsPerDay"], 3);
+    assert_eq!(
+        e.json["apiRequestsPerMinute"], 120,
+        "the environment value stays on top"
+    );
     // A restriction above the effective value never raises it.
     c.req(
         As::User(&owner),
@@ -587,7 +594,7 @@ async fn quotas_follow_organization_project_environment_service_account_credenti
     let e = c
         .internal(&gateway, Method::GET, &ent(Some(sa), Some(cred)), None)
         .await;
-    assert_eq!(e.json["apiRequestsPerMinute"], 50);
+    assert_eq!(e.json["subject"]["apiRequestsPerMinute"], 50);
     // The customer limits view names the levels and today's remaining allowance.
     let l = c
         .req(

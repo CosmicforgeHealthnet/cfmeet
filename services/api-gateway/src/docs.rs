@@ -111,6 +111,7 @@ pub async fn discovery(State(state): State<AppState>) -> Json<Value> {
         "documentation": { "aggregate": "/openapi.json", "reference": "/docs" },
         "families": families,
         "centralWebhooks": state.controls.central_webhooks,
+        "centralUsage": state.controls.central_usage,
     }))
 }
 

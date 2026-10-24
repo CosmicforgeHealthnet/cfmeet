@@ -273,9 +273,13 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
     let mut quota_headers = Vec::new();
     if let (Forward::Credential(customer), Some(engine)) = (&forward, &state.quota) {
         match engine
-            .check(
+            .check_for(
                 customer.environment_id,
                 customer.environment_kind,
+                Some(crate::quota::Subject {
+                    service_account_id: customer.service_account_id,
+                    credential_id: customer.credential_id,
+                }),
                 &context.correlation_id,
             )
             .await
@@ -321,21 +325,32 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
         return ApiError::Code(ErrorCode::ValidationError).into_response();
     }
     let credential_environment = match &forward {
-        Forward::Credential(customer) => Some(customer.environment_id),
+        Forward::Credential(customer) => Some((
+            customer.environment_id,
+            crate::quota::Subject {
+                service_account_id: customer.service_account_id,
+                credential_id: customer.credential_id,
+            },
+            customer.environment_kind,
+        )),
         _ => None,
     };
     let mut response = forward_rest(&state, &context, &route, &parts, bytes, forward).await;
     // Normalized API_OPERATION usage after final response classification (credential
     // requests: the application environment is known).
-    if let (Some(environment), Some(engine)) = (credential_environment, &state.quota) {
+    if let (Some((environment, subject, kind)), Some(engine)) =
+        (credential_environment, &state.quota)
+    {
         let definition = route.definition;
         let operation = definition
             .id
             .split_once('.')
             .map(|(_, o)| o)
             .unwrap_or(&definition.id);
-        engine.record_operation(
+        engine.record_caller_operation(
             environment,
+            Some(subject),
+            Some(kind),
             &definition.domain,
             operation,
             response.status().as_u16(),
