@@ -67,6 +67,7 @@ jobs:
           - services/telephony
           - packages/service-auth
           - packages/webhooks
+          - packages/usage-facts
           - packages/object-storage
           - packages/contracts/validator
           - packages/messaging-crypto

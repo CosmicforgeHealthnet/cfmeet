@@ -31,7 +31,7 @@ names them); **DEPENDENT** = the requirement belongs to, or needs, a later Part 
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Public routing for Meetings (incl. `/api/v2`), Calling, Privacy Relay (no Contact Vault), Messaging, Numbering (customer `/v1/numbers` only), SMS, Developer Platform | DONE | `infra/api-gateway/route-manifest.json` (465 PUBLIC_CUSTOMER operations); `tests/routing.rs::the_generated_catalogue_is_in_parity_with_the_contracts`; certification `external_developer_sandbox_journey` |
+| Public routing for Meetings (incl. `/api/v2`), Calling, Privacy Relay (no Contact Vault), Messaging, Numbering (customer `/v1/numbers` only), SMS, Developer Platform | DONE | `infra/api-gateway/route-manifest.json` (470 PUBLIC_CUSTOMER operations at the end of Chapters 6–9; corrected from 465); `tests/routing.rs::the_generated_catalogue_is_in_parity_with_the_contracts`; certification `external_developer_sandbox_journey` |
 | Route manifest generated from contracts + explicit allow-list, 5 classes, default deny; CI fails on drift or internal / admin / callback leakage | DONE | `scripts/contracts/public_api.py --check` (contracts.yml, api-gateway.yml); `infra/api-gateway/public-routes.json`; `tests/routing.rs`; `tests/ingress.rs` |
 | Platform Access credential authentication; 60-second signed delegated context with the credential id; receivers re-verify live and authorize their own routes | DONE | `src/identity.rs`; Platform Access `/credentials/delegated-authority`; receiver tests: Calling `tests/gateway_forwarding.rs`, Messaging `tests/gateway_forwarding.rs`, Numbering `tests/service.rs`, SMS `tests/gateway.rs`; certification revocation journey |
 | Client authority-header stripping; spoofing, cross-environment and bypass refusals | DONE | `src/headers.rs`; `tests/ingress.rs`; `tests/platform_access_e2e.rs` (forged headers / tokens) |
@@ -47,7 +47,7 @@ names them); **DEPENDENT** = the requirement belongs to, or needs, a later Part 
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Generated only from public contracts; generated vs curated separation; CI drift detection; compatibility manifest (pinned contract versions) | DONE | `sdks/generate.py --check` (465 operations, 12 pinned contracts); `sdk-typescript.yml`, `sdk-dart.yml` |
+| Generated only from public contracts; generated vs curated separation; CI drift detection; compatibility manifest (pinned contract versions) | DONE | `sdks/generate.py --check` (470 operations at the end of Chapters 6–9, corrected from 465; 12 pinned contracts); `sdk-typescript.yml`, `sdk-dart.yml` |
 | Auth helpers; browser-safe (platform credentials refused in browser runtimes by default) | DONE | TS `test/client.test.ts`; Dart `test/policy_test.dart`, `tool/web_probe.dart` |
 | Typed errors with request ids; timeouts / cancellation | DONE | both client test suites |
 | Retries with Retry-After; idempotency keys reused on retry; paid telecom mutations NEVER retried automatically (`UnknownOutcomeError`) | DONE | `sdks/generation.json` `paidTelecomOperations`; client tests; SDK parity `retry.neverPaidTelecom` (exactly one request through the real gateway) |

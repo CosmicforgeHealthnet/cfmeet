@@ -50,10 +50,16 @@ the central webhook platform with domain producers and the Calling migration too
 (§53). Requirement matrix and evidence: [`chapters-6-9.md`](chapters-6-9.md); migration
 runbook: [`webhook-migration-runbook.md`](webhook-migration-runbook.md).
 
-Still later sections: §54 credential self-service, §55 production access / usage
-metering, §56–57 integration models, §18 Developer Console UI. Part VII (payments,
-carriers, expansion) is out of scope.
+Still later at that point: §54–57 (now implemented, see §4) and §18 Developer Console
+UI. Part VII (payments, carriers, expansion) is out of scope.
 
-## 4. Validation evidence
+## 4. Chapters 10–13 (Sections 54–57)
+
+Credential self-service delegated to Platform Access (secret once, rotation, suspension,
+revocation, caller quotas enforced by the gateway), the production-access workflow, the
+unified usage ledger fed by the domain producers, first-party fixtures and the support
+profile. Requirement matrix and evidence: [`chapters-10-13.md`](chapters-10-13.md).
+
+## 5. Validation evidence
 
 See [`validation.md`](validation.md).

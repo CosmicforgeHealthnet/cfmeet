@@ -20,6 +20,7 @@ on:
       - "packages/contracts/openapi/**"
       - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
+      - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - "packages/contracts/openapi/**"
       - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
+      - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
   workflow_dispatch:
 

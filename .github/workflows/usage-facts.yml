@@ -1,0 +1,51 @@
+name: Usage facts package
+
+# packages/usage-facts (cf-usage-facts, Part VI §55): the shared usage catalogue (types,
+# units, producers, safe references, bounded dimensions, canonical digest) and the
+# producers' exporter (watermarked event streams, completed-day interval metering,
+# shadow reconciliation) used by the Developer Platform and the domain services.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/usage-facts/**"
+      - ".github/workflows/usage-facts.yml"
+  pull_request:
+    paths:
+      - "packages/usage-facts/**"
+      - ".github/workflows/usage-facts.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: usage-facts-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/usage-facts
+
+jobs:
+  test:
+    name: fmt / clippy / test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/usage-facts -> target
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (catalogue only, and with the exporter)
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --locked --features exporter -- -D warnings
+      - name: cargo test
+        run: cargo test --locked --features exporter

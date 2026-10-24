@@ -15,6 +15,7 @@ on:
     paths:
       - "services/sms-gateway/**"
       - "packages/service-auth/**"
+      - "packages/usage-facts/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
@@ -23,6 +24,7 @@ on:
     paths:
       - "services/sms-gateway/**"
       - "packages/service-auth/**"
+      - "packages/usage-facts/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
       - "infra/deployment/**"
