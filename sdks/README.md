@@ -275,3 +275,12 @@ CFMEET_STACK_ENV=/path/stack.json dart test test/stack_integration_test.dart  # 
 
 `lib/src/generated/` is not dart-formatted (it is written byte-for-byte by
 `generate.py`); format checks cover the hand-written files.
+
+## Release (Part VI §21.2 `SDK_PUBLICATION_ENABLED`)
+
+`.github/workflows/sdk-release.yml` is manual only. Every run builds and verifies the
+npm tarball and the Dart archive and uploads them; publication runs only when the
+`SDK_PUBLICATION_ENABLED` variable is `true`, the run asked for it, the `sdk-release`
+environment approves, and the manifests are made publishable (both are private today;
+the Dart package also needs a LICENSE — a licensing decision pending before any public
+release). Local generation never needs registry credentials.

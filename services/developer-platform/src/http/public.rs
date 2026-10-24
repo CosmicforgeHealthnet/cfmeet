@@ -1033,6 +1033,15 @@ async fn list_production_requests(
     ))
 }
 
+/// §21.2: the customer production-access flow is a separately switchable capability.
+fn production_workflow(s: &AppState) -> ApiResult<()> {
+    if s.flags.production_access_workflow {
+        Ok(())
+    } else {
+        Err(ApiError(ErrorCode::CapabilityUnavailable))
+    }
+}
+
 async fn submit_production_request(
     State(s): State<AppState>,
     c: Caller,
@@ -1040,6 +1049,7 @@ async fn submit_production_request(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> ApiResult<Response> {
+    production_workflow(&s)?;
     let parsed: control::production::Submit =
         serde_json::from_value(body.clone()).map_err(|_| ApiError(ErrorCode::ValidationError))?;
     let scope = format!("{}:{id}:production_access.submit", c.actor_ref());
@@ -1070,6 +1080,7 @@ async fn cancel_production_request(
     c: Caller,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
+    production_workflow(&s)?;
     Ok(Json(control::production::cancel(&s, &c, id).await?))
 }
 
@@ -1078,6 +1089,7 @@ async fn activate_production_request(
     c: Caller,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
+    production_workflow(&s)?;
     Ok(Json(control::production::activate(&s, &c, id).await?))
 }
 

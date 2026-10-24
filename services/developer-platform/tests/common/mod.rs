@@ -351,6 +351,7 @@ impl Harness {
     pub async fn new() -> Option<Self> {
         Self::with_flags(FeatureFlags {
             gateway_api: true,
+            production_access_workflow: true,
             ..Default::default()
         })
         .await
@@ -1421,6 +1422,7 @@ impl Control {
             .with_sessions(sessions.clone())
             .with_flags(FeatureFlags {
                 gateway_api: true,
+                production_access_workflow: true,
                 ..Default::default()
             });
         let webhooks = webhooks.map(|settings| {

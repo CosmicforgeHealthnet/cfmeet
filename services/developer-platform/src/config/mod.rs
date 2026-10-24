@@ -6,6 +6,7 @@
 //! | `DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS` | no | pool size (1–200, default 10) |
 //! | `DEVELOPER_PLATFORM_BIND_ADDRESS` | no | default `127.0.0.1:8098` |
 //! | `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED` | no | feature flag (default `false`): serve requests the API Gateway forwards; off, they are 404 |
+//! | `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED` | no | feature flag (default `false`): customer production-access submit / cancel / activate; off, they are 503 `CAPABILITY_UNAVAILABLE` (reads and operator decisions stay) |
 //! | `DEVELOPER_PLATFORM_WORKER_INTERVAL_MS` | no | worker loop interval (100–600000, default 5000) |
 //! | `DEVELOPER_PLATFORM_WORKER_INSTANCE_ID` | no | worker instance id (default `worker-<pid>`) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
@@ -60,6 +61,11 @@ pub struct FeatureFlags {
     /// AUTOMATIC policy (`DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL`, default off).
     /// Regulated telecom / numbering / SMS capabilities always need an operator.
     pub production_auto_approval: bool,
+    /// Part VI §21.2 `PRODUCTION_ACCESS_WORKFLOW_ENABLED`: the customer self-service
+    /// production-access flow (submit / cancel / activate). Off: those answer 503
+    /// `CAPABILITY_UNAVAILABLE`; reads and operator decisions (review, suspension) stay
+    /// available so an operator can always act on existing requests.
+    pub production_access_workflow: bool,
 }
 
 pub struct DeveloperPlatformConfig {
@@ -170,6 +176,10 @@ impl DeveloperPlatformConfig {
         let flags = FeatureFlags {
             gateway_api: flag(&get, "DEVELOPER_PLATFORM_GATEWAY_API_ENABLED")?,
             production_auto_approval: flag(&get, "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL")?,
+            production_access_workflow: flag(
+                &get,
+                "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
+            )?,
         };
         let worker_interval = Duration::from_millis(bounded(
             &get,
@@ -238,6 +248,10 @@ mod tests {
         assert_eq!(cfg.bind_address.to_string(), DEFAULT_BIND_ADDRESS);
         assert_eq!(cfg.flags, FeatureFlags::default());
         assert!(!cfg.flags.gateway_api, "disabled by default");
+        assert!(
+            !cfg.flags.production_access_workflow,
+            "the production-access workflow is disabled by default"
+        );
         assert!(!format!("{cfg:?}").contains("pw-secret-9"));
         assert!(DeveloperPlatformConfig::from_lookup(lookup(&[])).is_err());
     }

@@ -640,3 +640,49 @@ where
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     read().await
 }
+
+/// Part VI §21.2: `CALLING_LEGACY_USAGE_AUTHORITY=retired` switches the legacy usage /
+/// limit views off independently (503 `CF-Usage-Migration: moved`, after the scope
+/// check); `active` restores them.
+#[tokio::test]
+async fn legacy_usage_views_can_be_retired_independently() {
+    let Some(mut w) = CallWorld::new().await else {
+        return;
+    };
+    grant(&w, &[names::USAGE_READ]).await;
+    let reader = w.h.issue(w.consumer.sa(w.kind), &[names::USAGE_READ]).await;
+    let reader = reader.secret.expose_once().to_string();
+    w.h.state.legacy_usage_retired = true;
+    for path in [
+        "/v1/usage",
+        "/v1/limits",
+        "/v1/calling/usage",
+        "/v1/calling/limits",
+    ] {
+        let r = get(&w, &reader, path).await;
+        assert_eq!(
+            r.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{path}: {}",
+            r.text
+        );
+        assert_eq!(
+            r.headers
+                .get("cf-usage-migration")
+                .and_then(|v| v.to_str().ok()),
+            Some("moved"),
+            "{path}"
+        );
+        // Without usage.read the caller learns nothing about the retirement.
+        assert_eq!(
+            get(&w, w.secret(), path).await.status,
+            StatusCode::FORBIDDEN,
+            "{path}"
+        );
+    }
+    w.h.state.legacy_usage_retired = false;
+    assert_eq!(
+        get(&w, &reader, "/v1/calling/usage").await.status,
+        StatusCode::OK
+    );
+}

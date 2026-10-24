@@ -6,7 +6,7 @@
 use axum::{
     extract::{rejection::QueryRejection, Query, State},
     http::StatusCode,
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -100,12 +100,28 @@ fn filter(q: &QueryParams) -> Result<UsageFilter, CallingError> {
     })
 }
 
+/// `CALLING_LEGACY_USAGE_AUTHORITY=retired`: 503 with `CF-Usage-Migration: moved` (after
+/// the scope check: an unauthorized caller learns nothing).
+fn retired(state: &AppState) -> Option<Response> {
+    state.legacy_usage_retired.then(|| {
+        let mut r = CallingError::ServiceUnavailable.into_response();
+        r.headers_mut().insert(
+            "cf-usage-migration",
+            axum::http::HeaderValue::from_static("moved"),
+        );
+        r
+    })
+}
+
 async fn list_usage(
     State(state): State<AppState>,
     ctx: PlatformAuthContext,
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::USAGE_READ)?;
+    if let Some(r) = retired(&state) {
+        return Ok(r);
+    }
     let q = QueryParams::parse(
         query,
         &[
@@ -146,6 +162,9 @@ async fn get_limits(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::USAGE_READ)?;
+    if let Some(r) = retired(&state) {
+        return Ok(r);
+    }
     // Only a principal may be named — tenant, application, service account and
     // credential always come from the authenticated credential (unknown parameters: 400).
     let q = QueryParams::parse(query, &["principalId"])?;

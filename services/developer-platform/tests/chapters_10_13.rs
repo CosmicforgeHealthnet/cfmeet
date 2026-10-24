@@ -852,6 +852,7 @@ async fn approvals_expire_rejections_carry_reasons_and_software_only_may_be_auto
     let Some((c, _)) = Control::with_flags_and_producers(FeatureFlags {
         gateway_api: true,
         production_auto_approval: true,
+        production_access_workflow: true,
     })
     .await
     else {
@@ -969,6 +970,7 @@ fn fact(
 async fn usage_facts_are_ingested_once_rolled_up_queried_exported_and_reconciled() {
     let Some((c, producers)) = Control::with_flags_and_producers(FeatureFlags {
         gateway_api: true,
+        production_access_workflow: true,
         ..Default::default()
     })
     .await
@@ -1423,6 +1425,7 @@ async fn gateway_batches_become_api_operation_facts_and_history_is_backfilled() 
 async fn first_party_usage_carries_cost_centres_and_support_profiles_route_incidents() {
     let Some((c, producers)) = Control::with_flags_and_producers(FeatureFlags {
         gateway_api: true,
+        production_access_workflow: true,
         ..Default::default()
     })
     .await
@@ -1595,6 +1598,7 @@ async fn first_party_usage_carries_cost_centres_and_support_profiles_route_incid
 async fn chapter_14_15_immutability_pagination_and_activity_filters() {
     let Some((c, producers)) = Control::with_flags_and_producers(FeatureFlags {
         gateway_api: true,
+        production_access_workflow: true,
         ..Default::default()
     })
     .await
@@ -1849,4 +1853,125 @@ async fn chapter_14_15_immutability_pagination_and_activity_filters() {
             .await,
         1
     );
+}
+
+/// Part VI §21.2 `PRODUCTION_ACCESS_WORKFLOW_ENABLED`: off, the customer self-service flow
+/// (submit / cancel / activate) answers 503 CAPABILITY_UNAVAILABLE; reads and the
+/// operator's decision interface stay available.
+#[tokio::test]
+async fn production_access_workflow_flag_gates_only_the_customer_flow() {
+    let Some((c, _)) = Control::with_flags_and_producers(FeatureFlags {
+        gateway_api: true,
+        ..Default::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@acme.example");
+    let (_, project, _) = sandbox(&c, &owner).await;
+    let rid = Uuid::new_v4();
+    for (method, path, body) in [
+        (
+            Method::POST,
+            format!("/v1/projects/{project}/production-access-requests"),
+            Some(json!({ "capabilities": ["MEETINGS"], "useCaseSummary": "Clinics" })),
+        ),
+        (
+            Method::POST,
+            format!("/v1/production-access-requests/{rid}/cancel"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("/v1/production-access-requests/{rid}/activate"),
+            Some(json!({})),
+        ),
+    ] {
+        let r = c.req(As::User(&owner), method, &path, body).await;
+        assert_eq!(
+            r.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{path}: {}",
+            r.json
+        );
+        assert_eq!(r.json["error"]["code"], "CAPABILITY_UNAVAILABLE", "{path}");
+    }
+    for path in [
+        format!("/v1/projects/{project}/production-access"),
+        format!("/v1/projects/{project}/production-access-requests"),
+    ] {
+        let r = c.req(As::User(&owner), Method::GET, &path, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.json);
+    }
+    let op = c
+        .operator(
+            Method::GET,
+            "/internal/v1/operator/production-access-requests",
+            None,
+        )
+        .await;
+    assert_eq!(
+        op.status,
+        StatusCode::OK,
+        "operator reads stay: {}",
+        op.json
+    );
+}
+
+/// A full producer batch (500 facts, well above the general 64 KiB body limit) is
+/// accepted in one request: exporter backlogs (historical backfills) never stall on 413.
+#[tokio::test]
+async fn a_full_producer_batch_fits_the_usage_ingestion_body_limit() {
+    let Some((c, producers)) = Control::with_flags_and_producers(FeatureFlags {
+        gateway_api: true,
+        ..Default::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@acme.example");
+    let scope = sandbox(&c, &owner).await;
+    let facts: Vec<cf_usage_facts::UsageFact> = (0..cf_usage_facts::MAX_BATCH)
+        .map(|i| {
+            let mut f = fact(
+                scope,
+                &format!("call_usage:{}", Uuid::new_v4()),
+                "CALL_MINUTE_PUBLIC_NETWORK",
+                "MILLISECOND",
+                60_000 + i as u64,
+            );
+            f.resource_ref = format!("call_leg:{}", Uuid::new_v4());
+            for (k, v) in [
+                ("callId", json!(Uuid::new_v4().to_string())),
+                ("routeClass", json!("PSTN")),
+                ("destinationCountry", json!("GB")),
+                ("billableSeconds", json!(60)),
+                ("costEvidence", json!("KNOWN")),
+                ("costMinor", json!(31)),
+                ("costCurrency", json!("USD")),
+            ] {
+                f.dimensions.insert(k.into(), v);
+            }
+            f.normalized().sealed()
+        })
+        .collect();
+    let body = json!({ "stream": "calling.usage", "facts": facts,
+                       "advanceTo": { "at": chrono::Utc::now(), "key": "k-full" } });
+    let size = serde_json::to_vec(&body).unwrap().len();
+    assert!(
+        size > 3 * 64 * 1024,
+        "the batch is far above 64 KiB: {size}"
+    );
+    let r = c
+        .internal(
+            &producers.calling,
+            Method::POST,
+            "/internal/v1/usage/facts",
+            Some(body),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["recorded"], cf_usage_facts::MAX_BATCH, "{}", r.json);
 }

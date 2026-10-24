@@ -439,7 +439,7 @@ async fn main() -> anyhow::Result<()> {
     let authority: Arc<dyn IdentityAuthority> =
         Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
     let clock: SharedClock = Arc::new(SystemClock);
-    let state = AppState::new(
+    let mut state = AppState::new(
         db,
         clock.clone(),
         authority,
@@ -465,6 +465,15 @@ async fn main() -> anyhow::Result<()> {
             compliance_overlay,
             abuse_controls,
         },
+    );
+    state.legacy_usage_retired = config.legacy_usage_retired;
+    tracing::info!(
+        legacy_usage_authority = if config.legacy_usage_retired {
+            "retired"
+        } else {
+            "active"
+        },
+        "customer usage / limit views (Part VI §19.4 legacy compatibility)"
     );
 
     // Durable invitation expiry and media reconciliation on every instance (row locks /
