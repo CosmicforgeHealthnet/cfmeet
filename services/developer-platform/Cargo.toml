@@ -29,6 +29,9 @@ cf-service-auth = { path = "../../packages/service-auth", features = ["client"] 
 # policy, retry classification): Section 53 central webhooks reuse them; the Developer
 # Platform implements no webhook cryptography of its own.
 cf-webhooks = { path = "../../packages/webhooks" }
+# Part VI §55 unified usage facts: the catalogue, canonical digest and validation shared
+# with every producer (one fact model platform-wide).
+cf-usage-facts = { path = "../../packages/usage-facts" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }

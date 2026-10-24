@@ -47,6 +47,295 @@ pub fn routes() -> Router<AppState> {
             "/operator/commercial-plans/:plan_id/retire",
             post(retire_plan),
         )
+        // Section 54: explicit overrides and first-party scope grants.
+        .route(
+            "/operator/organizations/:organization_id/entitlement-overrides",
+            post(set_override),
+        )
+        .route(
+            "/operator/organizations/:organization_id/entitlement-overrides/:override_id",
+            axum::routing::delete(revoke_override),
+        )
+        .route(
+            "/operator/projects/:project_id/scope-grants",
+            post(operator_scope_grant),
+        )
+        // Section 55: production-access decisions.
+        .route(
+            "/operator/production-access-requests",
+            get(list_production_requests),
+        )
+        .route(
+            "/operator/production-access-requests/:request_id",
+            get(get_production_request),
+        )
+        .route(
+            "/operator/production-access-requests/:request_id/:command",
+            post(decide_production_request),
+        )
+        // Section 55: usage ledger operations.
+        .route("/operator/usage", get(usage_overview))
+        .route("/operator/usage/rollups/rebuild", post(rebuild_rollups))
+        .route(
+            "/operator/usage/backfill/api-operations",
+            post(backfill_api_operations),
+        )
+        .route(
+            "/operator/usage/reconcile/api-operations",
+            post(reconcile_api_operations),
+        )
+        .route(
+            "/operator/usage/streams/:producer/:stream/reset",
+            post(reset_stream),
+        )
+        .route(
+            "/operator/cost-centers/:cost_center/usage",
+            get(cost_center_usage),
+        )
+        // Section 57: support / incident path.
+        .route(
+            "/operator/organizations/:organization_id/support-profile",
+            put(set_support_profile),
+        )
+        .route(
+            "/operator/organizations/:organization_id/incidents",
+            post(record_incident),
+        )
+}
+
+async fn set_override(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<crate::control::entitlements::SetOverride>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::control::entitlements::operator_set_override(&s, &op, &ctx, id, body).await?),
+    ))
+}
+
+async fn revoke_override(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((id, override_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::entitlements::operator_revoke_override(&s, &op, &ctx, id, override_id)
+            .await?,
+    ))
+}
+
+async fn operator_scope_grant(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<crate::control::scopes::OperatorGrant>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::scopes::operator_grant(&s, &op, &ctx, id, body).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateQuery {
+    state: Option<String>,
+}
+
+async fn list_production_requests(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Query(q): axum::extract::Query<StateQuery>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
+    Ok(Json(
+        crate::control::production::operator_list(&s.db, q.state.as_deref()).await?,
+    ))
+}
+
+async fn get_production_request(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
+    Ok(Json(
+        crate::control::production::operator_get(&s.db, id).await?,
+    ))
+}
+
+/// `POST …/{id}/{review|approve|reject|suspend|reinstate}`. Approve / reject need the
+/// reviewing operator's CF Meet user id (`x-cf-operator-user-id`): a member of the
+/// requesting organization can never decide its request.
+async fn decide_production_request(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((id, command)): Path<(Uuid, String)>,
+    body: Option<Json<crate::control::production::Decision>>,
+) -> Result<Json<Value>, ApiError> {
+    use crate::control::production::OperatorCommand as C;
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    let command = match command.as_str() {
+        "review" => C::Review,
+        "approve" => C::Approve,
+        "reject" => C::Reject,
+        "suspend" => C::Suspend,
+        "reinstate" => C::Reinstate,
+        _ => return Err(ApiError(ErrorCode::NotFound)),
+    };
+    let user = headers
+        .get("x-cf-operator-user-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| Uuid::parse_str(v.trim()).map_err(|_| ApiError(ErrorCode::OperatorRequired)))
+        .transpose()?;
+    Ok(Json(
+        crate::control::production::operator_decide(
+            &s,
+            &op,
+            user,
+            &ctx,
+            id,
+            command,
+            body.map(|Json(b)| b).unwrap_or_default(),
+        )
+        .await?,
+    ))
+}
+
+async fn usage_overview(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
+    Ok(Json(crate::ledger::operator_overview(&s.db).await?))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RebuildBody {
+    from: String,
+    to: String,
+    #[serde(default)]
+    environment_id: Option<Uuid>,
+}
+
+async fn rebuild_rollups(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Json(b): Json<RebuildBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, _) = operator_of(&caller, &headers)?;
+    let from = crate::control::usage::parse_day(&b.from)?;
+    let to = crate::control::usage::parse_day(&b.to)?;
+    tracing::info!(operator = %op, "usage rollups rebuilt from facts");
+    Ok(Json(
+        crate::ledger::rebuild_rollups(&s.db, from, to, b.environment_id).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DayBody {
+    day: String,
+}
+
+async fn backfill_api_operations(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Json(b): Json<DayBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, _) = operator_of(&caller, &headers)?;
+    let before = crate::control::usage::parse_day(&b.day)?;
+    if before > chrono::Utc::now().date_naive() {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
+    tracing::info!(operator = %op, "historical API_OPERATION usage backfilled");
+    Ok(Json(
+        crate::ledger::backfill_api_operations(&s, before).await?,
+    ))
+}
+
+async fn reconcile_api_operations(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Json(b): Json<DayBody>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    let day = crate::control::usage::parse_day(&b.day)?;
+    Ok(Json(
+        crate::ledger::reconcile_api_operations(&s.db, day).await?,
+    ))
+}
+
+async fn reset_stream(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path((producer, stream)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, _) = operator_of(&caller, &headers)?;
+    tracing::info!(operator = %op, %producer, %stream, "usage stream watermark reset (backfill)");
+    Ok(Json(
+        crate::ledger::reset_stream(&s.db, &producer, &stream).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeriodQuery {
+    from: String,
+    to: String,
+}
+
+async fn cost_center_usage(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(cost_center): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<PeriodQuery>,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
+    let from = crate::control::usage::parse_day(&q.from)?;
+    let to = crate::control::usage::parse_day(&q.to)?;
+    Ok(Json(
+        crate::ledger::cost_center_usage(&s.db, &cost_center, from, to).await?,
+    ))
+}
+
+async fn set_support_profile(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<crate::control::support::OperatorProfile>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::support::operator_put(&s, &op, &ctx, id, body).await?,
+    ))
+}
+
+async fn record_incident(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<crate::control::support::Incident>,
+) -> Result<Json<Value>, ApiError> {
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::support::operator_incident(&s, &op, &ctx, id, body).await?,
+    ))
 }
 
 fn operator_of(

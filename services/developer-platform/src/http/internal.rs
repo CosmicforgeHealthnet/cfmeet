@@ -41,6 +41,61 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/usage/api-requests", axum::routing::post(record_usage))
         .route("/usage/api-requests/:environment_id/:day", get(daily_usage))
+        .route("/usage/facts", axum::routing::post(ingest_usage_facts))
+        .route("/usage/streams/:stream", get(usage_stream))
+        .route(
+            "/usage/reconciliations",
+            axum::routing::post(usage_reconciliation),
+        )
+}
+
+/// The authenticated producer of usage facts (`developer-event.publish`): the caller's
+/// service identity, never a body claim.
+fn producer(caller: &InternalCaller) -> Result<String, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperEventPublish)?;
+    Ok(caller
+        .context()
+        .authenticated_service()
+        .as_str()
+        .to_string())
+}
+
+/// `POST /internal/v1/usage/facts` — immutable usage facts of the calling domain service
+/// (Part VI §55 §11.4), with the stream watermark they advance.
+async fn ingest_usage_facts(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    body: Result<Json<crate::ledger::IngestBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let producer = producer(&caller)?;
+    let Json(body) = body.map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    Ok(Json(crate::ledger::ingest(&state, &producer, body).await?))
+}
+
+/// `GET /internal/v1/usage/streams/{stream}` — the caller's acknowledged watermark.
+async fn usage_stream(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    axum::extract::Path(stream): axum::extract::Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let producer = producer(&caller)?;
+    Ok(Json(json!({
+        "producer": producer,
+        "stream": stream,
+        "position": crate::ledger::stream_position(&state.db, &producer, &stream).await?,
+    })))
+}
+
+/// `POST /internal/v1/usage/reconciliations` — the caller's own totals for one window.
+async fn usage_reconciliation(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<crate::ledger::ReconcileBody>,
+) -> Result<Json<Value>, ApiError> {
+    let producer = producer(&caller)?;
+    Ok(Json(
+        crate::ledger::reconcile(&state.db, &producer, body).await?,
+    ))
 }
 
 /// `POST /internal/v1/usage/api-requests` — an idempotent batch of accepted public API
@@ -57,7 +112,7 @@ async fn record_usage(
         .as_str()
         .to_string();
     Ok(Json(
-        crate::control::usage::record(&state.db, &by, batch).await?,
+        crate::control::usage::record(&state, &by, batch).await?,
     ))
 }
 
@@ -80,6 +135,11 @@ struct EntitlementQuery {
     /// The environment kind Platform Access confirmed to the caller (used only for an
     /// environment without a Developer Platform profile).
     kind: Option<String>,
+    /// §54: the caller's service account / credential (their quota restrictions apply).
+    #[serde(rename = "serviceAccountId")]
+    service_account_id: Option<Uuid>,
+    #[serde(rename = "credentialId")]
+    credential_id: Option<Uuid>,
 }
 
 /// `GET /internal/v1/entitlements/environments/{id}` — effective platform entitlements
@@ -96,9 +156,26 @@ async fn environment_entitlements(
         Some(k @ ("SANDBOX" | "TEST" | "PRODUCTION")) => Some(k),
         Some(_) => return Err(ApiError(ErrorCode::ValidationError)),
     };
-    Ok(Json(
-        crate::control::entitlements::effective(&state.db, environment_id, kind).await?,
-    ))
+    let mut v = crate::control::entitlements::snapshot(&state.db, environment_id, kind).await?;
+    if query.service_account_id.is_some() || query.credential_id.is_some() {
+        let subject = crate::control::entitlements::effective_for(
+            &state.db,
+            environment_id,
+            kind,
+            query.service_account_id,
+            query.credential_id,
+        )
+        .await?;
+        for k in [
+            "apiRequestsPerMinute",
+            "apiRequestsPerDay",
+            "limitingLevel",
+            "subject",
+        ] {
+            v[k] = subject[k].clone();
+        }
+    }
+    Ok(Json(v))
 }
 
 async fn gateway_context(

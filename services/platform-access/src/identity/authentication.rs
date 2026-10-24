@@ -65,6 +65,8 @@ pub enum AuthFailureReason {
     CredentialNotYetValid,
     CredentialExpired,
     CredentialSuperseded,
+    /// Reversibly suspended (Part VI §54).
+    CredentialSuspended,
     ServiceAccountInactive,
     CorruptAuthorityChain,
 }
@@ -81,6 +83,7 @@ impl AuthFailureReason {
         Self::CredentialNotYetValid,
         Self::CredentialExpired,
         Self::CredentialSuperseded,
+        Self::CredentialSuspended,
         Self::ServiceAccountInactive,
         Self::CorruptAuthorityChain,
     ];
@@ -96,6 +99,7 @@ impl AuthFailureReason {
             Self::CredentialNotYetValid => "credential_not_yet_valid",
             Self::CredentialExpired => "credential_expired",
             Self::CredentialSuperseded => "credential_superseded",
+            Self::CredentialSuspended => "credential_suspended",
             Self::ServiceAccountInactive => "service_account_inactive",
             Self::CorruptAuthorityChain => "corrupt_authority_chain",
         }
@@ -202,7 +206,9 @@ SELECT
     ), '[]'::jsonb)            AS grants,
     (SELECT array_agg(r.principal_id ORDER BY r.principal_id)
        FROM platform_credential_principal_restrictions r
-      WHERE r.credential_id = c.id) AS restricted_principals
+      WHERE r.credential_id = c.id) AS restricted_principals,
+    EXISTS (SELECT 1 FROM platform_credential_suspensions s
+             WHERE s.credential_id = c.id) AS suspended
 FROM platform_api_credentials c
 JOIN platform_service_accounts sa
   ON sa.id = c.service_account_id
@@ -233,6 +239,7 @@ struct AuthorityRow {
     tenant: Value,
     grants: Value,
     restricted_principals: Option<Vec<Uuid>>,
+    suspended: bool,
 }
 
 #[derive(Deserialize)]
@@ -515,6 +522,11 @@ fn evaluate(
         CredentialEffectiveState::NotYetValid => return Err(R::CredentialNotYetValid),
         CredentialEffectiveState::Expired => return Err(R::CredentialExpired),
         CredentialEffectiveState::Superseded => return Err(R::CredentialSuperseded),
+        // `evaluate` never derives it from persisted status; suspension is below.
+        CredentialEffectiveState::Suspended => return Err(R::CredentialSuspended),
+    }
+    if row.suspended {
+        return Err(R::CredentialSuspended);
     }
     if service_account.status != ServiceAccountStatus::Active {
         return Err(R::ServiceAccountInactive);

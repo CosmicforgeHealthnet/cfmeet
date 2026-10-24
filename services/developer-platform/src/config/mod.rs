@@ -56,6 +56,10 @@ pub enum LogFormat {
 pub struct FeatureFlags {
     /// Serve customer requests forwarded by the API Gateway (`/internal/v1/gateway/**`).
     pub gateway_api: bool,
+    /// Section 55: software-only production-access requests may be approved by the
+    /// AUTOMATIC policy (`DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL`, default off).
+    /// Regulated telecom / numbering / SMS capabilities always need an operator.
+    pub production_auto_approval: bool,
 }
 
 pub struct DeveloperPlatformConfig {
@@ -165,6 +169,7 @@ impl DeveloperPlatformConfig {
         )? as u32;
         let flags = FeatureFlags {
             gateway_api: flag(&get, "DEVELOPER_PLATFORM_GATEWAY_API_ENABLED")?,
+            production_auto_approval: flag(&get, "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL")?,
         };
         let worker_interval = Duration::from_millis(bounded(
             &get,

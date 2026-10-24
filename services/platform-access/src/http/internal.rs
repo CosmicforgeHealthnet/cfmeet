@@ -416,6 +416,13 @@ async fn load_credential_in_scope(
         credential.expires_at,
         credential.supersession_valid_until,
         state.platform.clock().now(),
+    )
+    .with_suspension(
+        state
+            .platform
+            .credential_suspended(crate::domain::CredentialId::from_uuid(credential.id))
+            .await
+            .map_err(AccessError::service)?,
     );
     let scopes = effective_scopes(state, scope, credential.id).await?;
     let principal_restriction = state

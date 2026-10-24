@@ -82,6 +82,15 @@ pub enum Action {
     /// Suspend a service account (OWNER, ADMIN): withdrawing machine access stays
     /// possible in a RESTRICTED organization.
     ServiceAccountsSuspend,
+    /// §54: read API credential metadata (never a secret) — OWNER, ADMIN, DEVELOPER.
+    CredentialsRead,
+    /// §54: revoke / suspend a credential (withdrawing machine access stays possible in
+    /// a RESTRICTED organization) — OWNER, ADMIN, DEVELOPER.
+    CredentialsRevoke,
+    /// §55: read production-access requests and decisions — every member.
+    ProductionAccessRead,
+    /// §57: update the support profile's contact references — OWNER, ADMIN.
+    SupportProfileManage,
 }
 
 impl Action {
@@ -108,6 +117,10 @@ impl Action {
         Action::ServiceAccountsRead,
         Action::ServiceAccountsManage,
         Action::ServiceAccountsSuspend,
+        Action::CredentialsRead,
+        Action::CredentialsRevoke,
+        Action::ProductionAccessRead,
+        Action::SupportProfileManage,
     ];
 
     /// Whether the action changes state (refused for RESTRICTED organizations unless
@@ -125,6 +138,8 @@ impl Action {
                 | Action::ActivityRead
                 | Action::CommercialRead
                 | Action::ServiceAccountsRead
+                | Action::CredentialsRead
+                | Action::ProductionAccessRead
         )
     }
 
@@ -141,6 +156,7 @@ impl Action {
                     | Action::BillingAccountManage
                     | Action::OrganizationClose
                     | Action::ServiceAccountsSuspend
+                    | Action::CredentialsRevoke
             )
     }
 }
@@ -160,6 +176,9 @@ pub fn allows(role: Role, action: Action) -> bool {
         ServiceAccountsManage | ServiceAccountsSuspend => matches!(role, Owner | Admin),
         ServiceAccountsRead => matches!(role, Owner | Admin | Developer),
         CredentialsManage | WebhooksManage => matches!(role, Owner | Admin | Developer),
+        CredentialsRead | CredentialsRevoke => matches!(role, Owner | Admin | Developer),
+        ProductionAccessRead => true,
+        SupportProfileManage => matches!(role, Owner | Admin),
         WebhooksRead | LimitsRead => matches!(role, Owner | Admin | Developer | Analyst),
         UsageRead | UsageExport => true,
         ActivityRead => matches!(role, Owner | Admin | Analyst),
@@ -297,6 +316,17 @@ mod tests {
         // DEVELOPER integrates but never creates projects.
         assert!(allows(Developer, WebhooksManage) && allows(Developer, CredentialsManage));
         assert!(!allows(Developer, ProjectsManage) && !allows(Developer, ActivityRead));
+        // Credentials: OWNER / ADMIN / DEVELOPER; never ANALYST / BILLING.
+        for a in [CredentialsRead, CredentialsManage, CredentialsRevoke] {
+            for r in [Owner, Admin, Developer] {
+                assert!(allows(r, a), "{r:?} {a:?}");
+            }
+            for r in [Analyst, Billing] {
+                assert!(!allows(r, a), "{r:?} {a:?}");
+            }
+        }
+        assert!(allows(Analyst, ProductionAccessRead));
+        assert!(!allows(Developer, SupportProfileManage));
         // ANALYST is read-only.
         for a in Action::ALL.iter().filter(|a| a.is_mutation()) {
             assert!(!allows(Analyst, *a), "{a:?}");

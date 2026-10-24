@@ -141,7 +141,7 @@
       ]
     },
     "CredentialEffectiveState": {
-      "description": "Derived from the persisted lifecycle fields at evaluation time. Only ACTIVE and ROTATION_OVERLAP authenticate.",
+      "description": "Derived from the persisted lifecycle fields at evaluation time (SUSPENDED: a reversible Part VI §54 suspension). Only ACTIVE and ROTATION_OVERLAP authenticate.",
       "type": "string",
       "enum": [
         "ACTIVE",
@@ -149,7 +149,8 @@
         "NOT_YET_VALID",
         "EXPIRED",
         "SUPERSEDED",
-        "REVOKED"
+        "REVOKED",
+        "SUSPENDED"
       ]
     },
     "AuthorityMode": {
@@ -205,6 +206,7 @@
         "credential_not_yet_valid",
         "credential_expired",
         "credential_superseded",
+        "credential_suspended",
         "service_account_inactive",
         "corrupt_authority_chain"
       ]

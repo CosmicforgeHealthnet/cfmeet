@@ -36,21 +36,31 @@ use crate::{
 };
 
 /// The Developer Platform profile of an environment the caller may address.
-struct EnvironmentRef {
-    tenant_id: Uuid,
-    project_id: Uuid,
-    kind: String,
-    status: String,
+pub(crate) struct EnvironmentRef {
+    pub tenant_id: Uuid,
+    pub project_id: Uuid,
+    pub kind: String,
+    pub status: String,
+    /// `LIVE` for a PRODUCTION environment activated by an approved request (§55).
+    pub production_access_state: String,
 }
 
-async fn environment<C: ConnectionTrait>(
+impl EnvironmentRef {
+    /// Whether delegated machine-identity changes are allowed here: SANDBOX / TEST, or a
+    /// PRODUCTION environment that is LIVE through the production-access workflow.
+    pub fn delegable(&self) -> bool {
+        self.kind != "PRODUCTION" || self.production_access_state == "LIVE"
+    }
+}
+
+pub(crate) async fn environment<C: ConnectionTrait>(
     db: &C,
     environment_id: Uuid,
 ) -> Result<EnvironmentRef, ApiError> {
     let row = db
         .query_one(stmt(
-            "SELECT tenant_id, application_id, kind, status FROM devplat_environment_profiles \
-             WHERE environment_id = $1",
+            "SELECT tenant_id, application_id, kind, status, production_access_state \
+             FROM devplat_environment_profiles WHERE environment_id = $1",
             vec![environment_id.into()],
         ))
         .await?
@@ -60,6 +70,7 @@ async fn environment<C: ConnectionTrait>(
         project_id: row.try_get("", "application_id")?,
         kind: row.try_get("", "kind")?,
         status: row.try_get("", "status")?,
+        production_access_state: row.try_get("", "production_access_state")?,
     })
 }
 
@@ -86,7 +97,11 @@ fn description(value: Option<&str>) -> Result<Option<String>, ApiError> {
 
 /// The customer view of a Platform Access service account of `env` (anything else from
 /// the authority — another environment or tenant, a malformed view — fails closed).
-fn view(pa: &Value, environment_id: Uuid, env: &EnvironmentRef) -> Result<Value, ApiError> {
+pub(crate) fn view(
+    pa: &Value,
+    environment_id: Uuid,
+    env: &EnvironmentRef,
+) -> Result<Value, ApiError> {
     let id_of = |k: &str| {
         pa.get(k)
             .and_then(Value::as_str)
@@ -134,7 +149,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Value), ApiError> {
     let env = environment(&state.db, environment_id).await?;
     authorize(state, caller, env.tenant_id, Action::ServiceAccountsManage).await?;
-    if env.kind == "PRODUCTION" {
+    if !env.delegable() {
         return Err(ApiError(ErrorCode::PolicyViolation));
     }
     let name = name(&body.name)?;
@@ -274,7 +289,7 @@ pub async fn set_status(
         Action::ServiceAccountsManage
     };
     authorize(state, caller, env.tenant_id, action).await?;
-    if env.kind == "PRODUCTION" {
+    if !env.delegable() {
         return Err(ApiError(ErrorCode::PolicyViolation));
     }
     let (from, to) = if suspend {
@@ -358,6 +373,7 @@ mod tests {
             project_id: Uuid::new_v4(),
             kind: "SANDBOX".into(),
             status: "ACTIVE".into(),
+            production_access_state: "NOT_APPLICABLE".into(),
         };
         let environment_id = Uuid::new_v4();
         let pa = json!({

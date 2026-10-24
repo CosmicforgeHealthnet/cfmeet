@@ -62,6 +62,9 @@ error_codes! {
     IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED" => UNPROCESSABLE_ENTITY, "The Idempotency-Key was already used with a different request.";
     PolicyViolation = "POLICY_VIOLATION" => UNPROCESSABLE_ENTITY, "The operation is not permitted by platform policy.";
     OperatorRequired = "OPERATOR_REQUIRED" => BAD_REQUEST, "Operator administration requires a named operator.";
+    ApprovalExpired = "APPROVAL_EXPIRED" => CONFLICT, "The production-access approval expired before activation; submit a new request.";
+    SelfApprovalForbidden = "SELF_APPROVAL_FORBIDDEN" => FORBIDDEN, "A reviewer may not decide a request of an organization they belong to.";
+    ProductionAccessRequired = "PRODUCTION_ACCESS_REQUIRED" => FORBIDDEN, "The PRODUCTION environment of this project is not live.";
     CapabilityUnavailable = "CAPABILITY_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The capability is not available in this deployment.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";

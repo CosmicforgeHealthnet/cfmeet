@@ -17,14 +17,18 @@
 
 pub mod activity;
 pub mod commercial;
+pub mod credentials;
 pub mod entitlements;
 pub mod idempotency;
 pub mod members;
 pub mod operator;
 pub mod organizations;
 pub mod pagination;
+pub mod production;
 pub mod projects;
+pub mod scopes;
 pub mod service_accounts;
+pub mod support;
 pub mod usage;
 
 use cf_service_auth::DelegatedPlatformContext;
@@ -119,16 +123,16 @@ pub fn machine_scope(action: Action) -> Option<&'static str> {
         ServiceAccountsRead | ServiceAccountsManage | ServiceAccountsSuspend => {
             Some("service_accounts.manage")
         }
-        // Membership, ownership, closure, billing, credentials and production access are
-        // role-gated human operations (or Section 54 / 55).
-        OrganizationClose
-        | MembersManage
-        | OwnershipTransfer
-        | UsageExport
-        | CommercialRead
-        | BillingAccountManage
-        | ProductionAccessRequest
-        | CredentialsManage => None,
+        // Section 54: credential self-service of the tenant's own service accounts.
+        CredentialsRead | CredentialsManage | CredentialsRevoke => Some("credentials.manage"),
+        // Section 55: submitting (never approving) production access; reading it.
+        ProductionAccessRequest => Some("production_access.request"),
+        ProductionAccessRead => Some("projects.read"),
+        UsageExport => Some("usage.read"),
+        SupportProfileManage => Some("organizations.manage"),
+        // Membership, ownership, closure and billing are role-gated human operations.
+        OrganizationClose | MembersManage | OwnershipTransfer | CommercialRead
+        | BillingAccountManage => None,
     }
 }
 

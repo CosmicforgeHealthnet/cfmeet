@@ -39,6 +39,14 @@ pub struct OperationEntry {
     pub operation_id: String,
     pub status_class: String,
     pub count: u64,
+    /// Part VI §55: the authenticated credential / service account of the requests
+    /// (API_OPERATION dimensions) and the environment kind Platform Access confirmed.
+    #[serde(default)]
+    pub credential_id: Option<Uuid>,
+    #[serde(default)]
+    pub service_account_id: Option<Uuid>,
+    #[serde(default)]
+    pub environment_kind: Option<String>,
 }
 
 fn valid_domain(d: &str) -> bool {
@@ -69,12 +77,15 @@ pub fn parse_day(day: &str) -> Result<NaiveDate, ApiError> {
     NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|_| ApiError(ErrorCode::ValidationError))
 }
 
-/// Applies `batch` exactly once (`RECORDED`, or `ALREADY_RECORDED` for a replay).
-pub async fn record<C: TransactionTrait>(
-    db: &C,
+/// Applies `batch` exactly once (`RECORDED`, or `ALREADY_RECORDED` for a replay); its
+/// operation counts also become API_OPERATION facts of the unified ledger in the SAME
+/// transaction (exactly once with the batch).
+pub async fn record(
+    state: &crate::state::AppState,
     recorded_by: &str,
     batch: UsageBatch,
 ) -> Result<Value, ApiError> {
+    let db = &state.db;
     let total = batch.entries.len() + batch.operations.len();
     if total == 0 || total > MAX_ENTRIES {
         return Err(ApiError(ErrorCode::ValidationError));
@@ -96,7 +107,34 @@ pub async fn record<C: TransactionTrait>(
         {
             return Err(ApiError(ErrorCode::ValidationError));
         }
+        if o.environment_kind
+            .as_deref()
+            .is_some_and(|k| !matches!(k, "SANDBOX" | "TEST" | "PRODUCTION"))
+        {
+            return Err(ApiError(ErrorCode::ValidationError));
+        }
         operations.push((o.environment_id, parse_day(&o.day)?, o, o.count as i64));
+    }
+    // The authoritative ownership of every environment of the batch (before the
+    // transaction: it may ask Platform Access).
+    let mut owners = std::collections::HashMap::new();
+    for (env, _, o, _) in &operations {
+        if owners.contains_key(env) {
+            continue;
+        }
+        match crate::ledger::ownership(state, *env).await {
+            Ok(Some(own)) => {
+                if o.environment_kind.as_deref().is_some_and(|k| k != own.kind) {
+                    tracing::warn!("gateway environment kind disagrees with the authority");
+                }
+                owners.insert(*env, own);
+            }
+            // The legacy counters still count; the facts follow from the backfill.
+            Ok(None) => tracing::warn!("API usage of an environment unknown to the authority"),
+            Err(_) => tracing::warn!(
+                "ownership of an API usage environment unavailable; facts deferred to the backfill"
+            ),
+        }
     }
     let now = Utc::now();
     let txn = db.begin().await?;
@@ -125,7 +163,25 @@ pub async fn record<C: TransactionTrait>(
         ))
         .await?;
     }
-    for (environment, day, o, count) in operations {
+    let facts: Vec<crate::ledger::OperationFact<'_>> = operations
+        .iter()
+        .enumerate()
+        .map(
+            |(index, (environment_id, day, o, count))| crate::ledger::OperationFact {
+                index,
+                environment_id: *environment_id,
+                day: *day,
+                domain: &o.domain,
+                operation_id: &o.operation_id,
+                status_class: &o.status_class,
+                credential_id: o.credential_id,
+                service_account_id: o.service_account_id,
+                count: *count as u64,
+            },
+        )
+        .collect();
+    crate::ledger::api_operation_facts(&txn, &owners, batch.batch_id, &facts).await?;
+    for (environment, day, o, count) in &operations {
         txn.execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "INSERT INTO devplat_api_operation_usage \
@@ -135,12 +191,12 @@ pub async fn record<C: TransactionTrait>(
              SET request_count = devplat_api_operation_usage.request_count + EXCLUDED.request_count, \
                  updated_at = EXCLUDED.updated_at",
             vec![
-                environment.into(),
-                day.into(),
+                (*environment).into(),
+                (*day).into(),
                 o.domain.clone().into(),
                 o.operation_id.clone().into(),
                 o.status_class.clone().into(),
-                count.into(),
+                (*count).into(),
                 now.into(),
             ],
         ))

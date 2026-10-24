@@ -89,6 +89,16 @@ pub trait PlatformAccessPort: Send + Sync {
     /// Names of the registered scopes.
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable>;
 
+    /// The registry entries (`name`, `description`, `trust`).
+    async fn scope_registry(&self) -> Result<Vec<Value>, AuthorityUnavailable> {
+        Ok(self
+            .scope_names()
+            .await?
+            .into_iter()
+            .map(|n| serde_json::json!({ "name": n, "description": null, "trust": "STANDARD" }))
+            .collect())
+    }
+
     /// Whether the credential of the delegated scope holds ALL `scopes` now (Platform
     /// Access `POST /internal/v1/authorization/evaluate`).
     async fn credential_allows(
@@ -202,6 +212,75 @@ pub enum DelegationCall {
         environment_id: Uuid,
         service_account_id: Uuid,
         suspended: bool,
+    },
+    /// §54: issues a credential of a service account of `environment_id`. The raw
+    /// secret comes back ONCE in Platform Access's response and is never stored here.
+    IssueCredential {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        service_account_id: Uuid,
+        scopes: Vec<String>,
+        label: Option<String>,
+        /// RFC 3339.
+        expires_at: Option<String>,
+    },
+    ListCredentials {
+        environment_id: Uuid,
+        service_account_id: Uuid,
+    },
+    GetCredential {
+        environment_id: Uuid,
+        credential_id: Uuid,
+    },
+    RotateCredential {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        credential_id: Uuid,
+        overlap_minutes: Option<i64>,
+        scopes: Option<Vec<String>>,
+        label: Option<String>,
+        expires_at: Option<String>,
+    },
+    RevokeCredential {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        credential_id: Uuid,
+    },
+    SuspendCredential {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        credential_id: Uuid,
+        reason_code: String,
+    },
+    ResumeCredential {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        credential_id: Uuid,
+    },
+    /// §54: allows a STANDARD scope on the application for `environment_kinds`
+    /// (FIRST_PARTY_ONLY only as an operator command; PRODUCTION only once activated).
+    GrantApplicationScope {
+        actor: DelegationActor,
+        application_id: Uuid,
+        scope: String,
+        environment_kinds: Vec<String>,
+    },
+    WithdrawApplicationScope {
+        actor: DelegationActor,
+        application_id: Uuid,
+        scope: String,
+    },
+    /// §55: activates the PRODUCTION environment of an approved request.
+    ActivateProduction {
+        actor: DelegationActor,
+        application_id: Uuid,
+        approval_reference: String,
+    },
+    /// §55: live telecom of an ACTIVATED production environment.
+    SetLiveTelecom {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        allowed: bool,
     },
 }
 
@@ -345,6 +424,138 @@ impl DelegationCall {
                 Some(status(*suspended)),
                 Some(*actor),
             ),
+            DelegationCall::IssueCredential {
+                actor,
+                environment_id,
+                service_account_id,
+                scopes,
+                label,
+                expires_at,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/service-accounts/{service_account_id}/credentials"
+                ),
+                Some(json!({ "scopes": scopes, "label": label, "expiresAt": expires_at })),
+                Some(*actor),
+            ),
+            DelegationCall::ListCredentials {
+                environment_id,
+                service_account_id,
+            } => (
+                Method::GET,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/service-accounts/{service_account_id}/credentials"
+                ),
+                None,
+                None,
+            ),
+            DelegationCall::GetCredential {
+                environment_id,
+                credential_id,
+            } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}"),
+                None,
+                None,
+            ),
+            DelegationCall::RotateCredential {
+                actor,
+                environment_id,
+                credential_id,
+                overlap_minutes,
+                scopes,
+                label,
+                expires_at,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}/rotate"
+                ),
+                Some(json!({
+                    "overlapMinutes": overlap_minutes, "scopes": scopes, "label": label,
+                    "expiresAt": expires_at,
+                })),
+                Some(*actor),
+            ),
+            DelegationCall::RevokeCredential {
+                actor,
+                environment_id,
+                credential_id,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}/revoke"
+                ),
+                None,
+                Some(*actor),
+            ),
+            DelegationCall::SuspendCredential {
+                actor,
+                environment_id,
+                credential_id,
+                reason_code,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}/suspend"
+                ),
+                Some(json!({ "reasonCode": reason_code })),
+                Some(*actor),
+            ),
+            DelegationCall::ResumeCredential {
+                actor,
+                environment_id,
+                credential_id,
+            } => (
+                Method::POST,
+                format!(
+                    "/internal/v1/delegation/environments/{environment_id}/credentials/{credential_id}/resume"
+                ),
+                None,
+                Some(*actor),
+            ),
+            DelegationCall::GrantApplicationScope {
+                actor,
+                application_id,
+                scope,
+                environment_kinds,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/applications/{application_id}/scopes"),
+                Some(json!({ "scope": scope, "environmentKinds": environment_kinds })),
+                Some(*actor),
+            ),
+            DelegationCall::WithdrawApplicationScope {
+                actor,
+                application_id,
+                scope,
+            } => (
+                Method::DELETE,
+                format!("/internal/v1/delegation/applications/{application_id}/scopes/{scope}"),
+                None,
+                Some(*actor),
+            ),
+            DelegationCall::ActivateProduction {
+                actor,
+                application_id,
+                approval_reference,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/applications/{application_id}/production-environment"),
+                Some(json!({ "approvalReference": approval_reference })),
+                Some(*actor),
+            ),
+            DelegationCall::SetLiveTelecom {
+                actor,
+                environment_id,
+                allowed,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/environments/{environment_id}/live-telecom"),
+                Some(json!({ "allowed": allowed })),
+                Some(*actor),
+            ),
         }
     }
 }
@@ -433,6 +644,34 @@ impl PlatformAccessPort for HttpPlatformAccess {
         correlation: &CorrelationId,
     ) -> Result<Delegated, AuthorityUnavailable> {
         self.delegate_http(call, correlation).await
+    }
+
+    async fn scope_registry(&self) -> Result<Vec<Value>, AuthorityUnavailable> {
+        let request = OutboundServiceRequest::new_operation(ServiceId::platform_access());
+        let response = self
+            .client
+            .get(&request, "/internal/v1/scopes")
+            .await
+            .map_err(unavailable)?;
+        let body: Value = response
+            .json()
+            .map_err(|_| AuthorityUnavailable("malformed scope registry".into()))?;
+        Ok(body
+            .get("scopes")
+            .and_then(Value::as_array)
+            .map(|scopes| {
+                scopes
+                    .iter()
+                    .filter_map(|s| {
+                        Some(serde_json::json!({
+                            "name": s.get("name")?.as_str()?,
+                            "description": s.get("description").cloned().unwrap_or(Value::Null),
+                            "trust": s.get("trust")?.as_str()?,
+                        }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable> {

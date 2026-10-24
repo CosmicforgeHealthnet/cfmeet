@@ -125,6 +125,10 @@ fn action_name(action: Action) -> &'static str {
         Action::ServiceAccountsRead => "service_account.read",
         Action::ServiceAccountsManage => "service_account.manage",
         Action::ServiceAccountsSuspend => "service_account.suspend",
+        Action::CredentialsRead => "credential.read",
+        Action::CredentialsRevoke => "credential.revoke",
+        Action::ProductionAccessRead => "production_access.read",
+        Action::SupportProfileManage => "support_profile.manage",
     }
 }
 

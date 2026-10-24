@@ -102,6 +102,14 @@ pub fn routes() -> Router<AppState> {
             post(revoke_credential),
         )
         .route(
+            "/admin/credentials/:credential_id/suspend",
+            post(suspend_credential),
+        )
+        .route(
+            "/admin/credentials/:credential_id/resume",
+            post(resume_credential),
+        )
+        .route(
             "/admin/credentials/:credential_id/principal-restriction",
             put(restrict_credential),
         )
@@ -557,6 +565,44 @@ async fn revoke_credential(
     Ok(Json(
         s.platform
             .operator_revoke_credential(&op, CredentialId::from_uuid(id))
+            .await
+            .map_err(op_err)?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SuspendBody {
+    reason_code: String,
+}
+
+/// Part VI §54: reversible credential suspension (audited).
+async fn suspend_credential(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<SuspendBody>,
+) -> AccessResult<impl IntoResponse> {
+    let op = operator(&caller, &headers)?;
+    Ok(Json(
+        s.platform
+            .operator_suspend_credential(&op, CredentialId::from_uuid(id), &b.reason_code)
+            .await
+            .map_err(op_err)?,
+    ))
+}
+
+async fn resume_credential(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AccessResult<impl IntoResponse> {
+    let op = operator(&caller, &headers)?;
+    Ok(Json(
+        s.platform
+            .operator_resume_credential(&op, CredentialId::from_uuid(id))
             .await
             .map_err(op_err)?,
     ))

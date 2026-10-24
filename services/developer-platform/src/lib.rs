@@ -21,6 +21,7 @@ pub mod db;
 pub mod digest;
 pub mod domain;
 pub mod http;
+pub mod ledger;
 pub mod platform_access;
 pub mod session;
 pub mod state;

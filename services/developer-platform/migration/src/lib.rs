@@ -20,6 +20,7 @@ mod m20261103_000003_api_usage;
 mod m20261104_000004_webhooks;
 mod m20261105_000005_webhook_migration;
 mod m20261110_000010_api_operation_usage;
+mod m20261120_000011_credentials_production_usage;
 
 /// Name of the table recording which Developer Platform migrations have been applied.
 pub const MIGRATION_TABLE: &str = "developer_platform_seaql_migrations";
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261104_000004_webhooks::Migration),
             Box::new(m20261105_000005_webhook_migration::Migration),
             Box::new(m20261110_000010_api_operation_usage::Migration),
+            Box::new(m20261120_000011_credentials_production_usage::Migration),
         ]
     }
 

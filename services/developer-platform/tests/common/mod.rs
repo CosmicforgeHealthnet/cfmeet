@@ -349,7 +349,11 @@ pub fn delegated() -> DelegatedPlatformContext {
 
 impl Harness {
     pub async fn new() -> Option<Self> {
-        Self::with_flags(FeatureFlags { gateway_api: true }).await
+        Self::with_flags(FeatureFlags {
+            gateway_api: true,
+            ..Default::default()
+        })
+        .await
     }
 
     pub async fn with_flags(flags: FeatureFlags) -> Option<Self> {
@@ -501,8 +505,50 @@ pub struct MemServiceAccount {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MemCredential {
+    pub tenant: Uuid,
+    pub app: Uuid,
+    pub env: Uuid,
+    pub sa: Uuid,
+    pub scopes: Vec<String>,
+    pub label: Option<String>,
+    pub revoked: bool,
+    pub suspended: bool,
+    pub superseded_by: Option<Uuid>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The scope registry of the fake (name, trust).
+pub const FAKE_REGISTRY: &[(&str, &str)] = &[
+    ("calls.read", "STANDARD"),
+    ("calls.write", "STANDARD"),
+    ("meetings.read", "STANDARD"),
+    ("meetings.write", "STANDARD"),
+    ("sms.send", "STANDARD"),
+    ("sms.read", "STANDARD"),
+    ("numbers.search", "STANDARD"),
+    ("usage.read", "STANDARD"),
+    ("credentials.manage", "STANDARD"),
+    ("webhooks.read", "STANDARD"),
+    ("projects.read", "STANDARD"),
+    ("production_access.request", "STANDARD"),
+    ("organizations.read", "STANDARD"),
+    ("events.private_delivery", "FIRST_PARTY_ONLY"),
+    ("numbers.admin", "PRIVILEGED_OPERATOR"),
+];
+
 #[derive(Default)]
 pub struct MemoryPlatformAccess {
+    /// §54: credentials issued through delegation.
+    pub credentials: StdMutex<std::collections::HashMap<Uuid, MemCredential>>,
+    /// (application, scope) -> allowed environment kinds.
+    pub app_scopes: StdMutex<std::collections::HashMap<(Uuid, String), Vec<String>>>,
+    /// application -> activated PRODUCTION environment (§55).
+    pub activated: StdMutex<std::collections::HashMap<Uuid, Uuid>>,
+    /// environment -> live telecom.
+    pub live_telecom: StdMutex<std::collections::HashMap<Uuid, bool>>,
     pub tenants: StdMutex<std::collections::HashMap<Uuid, MemTenant>>,
     pub apps: StdMutex<std::collections::HashMap<Uuid, MemApp>>,
     pub envs: StdMutex<std::collections::HashMap<Uuid, MemEnv>>,
@@ -576,6 +622,123 @@ impl MemoryPlatformAccess {
             .with_initiating_credential(credential)
     }
 
+    fn view_credential(&self, id: Uuid, c: &MemCredential) -> Value {
+        let kind = self
+            .envs
+            .lock()
+            .unwrap()
+            .get(&c.env)
+            .map(|e| e.kind.clone())
+            .unwrap_or_default();
+        let state = if c.revoked {
+            "REVOKED"
+        } else if c.superseded_by.is_some() {
+            "ROTATION_OVERLAP"
+        } else if c.suspended {
+            "SUSPENDED"
+        } else {
+            "ACTIVE"
+        };
+        json!({
+            "id": id, "publicId": format!("pk{}", &id.simple().to_string()[..12]),
+            "masked": "cfmk_test_…abcd", "tenantId": c.tenant, "applicationId": c.app,
+            "environmentId": c.env, "environmentKind": kind, "serviceAccountId": c.sa,
+            "label": c.label, "scopes": c.scopes,
+            "status": if c.revoked { "REVOKED" } else { "ACTIVE" }, "effectiveState": state,
+            "notBefore": c.created_at.to_rfc3339(), "expiresAt": c.expires_at.to_rfc3339(),
+            "revokedAt": null, "suspendedAt": if c.suspended { json!(c.created_at.to_rfc3339()) } else { Value::Null },
+            "rotatedFromCredentialId": null, "supersededByCredentialId": c.superseded_by,
+            "supersessionValidUntil": null, "verifierAlgorithm": "HMAC-SHA256", "verifierKeyVersion": 1,
+            "revision": 1, "createdAt": c.created_at.to_rfc3339(), "updatedAt": c.created_at.to_rfc3339(),
+        })
+    }
+
+    /// Whether delegated machine-identity changes are allowed in `env` (PA's rule).
+    fn delegable(&self, env: &MemEnv, env_id: Uuid) -> bool {
+        env.kind != "PRODUCTION" || self.activated.lock().unwrap().get(&env.app) == Some(&env_id)
+    }
+
+    fn issue(
+        &self,
+        env_id: Uuid,
+        sa_id: Uuid,
+        scopes: Vec<String>,
+        label: Option<String>,
+    ) -> Result<(Uuid, Value), (u16, &'static str)> {
+        let env = self
+            .envs
+            .lock()
+            .unwrap()
+            .get(&env_id)
+            .cloned()
+            .ok_or((404, "NOT_FOUND"))?;
+        let sa = self
+            .service_accounts
+            .lock()
+            .unwrap()
+            .get(&sa_id)
+            .cloned()
+            .ok_or((404, "NOT_FOUND"))?;
+        if sa.env != env_id {
+            return Err((404, "NOT_FOUND"));
+        }
+        if !self.delegable(&env, env_id) {
+            return Err((422, "POLICY_VIOLATION"));
+        }
+        if sa.status != "ACTIVE" || env.status != "ACTIVE" {
+            return Err((409, "INVALID_STATE"));
+        }
+        for sc in &scopes {
+            let allowed = self
+                .app_scopes
+                .lock()
+                .unwrap()
+                .get(&(env.app, sc.clone()))
+                .cloned();
+            if !allowed.is_some_and(|k| k.contains(&env.kind)) {
+                return Err((422, "POLICY_VIOLATION"));
+            }
+        }
+        let id = Uuid::new_v4();
+        let c = MemCredential {
+            tenant: env.tenant,
+            app: env.app,
+            env: env_id,
+            sa: sa_id,
+            scopes: scopes.clone(),
+            label,
+            revoked: false,
+            suspended: false,
+            superseded_by: None,
+            expires_at: chrono::Utc::now() + chrono::Duration::days(90),
+            created_at: chrono::Utc::now(),
+        };
+        let v = self.view_credential(id, &c);
+        self.credentials.lock().unwrap().insert(id, c);
+        self.credential_scopes.lock().unwrap().insert(id, scopes);
+        Ok((id, v))
+    }
+
+    /// A delegated context of a credential issued through delegation.
+    pub fn machine_of(&self, credential: Uuid) -> DelegatedPlatformContext {
+        let c = self.credentials.lock().unwrap()[&credential].clone();
+        let kind = match self.envs.lock().unwrap()[&c.env].kind.as_str() {
+            "TEST" => cf_service_auth::ApplicationEnvironmentKind::Test,
+            "PRODUCTION" => cf_service_auth::ApplicationEnvironmentKind::Production,
+            _ => cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+        };
+        DelegatedPlatformContext::new(c.tenant, c.app, c.env, kind, c.sa)
+            .with_initiating_credential(credential)
+    }
+
+    /// Allows `scope` on `app` for `kinds` (operator path of the fake).
+    pub fn allow_scope(&self, app: Uuid, scope: &str, kinds: &[&str]) {
+        self.app_scopes.lock().unwrap().insert(
+            (app, scope.to_string()),
+            kinds.iter().map(|k| k.to_string()).collect(),
+        );
+    }
+
     fn view_tenant(id: Uuid, t: &MemTenant) -> Value {
         json!({ "id": id, "classification": t.classification, "status": t.status })
     }
@@ -612,7 +775,14 @@ impl PlatformAccessPort for MemoryPlatformAccess {
     }
 
     async fn scope_names(&self) -> Result<Vec<String>, AuthorityUnavailable> {
-        Ok(vec![])
+        Ok(FAKE_REGISTRY.iter().map(|(n, _)| n.to_string()).collect())
+    }
+
+    async fn scope_registry(&self) -> Result<Vec<Value>, AuthorityUnavailable> {
+        Ok(FAKE_REGISTRY
+            .iter()
+            .map(|(n, t)| json!({ "name": n, "description": null, "trust": t }))
+            .collect())
     }
 
     async fn credential_allows(
@@ -652,6 +822,11 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             })
         };
         let status = |s: bool| if s { "SUSPENDED" } else { "ACTIVE" }.to_string();
+        let call_kind = match &call {
+            DelegationCall::SuspendCredential { .. } => 1,
+            DelegationCall::ResumeCredential { .. } => 2,
+            _ => 0,
+        };
         match call {
             DelegationCall::CreateTenant { .. } => {
                 let id = Uuid::new_v4();
@@ -747,7 +922,9 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             DelegationCall::GetEnvironment { environment_id } => {
                 match self.envs.lock().unwrap().get(&environment_id) {
                     Some(e) => Ok(Delegated::Ok(
-                        json!({ "id": environment_id, "kind": e.kind, "status": e.status, "liveTelecomAllowed": false }),
+                        json!({ "id": environment_id, "tenantId": e.tenant, "applicationId": e.app,
+                                "kind": e.kind, "status": e.status,
+                                "liveTelecomAllowed": self.live_telecom.lock().unwrap().get(&environment_id).copied().unwrap_or(false) }),
                     )),
                     None => refused(404, "NOT_FOUND"),
                 }
@@ -757,17 +934,34 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 suspended,
                 ..
             } => {
+                let activated = self
+                    .activated
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|e| *e == environment_id);
                 let mut envs = self.envs.lock().unwrap();
                 let Some(e) = envs.get_mut(&environment_id) else {
                     return refused(404, "NOT_FOUND");
                 };
+                if e.kind == "PRODUCTION" && !activated {
+                    return refused(422, "POLICY_VIOLATION");
+                }
                 e.status = status(suspended);
                 Ok(Delegated::Ok(
                     json!({ "id": environment_id, "status": e.status }),
                 ))
             }
-            DelegationCall::ListApplicationScopes { .. } => {
-                Ok(Delegated::Ok(json!({ "scopes": [] })))
+            DelegationCall::ListApplicationScopes { application_id } => {
+                let list: Vec<Value> = self
+                    .app_scopes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|((a, _), _)| *a == application_id)
+                    .map(|((_, s), k)| json!({ "scope": s, "allowedEnvironmentKinds": k, "grantBasis": "STANDARD" }))
+                    .collect();
+                Ok(Delegated::Ok(json!({ "scopes": list })))
             }
             // Platform Access's rules: the environment's own tenant / application, unique
             // names, PRODUCTION refused, scoped to the environment, never revoked here.
@@ -780,7 +974,7 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 let Some(env) = self.envs.lock().unwrap().get(&environment_id).cloned() else {
                     return refused(404, "NOT_FOUND");
                 };
-                if env.kind == "PRODUCTION" {
+                if !self.delegable(&env, environment_id) {
                     return refused(422, "POLICY_VIOLATION");
                 }
                 let mut sas = self.service_accounts.lock().unwrap();
@@ -836,12 +1030,13 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 suspended,
                 ..
             } => {
-                let kind = self
+                let delegable = self
                     .envs
                     .lock()
                     .unwrap()
                     .get(&environment_id)
-                    .map(|e| e.kind.clone());
+                    .cloned()
+                    .map(|e| self.delegable(&e, environment_id));
                 let mut sas = self.service_accounts.lock().unwrap();
                 let Some(s) = sas
                     .get_mut(&service_account_id)
@@ -849,11 +1044,256 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 else {
                     return refused(404, "NOT_FOUND");
                 };
-                if kind.as_deref() == Some("PRODUCTION") {
+                if delegable == Some(false) {
                     return refused(422, "POLICY_VIOLATION");
                 }
                 s.status = status(suspended);
                 Ok(Delegated::Ok(Self::view_sa(service_account_id, s)))
+            }
+            DelegationCall::IssueCredential {
+                environment_id,
+                service_account_id,
+                scopes,
+                label,
+                ..
+            } => match self.issue(environment_id, service_account_id, scopes, label) {
+                Ok((_, v)) => Ok(Delegated::Ok(
+                    json!({ "credential": v, "secret": format!("cfmk_test_{}", Uuid::new_v4().simple()) }),
+                )),
+                Err((st, code)) => refused(st, code),
+            },
+            DelegationCall::ListCredentials {
+                environment_id,
+                service_account_id,
+            } => {
+                let list: Vec<Value> = self
+                    .credentials
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, c)| c.env == environment_id && c.sa == service_account_id)
+                    .map(|(id, c)| self.view_credential(*id, c))
+                    .collect();
+                Ok(Delegated::Ok(json!({ "credentials": list })))
+            }
+            DelegationCall::GetCredential {
+                environment_id,
+                credential_id,
+            } => match self
+                .credentials
+                .lock()
+                .unwrap()
+                .get(&credential_id)
+                .cloned()
+            {
+                Some(c) if c.env == environment_id => {
+                    Ok(Delegated::Ok(self.view_credential(credential_id, &c)))
+                }
+                _ => refused(404, "NOT_FOUND"),
+            },
+            DelegationCall::RotateCredential {
+                environment_id,
+                credential_id,
+                scopes,
+                ..
+            } => {
+                let Some(old) = self
+                    .credentials
+                    .lock()
+                    .unwrap()
+                    .get(&credential_id)
+                    .cloned()
+                else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if old.env != environment_id {
+                    return refused(404, "NOT_FOUND");
+                }
+                if old.revoked || old.suspended || old.superseded_by.is_some() {
+                    return refused(409, "INVALID_STATE");
+                }
+                match self.issue(
+                    environment_id,
+                    old.sa,
+                    scopes.unwrap_or(old.scopes.clone()),
+                    old.label.clone(),
+                ) {
+                    Ok((id, v)) => {
+                        self.credentials
+                            .lock()
+                            .unwrap()
+                            .get_mut(&credential_id)
+                            .unwrap()
+                            .superseded_by = Some(id);
+                        Ok(Delegated::Ok(
+                            json!({ "credential": v, "secret": format!("cfmk_test_{}", Uuid::new_v4().simple()) }),
+                        ))
+                    }
+                    Err((st, code)) => refused(st, code),
+                }
+            }
+            DelegationCall::RevokeCredential {
+                environment_id,
+                credential_id,
+                ..
+            }
+            | DelegationCall::SuspendCredential {
+                environment_id,
+                credential_id,
+                ..
+            }
+            | DelegationCall::ResumeCredential {
+                environment_id,
+                credential_id,
+                ..
+            } => {
+                let suspend = matches!(call_kind, 1);
+                let resume = matches!(call_kind, 2);
+                let mut creds = self.credentials.lock().unwrap();
+                let Some(c) = creds
+                    .get_mut(&credential_id)
+                    .filter(|c| c.env == environment_id)
+                else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if resume {
+                    if c.revoked {
+                        return refused(409, "INVALID_STATE");
+                    }
+                    c.suspended = false;
+                    self.credential_scopes
+                        .lock()
+                        .unwrap()
+                        .insert(credential_id, c.scopes.clone());
+                } else if suspend {
+                    if c.revoked {
+                        return refused(409, "INVALID_STATE");
+                    }
+                    c.suspended = true;
+                    self.credential_scopes
+                        .lock()
+                        .unwrap()
+                        .remove(&credential_id);
+                } else {
+                    c.revoked = true;
+                    self.credential_scopes
+                        .lock()
+                        .unwrap()
+                        .remove(&credential_id);
+                }
+                let c = c.clone();
+                drop(creds);
+                Ok(Delegated::Ok(self.view_credential(credential_id, &c)))
+            }
+            DelegationCall::GrantApplicationScope {
+                application_id,
+                scope,
+                environment_kinds,
+                actor,
+            } => {
+                let trust = FAKE_REGISTRY
+                    .iter()
+                    .find(|(n, _)| *n == scope)
+                    .map(|(_, t)| *t);
+                let operator = actor.header_value().starts_with("o-");
+                match trust {
+                    Some("STANDARD") => {}
+                    Some("FIRST_PARTY_ONLY") if operator => {
+                        let tenant = self
+                            .apps
+                            .lock()
+                            .unwrap()
+                            .get(&application_id)
+                            .map(|a| a.tenant);
+                        let fp = tenant
+                            .and_then(|t| {
+                                self.tenants
+                                    .lock()
+                                    .unwrap()
+                                    .get(&t)
+                                    .map(|t| t.classification == "FIRST_PARTY")
+                            })
+                            .unwrap_or(false);
+                        if !fp {
+                            return refused(422, "POLICY_VIOLATION");
+                        }
+                    }
+                    None => return refused(400, "VALIDATION_ERROR"),
+                    _ => return refused(422, "POLICY_VIOLATION"),
+                }
+                if environment_kinds.iter().any(|k| k == "PRODUCTION")
+                    && !self.activated.lock().unwrap().contains_key(&application_id)
+                {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                self.app_scopes
+                    .lock()
+                    .unwrap()
+                    .insert((application_id, scope.clone()), environment_kinds.clone());
+                Ok(Delegated::Ok(
+                    json!({ "applicationId": application_id, "scope": scope,
+                    "allowedEnvironmentKinds": environment_kinds, "grantBasis": "STANDARD" }),
+                ))
+            }
+            DelegationCall::WithdrawApplicationScope {
+                application_id,
+                scope,
+                ..
+            } => {
+                let removed = self
+                    .app_scopes
+                    .lock()
+                    .unwrap()
+                    .remove(&(application_id, scope))
+                    .is_some();
+                Ok(Delegated::Ok(
+                    json!({ "applicationId": application_id, "removed": removed }),
+                ))
+            }
+            DelegationCall::ActivateProduction { application_id, .. } => {
+                let Some(app) = self.apps.lock().unwrap().get(&application_id).cloned() else {
+                    return refused(404, "NOT_FOUND");
+                };
+                let existing = self.activated.lock().unwrap().get(&application_id).copied();
+                let id = existing.unwrap_or_else(Uuid::new_v4);
+                if existing.is_none() {
+                    self.envs.lock().unwrap().insert(
+                        id,
+                        MemEnv {
+                            tenant: app.tenant,
+                            app: application_id,
+                            kind: "PRODUCTION".into(),
+                            status: "ACTIVE".into(),
+                        },
+                    );
+                    self.activated.lock().unwrap().insert(application_id, id);
+                }
+                Ok(Delegated::Ok(
+                    json!({ "id": id, "tenantId": app.tenant, "applicationId": application_id,
+                    "kind": "PRODUCTION", "status": "ACTIVE", "liveTelecomAllowed": false }),
+                ))
+            }
+            DelegationCall::SetLiveTelecom {
+                environment_id,
+                allowed,
+                ..
+            } => {
+                if !self
+                    .activated
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|e| *e == environment_id)
+                {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                self.live_telecom
+                    .lock()
+                    .unwrap()
+                    .insert(environment_id, allowed);
+                Ok(Delegated::Ok(
+                    json!({ "id": environment_id, "liveTelecomAllowed": allowed }),
+                ))
             }
         }
     }
@@ -979,7 +1419,10 @@ impl Control {
         let mut state = AppState::new(db.conn.clone(), runtime)
             .with_platform_access(pa.clone())
             .with_sessions(sessions.clone())
-            .with_flags(FeatureFlags { gateway_api: true });
+            .with_flags(FeatureFlags {
+                gateway_api: true,
+                ..Default::default()
+            });
         let webhooks = webhooks.map(|settings| {
             let offset = Arc::new(std::sync::atomic::AtomicI64::new(0));
             let o = offset.clone();
@@ -1111,6 +1554,40 @@ impl Control {
     }
 
     /// An operator-console command.
+    /// An operator request naming the reviewing operator's CF Meet user id (§55).
+    pub async fn operator_as(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        user: Option<Uuid>,
+    ) -> Response {
+        let signed = self
+            .operator
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        headers.insert("x-cf-operator", "ops.tester".parse().unwrap());
+        if let Some(u) = user {
+            headers.insert("x-cf-operator-user-id", u.to_string().parse().unwrap());
+        }
+        self.send(method, path, headers, body).await
+    }
+
+    /// A harness with `flags` and the platform-event producers (no webhook delivery).
+    pub async fn with_flags_and_producers(flags: FeatureFlags) -> Option<(Self, Producers)> {
+        let settings = WebhookSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        Self::build_with(Some(settings), move |s| s.with_flags(flags))
+            .await
+            .map(|(c, w)| (c, w.expect("producers").producers))
+    }
+
     pub async fn operator(&self, method: Method, path: &str, body: Option<Value>) -> Response {
         let signed = self
             .operator

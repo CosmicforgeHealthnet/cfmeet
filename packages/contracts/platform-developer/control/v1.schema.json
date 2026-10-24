@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json",
   "title": "CF Meet Developer Platform control plane v1",
-  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's.",
+  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract.",
   "anyOf": [
     {
       "$ref": "#/$defs/Organization"
@@ -784,7 +784,8 @@
         "UNDER_REVIEW",
         "APPROVED",
         "REJECTED",
-        "SUSPENDED"
+        "SUSPENDED",
+        "LIVE"
       ]
     },
     "Environment": {
@@ -1688,16 +1689,22 @@
               "enum": [
                 "PLATFORM_DEFAULT",
                 "ORGANIZATION_PLAN",
+                "OPERATOR_OVERRIDE",
                 "PROJECT_PLAN",
-                "ENVIRONMENT"
+                "ENVIRONMENT",
+                "SERVICE_ACCOUNT",
+                "CREDENTIAL"
               ]
             },
             "apiRequestsPerDay": {
               "enum": [
                 "PLATFORM_DEFAULT",
                 "ORGANIZATION_PLAN",
+                "OPERATOR_OVERRIDE",
                 "PROJECT_PLAN",
-                "ENVIRONMENT"
+                "ENVIRONMENT",
+                "SERVICE_ACCOUNT",
+                "CREDENTIAL"
               ]
             }
           }
@@ -1752,9 +1759,52 @@
         },
         "domainEntitlements": {
           "$ref": "#/$defs/EntitlementValues"
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "serviceAccountId",
+            "credentialId"
+          ],
+          "properties": {
+            "serviceAccountId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "credentialId": {
+              "oneOf": [
+                {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "description": "The caller whose service-account / credential restrictions were applied (null: environment level)."
+        },
+        "snapshotVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "snapshotDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "snapshotAt": {
+          "type": "string",
+          "format": "date-time"
         }
       },
-      "description": "Effective platform entitlements: organization plan, stricter project plan and environment caps; the most restrictive value wins and the limiting level is named."
+      "description": "Effective platform entitlements (Section 54 §10.4 precedence: organization plan, explicit operator override, stricter project plan, environment cap, service-account and credential restrictions; the most restrictive value wins and the limiting level is named). Internal reads also carry the versioned snapshot consuming services cache."
     },
     "RegisterFirstPartyRequest": {
       "type": "object",
@@ -1894,6 +1944,2094 @@
         },
         "projects": {
           "type": "integer"
+        }
+      }
+    },
+    "CredentialEffectiveState": {
+      "enum": [
+        "ACTIVE",
+        "ROTATION_OVERLAP",
+        "NOT_YET_VALID",
+        "EXPIRED",
+        "SUPERSEDED",
+        "REVOKED",
+        "SUSPENDED"
+      ]
+    },
+    "QuotaRestrictionValues": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiRequestsPerMinute",
+            "apiRequestsPerDay"
+          ],
+          "properties": {
+            "apiRequestsPerMinute": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "apiRequestsPerDay": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "Credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "organizationId",
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "serviceAccountId",
+        "publicId",
+        "masked",
+        "label",
+        "scopes",
+        "status",
+        "effectiveState",
+        "notBefore",
+        "expiresAt",
+        "revokedAt",
+        "suspendedAt",
+        "rotatedFromCredentialId",
+        "supersededByCredentialId",
+        "supersessionValidUntil",
+        "createdAt",
+        "updatedAt",
+        "limits"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceAccountId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "masked": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scopes": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9._-]{1,100}$"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "oneOf": [
+            {
+              "enum": [
+                "ACTIVE",
+                "REVOKED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveState": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CredentialEffectiveState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notBefore": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suspendedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rotatedFromCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersededByCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersessionValidUntil": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/QuotaRestrictionValues"
+        }
+      },
+      "description": "Section 54: metadata of a Platform Access API credential. Never a secret or verifier."
+    },
+    "CredentialList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Credential"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "IssuedCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credential"
+      ],
+      "properties": {
+        "credential": {
+          "$ref": "#/$defs/Credential"
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 256,
+          "description": "The raw credential, shown exactly once (never on an idempotent replay)."
+        },
+        "secretRedacted": {
+          "const": true,
+          "description": "Present on an idempotent replay instead of the secret."
+        },
+        "rotatedFromCredentialId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      },
+      "description": "Section 54: an issued or rotated credential; the secret is returned once only."
+    },
+    "CreateCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9._-]{1,100}$"
+          }
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RotateCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "overlapMinutes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scopes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9._-]{1,100}$"
+          }
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "SuspendCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "QuotaRestrictionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "apiRequestsPerMinute": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apiRequestsPerDay": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "QuotaRestriction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjectKind",
+        "subjectId",
+        "environmentId",
+        "limits"
+      ],
+      "properties": {
+        "subjectKind": {
+          "enum": [
+            "SERVICE_ACCOUNT",
+            "CREDENTIAL"
+          ]
+        },
+        "subjectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "limits": {
+          "$ref": "#/$defs/QuotaRestrictionValues"
+        }
+      }
+    },
+    "CredentialPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "configured",
+        "maxLifetimeDays",
+        "maxRotationOverlapMinutes"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "maxLifetimeDays": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 730
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxRotationOverlapMinutes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10080
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PutCredentialPolicyRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxLifetimeDays",
+        "maxRotationOverlapMinutes"
+      ],
+      "properties": {
+        "maxLifetimeDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 730
+        },
+        "maxRotationOverlapMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10080
+        }
+      }
+    },
+    "ScopeRegistryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "trust",
+        "selfServiceGrantable",
+        "productionCapability",
+        "regulated"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$"
+        },
+        "description": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trust": {
+          "enum": [
+            "STANDARD",
+            "FIRST_PARTY_ONLY",
+            "PRIVILEGED_OPERATOR"
+          ]
+        },
+        "selfServiceGrantable": {
+          "type": "boolean"
+        },
+        "productionCapability": {
+          "oneOf": [
+            {
+              "enum": [
+                "PLATFORM_CONTROL",
+                "MEETINGS",
+                "MESSAGING",
+                "APP_CALLING",
+                "PUBLIC_NETWORK_CALLING",
+                "PRIVACY_RELAY",
+                "NUMBERS",
+                "SMS"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regulated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ScopeRegistry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeRegistryEntry"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "GrantScopeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$"
+        }
+      }
+    },
+    "ScopeGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "scope",
+        "environmentKinds",
+        "grantBasis"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$"
+        },
+        "environmentKinds": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grantBasis": {
+          "oneOf": [
+            {
+              "enum": [
+                "STANDARD",
+                "PRIVILEGED_OPERATOR"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ScopeWithdrawal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "scope",
+        "removed"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$"
+        },
+        "removed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProductionCapability": {
+      "enum": [
+        "PLATFORM_CONTROL",
+        "MEETINGS",
+        "MESSAGING",
+        "APP_CALLING",
+        "PUBLIC_NETWORK_CALLING",
+        "PRIVACY_RELAY",
+        "NUMBERS",
+        "SMS"
+      ]
+    },
+    "ProductionRequestState": {
+      "enum": [
+        "PRODUCTION_REQUESTED",
+        "UNDER_REVIEW",
+        "APPROVED",
+        "REJECTED",
+        "CANCELLED",
+        "LIVE",
+        "SUSPENDED"
+      ]
+    },
+    "ProductionAccessRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "organizationId",
+        "projectId",
+        "state",
+        "requestedCapabilities",
+        "approvedCapabilities",
+        "useCaseSummary",
+        "requestedBy",
+        "decision",
+        "approvalExpiresAt",
+        "productionEnvironmentId",
+        "activatedAt",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/ProductionRequestState"
+        },
+        "requestedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductionCapability"
+          }
+        },
+        "approvedCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductionCapability"
+          }
+        },
+        "useCaseSummary": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedBy": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "decision": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "policy",
+                "reasonCode",
+                "decidedAt"
+              ],
+              "properties": {
+                "policy": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "OPERATOR",
+                        "AUTOMATIC"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reasonCode": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "decidedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approvalExpiresAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "productionEnvironmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fromState",
+              "toState",
+              "actorKind",
+              "reasonCode",
+              "occurredAt"
+            ],
+            "properties": {
+              "fromState": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ProductionRequestState"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "toState": {
+                "$ref": "#/$defs/ProductionRequestState"
+              },
+              "actorKind": {
+                "enum": [
+                  "USER",
+                  "OPERATOR",
+                  "SERVICE",
+                  "POLICY"
+                ]
+              },
+              "reasonCode": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "description": "Section 55 production-access request: SANDBOX_READY → PRODUCTION_REQUESTED → UNDER_REVIEW → APPROVED / REJECTED → LIVE / SUSPENDED."
+    },
+    "ProductionAccessRequestList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductionAccessRequest"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SubmitProductionAccessRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ProductionCapability"
+          }
+        },
+        "useCaseSummary": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "ProductionAccessStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "state",
+        "enabledCapabilities",
+        "productionEnvironmentId",
+        "currentRequest",
+        "capabilityCatalogue"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "state": {
+          "enum": [
+            "NOT_READY",
+            "SANDBOX_READY",
+            "PRODUCTION_REQUESTED",
+            "UNDER_REVIEW",
+            "APPROVED",
+            "REJECTED",
+            "CANCELLED",
+            "LIVE",
+            "SUSPENDED"
+          ]
+        },
+        "enabledCapabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductionCapability"
+          }
+        },
+        "productionEnvironmentId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currentRequest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProductionAccessRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilityCatalogue": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "regulated",
+              "scopes"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/ProductionCapability"
+              },
+              "regulated": {
+                "type": "boolean"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9._-]{1,100}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ProductionDecisionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ProductionCapability"
+          }
+        },
+        "approvalValidDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "UsageType": {
+      "enum": [
+        "API_OPERATION",
+        "MEETING_PARTICIPANT_MINUTE",
+        "CALL_MINUTE_APP",
+        "CALL_MINUTE_PUBLIC_NETWORK",
+        "NUMBER_ACTIVE",
+        "SMS_SEGMENT",
+        "RECORDING_MINUTE",
+        "STORAGE_BYTE_TIME"
+      ]
+    },
+    "UsageUnit": {
+      "enum": [
+        "OPERATION",
+        "MILLISECOND",
+        "SEGMENT",
+        "BYTE_SECOND"
+      ]
+    },
+    "UsageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "sandbox",
+        "from",
+        "to",
+        "usageTypes",
+        "days",
+        "totals"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+        },
+        "sandbox": {
+          "type": "boolean"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "usageTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageType"
+          }
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "day",
+              "usageType",
+              "unit",
+              "quantity",
+              "factCount",
+              "derived"
+            ],
+            "properties": {
+              "day": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "usageType": {
+                "$ref": "#/$defs/UsageType"
+              },
+              "unit": {
+                "$ref": "#/$defs/UsageUnit"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "factCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "derived": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "totals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "unit",
+              "quantity",
+              "factCount",
+              "derived"
+            ],
+            "properties": {
+              "usageType": {
+                "$ref": "#/$defs/UsageType"
+              },
+              "unit": {
+                "$ref": "#/$defs/UsageUnit"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "factCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "derived": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "description": "Section 55: environment-scoped daily usage rollups and period totals (billing-neutral quantities)."
+    },
+    "UsageFactView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "usageType",
+        "unit",
+        "quantity",
+        "resourceRef",
+        "producer",
+        "sourceFactId",
+        "occurredAt",
+        "usageDay",
+        "periodStart",
+        "periodEnd",
+        "environmentId",
+        "environmentKind",
+        "sandbox",
+        "dimensions",
+        "recordedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "usageType": {
+          "$ref": "#/$defs/UsageType"
+        },
+        "unit": {
+          "$ref": "#/$defs/UsageUnit"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resourceRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "producer": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sourceFactId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "usageDay": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "periodStart": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "periodEnd": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+        },
+        "sandbox": {
+          "type": "boolean"
+        },
+        "dimensions": {
+          "type": "object"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "One immutable usage fact: safe resource reference and public dimensions only (no provider ids, rates or content)."
+    },
+    "UsageFactList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageFactView"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UsageWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "limit",
+        "level",
+        "current",
+        "ceiling",
+        "ratio"
+      ],
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "WARNING",
+            "EXHAUSTED"
+          ]
+        },
+        "current": {
+          "type": "integer"
+        },
+        "ceiling": {
+          "type": "integer"
+        },
+        "ratio": {
+          "type": "number"
+        }
+      }
+    },
+    "EnvironmentLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "limit",
+        "window",
+        "ceiling",
+        "current",
+        "remaining",
+        "enforcedBy"
+      ],
+      "properties": {
+        "limit": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]*$"
+        },
+        "window": {
+          "enum": [
+            "MINUTE",
+            "DAY",
+            "CURRENT"
+          ]
+        },
+        "ceiling": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limitingLevel": {
+          "enum": [
+            "PLATFORM_DEFAULT",
+            "ORGANIZATION_PLAN",
+            "OPERATOR_OVERRIDE",
+            "PROJECT_PLAN",
+            "ENVIRONMENT",
+            "SERVICE_ACCOUNT",
+            "CREDENTIAL"
+          ]
+        },
+        "current": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resetsAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "enforcedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "EnvironmentLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "organizationId",
+        "projectId",
+        "environmentKind",
+        "organizationState",
+        "generatedAt",
+        "snapshotVersion",
+        "snapshotDigest",
+        "plan",
+        "projectPlan",
+        "limits",
+        "warnings"
+      ],
+      "properties": {
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environmentKind": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organizationState": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "snapshotVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "snapshotDigest": {
+          "type": "string"
+        },
+        "plan": {
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectPlan": {
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EnvironmentLimit"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageWarning"
+          }
+        }
+      },
+      "description": "Section 55: effective limits, current usage and remaining allowance where meaningful, and limit warnings."
+    },
+    "UsageWarnings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "generatedAt",
+        "items"
+      ],
+      "properties": {
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageWarning"
+          }
+        }
+      }
+    },
+    "SupportProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "supportTier",
+        "supportReference",
+        "primaryTechnicalContactMemberId",
+        "incidentContactMemberId",
+        "productionStatus",
+        "lastIncident",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "supportTier": {
+          "enum": [
+            "COMMUNITY",
+            "STANDARD",
+            "PREMIUM",
+            "ENTERPRISE",
+            "INTERNAL"
+          ]
+        },
+        "supportReference": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "primaryTechnicalContactMemberId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incidentContactMemberId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "productionStatus": {
+          "enum": [
+            "SANDBOX_ONLY",
+            "PRODUCTION_PENDING",
+            "LIVE",
+            "SUSPENDED"
+          ]
+        },
+        "lastIncident": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reference",
+                "occurredAt"
+              ],
+              "properties": {
+                "reference": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+                },
+                "occurredAt": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Section 57 support / incident routing metadata: member references only, no ticket content, emails or phone numbers."
+    },
+    "PutSupportContactsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "primaryTechnicalContactMemberId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incidentContactMemberId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorSupportProfileRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supportTier"
+      ],
+      "properties": {
+        "supportTier": {
+          "enum": [
+            "COMMUNITY",
+            "STANDARD",
+            "PREMIUM",
+            "ENTERPRISE",
+            "INTERNAL"
+          ]
+        },
+        "supportReference": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        }
+      }
+    },
+    "IncidentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incidentRef",
+        "occurredAt"
+      ],
+      "properties": {
+        "incidentRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "EntitlementOverrideRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entitlements",
+        "reasonCode"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "entitlements": {
+          "$ref": "#/$defs/EntitlementValues"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "EntitlementOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "organizationId",
+        "projectId",
+        "entitlements",
+        "reasonCode",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "organizationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "projectId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entitlements": {
+          "$ref": "#/$defs/EntitlementValues"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorScopeGrantRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "environmentKinds",
+        "reasonCode"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$"
+        },
+        "environmentKinds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+          }
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      }
+    },
+    "UsageFactSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceFactId",
+        "usageType",
+        "unit",
+        "quantity",
+        "tenantId",
+        "applicationId",
+        "environmentId",
+        "resourceRef",
+        "occurredAt",
+        "digest"
+      ],
+      "properties": {
+        "sourceFactId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "usageType": {
+          "$ref": "#/$defs/UsageType"
+        },
+        "unit": {
+          "$ref": "#/$defs/UsageUnit"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "tenantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "applicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentKind": {
+          "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/EnvironmentKind"
+        },
+        "resourceRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "periodStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "periodEnd": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dimensions": {
+          "type": "object",
+          "maxProperties": 12
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "description": "A producer's usage fact (cf_usage_facts wire format); the digest is the canonical payload digest."
+    },
+    "UsageStreamPosition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "key"
+      ],
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "IngestUsageFactsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facts"
+      ],
+      "properties": {
+        "stream": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "facts": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/UsageFactSubmission"
+          }
+        },
+        "advanceTo": {
+          "$ref": "#/$defs/UsageStreamPosition"
+        }
+      }
+    },
+    "IngestUsageFactsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recorded",
+        "duplicates",
+        "refused",
+        "results",
+        "position"
+      ],
+      "properties": {
+        "recorded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sourceFactId",
+              "outcome"
+            ],
+            "properties": {
+              "sourceFactId": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "RECORDED",
+                  "DUPLICATE",
+                  "REFUSED"
+                ]
+              },
+              "reasonCode": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+              }
+            }
+          }
+        },
+        "position": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UsageStreamPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UsageStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "producer",
+        "stream",
+        "position"
+      ],
+      "properties": {
+        "producer": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "position": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UsageStreamPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "UsageReconciliationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "windowStart",
+        "windowEnd",
+        "entries"
+      ],
+      "properties": {
+        "windowStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "windowEnd": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environmentId",
+              "usageType",
+              "quantity",
+              "factCount"
+            ],
+            "properties": {
+              "environmentId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "usageType": {
+                "$ref": "#/$defs/UsageType"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "factCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "UsageReconciliationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "results",
+        "mismatches"
+      ],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "mismatches": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

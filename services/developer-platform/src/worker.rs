@@ -54,6 +54,12 @@ pub async fn run_once_with(
     if expired > 0 {
         tracing::info!(expired, "pending invitations expired");
     }
+    // Section 55: approvals not activated in time.
+    match crate::control::production::expire_due(db).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(expired = n, "production-access approvals expired"),
+        Err(e) => tracing::warn!(error = ?e, "production-access expiry sweep failed"),
+    }
     if let Some(w) = webhooks.filter(|w| w.settings().enabled) {
         let r = w.deliver_due_once(WEBHOOK_BATCH).await?;
         if r != Default::default() {
