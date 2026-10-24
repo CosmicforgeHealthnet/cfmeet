@@ -2435,7 +2435,7 @@ export namespace DeveloperPlatform {
       requestId: RequestId | null;
     };
   };
-  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "APPROVAL_EXPIRED" | "SELF_APPROVAL_FORBIDDEN" | "PRODUCTION_ACCESS_REQUIRED" | "CAPABILITY_UNAVAILABLE" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
+  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "CONFLICTING_REPLAY" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "APPROVAL_EXPIRED" | "SELF_APPROVAL_FORBIDDEN" | "PRODUCTION_ACCESS_REQUIRED" | "CAPABILITY_UNAVAILABLE" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
   export type GrantScopeRequest = {
     scope: string;
   };
@@ -2995,7 +2995,7 @@ export namespace DeveloperPlatform {
     };
     /** GET /v1/organizations/{organizationId}/activity — scope audit.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listActivity: {
-      params: { path: { organizationId: Uuid }; query?: { limit?: number; cursor?: string } };
+      params: { path: { organizationId: Uuid }; query?: { limit?: number; cursor?: string; projectId?: Uuid; action?: string } };
       response: ActivityList;
       item: NonNullable<(ActivityList)["items"]>[number];
     };
@@ -3006,8 +3006,9 @@ export namespace DeveloperPlatform {
     };
     /** GET /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listCredentials: {
-      params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid }; query?: { limit?: number; cursor?: string } };
       response: CredentialList;
+      item: NonNullable<(CredentialList)["items"]>[number];
     };
     /** GET /v1/environments/{environmentId}/usage/facts — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listEnvironmentUsageFacts: {
@@ -3064,8 +3065,9 @@ export namespace DeveloperPlatform {
     };
     /** GET /v1/projects/{projectId}/production-access-requests — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listProductionAccessRequests: {
-      params: { path: { projectId: Uuid } };
+      params: { path: { projectId: Uuid }; query?: { limit?: number; cursor?: string } };
       response: ProductionAccessRequestList;
+      item: NonNullable<(ProductionAccessRequestList)["items"]>[number];
     };
     /** GET /v1/projects/{projectId}/scopes — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listProjectScopes: {

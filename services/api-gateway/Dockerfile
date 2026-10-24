@@ -15,6 +15,7 @@ WORKDIR /src
 COPY packages/service-auth packages/service-auth
 COPY services/api-gateway services/api-gateway
 COPY infra/api-gateway/route-manifest.json infra/api-gateway/route-manifest.json
+COPY infra/api-gateway/sdk-discovery.json infra/api-gateway/sdk-discovery.json
 COPY packages/contracts/bundled/public packages/contracts/bundled/public
 WORKDIR /src/services/api-gateway
 RUN cargo build --release --locked --bin api-gateway

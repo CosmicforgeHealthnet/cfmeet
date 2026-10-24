@@ -85,6 +85,12 @@ jobs:
         working-directory: .
         run: python3 scripts/contracts/public_api.py --check
 
+      # Part VI §16: the generator's own checks (unique route ids, deprecation /
+      # replacement metadata) are mutation-tested.
+      - name: route catalogue generator checks
+        working-directory: .
+        run: python3 -m unittest scripts/contracts/test_public_api.py
+
   # The bundles rendered the way a reader meets them: Swagger UI (the version and SRI the
   # Meeting Service serves) in Chromium, the schema host blocked, the whole document
   # resolved by Swagger UI's own resolver, every operation rendered; a negative control

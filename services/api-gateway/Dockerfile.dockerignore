@@ -5,6 +5,7 @@
 # Embedded at compile time (generated, checked by CI): the route manifest and the
 # public OpenAPI documents.
 !infra/api-gateway/route-manifest.json
+!infra/api-gateway/sdk-discovery.json
 !packages/contracts/bundled/public
 
 **/target

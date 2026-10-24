@@ -153,6 +153,22 @@ def pattern_of(path: str) -> str:
     return re.sub(r"\{([^}]+)\}", lambda m: "{" + m.group(1) + "}", path)
 
 
+def check_replacements(routes):
+    """Every deprecated route names an existing, NOT deprecated public route as its
+    replacement (no dangling, self or chained replacements)."""
+    by_id = {r["id"]: r for r in routes}
+    for r in routes:
+        if not r.get("deprecated"):
+            continue
+        target = by_id.get(r["replacedBy"])
+        if target is None:
+            raise CatalogueError(f"{r['id']}: replacement {r['replacedBy']} is not a public route")
+        if target.get("deprecated"):
+            raise CatalogueError(f"{r['id']}: replacement {r['replacedBy']} is itself deprecated")
+        if target["id"] == r["id"]:
+            raise CatalogueError(f"{r['id']}: replaces itself")
+
+
 def build():
     allow = json.loads(ALLOW_LIST.read_text())
     entries = {}
@@ -169,8 +185,11 @@ def build():
     catalogue = []
     routes = []
     keys = set()
+    route_ids = set()
     for domain, service, rel, cid, method, path, op, doc in operations():
         key = (domain, method, path)
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,99}", op.get("operationId") or ""):
+            raise CatalogueError(f"{domain} {method} {path}: missing or invalid operationId")
         auto = auto_class(domain, path, op)
         entry = entries.get(key)
         seen.add(key)
@@ -196,8 +215,12 @@ def build():
         if rkey in keys:
             raise CatalogueError(f"{key}: route collision {rkey}")
         keys.add(rkey)
+        route_id = f"{domain}.{op['operationId']}"
+        if route_id in route_ids:
+            raise CatalogueError(f"{key}: duplicate route id {route_id} (operationIds must be unique per domain)")
+        route_ids.add(route_id)
         route = {
-            "id": f"{domain}.{op['operationId']}",
+            "id": route_id,
             "domain": domain,
             "method": method,
             "pattern": pattern_of(path),
@@ -214,10 +237,20 @@ def build():
             route["timeoutMs"] = entry["timeoutMs"]
         if route["protocol"] == "WEBSOCKET" and method != "GET":
             raise CatalogueError(f"{key}: WebSocket routes are GET upgrades")
+        replaced_by = op.get("x-cfmeet-replaced-by")
+        if op.get("deprecated") is True:
+            # A deprecated customer operation must name its public replacement.
+            if not isinstance(replaced_by, str) or not replaced_by:
+                raise CatalogueError(f"{route_id}: deprecated without x-cfmeet-replaced-by")
+            route["deprecated"] = True
+            route["replacedBy"] = replaced_by
+        elif replaced_by is not None:
+            raise CatalogueError(f"{route_id}: x-cfmeet-replaced-by on an operation that is not deprecated")
         routes.append(route)
     stale = set(entries) - seen
     if stale:
         raise CatalogueError(f"allow-list entries without a contract operation: {sorted(stale)[:5]}")
+    check_replacements(routes)
     # Leakage guard (belt and braces): nothing routable is internal / admin / provider.
     for r in routes:
         if r["pattern"].startswith("/internal") or "/admin" in r["pattern"] or "provider-callbacks" in r["pattern"]:

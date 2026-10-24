@@ -36,6 +36,27 @@ async fn probes_docs_and_discovery_are_public_infrastructure() {
         .unwrap()
         .iter()
         .any(|f| f["domain"] == "calling"));
+    // SDK discovery (Developer Console quick-starts) from the generated SDK catalogue.
+    let packages = d.json["sdks"]["packages"].as_array().unwrap();
+    assert_eq!(
+        packages
+            .iter()
+            .map(|p| p["language"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["typescript", "dart"]
+    );
+    assert!(packages
+        .iter()
+        .all(|p| p["install"].is_string() && p["quickstart"].is_string()));
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../infra/api-gateway/route-manifest.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        d.json["sdks"]["operations"].as_u64(),
+        Some(manifest["routes"].as_array().unwrap().len() as u64),
+        "the SDKs cover every public route of the catalogue"
+    );
     let agg = g.get("/openapi.json", None).await;
     assert_eq!(agg.status, StatusCode::OK);
     assert_eq!(agg.json["openapi"], "3.1.0");
