@@ -77,9 +77,11 @@ Test locations:
 | Developer Platform internal / operator | 52 → 53 (+ `operatorIngestionHealth`) |
 | Platform Access internal | 66 → 66 |
 
-## Open blocker (unchanged, not suppressed)
+## RUSTSEC-2026-0387 (closed 2026-10-24)
 
-RUSTSEC-2026-0387 (`crypto-bigint 0.5.5`) remains in the MLS dependency path of
-`packages/messaging-crypto`, and therefore in Messaging, the Meeting Service, certification
-and the wasm/web-harness builds. Dependency security stays red for those lockfiles; it is
-not a passing production security gate. Details: [`chapters-10-13.md`](chapters-10-13.md).
+The MLS dependency path of `packages/messaging-crypto` (and Messaging, the Meeting Service,
+certification and the wasm / web-harness builds) no longer links `crypto-bigint 0.5.5`:
+CF Meet's own OpenMLS provider replaced `openmls_rust_crypto` / `openmls_basic_credential`
+and Messaging's push adapters use `p256 0.14`. Dependency security is green for those
+lockfiles without any ignore. Details and compatibility evidence: ADR 0045 amendment,
+[`chapters-10-13.md`](chapters-10-13.md).

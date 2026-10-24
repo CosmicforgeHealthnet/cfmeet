@@ -13,7 +13,7 @@
 //!    physical devices even against a server that registered a rogue device.
 //! 3. The source seals the history archive to the transfer public key (RFC 9180 HPKE,
 //!    DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / ChaCha20-Poly1305 through the OpenMLS
-//!    RustCrypto provider; the transfer context is the AAD) and signs the sealed bytes
+//!    CF Meet provider, src/provider.rs; the transfer context is the AAD) and signs the sealed bytes
 //!    with its device key ([`seal_history`]). The server stores only these opaque bytes
 //!    (it can check the signature: [`verify_sealed`]) and deletes them on completion or
 //!    expiry.
@@ -24,10 +24,10 @@
 //! the client SDK's; this module only guarantees confidentiality to the target device,
 //! authenticity from the source device and binding to the transfer.
 
+use crate::provider::CfMlsCrypto;
 use openmls::prelude::{
     HpkeAeadType, HpkeConfig, HpkeKdfType, HpkeKemType, OpenMlsCrypto, SignatureScheme,
 };
-use openmls_rust_crypto::RustCrypto;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -115,7 +115,7 @@ pub fn request_signing_input(
 
 fn verify(public_key: &[u8], input: &[u8], signature: &[u8]) -> bool {
     signature.len() == SIGNATURE_LEN
-        && RustCrypto::default()
+        && CfMlsCrypto
             .verify_signature(SignatureScheme::ED25519, input, public_key, signature)
             .is_ok()
 }
@@ -235,7 +235,7 @@ mod client {
 
     impl TransferKeys {
         pub fn generate() -> Result<Self, TransferError> {
-            let crypto = RustCrypto::default();
+            let crypto = CfMlsCrypto;
             let ikm = zeroize::Zeroizing::new(
                 crypto
                     .random_array::<32>()
@@ -285,7 +285,7 @@ mod client {
         if transfer_public_key.len() != TRANSFER_PUBLIC_KEY_LEN {
             return Err(TransferError::Sealing);
         }
-        let ct = RustCrypto::default()
+        let ct = CfMlsCrypto
             .hpke_seal(
                 HPKE,
                 transfer_public_key,
@@ -325,7 +325,7 @@ mod client {
             kem_output: s.kem_output.to_vec().into(),
             ciphertext: s.ciphertext.to_vec().into(),
         };
-        RustCrypto::default()
+        CfMlsCrypto
             .hpke_open(
                 HPKE,
                 &input,

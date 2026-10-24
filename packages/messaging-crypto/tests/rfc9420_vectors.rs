@@ -14,18 +14,18 @@
 //! * `crypto-basics.json` — for the mandatory suite 0x0001 only: SignWithLabel
 //!   verification (what KeyPackage / leaf-node signature checks rely on), RefHash
 //!   (KeyPackageRef), ExpandWithLabel, DeriveSecret, DeriveTreeSecret and EncryptWithLabel
-//!   (HPKE open), computed with the OpenMLS RustCrypto provider. The labelled encodings
+//!   (HPKE open), computed with the CF Meet provider (src/provider.rs). The labelled encodings
 //!   below are the RFC 9420 §5.1–§5.2 definitions, written out only to call the provider;
 //!   no primitive is implemented here.
 
 use std::path::PathBuf;
 
+use cf_messaging_crypto::provider::CfMlsCrypto;
 use openmls::prelude::{
     tls_codec::{Deserialize as _, Serialize as _, VLBytes},
     HashType, HpkeAeadType, HpkeCiphertext, HpkeConfig, HpkeKdfType, HpkeKemType, MlsMessageIn,
     OpenMlsCrypto, SignatureScheme,
 };
-use openmls_rust_crypto::RustCrypto;
 use serde_json::Value;
 
 const MANDATORY_SUITE: u64 = 1;
@@ -69,7 +69,7 @@ fn expand_with_label(secret: &[u8], label: &str, context: &[u8], length: u16) ->
     let mut info = length.to_be_bytes().to_vec();
     info.extend(vl(&mls_label(label)));
     info.extend(vl(context));
-    RustCrypto::default()
+    CfMlsCrypto
         .hkdf_expand(HashType::Sha2_256, secret, &info, length as usize)
         .unwrap()
         .as_slice()
@@ -123,7 +123,7 @@ fn the_mandatory_suite_matches_the_crypto_basics_vectors() {
         .iter()
         .find(|c| c["cipher_suite"].as_u64() == Some(MANDATORY_SUITE))
         .expect("suite 0x0001 is in the published vectors");
-    let crypto = RustCrypto::default();
+    let crypto = CfMlsCrypto;
 
     // SignWithLabel (§5.1.2): SignContent { opaque label<V>; opaque content<V>; }.
     let v = &case["sign_with_label"];

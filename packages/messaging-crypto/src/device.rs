@@ -17,11 +17,13 @@ use openmls::prelude::{
     tls_codec::Serialize as _, ApplicationIdExtension, BasicCredential, CredentialWithKey,
     Extension, Extensions, KeyPackage, Lifetime, MlsMessageOut,
 };
-use openmls_basic_credential::SignatureKeyPair;
-use openmls_rust_crypto::OpenMlsRustCrypto;
 use uuid::Uuid;
 
-use crate::{binding, profile::MANDATORY_CIPHERSUITE};
+use crate::{
+    binding,
+    profile::MANDATORY_CIPHERSUITE,
+    provider::{CfMlsProvider, SignatureKeys},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
@@ -44,8 +46,8 @@ const MAX_STATE_ENTRIES: u32 = 1_000_000;
 /// One client device.
 pub struct Device {
     device_id: Uuid,
-    signer: SignatureKeyPair,
-    provider: OpenMlsRustCrypto,
+    signer: SignatureKeys,
+    provider: CfMlsProvider,
 }
 
 impl fmt::Debug for Device {
@@ -60,12 +62,12 @@ impl fmt::Debug for Device {
 impl Device {
     /// Generates a fresh device signature key pair for the server-assigned `device_id`.
     pub fn generate(device_id: Uuid) -> Result<Self, DeviceError> {
-        let signer = SignatureKeyPair::new(MANDATORY_CIPHERSUITE.signature_algorithm())
+        let signer = SignatureKeys::generate(MANDATORY_CIPHERSUITE.signature_algorithm())
             .map_err(|_| DeviceError::KeyGeneration)?;
         Ok(Self {
             device_id,
             signer,
-            provider: OpenMlsRustCrypto::default(),
+            provider: CfMlsProvider::default(),
         })
     }
 
@@ -78,11 +80,11 @@ impl Device {
         self.signer.to_public_vec()
     }
 
-    pub(crate) fn provider(&self) -> &OpenMlsRustCrypto {
+    pub(crate) fn provider(&self) -> &CfMlsProvider {
         &self.provider
     }
 
-    pub(crate) fn signer(&self) -> &SignatureKeyPair {
+    pub(crate) fn signer(&self) -> &SignatureKeys {
         &self.signer
     }
 
@@ -189,7 +191,7 @@ impl Device {
         }
         let signer = {
             use openmls::prelude::tls_codec::Deserialize as _;
-            SignatureKeyPair::tls_deserialize_exact(r.bytes()?)
+            SignatureKeys::tls_deserialize_exact(r.bytes()?)
                 .map_err(|_| DeviceError::InvalidState)?
         };
         let scheme = signer.signature_scheme();
@@ -201,7 +203,7 @@ impl Device {
         if n > MAX_STATE_ENTRIES {
             return Err(DeviceError::InvalidState);
         }
-        let provider = OpenMlsRustCrypto::default();
+        let provider = CfMlsProvider::default();
         {
             let mut values = provider
                 .storage()

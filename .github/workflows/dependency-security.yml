@@ -93,20 +93,10 @@ jobs:
       # for RS256 signing by `ring` (constant time), never by the `rsa` crate
       # (services/messaging/tests/architecture.rs rsa_keys_are_never_handled_by_the_rsa_crate).
       #
-      # RUSTSEC-2026-0330 / RUSTSEC-2026-0331 (libcrux-kem 0.0.9; packages/messaging-crypto
-      # only): hpke-rs 0.7.0 pins its optional libcrux backend (hpke-rs-libcrux =0.7.0 ->
-      # libcrux-kem 0.0.9), so the crate is in the lockfile, but the backend is never
-      # enabled: OpenMLS uses the RustCrypto HPKE backend. The step below proves
-      # libcrux-kem is in no build graph (any target, all features); the ignore is lifted
-      # when hpke-rs releases a fixed pin (ADR 0045).
-      - name: libcrux-kem is never compiled into the Messaging crypto core
-        if: startsWith(matrix.lockfile, 'packages/messaging-crypto') || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service'
-        working-directory: ${{ matrix.lockfile }}
-        run: |
-          set -euo pipefail
-          out="$(cargo tree --locked -e all --all-features --target all -i libcrux-kem 2>&1 || true)"
-          echo "$out" | grep -q "nothing to print" \
-            || { echo "$out"; echo "::error::libcrux-kem is linked; the advisory ignore no longer holds"; exit 1; }
+      # The Messaging crypto core (packages/messaging-crypto and every lockfile that links
+      # it) carries no advisory ignore: its OpenMLS provider is CF Meet's own (ADR 0045),
+      # so crypto-bigint 0.5 (RUSTSEC-2026-0387) is gone, and hpke-rs 0.8 pins the patched
+      # libcrux-kem 0.0.10 (RUSTSEC-2026-0330 / -0331).
       # RUSTSEC-2026-0381 (webpki-roots < 1.0.10 trusts distrusted emSign intermediates):
       # fixed by webpki-roots 1.0.10, which every lockfile now carries. sqlx 0.8 (via
       # sea-orm 1.1; no 0.8 release drops it) still depends on webpki-roots 0.26, whose
@@ -125,7 +115,6 @@ jobs:
         working-directory: ${{ matrix.lockfile }}
         run: >-
           cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0381
-          ${{ (startsWith(matrix.lockfile, 'packages/messaging-crypto') || matrix.lockfile == 'services/messaging' || matrix.lockfile == 'services/meeting-service') && '--ignore RUSTSEC-2026-0330 --ignore RUSTSEC-2026-0331' || '' }}
 
   sbom:
     # Part V K §158: a CycloneDX software bill of materials of every tracked Cargo.lock

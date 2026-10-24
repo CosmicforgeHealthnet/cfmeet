@@ -18,11 +18,11 @@
 //! KeyPackageRef, lifetime, application id). Callers then bind them to a device:
 //! [`ValidatedKeyPackage::require_device`].
 
+use crate::provider::CfMlsCrypto;
 use openmls::prelude::{
     tls_codec::{Deserialize as _, Serialize as _},
     BasicCredential, CredentialType, KeyPackageIn, MlsMessageBodyIn, MlsMessageIn,
 };
-use openmls_rust_crypto::RustCrypto;
 use uuid::Uuid;
 
 use crate::{
@@ -143,7 +143,14 @@ pub fn validate_key_package(
         MlsMessageBodyIn::KeyPackage(kp) => kp,
         _ => return Err(KeyPackageError::Malformed),
     };
-    let crypto = RustCrypto::default();
+    // MLSMessage: version (2) and wire format (2); KeyPackage: version (2) and cipher suite
+    // (2). The suite is gated BEFORE verification too: the provider verifies only the
+    // accepted suite's signatures, so another suite is reported as unsupported, not as a
+    // signature failure.
+    if encoded.get(6..8) != Some(&u16::from(MANDATORY_CIPHERSUITE).to_be_bytes()[..]) {
+        return Err(KeyPackageError::UnsupportedCiphersuite);
+    }
+    let crypto = CfMlsCrypto;
     let key_package = key_package_in
         .validate(&crypto, PROTOCOL_VERSION)
         .map_err(|_| KeyPackageError::InvalidSignatureOrStructure)?;

@@ -73,7 +73,9 @@ chacha20poly1305 = "0.10"
 # ES256 provider / VAPID tokens and Web Push (RFC 8291) ECDH with RustCrypto; RS256 FCM
 # service-account assertions and the RFC 8188 AES-128-GCM content encoding with ring
 # (constant-time; never the `rsa` crate).
-p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "pem", "std"] }
+# p256 0.14 (elliptic-curve 0.14 / crypto-bigint 0.7): 0.13 links crypto-bigint 0.5
+# (RUSTSEC-2026-0387). `getrandom`: key generation from the OS RNG.
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "pem", "std", "getrandom"] }
 hmac = "0.12"
 ring = "0.17"
 # MANAGED image thumbnails (src/attachments/derivatives.rs): PNG and JPEG decoders and the

@@ -100,12 +100,12 @@ generated manifest at the end of Chapters 6–9 held **470** (corrected there).
     developer-platform, api-gateway, calling, numbering, sms-gateway, privacy-relay,
     telephony); messaging, meeting-service and certification lost the `jsonwebtoken`
     path but keep the MLS one below.
-  * **open (upstream)** for the MLS path in `packages/messaging-crypto` (also locked by
+  * **fixed (2026-10-24)** for the MLS path in `packages/messaging-crypto` (and
     services/messaging, services/meeting-service, certification and the wasm /
-    web-harness builds): `openmls_rust_crypto` 0.6.0 and `openmls_basic_credential` 0.6.0
-    (latest releases) require `p256` / `p384` 0.13 → `crypto-bigint` 0.5. The profile uses
-    only `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Any dependency change there also
-    changes the committed browser artifact (`apps/web/public/messaging-crypto`, checked
-    byte-for-byte by web-crypto-artifact.yml), which is outside this backend scope. No
-    ignore entry was added.
+    web-harness builds): `openmls_rust_crypto` / `openmls_basic_credential` 0.6.0 were
+    replaced by CF Meet's own OpenMLS provider (`src/provider.rs`, only the accepted suite,
+    `hpke-rs 0.8`), and Messaging's push adapters moved to `p256 0.14`. Every lockfile
+    now carries only `crypto-bigint 0.7.7`; compatibility with persisted groups is proven
+    by vectors from the former provider (ADR 0045 amendment). No ignore entry was added;
+    the RUSTSEC-2026-0330 / -0331 ignores were removed (`libcrux-kem 0.0.10`).
 * Developer Console UI (§18) unchanged; `apps/web`, `frontend.yml` and Vercel untouched.
