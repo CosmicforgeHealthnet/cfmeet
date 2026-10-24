@@ -552,6 +552,15 @@ const LIFECYCLE_SCOPES: &[&str] = &[
     "credentials.manage",
 ];
 
+/// Waits until the current calendar minute (the gateway's quota window) has at least 15 s
+/// left, so a short sequence of requests is counted in one window.
+async fn within_one_quota_minute() {
+    let second = chrono::Utc::now().timestamp() % 60;
+    if second > 45 {
+        tokio::time::sleep(Duration::from_secs((61 - second) as u64)).await;
+    }
+}
+
 async fn new_credential(
     gw: &Gateway,
     session: Auth<'_>,
@@ -703,6 +712,9 @@ async fn credential_lifecycle_and_caller_quota_journey() {
         )
         .await;
     status(&r, 200, "credential limits");
+    // The gateway's per-minute windows are calendar minutes: start well inside one so the
+    // whole check is counted in a single window.
+    within_one_quota_minute().await;
     let lim = gw
         .get(
             &format!("/v1/environments/{env}/limits"),
@@ -717,9 +729,8 @@ async fn credential_lifecycle_and_caller_quota_journey() {
             .await;
     let ok = burst.iter().filter(|r| r.status == 200).count();
     let limited_n = burst.iter().filter(|r| r.status == 429).count();
-    // 3 per minute, one used by /limits (a minute boundary inside the burst frees one).
-    assert_eq!(ok + limited_n, 8);
-    assert!((2..=3).contains(&ok), "{ok} of 8 allowed");
+    // 3 per minute, one used by /limits: exactly 2 of the 8 concurrent requests pass.
+    assert_eq!((ok, limited_n), (2, 6), "{ok} of 8 allowed");
     let denied = burst.iter().find(|r| r.status == 429).expect("a 429");
     assert_eq!(denied.header("x-cf-quota-level"), Some("CREDENTIAL"));
     assert_eq!(
@@ -751,14 +762,17 @@ async fn credential_lifecycle_and_caller_quota_journey() {
         .await;
     status(&r, 200, "service-account limits");
     let (_, s4) = new_credential(&gw, session, env, sa2, &["calls.read"]).await;
+    within_one_quota_minute().await;
     let mut codes = Vec::new();
     for _ in 0..5 {
         codes.push(gw.get("/v1/calls", Auth::Credential(&s4)).await);
     }
-    assert_eq!((codes[0].status, codes[1].status), (200, 200));
-    let denied = codes.iter().filter(|r| r.status == 429).collect::<Vec<_>>();
-    assert!(!denied.is_empty(), "2 per minute for the service account");
-    assert!(denied
+    assert_eq!(
+        codes.iter().map(|r| r.status).collect::<Vec<_>>(),
+        [200, 200, 429, 429, 429],
+        "2 per minute for the service account"
+    );
+    assert!(codes[2..]
         .iter()
         .all(|r| r.header("x-cf-quota-level") == Some("SERVICE_ACCOUNT")));
     // Cross-tenant: another organization's member sees nothing and changes nothing.
