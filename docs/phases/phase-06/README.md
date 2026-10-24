@@ -60,6 +60,13 @@ revocation, caller quotas enforced by the gateway), the production-access workfl
 unified usage ledger fed by the domain producers, first-party fixtures and the support
 profile. Requirement matrix and evidence: [`chapters-10-13.md`](chapters-10-13.md).
 
+## 4a. Chapters 14–18
+
+Backend completion of the data model, public API, route catalogue and event/usage
+ingestion, plus Developer Console API readiness (UI deferred):
+[`chapters-14-18-backend.md`](chapters-14-18-backend.md),
+[`developer-console-api-handoff.md`](developer-console-api-handoff.md).
+
 ## 5. Validation evidence
 
 See [`validation.md`](validation.md).

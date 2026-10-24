@@ -217,6 +217,16 @@ async fn external_onboarding_to_production_journey() {
     status(&list, 200, "credential list");
     assert!(!list.text.contains(&sb.customer.secret));
     // 2. The credential works on the public APIs through the gateway, sandbox-scoped.
+    // SDK discovery for the console's quick-starts (public infrastructure, no auth).
+    let disc = gw.get("/discovery", Auth::None).await;
+    status(&disc, 200, "discovery");
+    let packages: Vec<&str> = disc.body["sdks"]["packages"]
+        .as_array()
+        .expect("sdks")
+        .iter()
+        .filter_map(|p| p["package"].as_str())
+        .collect();
+    assert_eq!(packages, ["@cfmeet/platform-sdk", "cfmeet_platform_sdk"]);
     let ctx = gw.get("/v1/developer-platform/context", cred).await;
     status(&ctx, 200, "credential context");
     assert_eq!(ctx.body["environmentKind"], "SANDBOX");
@@ -1139,6 +1149,18 @@ async fn usage_ledger_producers_journey() {
     })
     .await;
     assert_eq!(rejection["reasonCode"], "CONFLICTING_REPLAY");
+    // §17 monitoring: the refused replay turns the operator ingestion health DEGRADED.
+    let health = operator
+        .dp(Method::GET, "/operator/ingestion/health", None)
+        .await
+        .unwrap();
+    assert_eq!(health.status, 200, "{}", health.text);
+    assert_eq!(health.body["status"], "DEGRADED", "{}", health.text);
+    assert!(health.body["usageRejectionsLast24h"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["producer"] == "cfmeet.sms-gateway"));
     assert_eq!(total(&summary(gw.clone()).await, "SMS_SEGMENT"), 3);
     // Shadow reconciliation: interval producers reconcile every completed day.
     let ov = operator
