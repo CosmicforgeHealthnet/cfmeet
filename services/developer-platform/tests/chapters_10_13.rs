@@ -759,9 +759,8 @@ async fn production_access_is_requested_reviewed_approved_activated_and_suspende
     assert_eq!(live.json["state"], "LIVE");
     let prod = Uuid::parse_str(live.json["productionEnvironmentId"].as_str().unwrap()).unwrap();
     assert_eq!(c.pa.activated.lock().unwrap()[&project], prod);
-    assert_eq!(
+    assert!(
         c.pa.live_telecom.lock().unwrap()[&prod],
-        true,
         "approved regulated capability"
     );
     let grants = c.pa.app_scopes.lock().unwrap().clone();
@@ -820,7 +819,7 @@ async fn production_access_is_requested_reviewed_approved_activated_and_suspende
         .await;
     assert_eq!(s.json["state"], "SUSPENDED", "{}", s.json);
     assert_eq!(c.pa.env_status(prod), "SUSPENDED");
-    assert_eq!(c.pa.live_telecom.lock().unwrap()[&prod], false);
+    assert!(!c.pa.live_telecom.lock().unwrap()[&prod]);
     let blocked = c
         .req(
             As::User(&owner),

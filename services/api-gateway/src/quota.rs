@@ -888,12 +888,15 @@ mod tests {
             s: &Subject,
             _c: &CorrelationId,
         ) -> Option<Limits> {
-            (s.credential_id.as_u128() % 2 == 0).then_some(Limits {
-                per_minute: 2,
-                per_day: 100,
-                minute_level: "CREDENTIAL",
-                day_level: "ENVIRONMENT",
-            })
+            s.credential_id
+                .as_u128()
+                .is_multiple_of(2)
+                .then_some(Limits {
+                    per_minute: 2,
+                    per_day: 100,
+                    minute_level: "CREDENTIAL",
+                    day_level: "ENVIRONMENT",
+                })
         }
         async fn durable_count(&self, _e: Uuid, _d: &str) -> Option<u64> {
             Some(0)
