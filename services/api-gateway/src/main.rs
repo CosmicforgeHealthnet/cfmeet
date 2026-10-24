@@ -59,28 +59,29 @@ async fn main() -> anyhow::Result<()> {
             "API_GATEWAY_PUBLIC_ROUTING_ENABLED is off: every customer path is NOT_FOUND"
         );
     }
-    let authority = Arc::new(PlatformAccessAuthority::new(service_auth.client()));
+    let authority = Arc::new(
+        PlatformAccessAuthority::new(service_auth.client())
+            .with_health_probe(service_auth.authority_base()),
+    );
     // Platform request quotas: shared Redis counters when configured (per-instance
     // otherwise), limits and durable daily accounting from the Developer Platform.
-    let redis = match config.quotas.redis_url() {
-        Some(url) => {
-            let client = redis::Client::open(url)
-                .unwrap_or_else(|_| fatal("configuration error", "API_GATEWAY_REDIS_URL"));
-            match redis::aio::ConnectionManager::new(client).await {
-                Ok(c) => Some(c),
-                Err(_) => {
-                    tracing::warn!("quota store unreachable at startup: per-instance counters until it recovers");
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-    let quota = Arc::new(QuotaEngine::new(
-        redis,
+    let mut engine = QuotaEngine::new(
+        None,
         config.quotas.key_prefix.clone(),
         Arc::new(DeveloperPlatformQuotas::new(service_auth.client())),
-    ));
+    );
+    if let Some(url) = config.quotas.redis_url() {
+        let client = redis::Client::open(url)
+            .unwrap_or_else(|_| fatal("configuration error", "API_GATEWAY_REDIS_URL"));
+        engine = engine.with_store(client, config.quotas.redis_timeout);
+    }
+    let quota = Arc::new(engine);
+    if config.quotas.configured() && !quota.connect_store().await {
+        tracing::warn!(
+            "quota store unreachable at startup: per-instance counters until it recovers"
+        );
+    }
+    tokio::spawn(quota.clone().run_store_reconnector());
     tokio::spawn(quota.clone().run_flusher(config.quota_flush_interval));
     let state = AppState::new(authority, service_auth, routes)
         .with_flags(config.flags)

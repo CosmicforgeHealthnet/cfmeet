@@ -28,6 +28,8 @@ cf-service-auth = { path = "../packages/service-auth" }
 cf-messaging-crypto = { path = "../packages/messaging-crypto", features = ["client"] }
 # Receiver-side verification of customer webhook signatures (the reference verifier).
 cf-webhooks = { path = "../packages/webhooks" }
+# Canonical usage facts (digest-sealed) for the usage ingestion load profile.
+cf-usage-facts = { path = "../packages/usage-facts" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "process", "io-util", "fs"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"] }

@@ -13,6 +13,9 @@
 //! * Durability: accepted requests are accumulated per (environment, day) and flushed to
 //!   the Developer Platform (`POST /internal/v1/usage/api-requests`,
 //!   `developer-usage.record`) in idempotent batches; a failed flush is retried.
+//! * Every quota-store call and connection attempt is bounded
+//!   (`API_GATEWAY_REDIS_TIMEOUT_MS`): an unreachable or partitioned Redis never stalls a
+//!   request; a store unreachable at startup is reconnected in the background.
 //! * Redis outage: the gateway degrades to per-instance counters (never unlimited) and
 //!   reports `quotas: degraded` in readiness.
 //!
@@ -342,7 +345,12 @@ struct CachedLimits {
 
 /// The quota engine shared by every request.
 pub struct QuotaEngine {
-    redis: Option<redis::aio::ConnectionManager>,
+    /// The shared counter store's connection (`None`: not configured, or not connected
+    /// yet when [`QuotaEngine::store`] is set).
+    redis: Mutex<Option<redis::aio::ConnectionManager>>,
+    /// The configured store to (re)connect to in the background.
+    store: Option<redis::Client>,
+    store_timeout: Duration,
     script: redis::Script,
     prefix: String,
     authority: Arc<dyn QuotaAuthority>,
@@ -365,7 +373,9 @@ impl QuotaEngine {
         authority: Arc<dyn QuotaAuthority>,
     ) -> Self {
         Self {
-            redis,
+            redis: Mutex::new(redis),
+            store: None,
+            store_timeout: Duration::from_millis(250),
             script: redis::Script::new(SCRIPT),
             prefix,
             authority,
@@ -386,16 +396,75 @@ impl QuotaEngine {
         self
     }
 
-    /// `shared` (Redis), `degraded` (Redis unreachable: per-instance) or `local` (no
-    /// Redis configured).
+    /// The configured shared store: every call and connection attempt is bounded by
+    /// `timeout`; [`QuotaEngine::connect_store`] / [`QuotaEngine::run_store_reconnector`]
+    /// establish the connection.
+    pub fn with_store(mut self, client: redis::Client, timeout: Duration) -> Self {
+        self.store = Some(client);
+        self.store_timeout = timeout;
+        self
+    }
+
+    /// One bounded connection attempt to the configured store (`true`: connected).
+    pub async fn connect_store(&self) -> bool {
+        let Some(client) = &self.store else {
+            return false;
+        };
+        if self.redis.lock().unwrap().is_some() {
+            return true;
+        }
+        let config = redis::aio::ConnectionManagerConfig::new()
+            .set_connection_timeout(self.store_timeout)
+            .set_response_timeout(self.store_timeout)
+            .set_number_of_retries(1)
+            .set_max_delay(1_000);
+        match tokio::time::timeout(
+            self.store_timeout.saturating_mul(4),
+            redis::aio::ConnectionManager::new_with_config(client.clone(), config),
+        )
+        .await
+        {
+            Ok(Ok(conn)) => {
+                *self.redis.lock().unwrap() = Some(conn);
+                self.degraded
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!("quota store connected: shared quota counters in use");
+                true
+            }
+            _ => {
+                self.degraded
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                false
+            }
+        }
+    }
+
+    /// Connects a store that was unreachable at startup (every 2 s until it is).
+    pub async fn run_store_reconnector(self: Arc<Self>) {
+        if self.store.is_none() {
+            return;
+        }
+        loop {
+            if self.redis.lock().unwrap().is_none() {
+                self.connect_store().await;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// `shared` (Redis), `degraded` (configured Redis unreachable: per-instance
+    /// counters) or `local` (no Redis configured).
     pub fn mode(&self) -> &'static str {
+        let connected = self.redis.lock().unwrap().is_some();
         match (
-            &self.redis,
+            connected,
+            self.store.is_some(),
             self.degraded.load(std::sync::atomic::Ordering::Relaxed),
         ) {
-            (None, _) => "local",
-            (Some(_), true) => "degraded",
-            (Some(_), false) => "shared",
+            (false, false, _) => "local",
+            (false, true, _) => "degraded",
+            (true, _, true) => "degraded",
+            (true, _, false) => "shared",
         }
     }
 
@@ -521,7 +590,12 @@ impl QuotaEngine {
                 limits,
             };
         }
-        let outcome = match &self.redis {
+        let connection = self.redis.lock().unwrap().clone();
+        if connection.is_none() && self.store.is_some() {
+            self.degraded
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        let outcome = match connection {
             Some(conn) => {
                 let key = (environment, day.clone());
                 let seed = if self.seeded.lock().unwrap().contains(&key) {
@@ -533,10 +607,10 @@ impl QuotaEngine {
                         .map(|c| c as i64)
                         .unwrap_or(-1)
                 };
-                let mut conn = conn.clone();
+                let mut conn = conn;
                 let cred = subject.map(|s| s.credential_id).unwrap_or_default();
-                let r: Result<Vec<i64>, _> = self
-                    .script
+                let mut invocation = self.script.prepare_invoke();
+                invocation
                     .key(format!("{}rpm:{environment}:{minute}", self.prefix))
                     .key(format!("{}rpd:{environment}:{day}", self.prefix))
                     .key(format!("{}crpm:{cred}:{minute}", self.prefix))
@@ -547,11 +621,12 @@ impl QuotaEngine {
                     .arg(172_800)
                     .arg(seed)
                     .arg(caller.map(|c| c.per_minute as i64).unwrap_or(-1))
-                    .arg(caller.map(|c| c.per_day as i64).unwrap_or(-1))
-                    .invoke_async(&mut conn)
-                    .await;
+                    .arg(caller.map(|c| c.per_day as i64).unwrap_or(-1));
+                let call = invocation.invoke_async::<Vec<i64>>(&mut conn);
+                // Bounded: a partitioned store never stalls the request.
+                let r = tokio::time::timeout(self.store_timeout, call).await;
                 match r {
-                    Ok(v) if v.len() == 5 => {
+                    Ok(Ok(v)) if v.len() == 5 => {
                         self.degraded
                             .store(false, std::sync::atomic::Ordering::Relaxed);
                         if seed >= 0 {
@@ -861,6 +936,64 @@ mod tests {
         ));
         assert_eq!(q.mode(), "local");
         assert_eq!(q.flush().await, 2);
+    }
+
+    /// §20.4: an unreachable store and a partitioned (silent) store both degrade to
+    /// bounded per-instance counters — never a stalled request, never unlimited — and a
+    /// store that becomes reachable is connected in the background.
+    #[tokio::test]
+    async fn an_unreachable_or_silent_store_degrades_within_the_timeout_and_still_enforces() {
+        let limits = Limits {
+            per_minute: 3,
+            per_day: 100,
+            minute_level: "ENVIRONMENT",
+            day_level: "ENVIRONMENT",
+        };
+        let c = CorrelationId::generate();
+        let k = ApplicationEnvironmentKind::Sandbox;
+        // A port nothing listens on: connection refused.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = format!("redis://{}", closed.local_addr().unwrap());
+        drop(closed);
+        // A peer that accepts and never answers: a partition.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let silent_url = format!("redis://{}", silent.local_addr().unwrap());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((s, _)) = silent.accept().await {
+                held.push(s);
+            }
+        });
+        for url in [refused, silent_url] {
+            let q = QuotaEngine::new(None, "t:".into(), Arc::new(Fixed(Some(limits)))).with_store(
+                redis::Client::open(url.as_str()).unwrap(),
+                Duration::from_millis(100),
+            );
+            let started = Instant::now();
+            let _ = q.connect_store().await;
+            assert_eq!(
+                q.mode(),
+                "degraded",
+                "{url}: a configured store is never 'local'"
+            );
+            let env = Uuid::new_v4();
+            for _ in 0..3 {
+                assert!(matches!(
+                    q.check(env, k, &c).await,
+                    Decision::Allowed { .. }
+                ));
+            }
+            assert!(
+                matches!(q.check(env, k, &c).await, Decision::Exceeded { .. }),
+                "{url}: degraded counters still enforce"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(3),
+                "{url}: bounded ({:?})",
+                started.elapsed()
+            );
+            assert_eq!(q.mode(), "degraded");
+        }
     }
 
     /// A caller restriction (§54: service account / credential) below the environment.

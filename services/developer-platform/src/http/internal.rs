@@ -41,13 +41,26 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/usage/api-requests", axum::routing::post(record_usage))
         .route("/usage/api-requests/:environment_id/:day", get(daily_usage))
-        .route("/usage/facts", axum::routing::post(ingest_usage_facts))
+        // A full producer batch (`cf_usage_facts::MAX_BATCH` facts) exceeds the general
+        // 64 KiB limit: this route alone accepts up to USAGE_BATCH_MAX_BODY_BYTES.
+        .route(
+            "/usage/facts",
+            axum::routing::post(ingest_usage_facts).layer(axum::extract::DefaultBodyLimit::max(
+                USAGE_BATCH_MAX_BODY_BYTES,
+            )),
+        )
         .route("/usage/streams/:stream", get(usage_stream))
         .route(
             "/usage/reconciliations",
             axum::routing::post(usage_reconciliation),
         )
 }
+
+/// Body limit of `POST /internal/v1/usage/facts`: room for `cf_usage_facts::MAX_BATCH`
+/// (500) facts of up to 2 KiB each (a Calling leg fact is about 0.7 KiB). Exporters
+/// default to 200-fact batches; the general 64 KiB limit held fewer than 100, so a
+/// producer backlog (a historical backfill) was refused batch after batch.
+pub const USAGE_BATCH_MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The authenticated producer of usage facts (`developer-event.publish`): the caller's
 /// service identity, never a body claim.

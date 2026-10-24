@@ -159,8 +159,11 @@ async fn health() -> impl IntoResponse {
 }
 
 /// Readiness and service discovery: the gateway is ready to serve when its catalogue is
-/// loaded; each upstream family reports `configured` / `reachable` / `unreachable` (a
-/// domain outage never reroutes traffic to another service).
+/// loaded and — while public routing is on — Platform Access, the authority every
+/// customer request needs, answers (otherwise 503 `not_ready`: a load balancer stops
+/// sending traffic that could only fail). Each upstream family reports `configured` /
+/// `reachable` / `unreachable` without affecting readiness (a domain outage never
+/// reroutes traffic to another service and never takes the other families down).
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let mut upstreams = serde_json::Map::new();
     let mut needed: Vec<String> = state
@@ -197,19 +200,34 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             (service, status)
         }
     });
-    for (service, status) in futures_util::future::join_all(probes).await {
+    let (upstream_status, authority_ok) = futures_util::future::join(
+        futures_util::future::join_all(probes),
+        state.authority.reachable(),
+    )
+    .await;
+    for (service, status) in upstream_status {
         upstreams.insert(service, Value::from(status));
     }
-    Json(json!({
-        "status": "ready",
-        "service": "api-gateway",
-        "publicRouting": if state.flags.public_routing { "enabled" } else { "disabled" },
-        "routes": state.routes.len(),
-        "websockets": if state.flags.websockets { "enabled" } else { "disabled" },
-        "quotas": state.quota.as_ref().map(|q| q.mode()).unwrap_or("not_enforced"),
-        "centralWebhooks": state.controls.central_webhooks,
-        "centralUsage": state.controls.central_usage,
-        "disabledFamilies": state.controls.disabled_domains.iter().collect::<Vec<_>>(),
-        "upstreams": upstreams,
-    }))
+    let ready = authority_ok || !state.flags.public_routing;
+    let code = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        code,
+        Json(json!({
+            "status": if ready { "ready" } else { "not_ready" },
+            "platformAccess": if authority_ok { "reachable" } else { "unreachable" },
+            "service": "api-gateway",
+            "publicRouting": if state.flags.public_routing { "enabled" } else { "disabled" },
+            "routes": state.routes.len(),
+            "websockets": if state.flags.websockets { "enabled" } else { "disabled" },
+            "quotas": state.quota.as_ref().map(|q| q.mode()).unwrap_or("not_enforced"),
+            "centralWebhooks": state.controls.central_webhooks,
+            "centralUsage": state.controls.central_usage,
+            "disabledFamilies": state.controls.disabled_domains.iter().collect::<Vec<_>>(),
+            "upstreams": upstreams,
+        })),
+    )
 }

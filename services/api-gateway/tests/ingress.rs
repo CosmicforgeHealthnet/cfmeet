@@ -29,6 +29,21 @@ async fn probes_docs_and_discovery_are_public_infrastructure() {
     let r = g.get("/ready", None).await;
     assert_eq!(r.json["publicRouting"], "enabled");
     assert_eq!(r.json["upstreams"]["cfmeet.calling"], "reachable");
+    assert_eq!(
+        (r.status, r.json["platformAccess"].as_str()),
+        (StatusCode::OK, Some("reachable"))
+    );
+    // §21: Platform Access unreachable -> not ready (every customer request would fail);
+    // it recovers with the authority.
+    *g.authority.down.lock().unwrap() = true;
+    let r = g.get("/ready", None).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.json);
+    assert_eq!(
+        (r.json["status"].as_str(), r.json["platformAccess"].as_str()),
+        (Some("not_ready"), Some("unreachable"))
+    );
+    *g.authority.down.lock().unwrap() = false;
+    assert_eq!(g.get("/ready", None).await.status, StatusCode::OK);
     assert!(r.headers.get("x-request-id").is_some());
     let d = g.get("/discovery", None).await;
     assert!(d.json["families"]

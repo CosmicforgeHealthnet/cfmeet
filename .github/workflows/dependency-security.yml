@@ -25,6 +25,9 @@ on:
       - "services/sms-gateway/**"
       - "services/numbering/**"
       - "services/meeting-service/**"
+      - "services/developer-platform/**"
+      - "services/api-gateway/**"
+      - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
@@ -40,6 +43,9 @@ on:
       - "services/sms-gateway/**"
       - "services/numbering/**"
       - "services/meeting-service/**"
+      - "services/developer-platform/**"
+      - "services/api-gateway/**"
+      - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
       - "scripts/secret-scan/**"
@@ -84,6 +90,12 @@ jobs:
           # and the cross-service certification workspace.
           - packages/messaging-crypto/ffi
           - certification
+          # Part VI (Chapter 20 security certification): the two Part VI services were
+          # not audited. Neither links `rsa` (sqlx-mysql is in the lockfile only: `cargo
+          # tree -i rsa -e normal` is empty) — the existing justified ignores below are
+          # not widened by a new advisory id.
+          - services/developer-platform
+          - services/api-gateway
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -142,7 +154,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [calling, privacy-relay, telephony]
+        service: [calling, privacy-relay, telephony, developer-platform, api-gateway]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

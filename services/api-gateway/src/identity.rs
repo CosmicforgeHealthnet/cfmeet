@@ -131,21 +131,56 @@ pub trait CustomerAuthority: Send + Sync {
         presented: &str,
         correlation: &CorrelationId,
     ) -> Result<Authentication, AuthorityUnavailable>;
+
+    /// Whether the authority answers at all (readiness: every customer request needs it).
+    async fn reachable(&self) -> bool {
+        true
+    }
 }
 
 /// Platform Access over authenticated internal HTTP.
 pub struct PlatformAccessAuthority {
     client: Arc<InternalServiceClient>,
+    /// `GET {base}/health` is the readiness probe (`None`: not probed, assumed up).
+    health: Option<(url::Url, reqwest::Client)>,
 }
 
 impl PlatformAccessAuthority {
     pub fn new(client: Arc<InternalServiceClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            health: None,
+        }
+    }
+
+    /// Probes `base`'s public `/health` for readiness (bounded: 1 s).
+    pub fn with_health_probe(mut self, base: Option<&url::Url>) -> Self {
+        self.health = base.and_then(|b| {
+            let url = b.join("/health").ok()?;
+            let http = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(1))
+                .build()
+                .ok()?;
+            Some((url, http))
+        });
+        self
     }
 }
 
 #[async_trait::async_trait]
 impl CustomerAuthority for PlatformAccessAuthority {
+    async fn reachable(&self) -> bool {
+        match &self.health {
+            None => true,
+            Some((url, http)) => matches!(
+                http.get(url.clone()).send().await,
+                Ok(r) if r.status().is_success()
+            ),
+        }
+    }
+
     async fn authenticate(
         &self,
         presented: &str,

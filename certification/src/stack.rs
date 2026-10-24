@@ -402,6 +402,35 @@ impl Stack {
         self.spawn_spec(process, &spec).await
     }
 
+    /// Stops `process` (a resilience test's outage); [`Stack::restart`] starts it again
+    /// with the same binary, port, database and keys. `false` when it was not running.
+    pub async fn stop(&mut self, process: &str) -> bool {
+        let Some(i) = self.procs.iter().position(|p| p.name == process) else {
+            return false;
+        };
+        let mut old = self.procs.remove(i);
+        let _ = old.child.start_kill();
+        let _ = tokio::time::timeout(Duration::from_secs(10), old.child.wait()).await;
+        let _ = std::fs::rename(&old.log, old.log.with_extension("previous.log"));
+        true
+    }
+
+    /// `(process, pid)` of every running process (resource sampling).
+    pub fn pids(&self) -> Vec<(String, u32)> {
+        self.procs
+            .iter()
+            .filter_map(|p| p.child.id().map(|id| (p.name.clone(), id)))
+            .collect()
+    }
+
+    /// The database name of `service` (outage drills on that database only).
+    pub fn db_name(&self, service: &str) -> Option<String> {
+        self.db_urls
+            .get(service)
+            .and_then(|u| u.rsplit_once('/'))
+            .map(|(_, n)| n.split('?').next().unwrap_or(n).to_string())
+    }
+
     async fn boot(&mut self) -> anyhow::Result<()> {
         // Ports first: every service learns its peers' URLs up front.
         for name in [
@@ -498,6 +527,11 @@ impl Stack {
             kv("DATABASE_URL", db_url),
             kv("DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS", "4".into()),
             kv("DEVELOPER_PLATFORM_GATEWAY_API_ENABLED", "true".into()),
+            // Part VI §21.2: the production-access self-service flow (default off).
+            kv(
+                "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
+                "true".into(),
+            ),
             kv("DEVELOPER_PLATFORM_WORKER_INTERVAL_MS", "500".into()),
             kv("CF_PLATFORM_ACCESS_BASE_URL", url(self, PLATFORM_ACCESS)),
             kv("CF_MEETING_SERVICE_BASE_URL", url(self, MEETING_SERVICE)),

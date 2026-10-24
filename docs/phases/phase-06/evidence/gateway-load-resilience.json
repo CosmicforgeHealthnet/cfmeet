@@ -1,0 +1,528 @@
+{
+  "failures": [],
+  "generatedAt": "2026-10-24T21:07:33.910294348+00:00",
+  "hardware": {
+    "binaries": "/home/user/cfmeet/target/release",
+    "build": "unoptimized debug binaries unless CFMEET_BIN_DIR points at a release build",
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "kernel": "6.18.44-fc-v153",
+    "logicalCpus": 4,
+    "memoryGiB": 15.7,
+    "scale": 1
+  },
+  "profiles": [
+    {
+      "criteria": [
+        {
+          "criterion": "every cold first request of 48 credentials authenticates (0 errors)",
+          "passed": true
+        },
+        {
+          "criterion": "every warm request authenticates (0 errors)",
+          "passed": true
+        },
+        {
+          "criterion": "warm p95 <= cold p95 (no degradation once connections and Platform Access lookups are warm)",
+          "passed": true
+        },
+        {
+          "criterion": "a credential revoked under concurrent load is refused on the very next request (401)",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "cold": {
+          "byStatus": {
+            "200": 48
+          },
+          "concurrency": 48,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 353.2,
+            "p50": 349.7,
+            "p95": 352.9,
+            "p99": 353.2
+          },
+          "requests": 48,
+          "success2xx": 48,
+          "throughputPerSecond": 135.7,
+          "transportErrors": 0,
+          "wallSeconds": 0.35
+        },
+        "credentials": 48,
+        "resources": {
+          "api-gateway": {
+            "cpuSeconds": 0.17,
+            "rssMiB": 18.8
+          },
+          "calling": {
+            "cpuSeconds": 0.32,
+            "rssMiB": 39.5
+          },
+          "developer-platform": {
+            "cpuSeconds": 0.14,
+            "rssMiB": 24.5
+          },
+          "developer-platform-worker": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 9.9
+          },
+          "meeting-service": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 44.1
+          },
+          "messaging": {
+            "cpuSeconds": 0.02,
+            "rssMiB": 26.6
+          },
+          "numbering": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 18.7
+          },
+          "platform-access": {
+            "cpuSeconds": 0.21,
+            "rssMiB": 25.0
+          },
+          "privacy-relay": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 14.1
+          },
+          "sms-gateway": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 13.7
+          }
+        },
+        "revokedNextRequestStatus": 401,
+        "warm": {
+          "byStatus": {
+            "200": 96
+          },
+          "concurrency": 48,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 188.0,
+            "p50": 134.9,
+            "p95": 154.0,
+            "p99": 154.4
+          },
+          "requests": 96,
+          "success2xx": 96,
+          "throughputPerSecond": 337.6,
+          "transportErrors": 0,
+          "wallSeconds": 0.28
+        }
+      },
+      "profile": "concurrent-authentication"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "error rate <= 1 % (paced at 90 % of the aggregate TEST quota)",
+          "passed": true
+        },
+        {
+          "criterion": "p95 latency <= 500 ms (optimized build)",
+          "passed": true
+        },
+        {
+          "criterion": "p99 latency <= 1500 ms (optimized build)",
+          "passed": true
+        },
+        {
+          "criterion": "no 5xx",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "families": [
+          "/v1/calls",
+          "/v1/messaging/policy",
+          "/v1/numbers/countries",
+          "/v1/sms/messages",
+          "/v1/developer-platform/context",
+          "/v1/privacy-relay/contexts"
+        ],
+        "optimizedBinaries": true,
+        "resources": {
+          "api-gateway": {
+            "cpuSeconds": 2.63,
+            "rssMiB": 18.9
+          },
+          "calling": {
+            "cpuSeconds": 1.75,
+            "rssMiB": 39.5
+          },
+          "developer-platform": {
+            "cpuSeconds": 1.96,
+            "rssMiB": 24.7
+          },
+          "developer-platform-worker": {
+            "cpuSeconds": 0.07,
+            "rssMiB": 9.9
+          },
+          "meeting-service": {
+            "cpuSeconds": 0.02,
+            "rssMiB": 44.1
+          },
+          "messaging": {
+            "cpuSeconds": 0.9,
+            "rssMiB": 27.2
+          },
+          "numbering": {
+            "cpuSeconds": 0.72,
+            "rssMiB": 19.9
+          },
+          "platform-access": {
+            "cpuSeconds": 4.61,
+            "rssMiB": 25.5
+          },
+          "privacy-relay": {
+            "cpuSeconds": 0.48,
+            "rssMiB": 14.8
+          },
+          "sms-gateway": {
+            "cpuSeconds": 0.91,
+            "rssMiB": 14.9
+          }
+        },
+        "result": {
+          "byStatus": {
+            "200": 2160
+          },
+          "concurrency": 64,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 51.2,
+            "p50": 10.4,
+            "p95": 14.9,
+            "p99": 18.4
+          },
+          "requests": 2160,
+          "success2xx": 2160,
+          "throughputPerSecond": 72.0,
+          "transportErrors": 0,
+          "wallSeconds": 30.0
+        },
+        "targetRatePerSecond": 72.0,
+        "tenants": 16
+      },
+      "profile": "gateway-mixed-rest-throughput"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "each of 4 tenants admitted EXACTLY its 40/min under 48-way concurrency (no over- or under-admission)",
+          "passed": true
+        },
+        {
+          "criterion": "every refusal is 429 (no 5xx, no transport error)",
+          "passed": true
+        },
+        {
+          "criterion": "a tenant outside the race is unaffected",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "admitted": {
+          "0": 40,
+          "1": 40,
+          "2": 40,
+          "3": 40
+        },
+        "attemptsPerTenant": 150,
+        "limitPerMinute": 40,
+        "result": {
+          "byStatus": {
+            "200": 160,
+            "429": 440
+          },
+          "concurrency": 48,
+          "errorRate": 0.7333,
+          "latencyMs": {
+            "max": 264.2,
+            "p50": 25.2,
+            "p95": 182.8,
+            "p99": 260.0
+          },
+          "requests": 600,
+          "success2xx": 160,
+          "throughputPerSecond": 1019.9,
+          "transportErrors": 0,
+          "wallSeconds": 0.59
+        }
+      },
+      "profile": "multi-tenant-quota-race"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "success (ticket → upgrade → welcome → ping → clean close) >= 99 %",
+          "passed": true
+        },
+        {
+          "criterion": "p95 upgrade-to-welcome <= 1000 ms (optimized build)",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "concurrentConnections": 20,
+        "connectMs": {
+          "max": 54.817972,
+          "p50": 31.825046000000004,
+          "p95": 52.203272000000005
+        },
+        "cycle": {
+          "byStatus": {
+            "101": 60
+          },
+          "concurrency": 20,
+          "errorRate": 1.0,
+          "latencyMs": {
+            "max": 128.0,
+            "p50": 69.3,
+            "p95": 101.1,
+            "p99": 101.2
+          },
+          "requests": 60,
+          "success2xx": 0,
+          "throughputPerSecond": 269.3,
+          "transportErrors": 0,
+          "wallSeconds": 0.22
+        },
+        "cycles": 60,
+        "reconnectRounds": 3,
+        "resources": {
+          "api-gateway": {
+            "cpuSeconds": 0.04,
+            "rssMiB": 22.6
+          },
+          "calling": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 32.2
+          },
+          "developer-platform": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 29.0
+          },
+          "developer-platform-worker": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 9.9
+          },
+          "meeting-service": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 47.3
+          },
+          "messaging": {
+            "cpuSeconds": 0.25,
+            "rssMiB": 49.8
+          },
+          "numbering": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 25.1
+          },
+          "platform-access": {
+            "cpuSeconds": 0.07,
+            "rssMiB": 28.0
+          },
+          "privacy-relay": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 14.9
+          },
+          "sms-gateway": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 15.9
+          }
+        },
+        "successfulCycles": 60
+      },
+      "profile": "websocket-connect-reconnect-close"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "every request during an 8 s Redis outage is answered 200 / 429 (no 5xx, no transport error)",
+          "passed": true
+        },
+        {
+          "criterion": "degraded quotas still bound admission: a 40/min tenant gets at most 40 of 80 attempts",
+          "passed": true
+        },
+        {
+          "criterion": "the gateway keeps serving during the outage (at least one 200)",
+          "passed": true
+        },
+        {
+          "criterion": "the gateway reports degraded quota mode during the outage",
+          "passed": true
+        },
+        {
+          "criterion": "shared counters return within 30 s of Redis returning",
+          "passed": true
+        },
+        {
+          "criterion": "requests succeed after recovery",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "admittedDuringOutage": 40,
+        "attempts": 80,
+        "during": {
+          "byStatus": {
+            "200": 40,
+            "429": 40
+          },
+          "concurrency": 1,
+          "errorRate": 0.5,
+          "latencyMs": {
+            "max": 265.0,
+            "p50": 256.7,
+            "p95": 262.9,
+            "p99": 264.6
+          },
+          "requests": 80,
+          "success2xx": 40,
+          "throughputPerSecond": 10.0,
+          "transportErrors": 0,
+          "wallSeconds": 8.0
+        },
+        "limitPerMinute": 40,
+        "outageSeconds": 8,
+        "quotaModesSeen": [
+          "degraded"
+        ],
+        "sharedRestoredSeconds": 1.23
+      },
+      "profile": "redis-outage"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "every Calling request during the outage is a safe 502 / 503 / 504 (never 200 from another domain)",
+          "passed": true
+        },
+        {
+          "criterion": "Privacy Relay (served by the Calling process) fails safe the same way",
+          "passed": true
+        },
+        {
+          "criterion": "the four independent families stay 200 throughout",
+          "passed": true
+        },
+        {
+          "criterion": "Calling routes recover within 10 s of the service being ready",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "callingDuringOutage": {
+          "byStatus": {
+            "502": 24
+          },
+          "concurrency": 1,
+          "errorRate": 1.0,
+          "latencyMs": {
+            "max": 6.7,
+            "p50": 4.5,
+            "p95": 6.5,
+            "p99": 6.7
+          },
+          "requests": 24,
+          "success2xx": 0,
+          "throughputPerSecond": 4.6,
+          "transportErrors": 0,
+          "wallSeconds": 5.18
+        },
+        "errorCodes": [
+          "UPSTREAM_UNAVAILABLE"
+        ],
+        "independentFamilies": {
+          "byStatus": {
+            "200": 24
+          },
+          "concurrency": 1,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 9.6,
+            "p50": 6.2,
+            "p95": 9.3,
+            "p99": 9.6
+          },
+          "requests": 24,
+          "success2xx": 24,
+          "throughputPerSecond": 4.6,
+          "transportErrors": 0,
+          "wallSeconds": 5.18
+        },
+        "outageSeconds": 5.2,
+        "privacyRelayDuringOutage": {
+          "byStatus": {
+            "502": 24
+          },
+          "concurrency": 1,
+          "errorRate": 1.0,
+          "latencyMs": {
+            "max": 4.1,
+            "p50": 3.2,
+            "p95": 4.0,
+            "p99": 4.1
+          },
+          "requests": 24,
+          "success2xx": 0,
+          "throughputPerSecond": 4.6,
+          "transportErrors": 0,
+          "wallSeconds": 5.18
+        },
+        "recoverySecondsAfterRestart": 0.02,
+        "restartToReadySeconds": 0.0
+      },
+      "profile": "domain-service-outage"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "every request while Platform Access is down fails closed with 503 (never 200, never 401)",
+          "passed": true
+        },
+        {
+          "criterion": "gateway readiness reports not ready (503) during the outage",
+          "passed": true
+        },
+        {
+          "criterion": "requests succeed within 10 s of Platform Access being ready again",
+          "passed": true
+        },
+        {
+          "criterion": "readiness returns to ready",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "during": {
+          "byStatus": {
+            "503": 25
+          },
+          "concurrency": 1,
+          "errorRate": 1.0,
+          "latencyMs": {
+            "max": 1.9,
+            "p50": 1.7,
+            "p95": 1.8,
+            "p99": 1.9
+          },
+          "requests": 25,
+          "success2xx": 0,
+          "throughputPerSecond": 4.7,
+          "transportErrors": 0,
+          "wallSeconds": 5.36
+        },
+        "outageSeconds": 5,
+        "readyDuringOutage": 503,
+        "recoverySecondsAfterRestart": 0.02
+      },
+      "profile": "platform-access-outage"
+    }
+  ],
+  "suite": "gateway-load-resilience"
+}

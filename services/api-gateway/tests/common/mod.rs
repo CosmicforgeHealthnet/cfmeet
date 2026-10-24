@@ -117,6 +117,10 @@ impl CustomerAuthority for FakeAuthority {
                 throttle: None,
             }))
     }
+
+    async fn reachable(&self) -> bool {
+        !*self.down.lock().unwrap()
+    }
 }
 
 /// What reached an upstream.

@@ -9,6 +9,7 @@
 //! | `API_GATEWAY_MAX_BODY_BYTES` | no | request body limit (1024–8388608, default 1048576) |
 //! | `API_GATEWAY_REDIS_URL` | no | Redis for SHARED atomic quota counters across instances (`redis://` local / test, `rediss://` otherwise); unset: per-instance counters (quotas still enforced, limits from the Developer Platform) |
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
+//! | `API_GATEWAY_REDIS_TIMEOUT_MS` | no | bound of one quota-store call and of one connection attempt (20–5000, default 250); past it the request is counted per instance (`quotas: degraded`) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. The gateway has NO
@@ -58,6 +59,8 @@ pub struct FeatureFlags {
 pub struct QuotaSettings {
     redis_url: Option<SecretString>,
     pub key_prefix: String,
+    /// Bound of one quota-store call / connection attempt.
+    pub redis_timeout: Duration,
 }
 
 impl Default for QuotaSettings {
@@ -65,6 +68,7 @@ impl Default for QuotaSettings {
         Self {
             redis_url: None,
             key_prefix: "cfgw:".into(),
+            redis_timeout: Duration::from_millis(250),
         }
     }
 }
@@ -74,6 +78,7 @@ impl fmt::Debug for QuotaSettings {
         f.debug_struct("QuotaSettings")
             .field("redis_url", &self.redis_url.as_ref().map(|_| "[REDACTED]"))
             .field("key_prefix", &self.key_prefix)
+            .field("redis_timeout", &self.redis_timeout)
             .finish()
     }
 }
@@ -233,6 +238,10 @@ impl ApiGatewayConfig {
                 "must be at most 32 characters of [a-z0-9:_-]",
             ));
         }
+        let redis_timeout =
+            Duration::from_millis(
+                bounded(&get, "API_GATEWAY_REDIS_TIMEOUT_MS", 250, 20, 5_000)? as u64,
+            );
         const DOMAINS: &[&str] = &[
             "meetings",
             "calling",
@@ -318,6 +327,7 @@ impl ApiGatewayConfig {
             quotas: QuotaSettings {
                 redis_url,
                 key_prefix,
+                redis_timeout,
             },
             log_format,
         })

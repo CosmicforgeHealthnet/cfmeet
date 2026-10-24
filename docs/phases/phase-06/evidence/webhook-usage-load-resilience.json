@@ -1,0 +1,341 @@
+{
+  "failures": [],
+  "generatedAt": "2026-10-24T21:03:37.062777984+00:00",
+  "hardware": {
+    "binaries": "/home/user/cfmeet/target/release",
+    "build": "unoptimized debug binaries unless CFMEET_BIN_DIR points at a release build",
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "kernel": "6.18.44-fc-v153",
+    "logicalCpus": 4,
+    "memoryGiB": 15.7,
+    "scale": 1
+  },
+  "profiles": [
+    {
+      "criteria": [
+        {
+          "criterion": "every event ingested (202/200)",
+          "passed": true
+        },
+        {
+          "criterion": "all subs × events delivered within 240 s (incl. 30 s-class retry backoff)",
+          "passed": true
+        },
+        {
+          "criterion": "exactly one successful delivery per (subscription, event)",
+          "passed": true
+        },
+        {
+          "criterion": "every delivered request carries a valid signature",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "drainSeconds": 27.24,
+        "duplicates": 0,
+        "events": 40,
+        "failingAnswersInjected": 10,
+        "ingest": {
+          "byStatus": {
+            "200": 40
+          },
+          "concurrency": 1,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 6.9,
+            "p50": 4.1,
+            "p95": 6.6,
+            "p99": 6.9
+          },
+          "requests": 40,
+          "success2xx": 40,
+          "throughputPerSecond": 229.1,
+          "transportErrors": 0,
+          "wallSeconds": 0.17
+        },
+        "logicalDeliveries": 200,
+        "maxQueueDepth": 176,
+        "resources": {
+          "api-gateway": {
+            "cpuSeconds": 0.02,
+            "rssMiB": 10.9
+          },
+          "calling": {
+            "cpuSeconds": 0.22,
+            "rssMiB": 24.5
+          },
+          "developer-platform": {
+            "cpuSeconds": 0.03,
+            "rssMiB": 16.5
+          },
+          "developer-platform-worker": {
+            "cpuSeconds": 0.32,
+            "rssMiB": 11.1
+          },
+          "meeting-service": {
+            "cpuSeconds": 0.01,
+            "rssMiB": 46.9
+          },
+          "messaging": {
+            "cpuSeconds": 0.22,
+            "rssMiB": 23.2
+          },
+          "numbering": {
+            "cpuSeconds": 0.15,
+            "rssMiB": 18.4
+          },
+          "platform-access": {
+            "cpuSeconds": 0.15,
+            "rssMiB": 15.0
+          },
+          "privacy-relay": {
+            "cpuSeconds": 0.12,
+            "rssMiB": 14.5
+          },
+          "sms-gateway": {
+            "cpuSeconds": 0.26,
+            "rssMiB": 13.5
+          }
+        },
+        "subscriptions": 5
+      },
+      "profile": "webhook-fan-out-and-retry-backlog"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "at least 25 delivered deliveries were available to replay",
+          "passed": true
+        },
+        {
+          "criterion": "every replay accepted (201) with a new delivery id and the same event id",
+          "passed": true
+        },
+        {
+          "criterion": "every replay delivered within 60 s",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "deliveredSeconds": 0.41,
+        "replays": 30,
+        "result": {
+          "byStatus": {
+            "201": 30
+          },
+          "concurrency": 10,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 87.2,
+            "p50": 46.1,
+            "p95": 70.8,
+            "p99": 87.2
+          },
+          "requests": 30,
+          "success2xx": 30,
+          "throughputPerSecond": 235.5,
+          "transportErrors": 0,
+          "wallSeconds": 0.13
+        }
+      },
+      "profile": "webhook-replay-volume"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "every fact recorded once on first delivery",
+          "passed": true
+        },
+        {
+          "criterion": "a full replay records nothing new (all duplicates)",
+          "passed": true
+        },
+        {
+          "criterion": "ledger holds exactly one fact per producer source id",
+          "passed": true
+        },
+        {
+          "criterion": "ingestion >= 500 facts / s",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "batchSize": 500,
+        "concurrency": 4,
+        "facts": 20000,
+        "factsPerSecond": 4620.2,
+        "firstPass": {
+          "byStatus": {
+            "200": 40
+          },
+          "concurrency": 4,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 848.5,
+            "p50": 406.6,
+            "p95": 472.4,
+            "p99": 848.5
+          },
+          "requests": 40,
+          "success2xx": 40,
+          "throughputPerSecond": 9.2,
+          "transportErrors": 0,
+          "wallSeconds": 4.33
+        },
+        "replay": {
+          "byStatus": {
+            "200": 40
+          },
+          "concurrency": 4,
+          "errorRate": 0.0,
+          "latencyMs": {
+            "max": 354.2,
+            "p50": 282.2,
+            "p95": 343.7,
+            "p99": 354.2
+          },
+          "requests": 40,
+          "success2xx": 40,
+          "throughputPerSecond": 13.5,
+          "transportErrors": 0,
+          "wallSeconds": 2.96
+        },
+        "replayFactsPerSecond": 6765.1,
+        "resources": {
+          "api-gateway": {
+            "cpuSeconds": 0.01,
+            "rssMiB": 12.3
+          },
+          "calling": {
+            "cpuSeconds": 0.06,
+            "rssMiB": 24.6
+          },
+          "developer-platform": {
+            "cpuSeconds": 4.05,
+            "rssMiB": 32.7
+          },
+          "developer-platform-worker": {
+            "cpuSeconds": 0.01,
+            "rssMiB": 11.1
+          },
+          "meeting-service": {
+            "cpuSeconds": 0.0,
+            "rssMiB": 47.1
+          },
+          "messaging": {
+            "cpuSeconds": 0.05,
+            "rssMiB": 23.2
+          },
+          "numbering": {
+            "cpuSeconds": 0.04,
+            "rssMiB": 18.4
+          },
+          "platform-access": {
+            "cpuSeconds": 0.04,
+            "rssMiB": 17.2
+          },
+          "privacy-relay": {
+            "cpuSeconds": 0.02,
+            "rssMiB": 14.5
+          },
+          "sms-gateway": {
+            "cpuSeconds": 0.06,
+            "rssMiB": 13.5
+          }
+        }
+      },
+      "profile": "usage-ingestion-throughput-and-replay"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "every rebuild during ingestion succeeds",
+          "passed": true
+        },
+        {
+          "criterion": "rollups equal the facts afterwards (0 mismatching rows)",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "concurrentFacts": 10000,
+        "mismatchingRows": 0,
+        "rebuildsDuringIngestion": [
+          [
+            200,
+            0.074413741
+          ],
+          [
+            200,
+            1.2055094450000001
+          ],
+          [
+            200,
+            0.433336926
+          ]
+        ],
+        "wallSeconds": 2.6
+      },
+      "profile": "rollup-rebuild-under-load"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "readiness reports not ready (503) while its database is unavailable",
+          "passed": true
+        },
+        {
+          "criterion": "readiness recovers within 30 s of the database returning",
+          "passed": true
+        },
+        {
+          "criterion": "ingestion attempted during the outage is retried and recorded exactly once",
+          "passed": true
+        },
+        {
+          "criterion": "webhook deliveries of the wave complete after recovery",
+          "passed": true
+        },
+        {
+          "criterion": "no duplicate successful delivery across the outage",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "blockedFor": 10.1,
+        "duplicates": 0,
+        "factsRecorded": 4000,
+        "ingestRetriesDuringOutage": 74,
+        "outageSeconds": 10,
+        "readyDuringOutage": 503,
+        "readyRecoverySeconds": 0.0,
+        "waveDeliveredSecondsAfterUnblock": 0.0
+      },
+      "profile": "developer-platform-database-outage"
+    },
+    {
+      "criteria": [
+        {
+          "criterion": "nothing is sent while the worker is down",
+          "passed": true
+        },
+        {
+          "criterion": "the backlog completes after the worker restarts (leases expire, claims resume)",
+          "passed": true
+        },
+        {
+          "criterion": "no duplicate successful delivery across the interruption",
+          "passed": true
+        }
+      ],
+      "measured": {
+        "backlogWhenStopped": 10,
+        "completedSecondsAfterRestart": 20.36,
+        "duplicates": 0,
+        "restartSeconds": 20.4
+      },
+      "profile": "worker-interruption"
+    }
+  ],
+  "suite": "webhook-usage-load-resilience"
+}

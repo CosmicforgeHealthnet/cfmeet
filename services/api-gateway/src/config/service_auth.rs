@@ -37,6 +37,8 @@ pub struct ServiceAuthRuntime {
     client: Arc<InternalServiceClient>,
     /// Base URLs of the customer-facing upstreams (validated like internal targets).
     upstreams: Arc<std::collections::BTreeMap<String, url::Url>>,
+    /// Platform Access's base URL (readiness probe).
+    authority_base: Option<url::Url>,
 }
 
 impl fmt::Debug for ServiceAuthRuntime {
@@ -63,6 +65,7 @@ impl ServiceAuthRuntime {
             signer,
             client,
             upstreams: Arc::new(Default::default()),
+            authority_base: None,
         })
     }
 
@@ -73,6 +76,17 @@ impl ServiceAuthRuntime {
     ) -> Self {
         self.upstreams = Arc::new(upstreams);
         self
+    }
+
+    /// Declares Platform Access's base URL (its public `/health` is the readiness probe).
+    pub fn with_authority_base(mut self, base: Option<url::Url>) -> Self {
+        self.authority_base = base;
+        self
+    }
+
+    /// Platform Access's base URL, when configured.
+    pub fn authority_base(&self) -> Option<&url::Url> {
+        self.authority_base.as_ref()
     }
 
     /// The base URL of `service`, when configured.
@@ -227,9 +241,15 @@ impl ServiceAuthSettings {
                 upstreams.insert(service.as_str().to_string(), parsed);
             }
         }
+        let authority = self
+            .targets
+            .iter()
+            .find(|(s, _)| s.as_str() == services::PLATFORM_ACCESS)
+            .and_then(|(_, u)| url::Url::parse(u).ok());
         Ok(ServiceAuthRuntime::new(signer, client)
             .map_err(|e| invalid("CF_SERVICE_ID", e.to_string()))?
-            .with_upstreams(upstreams))
+            .with_upstreams(upstreams)
+            .with_authority_base(authority))
     }
 }
 

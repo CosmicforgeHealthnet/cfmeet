@@ -92,6 +92,14 @@ pub async fn get(url: &str, key: &str) -> anyhow::Result<Option<String>> {
     reply(&mut r).await
 }
 
+/// One raw command (`CLIENT PAUSE 5000 ALL`, `CLIENT KILL TYPE normal`, …); returns
+/// the simple / integer / bulk reply.
+pub async fn run(url: &str, args: &[&str]) -> anyhow::Result<Option<String>> {
+    let mut r = connect(url).await?;
+    r.get_mut().write_all(&command(args)).await?;
+    reply(&mut r).await
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
