@@ -23,7 +23,6 @@ use sms_gateway::{
     sms::protection::Protection,
     state::AppState,
 };
-use sms_gateway_migration::MigratorTrait;
 use tracing_subscriber::EnvFilter;
 
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
@@ -143,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             summarize_db_error(&e)
         )
     })?;
-    let pending = sms_gateway_migration::Migrator::get_pending_migrations(&db)
+    let pending = sms_gateway_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {

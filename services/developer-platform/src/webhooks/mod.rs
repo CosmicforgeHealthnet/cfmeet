@@ -139,6 +139,9 @@ pub struct WebhookService {
     settings: Arc<WebhookSettings>,
     client: reqwest::Client,
     clock: Clock,
+    /// `true` once the process is shutting down: the worker finishes the delivery it is
+    /// sending and releases the rest of its claimed batch (never abandons a send).
+    stop: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 pub(crate) fn ts(at: DateTime<Utc>) -> String {
@@ -334,7 +337,19 @@ impl WebhookService {
             settings: Arc::new(settings),
             client,
             clock: Arc::new(Utc::now),
+            stop: None,
         }
+    }
+
+    /// Observes the process's shutdown signal (the worker binary).
+    pub fn with_stop(mut self, stop: tokio::sync::watch::Receiver<bool>) -> Self {
+        self.stop = Some(stop);
+        self
+    }
+
+    /// Whether the process is shutting down.
+    pub fn stopping(&self) -> bool {
+        self.stop.as_ref().is_some_and(|s| *s.borrow())
     }
 
     /// Replaces the delivery client (tests inject a rebinding resolver).

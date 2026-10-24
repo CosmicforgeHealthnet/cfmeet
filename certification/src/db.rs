@@ -44,6 +44,56 @@ pub async fn drop_all(admin: &str, names: &[String]) {
     }
 }
 
+/// Creates the least-privilege RUNTIME role of `database`, granted exactly as
+/// `infra/deployment/postgres/provision-service-database.sh` grants it in production
+/// (CONNECT, USAGE on `public`, DML on its tables and sequences, EXECUTE on its functions;
+/// no DDL, no TEMP), and returns `(role, url)`. Run after the migrations (which apply as
+/// the owner). Every service the stack starts with it proves it runs under its own
+/// production privileges, not as a superuser.
+pub async fn runtime_role(admin: &str, database: &str) -> anyhow::Result<(String, String)> {
+    let role = format!("{database}_rt");
+    let password = uuid::Uuid::new_v4().simple().to_string();
+    let conn = Database::connect(with_db(admin, database))
+        .await
+        .with_context(|| format!("connecting to {database}"))?;
+    for sql in [
+        format!("CREATE ROLE {role} LOGIN NOINHERIT PASSWORD '{password}'"),
+        format!("REVOKE ALL ON DATABASE {database} FROM PUBLIC"),
+        format!("GRANT CONNECT ON DATABASE {database} TO {role}"),
+        "REVOKE CREATE ON SCHEMA public FROM PUBLIC".to_string(),
+        format!("GRANT USAGE ON SCHEMA public TO {role}"),
+        format!("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}"),
+        format!("GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO {role}"),
+        format!("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {role}"),
+    ] {
+        conn.execute_unprepared(&sql)
+            .await
+            .with_context(|| format!("runtime role of {database}"))?;
+    }
+    conn.close().await.ok();
+    let (scheme, rest) = admin
+        .split_once("://")
+        .context("TEST_DATABASE_URL must be a URL")?;
+    let host = rest.rsplit_once('@').map(|(_, h)| h).unwrap_or(rest);
+    let url = with_db(&format!("{scheme}://{role}:{password}@{host}"), database);
+    Ok((role, url))
+}
+
+/// Drops the runtime roles of [`runtime_role`] (after their databases are gone).
+pub async fn drop_roles(admin: &str, roles: &[String]) {
+    if roles.is_empty() {
+        return;
+    }
+    if let Ok(conn) = Database::connect(admin).await {
+        for r in roles {
+            let _ = conn
+                .execute_unprepared(&format!("DROP ROLE IF EXISTS {r}"))
+                .await;
+        }
+        conn.close().await.ok();
+    }
+}
+
 /// Runs `<migration> up` against `url` (each service's OWN migration binary).
 pub fn migrate(bin: &Path, url: &str) -> anyhow::Result<()> {
     let out = std::process::Command::new(bin)

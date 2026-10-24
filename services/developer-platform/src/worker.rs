@@ -71,6 +71,7 @@ pub async fn run_once_with(
                 shadowed = r.shadowed,
                 stale = r.stale,
                 disabled = r.disabled,
+                released = r.released,
                 mode = w.settings().mode.as_str(),
                 "webhook delivery pass"
             );

@@ -144,5 +144,41 @@ async fn the_default_gateway_is_deny_all() {
             "{path}: default deny, the authority is never contacted"
         );
     }
-    child.kill().await.ok();
+    // §21: SIGTERM (a container stop) drains and exits cleanly.
+    let pid = child.id().expect("running").to_string();
+    std::process::Command::new("kill")
+        .args(["-TERM", &pid])
+        .status()
+        .unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+        .await
+        .expect("exits on SIGTERM within 10 s")
+        .unwrap();
+    assert!(status.success(), "graceful exit: {status:?}");
+}
+
+/// Part VI §21 deployment preflight: `--check-config` validates configuration, key file
+/// and the route catalogue for these flags without contacting anything; invalid input
+/// fails closed.
+#[tokio::test]
+async fn check_config_validates_without_serving() {
+    let (_dir, mut env, _) = setup();
+    env.push(("API_GATEWAY_PUBLIC_ROUTING_ENABLED".into(), "true".into()));
+    let out = command(&env).arg("--check-config").output().await.unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["configuration"], "valid");
+    assert!(v["routes"].as_u64().unwrap() > 400, "{v}");
+    assert_eq!(v["controls"]["API_GATEWAY_CENTRAL_USAGE_ENABLED"], false);
+    env.push(("API_GATEWAY_REDIS_TIMEOUT_MS".into(), "1".into()));
+    let out = command(&env).arg("--check-config").output().await.unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "an out-of-range timeout fails the check"
+    );
 }

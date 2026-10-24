@@ -29,11 +29,36 @@ async fn main() -> anyhow::Result<()> {
             "CF_PLATFORM_ACCESS_BASE_URL is required: Platform Access is the identity authority",
         );
     }
-    developer_platform::init_tracing(config.log_format);
     // Fail closed on malformed keys, bundles or targets before touching the network.
+    let check_only = std::env::args().any(|a| a == "--check-config");
+    if !check_only {
+        developer_platform::init_tracing(config.log_format);
+    }
     let service_auth = settings
         .load(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("service authentication configuration error", e));
+    if check_only {
+        // Part VI §21 deployment preflight: the configuration (and every key / bundle
+        // file it names) is valid in THIS environment; nothing is connected or served.
+        println!(
+            "{}",
+            serde_json::json!({
+                "service": "developer-platform",
+                "configuration": "valid",
+                "runtimeEnvironment": service_auth.signer().runtime_environment().as_str(),
+                "controls": {
+                    "DEVELOPER_PLATFORM_GATEWAY_API_ENABLED": config.flags.gateway_api,
+                    "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED": config.flags.production_access_workflow,
+                    "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL": config.flags.production_auto_approval,
+                    "DEVELOPER_PLATFORM_WEBHOOKS_ENABLED": config.webhooks.enabled,
+                    "DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE": config.webhooks.mode.as_str(),
+                    "DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN": config.webhooks.mutations_frozen,
+                },
+                "webhookMigrationTransferKeyConfigured": config.webhooks.transfer_key.is_some(),
+            })
+        );
+        return Ok(());
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %service_auth.signer().runtime_environment(),
@@ -78,9 +103,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "developer platform listening");
     axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(developer_platform::shutdown_signal())
         .await?;
     Ok(())
 }

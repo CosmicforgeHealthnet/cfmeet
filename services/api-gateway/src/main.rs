@@ -12,6 +12,29 @@ use api_gateway::{
 };
 use tracing_subscriber::EnvFilter;
 
+/// Resolves on SIGTERM (container stop) or Ctrl-C: in-flight requests drain.
+async fn shutdown_signal() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = interrupt => {}
+        _ = terminate => {}
+    }
+    tracing::info!("shutdown signal received: draining");
+}
+
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
     eprintln!("api-gateway: {what}: {err}");
     std::process::exit(2);
@@ -27,14 +50,16 @@ async fn main() -> anyhow::Result<()> {
         .quotas
         .validate_for(settings.runtime_environment)
         .unwrap_or_else(|e| fatal("configuration error", e));
+    let check_only = std::env::args().any(|a| a == "--check-config");
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("api_gateway=info,warn"));
-    match config.log_format {
-        LogFormat::Json => tracing_subscriber::fmt()
+    match (check_only, config.log_format) {
+        (true, _) => {}
+        (false, LogFormat::Json) => tracing_subscriber::fmt()
             .with_env_filter(filter)
             .json()
             .init(),
-        LogFormat::Pretty => tracing_subscriber::fmt().with_env_filter(filter).init(),
+        (false, LogFormat::Pretty) => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
     let service_auth = settings
         .load(Arc::new(cf_service_auth::SystemClock))
@@ -45,6 +70,29 @@ async fn main() -> anyhow::Result<()> {
         &config.controls,
     )
     .unwrap_or_else(|e| fatal("route catalogue error", e));
+    if check_only {
+        // Part VI §21 deployment preflight: configuration, key file and route catalogue
+        // are valid in THIS environment; nothing is connected or served.
+        println!(
+            "{}",
+            serde_json::json!({
+                "service": "api-gateway",
+                "configuration": "valid",
+                "runtimeEnvironment": service_auth.signer().runtime_environment().as_str(),
+                "routes": routes.len(),
+                "controls": {
+                    "API_GATEWAY_PUBLIC_ROUTING_ENABLED": config.flags.public_routing,
+                    "API_GATEWAY_WEBSOCKETS_ENABLED": config.flags.websockets,
+                    "API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED": config.controls.central_webhooks,
+                    "API_GATEWAY_CENTRAL_USAGE_ENABLED": config.controls.central_usage,
+                    "API_GATEWAY_DISABLED_DOMAINS": config.controls.disabled_domains.iter().collect::<Vec<_>>(),
+                },
+                "quotaStoreConfigured": config.quotas.configured(),
+                "quotaStoreTimeoutMs": config.quotas.redis_timeout.as_millis() as u64,
+            })
+        );
+        return Ok(());
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %service_auth.signer().runtime_environment(),
@@ -96,9 +144,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "api gateway listening");
     axum::serve(listener, http::app(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
 }

@@ -39,7 +39,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use numbering_migration::MigratorTrait;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::json;
 
@@ -120,7 +119,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    let pending = numbering_migration::Migrator::get_pending_migrations(&state.db).await;
+    let pending = numbering_migration::pending_migrations(&state.db).await;
     let (ok, database, migrations) = match pending {
         Ok(p) if p.is_empty() => (true, "ok", "current"),
         Ok(_) => (false, "ok", "pending"),

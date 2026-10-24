@@ -31,6 +31,8 @@ pub struct DeliveryReport {
     pub stale: usize,
     /// Endpoints disabled automatically during the pass.
     pub disabled: usize,
+    /// Claimed but unsent deliveries handed back because the process is shutting down.
+    pub released: usize,
 }
 
 /// A delivery claimed by this worker (its lease is held until the outcome is written).
@@ -151,8 +153,20 @@ impl WebhookService {
             return Ok(report);
         }
         report.failed += self.dead_letter_expired_at_cap(limit).await?;
-        for c in self.claim_due(limit).await? {
-            let (status, disabled) = self.attempt(&c).await?;
+        let claimed = self.claim_due(limit).await?;
+        let mut released = false;
+        for (i, c) in claimed.iter().enumerate() {
+            if self.stopping() && !released {
+                // Graceful shutdown: the claims not attempted yet are handed back at once
+                // (not left to their lease) — except a delivery on its FINAL attempt,
+                // which is still sent rather than dead-lettered unsent.
+                report.released = self.release(&claimed[i..]).await?;
+                released = true;
+            }
+            if released && (c.attempt_count as u32) < self.settings.max_attempts {
+                continue;
+            }
+            let (status, disabled) = self.attempt(c).await?;
             report.disabled += disabled as usize;
             match status {
                 "SUCCEEDED" => report.succeeded += 1,
@@ -272,24 +286,91 @@ impl WebhookService {
         drop(sent);
         match classified {
             cf_webhooks::retry::Outcome::Delivered => {
-                self.finish(c, Outcome::Succeeded, http, None, started, true)
+                self.record_sent(c, Outcome::Succeeded, http, None, started, None)
                     .await
             }
             cf_webhooks::retry::Outcome::Retry(category) => {
-                self.finish_after(
+                self.record_sent(
                     c,
                     Outcome::Retry,
                     http,
                     Some(category),
                     started,
-                    true,
                     retry_after,
                 )
                 .await
             }
             cf_webhooks::retry::Outcome::Permanent(category) => {
-                self.finish(c, Outcome::Failed, http, Some(category), started, true)
+                self.record_sent(c, Outcome::Failed, http, Some(category), started, None)
                     .await
+            }
+        }
+    }
+
+    /// Hands claimed but never attempted deliveries back (graceful shutdown): their lease
+    /// ends now, so this or another worker reclaims them at once (attempt numbers only
+    /// grow: the released claim's number is skipped, it was never sent). Deliveries on
+    /// their final attempt are not released (they are sent).
+    async fn release(&self, claimed: &[ClaimedDelivery]) -> Result<usize, DbErr> {
+        let now = self.now();
+        let mut released = 0;
+        for c in claimed
+            .iter()
+            .filter(|c| (c.attempt_count as u32) < self.settings.max_attempts)
+        {
+            released += self
+                .db()
+                .execute(stmt(
+                    "UPDATE devplat_webhook_deliveries SET lease_until = $2, updated_at = $2 \
+                     WHERE id = $1 AND status = 'DELIVERING' AND attempt_count = $3",
+                    vec![c.id.into(), now.into(), c.attempt_count.into()],
+                ))
+                .await?
+                .rows_affected() as usize;
+        }
+        if released > 0 {
+            tracing::info!(
+                released,
+                "shutting down: unsent claimed deliveries released"
+            );
+        }
+        Ok(released)
+    }
+
+    /// Records the outcome of a request that was SENT. A database blip must not lose it:
+    /// the delivery would stay DELIVERING until its lease expires and then be sent again
+    /// (a duplicate customer delivery). The write is retried with bounded backoff while
+    /// this worker still holds the lease; past it another worker may own the delivery and
+    /// the conditional update answers STALE instead of overwriting.
+    async fn record_sent(
+        &self,
+        c: &ClaimedDelivery,
+        outcome: Outcome,
+        http: Option<i32>,
+        category: Option<&'static str>,
+        started: DateTime<Utc>,
+        retry_after: Option<std::time::Duration>,
+    ) -> Result<(&'static str, bool), DbErr> {
+        let deadline = started + self.lease() - Duration::seconds(5);
+        let mut wait = std::time::Duration::from_millis(200);
+        loop {
+            match self
+                .finish_after(c, outcome, http, category, started, true, retry_after)
+                .await
+            {
+                Ok(v) => return Ok(v),
+                Err(e)
+                    if transient(&e)
+                        && self.now() + Duration::from_std(wait).unwrap_or_default() < deadline =>
+                {
+                    tracing::warn!(
+                        delivery_id = %c.id,
+                        "recording a sent webhook attempt failed (database unavailable); retrying within the lease"
+                    );
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(std::time::Duration::from_secs(2));
+                }
+                Err(e) => return Err(e),
             }
         }
     }
@@ -445,4 +526,13 @@ impl WebhookService {
         }
         Ok((status, disabled))
     }
+}
+
+/// Database errors that mean "unavailable right now" (connection lost / not acquirable,
+/// statement failed on a dead connection) — worth retrying a sent attempt's record.
+fn transient(e: &DbErr) -> bool {
+    matches!(
+        e,
+        DbErr::Conn(_) | DbErr::ConnectionAcquire(_) | DbErr::Exec(_) | DbErr::Query(_)
+    )
 }

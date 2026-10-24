@@ -19,7 +19,6 @@ use calling::{
     state::{AppState, CallingRuntime},
     telemetry,
 };
-use calling_migration::MigratorTrait;
 use sea_orm::{ConnectOptions, Database};
 
 /// Rate windows older than this are pruned (windows are one minute long).
@@ -75,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         )
     })?;
 
-    let pending = calling_migration::Migrator::get_pending_migrations(&db)
+    let pending = calling_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {

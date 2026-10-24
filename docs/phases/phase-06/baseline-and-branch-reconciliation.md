@@ -55,5 +55,12 @@ documentation behaviour on `main` is not certified together with Part VI.
 
 ## Merged Meeting Service swagger check
 
-Pending in this file until recorded by the closure run (see
-[`backend-final-closure.md`](backend-final-closure.md) §14).
+Recorded by the closure run (scratch worktree of `origin/staging` @ `1b16fc1` with
+`origin/main` @ `454440c` merged, `--no-commit`, discarded afterwards):
+`cargo test --lib swagger` in `services/meeting-service` — **7 passed, 0 failed**
+(`public_specs_exclude_internal_and_privileged_operations`,
+`swagger_serves_only_public_contracts_from_the_doc_host`,
+`every_served_document_resolves_all_references_locally`,
+`peer_openapi_specs_are_valid_and_expose_expected_operations`,
+`swagger_page_pins_its_assets_and_sets_a_restrictive_csp`, and the two server-URL tests).
+The merge itself remains a release gate (plan above).

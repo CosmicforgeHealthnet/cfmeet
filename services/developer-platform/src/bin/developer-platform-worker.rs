@@ -35,16 +35,26 @@ async fn main() -> anyhow::Result<()> {
         interval_ms = config.worker_interval.as_millis() as u64,
         webhooks = config.webhooks.enabled, webhook_mode = config.webhooks.mode.as_str(),
         "developer platform worker started");
+    // SIGTERM / Ctrl-C: the delivery being sent is finished and recorded, the rest of the
+    // claimed batch is released, then the loop exits (no abandoned send to re-deliver).
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        developer_platform::shutdown_signal().await;
+        let _ = stop_tx.send(true);
+    });
+    let webhooks = webhooks.map(|w| w.with_stop(stop_rx.clone()));
+    let mut stopped = stop_rx;
     developer_platform::worker::run_with(
         db,
         config.worker_instance_id,
         runtime,
         config.worker_interval,
         webhooks,
-        async {
-            let _ = tokio::signal::ctrl_c().await;
+        async move {
+            let _ = stopped.wait_for(|s| *s).await;
         },
     )
     .await;
+    tracing::info!("developer platform worker stopped");
     Ok(())
 }

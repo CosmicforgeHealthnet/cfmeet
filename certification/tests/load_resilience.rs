@@ -1508,6 +1508,15 @@ async fn webhook_usage_load_and_resilience() {
     // The Developer Platform issues its own public event ids: progress is counted as
     // NEW successful (subscription, event) pairs.
     let before_wave = successes(&rx, &paths).len();
+    // One endpoint answers slowly (3 s): its deliveries are SENT and still awaiting their
+    // answer when the database goes away, so the worker must record their outcome after
+    // the outage instead of re-sending them when the lease expires.
+    rx.script(
+        "/h3",
+        (0..wave)
+            .map(|_| Reply::status(200).delayed(Duration::from_secs(3)))
+            .collect(),
+    );
     let mut wave_events = BTreeSet::new();
     for _ in 0..wave {
         let e = envelope(&sb.customer);
@@ -1533,6 +1542,13 @@ async fn webhook_usage_load_and_resilience() {
         })
         .collect();
     let outage_for = Duration::from_secs(10);
+    // Let the worker claim and send the wave first (slow endpoint in flight).
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let in_flight = scalar(
+        &dp_db,
+        "SELECT count(*) FROM devplat_webhook_deliveries WHERE status = 'DELIVERING'",
+    )
+    .await;
     block(&config.admin_url, &dp_name).await;
     let blocked_at = Instant::now();
     let ready_during = ready(&stack, stack::DEVELOPER_PLATFORM).await;
@@ -1573,46 +1589,65 @@ async fn webhook_usage_load_and_resilience() {
             ("readiness reports not ready (503) while its database is unavailable", ready_during.status == 503),
             ("readiness recovers within 30 s of the database returning", ready_back.is_some_and(|d| d <= Duration::from_secs(30))),
             ("ingestion attempted during the outage is retried and recorded exactly once", rec3 + dup3 == 8 * batch as u64 && facts3 == 8 * batch as i64),
+            ("deliveries were in flight when the database went away", in_flight >= 1),
             ("webhook deliveries of the wave complete after recovery", wave_done.is_some()),
             ("no duplicate successful delivery across the outage", dupes == 0),
         ],
-        json!({ "outageSeconds": outage_for.as_secs(), "readyDuringOutage": ready_during.status,
+        json!({ "outageSeconds": outage_for.as_secs(), "deliveriesInFlightAtOutage": in_flight,
+                "readyDuringOutage": ready_during.status,
                 "readyRecoverySeconds": secs(ready_back), "ingestRetriesDuringOutage": fails3,
                 "factsRecorded": facts3, "waveDeliveredSecondsAfterUnblock": secs(wave_done),
                 "blockedFor": (unblocked_at.duration_since(blocked_at).as_secs_f64() * 10.0).round() / 10.0, "duplicates": dupes }),
     );
 
     // ---- W6: worker interruption in the middle of a backlog.
-    rx.script("/h1", (0..10).map(|_| Reply::status(503)).collect());
-    let before_backlog = successes(&rx, &paths).len();
-    let mut backlog_events = BTreeSet::new();
-    for _ in 0..wave {
-        let e = envelope(&sb.customer);
-        backlog_events.insert(e["event_id"].as_str().unwrap().to_string());
-        internal(
-            &stack,
-            services::MESSAGING,
-            "/internal/v1/platform/events",
-            &e,
-        )
-        .await;
+    // (a) Graceful stop (SIGTERM, as a container stop): the delivery being sent is
+    //     finished and recorded, the rest of the claimed batch is released — nothing is
+    //     sent twice. One endpoint answers slowly so a send is in flight at the signal.
+    let backlog_round = |rx: &Receiver, slow: &str| {
+        rx.script(
+            slow,
+            (0..wave)
+                .map(|_| Reply::status(200).delayed(Duration::from_secs(2)))
+                .collect(),
+        );
+    };
+    async fn backlog(stack: &Stack, c: &Customer, n: usize) {
+        for _ in 0..n {
+            internal(
+                stack,
+                services::MESSAGING,
+                "/internal/v1/platform/events",
+                &envelope(c),
+            )
+            .await;
+        }
     }
-    tokio::time::sleep(Duration::from_millis(700)).await;
-    assert!(
-        stack.stop(stack::DEVELOPER_PLATFORM_WORKER).await,
-        "worker stopped"
-    );
+    backlog_round(&rx, "/h2");
+    let before_backlog = successes(&rx, &paths).len();
+    backlog(&stack, &sb.customer, wave).await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let graceful = stack
+        .terminate(stack::DEVELOPER_PLATFORM_WORKER, Duration::from_secs(20))
+        .await
+        .expect("worker running");
     let stopped_pending = scalar(&dp_db, "SELECT count(*) FROM devplat_webhook_deliveries WHERE status IN ('PENDING','RETRY_SCHEDULED','DELIVERING')").await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Claims the stopped worker still HOLDS (an unexpired lease): released ones end
+    // their lease at once and are reclaimable by any worker.
+    let stranded = scalar(
+        &dp_db,
+        "SELECT count(*) FROM devplat_webhook_deliveries WHERE status = 'DELIVERING' AND lease_until > now()",
+    )
+    .await;
     let received_while_stopped = rx.all().len();
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
     let quiet = rx.all().len() == received_while_stopped;
     stack
         .restart(stack::DEVELOPER_PLATFORM_WORKER, &[])
         .await
         .expect("worker restarts");
     let resumed = Instant::now();
-    let backlog_target = before_backlog + backlog_events.len() * all_paths.len();
+    let backlog_target = before_backlog + wave * all_paths.len();
     let backlog_done = recovery(Duration::from_secs(300), || {
         let (rx, all_paths) = (&rx, &all_paths);
         async move { successes(rx, all_paths).len() >= backlog_target }
@@ -1621,14 +1656,63 @@ async fn webhook_usage_load_and_resilience() {
     let got = successes(&rx, &paths);
     let dupes = got.values().filter(|n| **n > 1).count();
     report.profile(
-        "worker-interruption",
+        "worker-graceful-stop",
         &[
+            ("the worker exits on SIGTERM within its grace period", graceful),
+            ("no delivery is left held by the stopped worker (unsent claims released)", stranded == 0),
             ("nothing is sent while the worker is down", quiet),
-            ("the backlog completes after the worker restarts (leases expire, claims resume)", backlog_done.is_some()),
-            ("no duplicate successful delivery across the interruption", dupes == 0),
+            ("the backlog completes after the restart", backlog_done.is_some()),
+            ("no duplicate successful delivery across the stop", dupes == 0),
         ],
-        json!({ "backlogWhenStopped": stopped_pending, "completedSecondsAfterRestart": secs(backlog_done),
+        json!({ "backlogWhenStopped": stopped_pending, "claimedLeftBehind": stranded,
+                "completedSecondsAfterRestart": secs(backlog_done),
                 "restartSeconds": (resumed.elapsed().as_secs_f64() * 10.0).round() / 10.0, "duplicates": dupes }),
+    );
+
+    // (b) Crash (SIGKILL) mid-send: a request already on the wire cannot be recorded, so
+    //     it may be sent again after its lease — always as the SAME delivery (same
+    //     CF-Webhook-Delivery-Id / event id) so receivers de-duplicate; nothing is lost.
+    backlog_round(&rx, "/h4");
+    let before_crash = successes(&rx, &paths).len();
+    backlog(&stack, &sb.customer, wave).await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(
+        stack.stop(stack::DEVELOPER_PLATFORM_WORKER).await,
+        "worker killed"
+    );
+    stack
+        .restart(stack::DEVELOPER_PLATFORM_WORKER, &[])
+        .await
+        .expect("worker restarts after the crash");
+    let crash_target = before_crash + wave * all_paths.len();
+    let crash_done = recovery(Duration::from_secs(300), || {
+        let (rx, all_paths) = (&rx, &all_paths);
+        async move { successes(rx, all_paths).len() >= crash_target }
+    })
+    .await;
+    let replays = REPLAYS.lock().unwrap().clone();
+    let mut ids: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+    let mut receipts: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for p in &paths {
+        for r in rx.received(p) {
+            if (200..300).contains(&r.answered) && !replays.contains(r.delivery_id()) {
+                let k = (p.clone(), r.event_id().to_string());
+                ids.entry(k.clone())
+                    .or_default()
+                    .insert(r.delivery_id().to_string());
+                *receipts.entry(k).or_default() += 1;
+            }
+        }
+    }
+    let resent = receipts.values().filter(|n| **n > 1).count();
+    let one_delivery_each = ids.values().all(|d| d.len() == 1);
+    report.profile(
+        "worker-crash",
+        &[
+            ("the backlog completes after a crash and restart (nothing lost)", crash_done.is_some()),
+            ("any re-send after the crash is the SAME delivery (one delivery id per subscription and event)", one_delivery_each),
+        ],
+        json!({ "completedSecondsAfterRestart": secs(crash_done), "resentAfterCrash": resent }),
     );
     stack.teardown().await;
     report.finish();

@@ -217,7 +217,8 @@ pub struct Stack {
     pub secrets: Secrets,
     /// Service name -> base URL.
     pub urls: BTreeMap<String, String>,
-    /// Service name -> database URL (evidence probes only; services never share one).
+    /// Service name -> database URL as the OWNER (evidence probes only; services never
+    /// share one, and each service process connects with its own runtime role).
     pub db_urls: BTreeMap<String, String>,
     pub http: reqwest::Client,
     /// The runtime environment every service of this stack runs in.
@@ -225,9 +226,23 @@ pub struct Stack {
     options: StackOptions,
     specs: BTreeMap<String, LaunchSpec>,
     dbs: Vec<String>,
+    roles: Vec<String>,
     procs: Vec<Service>,
     torn_down: bool,
 }
+
+/// The HTTP processes of every stack (the worker has no HTTP surface).
+pub const STARTED_PROCESSES: &[&str] = &[
+    PLATFORM_ACCESS,
+    DEVELOPER_PLATFORM,
+    API_GATEWAY,
+    MEETING_SERVICE,
+    CALLING,
+    MESSAGING,
+    NUMBERING,
+    SMS_GATEWAY,
+    PRIVACY_RELAY,
+];
 
 /// The service identities started by every stack.
 pub const STARTED: &[&str] = &[
@@ -275,6 +290,7 @@ impl Stack {
             options,
             specs: BTreeMap::new(),
             dbs: Vec::new(),
+            roles: Vec::new(),
             procs: Vec::new(),
             torn_down: false,
             config,
@@ -302,10 +318,17 @@ impl Stack {
     async fn database(&mut self, service: &str, migration: &str) -> anyhow::Result<String> {
         let name = format!("cert_{}_{}", service.replace('-', "_"), self.id);
         let url = db::create(&self.config.admin_url, &name).await?;
-        self.dbs.push(name);
+        self.dbs.push(name.clone());
         db::migrate(&self.bin(migration), &url)?;
         self.db_urls.insert(service.to_string(), url.clone());
-        Ok(url)
+        // §21.1: every service provisioned by `provision-service-database.sh` runs under
+        // its no-DDL runtime role (the Meeting Service keeps its own deployment model).
+        if service == MEETING_SERVICE {
+            return Ok(url);
+        }
+        let (role, runtime_url) = db::runtime_role(&self.config.admin_url, &name).await?;
+        self.roles.push(role);
+        Ok(runtime_url)
     }
 
     /// `CF_*` service-auth variables of `identity` (key file + derived trust bundle).
@@ -413,6 +436,45 @@ impl Stack {
         let _ = tokio::time::timeout(Duration::from_secs(10), old.child.wait()).await;
         let _ = std::fs::rename(&old.log, old.log.with_extension("previous.log"));
         true
+    }
+
+    /// The HTTP status of `process`'s readiness probe (the URL the stack waits on).
+    pub async fn readiness(&self, process: &str) -> anyhow::Result<u16> {
+        let url = self
+            .specs
+            .get(process)
+            .and_then(|s| s.ready.clone())
+            .with_context(|| format!("{process} has no readiness probe"))?;
+        Ok(self
+            .http
+            .get(url)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await?
+            .status()
+            .as_u16())
+    }
+
+    /// Stops `process` GRACEFULLY (SIGTERM, as a container stop does) and waits up to
+    /// `grace` for it to exit (then kills it). `Some(true)` when it exited on its own.
+    pub async fn terminate(&mut self, process: &str, grace: Duration) -> Option<bool> {
+        let i = self.procs.iter().position(|p| p.name == process)?;
+        let mut old = self.procs.remove(i);
+        let graceful = match old.child.id() {
+            Some(pid) => {
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status();
+                tokio::time::timeout(grace, old.child.wait()).await.is_ok()
+            }
+            None => true,
+        };
+        if !graceful {
+            let _ = old.child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(10), old.child.wait()).await;
+        }
+        let _ = std::fs::rename(&old.log, old.log.with_extension("previous.log"));
+        Some(graceful)
     }
 
     /// `(process, pid)` of every running process (resource sampling).
@@ -839,6 +901,7 @@ impl Stack {
             let _ = tokio::time::timeout(Duration::from_secs(5), p.child.wait()).await;
         }
         db::drop_all(&self.config.admin_url, &self.dbs).await;
+        db::drop_roles(&self.config.admin_url, &self.roles).await;
         if !self.config.keep_dir {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
@@ -865,6 +928,7 @@ impl Drop for Stack {
         }
         let admin = self.config.admin_url.clone();
         let dbs = std::mem::take(&mut self.dbs);
+        let roles = std::mem::take(&mut self.roles);
         let _ = std::thread::spawn(move || {
             if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -874,6 +938,7 @@ impl Drop for Stack {
                     // Give the killed processes a moment to release their connections.
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     db::drop_all(&admin, &dbs).await;
+                    db::drop_roles(&admin, &roles).await;
                 });
             }
         })

@@ -32,6 +32,8 @@ const MAX_BODY: usize = 1024 * 1024;
 pub struct Reply {
     pub status: u16,
     pub headers: Vec<(String, String)>,
+    /// How long the answer is held (an endpoint that is slow to answer).
+    pub delay: std::time::Duration,
 }
 
 impl Reply {
@@ -39,7 +41,14 @@ impl Reply {
         Reply {
             status,
             headers: Vec::new(),
+            delay: std::time::Duration::ZERO,
         }
+    }
+
+    /// The answer is held for `delay` before it is written.
+    pub fn delayed(mut self, delay: std::time::Duration) -> Reply {
+        self.delay = delay;
+        self
     }
 
     pub fn with_header(mut self, name: &str, value: &str) -> Reply {
@@ -329,6 +338,9 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> anyhow::Result<()
         out.push_str(&format!("{k}: {v}\r\n"));
     }
     out.push_str("\r\n");
+    if !reply.delay.is_zero() {
+        tokio::time::sleep(reply.delay).await;
+    }
     let mut stream = r.into_inner();
     stream.write_all(out.as_bytes()).await?;
     stream.shutdown().await.ok();

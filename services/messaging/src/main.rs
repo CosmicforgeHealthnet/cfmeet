@@ -15,7 +15,6 @@ use messaging::{
     metrics,
     state::AppState,
 };
-use messaging_migration::MigratorTrait;
 use sea_orm::{ConnectOptions, Database};
 use tracing_subscriber::EnvFilter;
 
@@ -89,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
             summarize_db_error(&e)
         )
     })?;
-    let pending = messaging_migration::Migrator::get_pending_migrations(&db)
+    let pending = messaging_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {

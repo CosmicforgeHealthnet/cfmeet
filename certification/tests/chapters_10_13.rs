@@ -275,13 +275,24 @@ async fn external_onboarding_to_production_journey() {
     assert!(api.iter().all(|f| f["sandbox"] == true
         && f["environmentId"] == env.to_string()
         && f["producer"] == "cfmeet.api-gateway"));
-    // `/v1/usage` and `/v1/limits` are served by the Developer Platform (re-pointed).
-    let u = gw.get("/v1/usage?usageType=API_OPERATION", cred).await;
+    // `/v1/usage` and `/v1/limits` are served by the Developer Platform (re-pointed) in
+    // Calling's published contract (§19.4): Calling's call facts and the request rate;
+    // a unified usage type is not a filter of that contract.
+    let u = gw.get("/v1/usage", cred).await;
     status(&u, 200, "GET /v1/usage (central)");
-    assert!(u.body["data"].is_array(), "{}", u.text);
+    assert!(
+        u.body["data"].is_array() && u.body.get("nextCursor").is_some(),
+        "{}",
+        u.text
+    );
+    status(
+        &gw.get("/v1/usage?usageType=API_OPERATION", cred).await,
+        400,
+        "a ledger usage type is not a /v1/usage filter",
+    );
     let l = gw.get("/v1/limits", cred).await;
     status(&l, 200, "GET /v1/limits (central)");
-    assert!(l.body["limits"].as_array().is_some_and(|a| !a.is_empty()));
+    assert_eq!(l.body["limits"][0]["limit"], "REQUEST_RATE", "{}", l.text);
     // 4. Production access: request -> review -> approve -> activate.
     let project = sb.project_id;
     let st = gw
@@ -1215,10 +1226,27 @@ async fn usage_ledger_producers_journey() {
         .await;
     status(&js, 200, "JSON export");
     assert!(!js.text.contains(&e164));
-    // The credential reads the same ledger through the re-pointed `/v1/usage`.
-    let u = gw.get("/v1/usage?usageType=SMS_SEGMENT", cred).await;
+    // The credential reads the same ledger through the re-pointed `/v1/usage` (Calling's
+    // contract: the seeded public-network leg) and the unified facts view (SMS).
+    let u = gw.get("/v1/usage?usageType=LEG_CONNECTED_TIME", cred).await;
     status(&u, 200, "GET /v1/usage");
-    assert_eq!(u.body["data"][0]["quantity"], 3, "{}", u.text);
+    assert_eq!(u.body["data"][0]["quantity"], 60_000, "{}", u.text);
+    assert_eq!(
+        u.body["data"][0]["cost"]["status"], "ESTIMATED",
+        "{}",
+        u.text
+    );
+    let f = gw
+        .get(
+            &format!(
+                "/v1/environments/{env}/usage/facts?usageType=SMS_SEGMENT&from={}",
+                week_ago()
+            ),
+            cred,
+        )
+        .await;
+    status(&f, 200, "unified facts (credential)");
+    assert_eq!(f.body["items"][0]["quantity"], 3, "{}", f.text);
     stack.teardown().await;
 }
 

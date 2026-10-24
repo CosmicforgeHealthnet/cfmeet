@@ -36,7 +36,6 @@ use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 /// Connects to the Developer Platform's own database and refuses to run with pending
 /// migrations (fail closed).
 pub async fn connect(url: &str, max_connections: u32) -> anyhow::Result<DatabaseConnection> {
-    use developer_platform_migration::MigratorTrait;
     let mut options = ConnectOptions::new(url.to_string());
     options
         .max_connections(max_connections)
@@ -52,14 +51,12 @@ pub async fn connect(url: &str, max_connections: u32) -> anyhow::Result<Database
             db::summarize_db_error(&e)
         )
     })?;
-    let pending = developer_platform_migration::Migrator::get_pending_migrations(&db)
-        .await
-        .map_err(|e| {
-            anyhow!(
-                "cannot read migration state ({})",
-                db::summarize_db_error(&e)
-            )
-        })?;
+    let pending = pending_migrations(&db).await.map_err(|e| {
+        anyhow!(
+            "cannot read migration state ({})",
+            db::summarize_db_error(&e)
+        )
+    })?;
     if !pending.is_empty() {
         return Err(anyhow!(
             "{} Developer Platform migration(s) pending; run `cargo run -p developer-platform-migration -- up` first",
@@ -69,7 +66,37 @@ pub async fn connect(url: &str, max_connections: u32) -> anyhow::Result<Database
     Ok(db)
 }
 
+/// The Developer Platform migrations not yet applied (read-only; works under the runtime
+/// role — see [`developer_platform_migration::pending_migrations`]).
+pub async fn pending_migrations(db: &DatabaseConnection) -> Result<Vec<String>, sea_orm::DbErr> {
+    developer_platform_migration::pending_migrations(db).await
+}
+
 /// Installs the tracing subscriber.
+/// Resolves on SIGTERM (container stop) or Ctrl-C: the API drains its connections and
+/// the worker finishes the delivery it is sending (Part VI §21: graceful shutdown).
+pub async fn shutdown_signal() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = interrupt => {}
+        _ = terminate => {}
+    }
+    tracing::info!("shutdown signal received: draining");
+}
+
 pub fn init_tracing(format: config::LogFormat) {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env()

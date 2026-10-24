@@ -1441,6 +1441,48 @@ async fn concurrent_workers_and_crash_recovery_deliver_each_once() {
     assert_eq!(c.count("SELECT count(*) FROM devplat_webhook_deliveries WHERE failure_category = 'LEASE_EXPIRED_AT_CAP'").await, 1);
 }
 
+/// Graceful shutdown (§21): a stopping worker finishes the delivery it is sending, records
+/// it, and hands the rest of its claimed batch back at once (no wait for the lease, no
+/// re-send); the next pass delivers each remaining one exactly once.
+#[tokio::test]
+async fn a_stopping_worker_finishes_the_send_in_flight_and_releases_the_rest() {
+    let Some((c, w, scope, d)) = world(settings()).await else {
+        return;
+    };
+    let rx = Receiver::start().await;
+    rx.delay(400);
+    subscribe(&c, &d, &rx.url, &["call.requested"]).await;
+    for _ in 0..5 {
+        publish(&c, &w.producers.calling, &call_requested(scope)).await;
+    }
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    let stopping = w.service.clone().with_stop(stop_rx);
+    let pass = tokio::spawn(async move { stopping.deliver_due_once(100).await });
+    tokio::time::sleep(StdDuration::from_millis(150)).await;
+    stop_tx.send(true).unwrap();
+    let report = pass.await.unwrap().unwrap();
+    assert_eq!((report.succeeded, report.released), (1, 4), "{report:?}");
+    assert_eq!(rx.seen().len(), 1, "only the send in flight went out");
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_webhook_deliveries WHERE status = 'DELIVERING' AND lease_until <= now()").await,
+        4,
+        "released claims are reclaimable at once (their lease ended)"
+    );
+    rx.delay(0);
+    let next = w.service.deliver_due_once(100).await.unwrap();
+    assert_eq!(next.succeeded, 4, "{next:?}");
+    let ids: std::collections::BTreeSet<String> = rx
+        .seen()
+        .iter()
+        .map(|r| header(r, signing::HEADER_DELIVERY_ID))
+        .collect();
+    assert_eq!(
+        (rx.seen().len(), ids.len()),
+        (5, 5),
+        "each delivery sent exactly once"
+    );
+}
+
 /// Shadow mode: events are ingested and projected, deliveries recorded SHADOW, nothing is
 /// sent — and switching to active later never sends the shadow backlog.
 #[tokio::test]

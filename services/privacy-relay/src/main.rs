@@ -15,7 +15,6 @@ use privacy_relay::{
     service::RelayService,
     state::AppState,
 };
-use privacy_relay_migration::MigratorTrait;
 use sea_orm::{ConnectOptions, Database};
 use tracing_subscriber::EnvFilter;
 
@@ -110,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
             summarize_db_error(&e).0
         )
     })?;
-    let pending = privacy_relay_migration::Migrator::get_pending_migrations(&db)
+    let pending = privacy_relay_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e).0))?;
     if !pending.is_empty() {

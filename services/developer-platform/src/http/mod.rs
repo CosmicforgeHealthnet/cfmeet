@@ -22,7 +22,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use developer_platform_migration::MigratorTrait;
 use serde_json::json;
 
 use self::{
@@ -93,7 +92,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    let pending = developer_platform_migration::Migrator::get_pending_migrations(&state.db).await;
+    let pending = crate::pending_migrations(&state.db).await;
     let (ok, database, migrations) = match pending {
         Ok(p) if p.is_empty() => (true, "ok", "current"),
         Ok(_) => (false, "ok", "pending"),

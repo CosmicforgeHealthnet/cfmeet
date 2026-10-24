@@ -20,7 +20,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use platform_access_migration::MigratorTrait;
 use serde_json::json;
 
 use self::{
@@ -64,7 +63,7 @@ async fn health() -> impl IntoResponse {
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let db = state.platform.db();
-    let pending = platform_access_migration::Migrator::get_pending_migrations(db).await;
+    let pending = platform_access_migration::pending_migrations(db).await;
     let (status, database, migrations) = match pending {
         Ok(p) if p.is_empty() => (StatusCode::OK, "ok", "current"),
         Ok(_) => (StatusCode::SERVICE_UNAVAILABLE, "ok", "pending"),
