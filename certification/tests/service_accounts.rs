@@ -4,9 +4,10 @@
 //! The journey starts its own certification stack — the REAL service binaries, real
 //! Ed25519 service authentication, one PostgreSQL database per service, real Redis — and
 //! drives it through the real API Gateway with a CF Meet developer session (plus the
-//! operator console for the credential: credential self-service is Section 54, so the
-//! credential of the developer-created service account is issued by the operator console
-//! through the Platform Access operator API, as the other journeys do). Nothing is stubbed.
+//! operator console, which issues the credential of the developer-created service
+//! account through the Platform Access operator API — the operator path; customer
+//! credential self-service (Section 54) is certified by `tests/chapters_10_13.rs`).
+//! Nothing is stubbed.
 //!
 //! Prerequisites and skip rules are those of `tests/journeys.rs`: TEST_DATABASE_URL,
 //! TEST_REDIS_URL and the service binaries (CFMEET_BIN_DIR); without them the journey

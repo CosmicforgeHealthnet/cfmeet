@@ -117,6 +117,19 @@ impl Operator {
         path: &str,
         body: Option<Value>,
     ) -> anyhow::Result<Resp> {
+        self.call_with(audience, base, method, path, body, &[])
+            .await
+    }
+
+    async fn call_with(
+        &self,
+        audience: ServiceId,
+        base: &str,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, String)],
+    ) -> anyhow::Result<Resp> {
         let signed = self
             .signer
             .sign(&OutboundServiceRequest::new_operation(audience))?;
@@ -124,6 +137,9 @@ impl Operator {
             .http
             .request(method, format!("{base}{path}"))
             .header("x-cf-operator", OPERATOR_NAME);
+        for (k, v) in headers {
+            r = r.header(*k, v);
+        }
         for (k, v) in signed.headers().iter() {
             r = r.header(k.as_str(), v.as_bytes());
         }
@@ -168,6 +184,30 @@ impl Operator {
             method,
             &format!("/internal/v1{path}"),
             body,
+        )
+        .await
+    }
+
+    /// A Section 55 production-access decision (`review`, `approve`, `reject`,
+    /// `suspend`, `reinstate`) by the reviewing operator `operator_user` (their CF Meet
+    /// user id: a member of the requesting organization can never decide).
+    pub async fn decide(
+        &self,
+        request: Uuid,
+        command: &str,
+        body: Option<Value>,
+        operator_user: Option<Uuid>,
+    ) -> anyhow::Result<Resp> {
+        let headers: Vec<(&str, String)> = operator_user
+            .map(|u| vec![("x-cf-operator-user-id", u.to_string())])
+            .unwrap_or_default();
+        self.call_with(
+            ServiceId::developer_platform(),
+            &self.dp,
+            Method::POST,
+            &format!("/internal/v1/operator/production-access-requests/{request}/{command}"),
+            body,
+            &headers,
         )
         .await
     }
@@ -653,6 +693,59 @@ pub struct Sandbox {
     pub customer: Customer,
 }
 
+/// Section 54 self-service: allows `scopes` on the project (STANDARD scopes, SANDBOX /
+/// TEST), creates a service account in `environment` and a credential with exactly
+/// `scopes` — all through the public gateway with the member's session (no operator,
+/// no engineer-issued secret). The secret is the one-time value of the create response.
+pub async fn self_service_credential(
+    gw: &Gateway,
+    session: Auth<'_>,
+    tenant: Uuid,
+    project: Uuid,
+    environment: Uuid,
+    scopes: &[&str],
+    name: &str,
+) -> anyhow::Result<Customer> {
+    for s in scopes {
+        gw.post(
+            &format!("/v1/projects/{project}/scopes"),
+            session,
+            json!({ "scope": s }),
+        )
+        .await
+        .expect(200, &format!("POST /v1/projects/{{id}}/scopes ({s})"))?;
+    }
+    let sa = gw
+        .post(
+            &format!("/v1/environments/{environment}/service-accounts"),
+            session,
+            json!({ "name": name }),
+        )
+        .await
+        .expect(201, "POST /v1/environments/{id}/service-accounts")?
+        .uuid("/id");
+    let issued = gw
+        .post(
+            &format!("/v1/environments/{environment}/service-accounts/{sa}/credentials"),
+            session,
+            json!({ "scopes": scopes, "label": name }),
+        )
+        .await
+        .expect(
+            201,
+            "POST /v1/environments/{id}/service-accounts/{sa}/credentials",
+        )?;
+    Ok(Customer {
+        tenant_id: tenant,
+        application_id: project,
+        environment_id: environment,
+        service_account_id: sa,
+        credential_id: issued.uuid("/credential/id"),
+        secret: issued.str("/secret"),
+        scopes: scopes.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
 pub async fn developer_sandbox(
     stack: &crate::Stack,
     email: &str,
@@ -694,14 +787,18 @@ pub async fn developer_sandbox(
         .await
         .expect(201, "POST /v1/projects/{id}/environments (SANDBOX)")?;
     let environment_id = env.uuid("/id");
-    // The Developer Platform has no credential self-service yet (no public credential
-    // route exists in packages/contracts/platform-developer/http/v1.openapi.json): the
-    // credential of the developer-created environment is issued by the operator console
-    // through the Platform Access operator API.
-    let customer = stack
-        .operator()
-        .credential_for(organization_id, project_id, environment_id, scopes)
-        .await?;
+    // Section 54: credential self-service through the Developer Platform (delegated to
+    // Platform Access); no operator issues the developer's secret.
+    let customer = self_service_credential(
+        &gw,
+        session,
+        organization_id,
+        project_id,
+        environment_id,
+        scopes,
+        "backend",
+    )
+    .await?;
     Ok(Sandbox {
         user,
         organization_id,

@@ -1336,16 +1336,33 @@ async fn production_approval_journey() {
         .await;
     status(&envs, 200, "environments");
     assert!(!envs.text.contains("PRODUCTION"), "{}", envs.text);
-    // 2. There is no production-access request workflow in the current Developer
-    //    Platform: such routes are not in the gateway catalogue (default deny).
-    for p in [
-        format!("/v1/projects/{}/production-access", sb.project_id),
-        format!("/v1/projects/{}/production-access-requests", sb.project_id),
-        "/v1/production-access-requests".to_string(),
-    ] {
-        status(&gw.post(&p, session, json!({})).await, 404, &p);
-    }
-    // 3. The operator creates the PRODUCTION environment through Platform Access.
+    // 2. Production access goes through the Section 55 workflow (certified end to end
+    //    by tests/chapters_10_13.rs): nothing can be activated without an approved
+    //    request, and there is no collection-level request route.
+    let r = gw
+        .post(
+            &format!("/v1/production-access-requests/{}/activate", Uuid::new_v4()),
+            session,
+            json!({}),
+        )
+        .await;
+    status(&r, 404, "activation of an unknown request");
+    status(
+        &gw.post("/v1/production-access-requests", session, json!({}))
+            .await,
+        404,
+        "/v1/production-access-requests",
+    );
+    let st = gw
+        .get(
+            &format!("/v1/projects/{}/production-access", sb.project_id),
+            session,
+        )
+        .await;
+    status(&st, 200, "production-access status");
+    assert_eq!(st.body["state"], "SANDBOX_READY");
+    // 3. The operator console can still create a PRODUCTION environment through
+    //    Platform Access directly (operator path, outside the customer workflow).
     let prod = operator
         .environment(sb.project_id, "PRODUCTION")
         .await
