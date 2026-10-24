@@ -1,3 +1,5 @@
 # Written by `make certification-stack` / `cfmeet-cert-stack up` (contains test secrets).
 stack-env.json
 target/
+# A local Redis snapshot (redis-server started in this directory); never committed.
+dump.rdb
