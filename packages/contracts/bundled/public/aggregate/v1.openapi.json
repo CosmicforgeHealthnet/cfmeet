@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.12.0"
+      "description": "cfmeet.calling.http-api 1.13.0"
     },
     {
       "name": "privacy-relay",
@@ -10772,6 +10772,79 @@
         ]
       }
     },
+    "/v1/calling/limits": {
+      "get": {
+        "operationId": "getCallingLimits",
+        "summary": "Get Calling limit status (service-specific view)",
+        "description": "Calling's own limit status of the authenticated credential - identical to GET /v1/limits while Calling serves it. Part VI §19.4: preserved for existing clients and never re-pointed by the API Gateway's central-usage switch. The authenticated credential's limits (Part G §70): request rate, concurrent calls and telecom spend (daily / monthly). Each reports every configured level of the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL (the environment's spend policy for spend) and the binding level — the one with the least remaining headroom; the most restrictive applicable ceiling denies first. Tenant, application, service account and credential always come from the authenticated credential and are never parameters. With `principalId` (also needs `principals.read`) the principal's own PRINCIPAL levels are added; the principal must resolve in the caller's own scope, otherwise 404. No level carries an identifier.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "usage.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "usage.read",
+        "responses": {
+          "200": {
+            "description": "Limit status.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.platform.usage.v1.Limits"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.ServiceUnavailable"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          }
+        },
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "A principal of the caller's own application environment whose PRINCIPAL levels to include (requires principals.read).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.getCallingLimits",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ],
+        "tags": [
+          "calling"
+        ]
+      }
+    },
     "/v1/calling/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueOwnMediaCredential",
@@ -10946,6 +11019,137 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.mintSignalingCredential",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ],
+        "tags": [
+          "calling"
+        ]
+      }
+    },
+    "/v1/calling/usage": {
+      "get": {
+        "operationId": "listCallingUsage",
+        "summary": "List Calling usage facts (service-specific view)",
+        "description": "The Calling-owned usage ledger of the authenticated application environment - identical to GET /v1/usage while Calling serves it. Part VI §19.4: this service-specific path is preserved for existing clients and is never re-pointed by the API Gateway's central-usage switch (GET /v1/usage then answers from the Developer Platform's unified ledger). Final consumption facts of the authenticated application environment (Part G §69), oldest first by recording time, keyset-paginated. A ledger, not a bill: public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN — an UNKNOWN cost has no amount). Never a provider identifier, telephone number, SIP URI or object key.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "usage.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "usage.read",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Recorded at or after this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Recorded before this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "usageType",
+            "in": "query",
+            "required": false,
+            "description": "Only this usage type.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CALL_CONNECTED_TIME",
+                "PARTICIPANT_CONNECTED_TIME",
+                "SESSION_CONNECTED_TIME",
+                "LEG_CONNECTED_TIME",
+                "VOICEMAIL_ARTIFACT",
+                "RECORDING_ARTIFACT"
+              ]
+            }
+          },
+          {
+            "name": "resourceClass",
+            "in": "query",
+            "required": false,
+            "description": "Only this resource class.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "APP_MEDIA",
+                "PUBLIC_NETWORK",
+                "STORAGE"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of usage facts.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.platform.usage.v1.UsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.ServiceUnavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.listCallingUsage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ],

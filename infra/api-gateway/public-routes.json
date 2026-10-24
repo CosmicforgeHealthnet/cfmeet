@@ -726,6 +726,18 @@
     },
     {
       "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calling/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
       "method": "POST",
       "path": "/v1/webhook-deliveries/{delivery_id}/replay",
       "class": "PUBLIC_CUSTOMER"

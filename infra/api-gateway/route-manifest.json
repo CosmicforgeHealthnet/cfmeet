@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 36,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 497,
+    "PUBLIC_CUSTOMER": 499,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -2251,6 +2251,20 @@
       "forwardHeaders": []
     },
     {
+      "id": "calling.getCallingLimits",
+      "domain": "calling",
+      "method": "GET",
+      "pattern": "/v1/calling/limits",
+      "protocol": "REST",
+      "upstream": "cfmeet.calling",
+      "upstreamPath": "/v1/calling/limits",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
+    },
+    {
       "id": "calling.issueOwnMediaCredential",
       "domain": "calling",
       "method": "POST",
@@ -2289,6 +2303,20 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "calls.write"
+    },
+    {
+      "id": "calling.listCallingUsage",
+      "domain": "calling",
+      "method": "GET",
+      "pattern": "/v1/calling/usage",
+      "protocol": "REST",
+      "upstream": "cfmeet.calling",
+      "upstreamPath": "/v1/calling/usage",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
     },
     {
       "id": "calling.listCalls",
@@ -7592,6 +7620,14 @@
     {
       "domain": "calling",
       "contract": "cfmeet.calling.http-api",
+      "operationId": "getCallingLimits",
+      "method": "GET",
+      "path": "/v1/calling/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "contract": "cfmeet.calling.http-api",
       "operationId": "connectMediaLegacy",
       "method": "GET",
       "path": "/v1/calling/media/rtc",
@@ -7647,6 +7683,14 @@
       "operationId": "mintSignalingCredential",
       "method": "POST",
       "path": "/v1/calling/signaling-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "contract": "cfmeet.calling.http-api",
+      "operationId": "listCallingUsage",
+      "method": "GET",
+      "path": "/v1/calling/usage",
       "class": "PUBLIC_CUSTOMER"
     },
     {

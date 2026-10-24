@@ -1133,16 +1133,30 @@ async fn environment_limits(
     Ok(Json(crate::ledger::views::limits(&s, &c, id).await?))
 }
 
+// Calling's contract answers a malformed or unknown query parameter with 400
+// VALIDATION_ERROR (never a plain-text extractor rejection).
 async fn compat_usage(
     State(s): State<AppState>,
     c: Caller,
-    Query(q): Query<crate::ledger::views::CompatUsageQuery>,
+    q: Result<
+        Query<crate::ledger::views::CompatUsageQuery>,
+        axum::extract::rejection::QueryRejection,
+    >,
 ) -> ApiResult<Json<Value>> {
+    let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
     Ok(Json(crate::ledger::views::compat_usage(&s, &c, q).await?))
 }
 
-async fn compat_limits(State(s): State<AppState>, c: Caller) -> ApiResult<Json<Value>> {
-    Ok(Json(crate::ledger::views::compat_limits(&s, &c).await?))
+async fn compat_limits(
+    State(s): State<AppState>,
+    c: Caller,
+    q: Result<
+        Query<crate::ledger::views::CompatLimitsQuery>,
+        axum::extract::rejection::QueryRejection,
+    >,
+) -> ApiResult<Json<Value>> {
+    let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
+    Ok(Json(crate::ledger::views::compat_limits(&s, &c, q).await?))
 }
 
 use sea_orm::ConnectionTrait;

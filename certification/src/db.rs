@@ -65,6 +65,33 @@ pub fn migrate(bin: &Path, url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runs `<migration> <args…>` against `url` and returns its output (stdout, then stderr) (the
+/// migration CLI of every service: `status`, `up [-n N]`, `down [-n N]`). `Err` carries
+/// both output streams when the command fails (a guarded down refuses this way).
+pub fn migration(bin: &Path, url: &str, args: &[&str]) -> anyhow::Result<String> {
+    let out = std::process::Command::new(bin)
+        .args(args)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("DATABASE_URL", url)
+        .output()
+        .with_context(|| format!("running {}", bin.display()))?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !out.status.success() {
+        bail!(
+            "{} {} failed ({}):\n{text}",
+            bin.display(),
+            args.join(" "),
+            out.status
+        );
+    }
+    Ok(text)
+}
+
 /// A read-only probe connection (usage counters and similar evidence).
 pub async fn connect(url: &str) -> anyhow::Result<DatabaseConnection> {
     Ok(Database::connect(url).await?)

@@ -30,6 +30,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/usage", get(list_usage))
         .route("/v1/limits", get(get_limits))
+        // Part VI §19.4: the same Calling-owned views at service-specific paths, preserved
+        // for existing clients; the API Gateway's central-usage switch never re-points them.
+        .route("/v1/calling/usage", get(list_usage))
+        .route("/v1/calling/limits", get(get_limits))
 }
 
 const USAGE_TYPES: &[&str] = &[

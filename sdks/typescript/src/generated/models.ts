@@ -1759,6 +1759,11 @@ export namespace Calling {
       params: { path: { recording_id: string }; query?: { principalId?: Uuid } };
       response: CallRecording;
     };
+    /** GET /v1/calling/limits — scope usage.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    getCallingLimits: {
+      params: { query?: { principalId?: string } };
+      response: Limits;
+    };
     /** GET /v1/enterprise/departments/{department_id} — scope enterprise.config.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     getDepartment: {
       params: { path: { department_id: string } };
@@ -1879,6 +1884,12 @@ export namespace Calling {
     listCallRecordings: {
       params: { path: { call_id: string }; query?: { principalId?: Uuid } };
       response: CallRecordingList;
+    };
+    /** GET /v1/calling/usage — scope usage.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    listCallingUsage: {
+      params: { query?: { from?: string; to?: string; usageType?: "CALL_CONNECTED_TIME" | "PARTICIPANT_CONNECTED_TIME" | "SESSION_CONNECTED_TIME" | "LEG_CONNECTED_TIME" | "VOICEMAIL_ARTIFACT" | "RECORDING_ARTIFACT"; resourceClass?: "APP_MEDIA" | "PUBLIC_NETWORK" | "STORAGE"; limit?: number; cursor?: string } };
+      response: UsageList;
+      item: NonNullable<(UsageList)["data"]>[number];
     };
     /** GET /v1/calls — scope calls.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     listCalls: {

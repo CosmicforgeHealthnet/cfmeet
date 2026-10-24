@@ -101,7 +101,12 @@ response and request `$defs`.
 * Usage daily rollups update as producers export. A domain's usage appears after its
   exporter runs (off by default: `CFMEET_USAGE_EXPORT_ENABLED`). `/v1/usage` and
   `/v1/limits` are served by the Developer Platform only while
-  `API_GATEWAY_CENTRAL_USAGE_ENABLED` is on.
+  `API_GATEWAY_CENTRAL_USAGE_ENABLED` is on, and always keep Calling's published
+  contract (machine credentials only; Calling call facts and the request rate). The
+  console should read the unified views (`/v1/environments/{id}/usage…`,
+  `/v1/environments/{id}/limits`) — not these compatibility paths. Calling's full
+  detail stays at `GET /v1/calling/usage` and `GET /v1/calling/limits` (Part VI §19.4,
+  added 2026-10-24; public operation count 497 → 499).
 * Webhook console routes are session-only. Machines use the `/v1/webhooks*` machine API.
 * Operator decisions (production review/approval, incidents, tiers) are operator-console
   APIs under `/internal/v1/operator/**`. They are never available from the customer

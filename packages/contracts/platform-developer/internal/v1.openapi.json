@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.7.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health."
+    "version": "1.8.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits."
   },
   "paths": {
     "/health": {
@@ -3175,12 +3175,13 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55 ownership migration: Calling's public `GET /v1/usage` path served by the Developer Platform once the API Gateway re-points it (`API_GATEWAY_CENTRAL_USAGE_ENABLED`; rollback: unset). The credential's own environment's facts (`usage.read`). Permission `developer-request.forward`.",
+        "description": "Section 55 / §19.4 ownership migration: Calling's public `GET /v1/usage` path served by the Developer Platform once the API Gateway re-points it (`API_GATEWAY_CENTRAL_USAGE_ENABLED`; rollback: unset). Keeps the published contract (`listUsage`): the credential's own environment's Calling call facts from the unified ledger (CALL_MINUTE_APP -> CALL_CONNECTED_TIME, CALL_MINUTE_PUBLIC_NETWORK -> LEG_CONNECTED_TIME, same ids, order and cost evidence); participant / session / voicemail / recording detail is served by Calling at `GET /v1/calling/usage`. `usage.read`. Permission `developer-request.forward`.",
         "parameters": [
           {
             "name": "from",
             "in": "query",
             "required": false,
+            "description": "Recorded at or after this instant (RFC 3339).",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -3190,6 +3191,7 @@
             "name": "to",
             "in": "query",
             "required": false,
+            "description": "Recorded before this instant (RFC 3339).",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -3199,14 +3201,38 @@
             "name": "usageType",
             "in": "query",
             "required": false,
+            "description": "Only this usage type.",
             "schema": {
-              "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UsageType"
+              "type": "string",
+              "enum": [
+                "CALL_CONNECTED_TIME",
+                "PARTICIPANT_CONNECTED_TIME",
+                "SESSION_CONNECTED_TIME",
+                "LEG_CONNECTED_TIME",
+                "VOICEMAIL_ARTIFACT",
+                "RECORDING_ARTIFACT"
+              ]
+            }
+          },
+          {
+            "name": "resourceClass",
+            "in": "query",
+            "required": false,
+            "description": "Only this resource class.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "APP_MEDIA",
+                "PUBLIC_NETWORK",
+                "STORAGE"
+              ]
             }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
+            "description": "Page size (1-100, default 50).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3217,6 +3243,7 @@
             "name": "cursor",
             "in": "query",
             "required": false,
+            "description": "Opaque cursor from the previous page.",
             "schema": {
               "type": "string"
             }
@@ -3224,11 +3251,11 @@
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "A page of usage facts (the published Calling contract).",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "https://schemas.cfmeet.com/platform/usage/v1.schema.json#/$defs/UsageList"
                 }
               }
             }
@@ -3259,15 +3286,26 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55 ownership migration: Calling's public `GET /v1/limits` path (Calling's LimitsView shape) served by the Developer Platform once re-pointed (`usage.read`). Permission `developer-request.forward`.",
-        "parameters": [],
+        "description": "Section 55 / §19.4 ownership migration: Calling's public `GET /v1/limits` path served by the Developer Platform once the API Gateway re-points it. Keeps the published contract (`getLimits`): REQUEST_RATE (MINUTE) of the credential's effective plan entitlement (the limit the gateway enforces; current = API operations the ledger recorded this minute). Concurrent calls, telecom spend and the PRINCIPAL axis (`principalId`, refused here with VALIDATION_ERROR) are Calling's: `GET /v1/calling/limits`. `usage.read`. Permission `developer-request.forward`.",
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Refused (400 VALIDATION_ERROR): the PRINCIPAL axis is served by Calling at GET /v1/calling/limits.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "Limit status (the published Calling contract).",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "https://schemas.cfmeet.com/platform/usage/v1.schema.json#/$defs/Limits"
                 }
               }
             }

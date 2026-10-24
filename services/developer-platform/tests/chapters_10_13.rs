@@ -1155,25 +1155,162 @@ async fn usage_facts_are_ingested_once_rolled_up_queried_exported_and_reconciled
         )
         .await;
     assert_eq!(own.status, StatusCode::OK, "{}", own.json);
-    let compat = c
+    // Part VI §19.4: `/v1/usage` and `/v1/limits` keep Calling's PUBLISHED contract when
+    // the gateway re-points them here. Calling's call facts (its exporter's source ids,
+    // call / leg refs and cost evidence) project back to the contract's records; facts the
+    // contract cannot carry (another producer, a non-Calling source id) are not listed.
+    let (app_record, leg_record, call_id, leg_id) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let mut app = fact(
+        scope,
+        &format!("call_usage:{app_record}"),
+        "CALL_MINUTE_APP",
+        "MILLISECOND",
+        120_000,
+    );
+    app.resource_ref = format!("call:{call_id}");
+    app.dimensions
+        .insert("callId".into(), json!(call_id.to_string()));
+    let mut leg = fact(
+        scope,
+        &format!("call_usage:{leg_record}"),
+        "CALL_MINUTE_PUBLIC_NETWORK",
+        "MILLISECOND",
+        60_000,
+    );
+    leg.resource_ref = format!("call_leg:{leg_id}");
+    leg.occurred_at = app.occurred_at + chrono::Duration::seconds(1);
+    for (k, v) in [
+        ("callId", json!(call_id.to_string())),
+        ("routeClass", json!("PSTN")),
+        ("destinationCountry", json!("US")),
+        ("billableSeconds", json!(60)),
+        ("costEvidence", json!("ESTIMATED")),
+        ("costMinor", json!(12)),
+        ("costCurrency", json!("USD")),
+    ] {
+        leg.dimensions.insert(k.into(), v);
+    }
+    let mut rec = fact(
+        scope,
+        &format!("call_usage:{}", Uuid::new_v4()),
+        "RECORDING_MINUTE",
+        "MILLISECOND",
+        30_000,
+    );
+    rec.dimensions
+        .insert("recordingDomain".into(), json!("CALL"));
+    let r = c
+        .internal(&producers.calling.clone(), Method::POST, "/internal/v1/usage/facts",
+            Some(json!({ "stream": "calling.usage", "facts": [app.normalized().sealed(), leg.normalized().sealed(), rec.normalized().sealed()],
+                         "advanceTo": { "at": chrono::Utc::now(), "key": "k2" } })))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["recorded"], 3, "{}", r.json);
+    let compat = c.req(As::Machine(&m), Method::GET, "/v1/usage", None).await;
+    assert_eq!(compat.status, StatusCode::OK, "{}", compat.json);
+    conforms(
+        "platform/usage/v1.schema.json#/$defs/UsageList",
+        &compat.json,
+    );
+    let data = compat.json["data"].as_array().unwrap();
+    assert_eq!(
+        data.len(),
+        2,
+        "only Calling's metered call facts: {}",
+        compat.json
+    );
+    assert_eq!(data[0]["id"], json!(app_record));
+    assert_eq!(data[0]["callId"], json!(call_id));
+    assert_eq!(data[0]["usageType"], "CALL_CONNECTED_TIME");
+    assert_eq!(data[0]["resourceClass"], "APP_MEDIA");
+    assert_eq!(
+        (data[0]["quantity"].as_i64(), data[0]["unit"].as_str()),
+        (Some(120_000), Some("MILLISECONDS"))
+    );
+    assert_eq!(data[1]["id"], json!(leg_record));
+    assert_eq!(data[1]["usageType"], "LEG_CONNECTED_TIME");
+    assert_eq!(data[1]["legId"], json!(leg_id));
+    assert_eq!(data[1]["routeClass"], "PSTN");
+    assert_eq!(data[1]["destinationCountry"], "US");
+    assert_eq!(data[1]["billableSeconds"], 60);
+    assert_eq!(
+        data[1]["cost"],
+        json!({ "status": "ESTIMATED", "amountMinor": 12, "currency": "USD" })
+    );
+    // Calling's filters and paging, Calling's validation.
+    let n = |path: &'static str| {
+        let (c, m) = (&c, &m);
+        async move {
+            let r = c.req(As::Machine(m), Method::GET, path, None).await;
+            assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.json);
+            conforms("platform/usage/v1.schema.json#/$defs/UsageList", &r.json);
+            r.json["data"].as_array().unwrap().len()
+        }
+    };
+    assert_eq!(n("/v1/usage?usageType=LEG_CONNECTED_TIME").await, 1);
+    assert_eq!(n("/v1/usage?resourceClass=APP_MEDIA").await, 1);
+    assert_eq!(
+        n("/v1/usage?resourceClass=STORAGE").await,
+        0,
+        "artifacts stay at /v1/calling/usage"
+    );
+    assert_eq!(n("/v1/usage?usageType=VOICEMAIL_ARTIFACT").await, 0);
+    assert_eq!(
+        n("/v1/usage?usageType=CALL_CONNECTED_TIME&resourceClass=PUBLIC_NETWORK").await,
+        0
+    );
+    let p1 = c
+        .req(As::Machine(&m), Method::GET, "/v1/usage?limit=1", None)
+        .await;
+    assert_eq!(p1.json["data"][0]["id"], json!(app_record));
+    let cursor = p1.json["nextCursor"]
+        .as_str()
+        .expect("a next page")
+        .to_string();
+    let p2 = c
         .req(
             As::Machine(&m),
             Method::GET,
-            "/v1/usage?usageType=SMS_SEGMENT",
+            &format!("/v1/usage?limit=1&cursor={cursor}"),
             None,
         )
         .await;
-    assert_eq!(compat.status, StatusCode::OK, "{}", compat.json);
-    assert_eq!(compat.json["data"].as_array().unwrap().len(), 1);
+    assert_eq!(p2.json["data"][0]["id"], json!(leg_record), "{}", p2.json);
+    assert!(p2.json["nextCursor"].is_null(), "{}", p2.json);
+    for bad in [
+        "/v1/usage?usageType=SMS_SEGMENT",
+        "/v1/usage?resourceClass=BILLING",
+        "/v1/usage?limit=0",
+        "/v1/usage?tenantId=x",
+        "/v1/usage?from=yesterday",
+        "/v1/usage?cursor=not-a-cursor",
+        "/v1/limits?principalId=00000000-0000-0000-0000-000000000000",
+        "/v1/limits?environmentId=x",
+    ] {
+        let r = c.req(As::Machine(&m), Method::GET, bad, None).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}: {}", r.json);
+        assert_eq!(
+            r.json["error"]["code"], "VALIDATION_ERROR",
+            "{bad}: {}",
+            r.json
+        );
+    }
     let lim = c
         .req(As::Machine(&m), Method::GET, "/v1/limits", None)
         .await;
     assert_eq!(lim.status, StatusCode::OK, "{}", lim.json);
-    assert!(lim.json["limits"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|l| l["limit"] == "API_REQUESTS_PER_MINUTE"));
+    conforms("platform/usage/v1.schema.json#/$defs/Limits", &lim.json);
+    let rate = &lim.json["limits"][0];
+    assert_eq!(
+        (rate["limit"].as_str(), rate["window"].as_str()),
+        (Some("REQUEST_RATE"), Some("MINUTE"))
+    );
+    assert!(rate["ceiling"].as_i64().unwrap() > 0, "{}", lim.json);
     let test_env = c
         .req(
             As::User(&owner),

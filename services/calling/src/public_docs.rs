@@ -307,6 +307,8 @@ fn calling_tag(path: &str) -> &'static str {
         "Service"
     } else if path == "/v1/calling/history" {
         "Call History"
+    } else if path == "/v1/calling/usage" || path == "/v1/calling/limits" {
+        "Usage & Limits"
     } else if path.starts_with("/v1/calling/") {
         "Realtime Calling"
     } else if path.starts_with("/v1/webhooks") || path.starts_with("/v1/webhook-deliveries") {
@@ -386,13 +388,15 @@ mod tests {
         let document = public_calling_document();
         let paths = document["paths"].as_object().expect("paths");
 
-        assert_eq!(paths.len(), 83);
-        assert_eq!(operation_count(&document), 127);
+        assert_eq!(paths.len(), 85);
+        assert_eq!(operation_count(&document), 129);
         assert!(paths.contains_key("/v1/calls"));
         assert!(paths.contains_key("/v1/calling/endpoints"));
         assert!(paths.contains_key("/v1/enterprise/extensions"));
         assert!(paths.contains_key("/v1/webhooks"));
         assert!(paths.contains_key("/v1/usage"));
+        assert!(paths.contains_key("/v1/calling/usage"));
+        assert!(paths.contains_key("/v1/calling/limits"));
         assert!(paths.keys().all(|path| !path.starts_with("/internal/")));
 
         let security = document["components"]["securitySchemes"]

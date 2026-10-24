@@ -8,7 +8,7 @@
 //! protected contacts or content: facts carry safe refs and public dimensions only
 //! (cost evidence stays internal).
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Timelike, Utc};
 use sea_orm::ConnectionTrait;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -584,7 +584,22 @@ pub async fn warnings(
 // ---------------------------------------------------------------------------------------
 // Machine compatibility: `/v1/usage` and `/v1/limits` (Calling's public paths), served by
 // the Developer Platform once the API Gateway's `API_GATEWAY_CENTRAL_USAGE_ENABLED`
-// re-points them (rollback: unset the flag; Calling's legacy routes stay intact).
+// re-points them (rollback: unset the flag; Calling's routes stay intact).
+//
+// Part VI §19.4: the paths keep their PUBLISHED contract (`cfmeet.calling.http-api`
+// `listUsage` / `getLimits`, `platform/usage/v1.schema.json` `UsageList` / `Limits`), so
+// existing clients and the generated SDKs keep decoding them after the switch:
+//
+// * `/v1/usage` projects the unified ledger's Calling-produced call-minute facts back to
+//   the contract's records — `CALL_MINUTE_APP` → `CALL_CONNECTED_TIME`,
+//   `CALL_MINUTE_PUBLIC_NETWORK` → `LEG_CONNECTED_TIME` (same record id, call id, leg id,
+//   quantity, route class, destination country, billable seconds, cost evidence and
+//   recording time as Calling's own view; same keyset order). Calling detail the ledger
+//   does not meter (participant / session connected time, voicemail and recording
+//   artifacts) stays at Calling's preserved service-specific path `/v1/calling/usage`.
+// * `/v1/limits` reports `REQUEST_RATE` (`MINUTE`) from the effective plan entitlement the
+//   gateway enforces; concurrent calls, telecom spend and the PRINCIPAL axis are Calling's
+//   domain limits and stay at `/v1/calling/limits` (`principalId` is refused here).
 // ---------------------------------------------------------------------------------------
 
 fn machine(caller: &Caller) -> Result<&crate::control::MachineCaller, ApiError> {
@@ -593,6 +608,29 @@ fn machine(caller: &Caller) -> Result<&crate::control::MachineCaller, ApiError> 
         Principal::Human(_) => Err(ApiError(ErrorCode::AuthenticationRequired)),
     }
 }
+
+/// `(Calling usage type, resource class, ledger usage type)` of the call facts the
+/// unified ledger meters (Calling's exporter mapping, reversed).
+pub const COMPAT_USAGE_TYPES: &[(&str, &str, &str)] = &[
+    ("CALL_CONNECTED_TIME", "APP_MEDIA", "CALL_MINUTE_APP"),
+    (
+        "LEG_CONNECTED_TIME",
+        "PUBLIC_NETWORK",
+        "CALL_MINUTE_PUBLIC_NETWORK",
+    ),
+];
+/// Every usage type / resource class the published contract accepts as a filter.
+const CONTRACT_USAGE_TYPES: &[&str] = &[
+    "CALL_CONNECTED_TIME",
+    "PARTICIPANT_CONNECTED_TIME",
+    "SESSION_CONNECTED_TIME",
+    "LEG_CONNECTED_TIME",
+    "VOICEMAIL_ARTIFACT",
+    "RECORDING_ARTIFACT",
+];
+const CONTRACT_RESOURCE_CLASSES: &[&str] = &["APP_MEDIA", "PUBLIC_NETWORK", "STORAGE"];
+/// Calling's source fact id prefix of a `call_usage_records` row.
+const CALL_USAGE_SOURCE: &str = "call_usage:";
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -604,12 +642,87 @@ pub struct CompatUsageQuery {
     #[serde(default)]
     pub usage_type: Option<String>,
     #[serde(default)]
+    pub resource_class: Option<String>,
+    #[serde(default)]
     pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
 }
 
-/// `GET /v1/usage` — the credential's environment's facts (`{data, nextCursor}`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompatLimitsQuery {
+    #[serde(default)]
+    pub principal_id: Option<String>,
+}
+
+/// The ledger usage types a compatibility query selects (validated like Calling does:
+/// an unknown type / class is a VALIDATION_ERROR; both filters intersect).
+fn compat_types(q: &CompatUsageQuery) -> Result<Vec<&'static str>, ApiError> {
+    if q.usage_type
+        .as_deref()
+        .is_some_and(|t| !CONTRACT_USAGE_TYPES.contains(&t))
+        || q.resource_class
+            .as_deref()
+            .is_some_and(|c| !CONTRACT_RESOURCE_CLASSES.contains(&c))
+    {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
+    Ok(COMPAT_USAGE_TYPES
+        .iter()
+        .filter(|(t, c, _)| {
+            q.usage_type.as_deref().is_none_or(|u| u == *t)
+                && q.resource_class.as_deref().is_none_or(|r| r == *c)
+        })
+        .map(|(_, _, ledger)| *ledger)
+        .collect())
+}
+
+fn millis(at: DateTime<Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// One ledger fact as the contract's `UsageRecord` (`None`: not representable).
+pub fn compat_record(
+    source_fact_id: &str,
+    usage_type: &str,
+    quantity: i64,
+    resource_ref: &str,
+    occurred_at: DateTime<Utc>,
+    dimensions: &Value,
+) -> Option<Value> {
+    let id = Uuid::parse_str(source_fact_id.strip_prefix(CALL_USAGE_SOURCE)?).ok()?;
+    let (calling_type, class, _) = COMPAT_USAGE_TYPES
+        .iter()
+        .find(|(_, _, ledger)| *ledger == usage_type)?;
+    let call_id = Uuid::parse_str(dimensions.get("callId")?.as_str()?).ok()?;
+    let mut out = json!({
+        "id": id, "callId": call_id, "usageType": calling_type, "resourceClass": class,
+        "quantity": quantity.max(0), "unit": "MILLISECONDS", "recordedAt": millis(occurred_at),
+    });
+    if *calling_type == "LEG_CONNECTED_TIME" {
+        let leg = Uuid::parse_str(resource_ref.strip_prefix("call_leg:")?).ok()?;
+        out["legId"] = json!(leg);
+        for key in ["routeClass", "destinationCountry", "billableSeconds"] {
+            if let Some(v) = dimensions.get(key).filter(|v| !v.is_null()) {
+                out[key] = v.clone();
+            }
+        }
+        // Cost EVIDENCE exactly as Calling reports it to the same environment: KNOWN /
+        // ESTIMATED carry the amount and currency, UNKNOWN never does.
+        let status = dimensions.get("costEvidence")?.as_str()?;
+        let mut cost = json!({ "status": status });
+        if status != "UNKNOWN" {
+            cost["amountMinor"] = dimensions.get("costMinor")?.clone();
+            cost["currency"] = dimensions.get("costCurrency")?.clone();
+        }
+        out["cost"] = cost;
+    }
+    Some(out)
+}
+
+/// `GET /v1/usage` — the credential's environment's metered call facts in the published
+/// `UsageList` shape (`{data, nextCursor}`), oldest first by recording time.
 pub async fn compat_usage(
     state: &AppState,
     caller: &Caller,
@@ -623,71 +736,151 @@ pub async fn compat_usage(
             return Err(ApiError(ErrorCode::ValidationError));
         }
     }
-    if q.usage_type
-        .as_deref()
-        .is_some_and(|t| cf_usage_facts::definition(t).is_none())
-    {
-        return Err(ApiError(ErrorCode::ValidationError));
-    }
+    let types = compat_types(&q)?;
     let page = Page::from_query(&PageQuery {
         limit: q.limit,
-        cursor: q.cursor,
+        cursor: q.cursor.clone(),
     })?;
-    if page.has_cursor() && page.cursor_seq().is_none() {
-        return Err(ApiError(ErrorCode::ValidationError));
+    let after = match (page.has_cursor(), page.cursor_key()) {
+        (false, _) => None,
+        (true, Some(k)) => Some(k),
+        (true, None) => return Err(ApiError(ErrorCode::ValidationError)),
+    };
+    if types.is_empty() {
+        return Ok(json!({ "data": [], "nextCursor": null }));
     }
-    let from = q
-        .from
-        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).expect("epoch"));
-    let to = q.to.unwrap_or_else(|| Utc::now() + Duration::days(1));
-    let (items, next) = fact_page(
-        &state.db,
-        env,
-        from,
-        to,
-        q.usage_type.as_deref(),
-        page.cursor_seq(),
-        page.limit,
-    )
-    .await?;
-    Ok(json!({ "data": items, "nextCursor": next }))
+    let types: Vec<String> = types.into_iter().map(str::to_string).collect();
+    let (after_at, after_key) = match after {
+        Some((at, id)) => (Some(at), Some(format!("{CALL_USAGE_SOURCE}{id}"))),
+        None => (None, None),
+    };
+    let rows = state
+        .db
+        .query_all(stmt(
+            "SELECT source_fact_id, usage_type, quantity, resource_ref, occurred_at, dimensions \
+             FROM devplat_usage_facts \
+             WHERE environment_id = $1 AND tenant_id = $2 AND application_id = $3 \
+               AND producer = 'cfmeet.calling' AND usage_type = ANY($4) \
+               AND source_fact_id LIKE 'call_usage:%' AND dimensions ? 'callId' \
+               AND (usage_type <> 'CALL_MINUTE_PUBLIC_NETWORK' \
+                    OR (resource_ref LIKE 'call_leg:%' AND dimensions ? 'costEvidence')) \
+               AND ($5::timestamptz IS NULL OR occurred_at >= $5) \
+               AND ($6::timestamptz IS NULL OR occurred_at < $6) \
+               AND ($7::timestamptz IS NULL OR (occurred_at, source_fact_id) > ($7, $8::text)) \
+             ORDER BY occurred_at, source_fact_id LIMIT $9",
+            vec![
+                env.into(),
+                m.context.tenant_id.into(),
+                m.context.application_id.into(),
+                types.into(),
+                q.from.into(),
+                q.to.into(),
+                after_at.into(),
+                after_key.into(),
+                (page.limit as i64 + 1).into(),
+            ],
+        ))
+        .await?;
+    let mut data = Vec::new();
+    let mut last: Option<(DateTime<Utc>, Uuid)> = None;
+    for r in rows.iter().take(page.limit) {
+        let source: String = r.try_get("", "source_fact_id")?;
+        let at: DateTime<Utc> = r.try_get("", "occurred_at")?;
+        if let Some(id) = source
+            .strip_prefix(CALL_USAGE_SOURCE)
+            .and_then(|s| Uuid::parse_str(s).ok())
+        {
+            last = Some((at, id));
+        }
+        match compat_record(
+            &source,
+            &r.try_get::<String>("", "usage_type")?,
+            r.try_get("", "quantity")?,
+            &r.try_get::<String>("", "resource_ref")?,
+            at,
+            &r.try_get::<Value>("", "dimensions")?,
+        ) {
+            Some(v) => data.push(v),
+            None => {
+                tracing::warn!(source_fact_id = %source, "ledger call fact not representable in the /v1/usage contract")
+            }
+        }
+    }
+    let next = (rows.len() > page.limit)
+        .then(|| last.map(|(at, id)| Page::key_cursor(at, id)))
+        .flatten();
+    Ok(json!({ "data": data, "nextCursor": next }))
 }
 
-/// `GET /v1/limits` — Calling's `LimitsView` shape over the Developer Platform's
-/// effective limits of the credential (binding level = least headroom).
-pub async fn compat_limits(state: &AppState, caller: &Caller) -> Result<Value, ApiError> {
+/// The contract's `LimitLevel.scope` of an entitlement resolution level.
+fn compat_scope(level: &str) -> &'static str {
+    match level {
+        "CREDENTIAL" => "CREDENTIAL",
+        "SERVICE_ACCOUNT" => "SERVICE_ACCOUNT",
+        "ENVIRONMENT" => "ENVIRONMENT",
+        "PROJECT_PLAN" => "APPLICATION",
+        "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" => "TENANT",
+        _ => "PLATFORM_DEFAULT",
+    }
+}
+
+/// `GET /v1/limits` — the published `Limits` shape: the request rate the gateway enforces
+/// for this credential (effective plan entitlement; current = API operations the ledger
+/// recorded in the current minute, which can trail the gateway's live counter by the
+/// producer's export interval).
+pub async fn compat_limits(
+    state: &AppState,
+    caller: &Caller,
+    q: CompatLimitsQuery,
+) -> Result<Value, ApiError> {
     let m = machine(caller)?;
+    if q.principal_id.is_some() {
+        // The PRINCIPAL axis is Calling's (`GET /v1/calling/limits?principalId=`).
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
     let env = m.context.environment_id;
     authorize_environment(state, caller, env, Action::LimitsRead).await?;
-    let v = limits_view(
-        state,
+    let eff = entitlements::effective_for(
+        &state.db,
         env,
         Some(&m.context.environment_kind),
         Some(m.context.service_account_id),
         Some(m.credential_id),
     )
     .await?;
-    let limits: Vec<Value> = v["limits"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|l| {
-            let ceiling = l["ceiling"].as_i64().unwrap_or(0);
-            let current = l["current"].as_i64().unwrap_or(0);
-            let scope = l["limitingLevel"].as_str().unwrap_or("PLATFORM_DEFAULT").to_string();
-            let mut out = json!({
-                "limit": l["limit"], "window": l["window"], "scope": scope,
-                "ceiling": ceiling, "current": current, "remaining": (ceiling - current).max(0),
-                "levels": [{ "scope": scope, "ceiling": ceiling, "current": current, "remaining": (ceiling - current).max(0) }],
-            });
-            if let Some(r) = l.get("resetsAt") {
-                out["resetsAt"] = r.clone();
-            }
-            out
-        })
-        .collect();
-    Ok(json!({ "generatedAt": v["generatedAt"], "limits": limits }))
+    let now = Utc::now();
+    let minute = now
+        .date_naive()
+        .and_hms_opt(now.time().hour(), now.time().minute(), 0)
+        .expect("minute")
+        .and_utc();
+    let current: i64 = state
+        .db
+        .query_one(stmt(
+            "SELECT COALESCE(SUM(quantity), 0)::bigint AS n FROM devplat_usage_facts \
+             WHERE environment_id = $1 AND usage_type = 'API_OPERATION' AND occurred_at >= $2",
+            vec![env.into(), minute.into()],
+        ))
+        .await?
+        .map(|r| r.try_get("", "n"))
+        .transpose()?
+        .unwrap_or(0);
+    let ceiling = eff["apiRequestsPerMinute"].as_i64().unwrap_or(0).max(0);
+    let scope = compat_scope(
+        eff["limitingLevel"]["apiRequestsPerMinute"]
+            .as_str()
+            .unwrap_or("PLATFORM_DEFAULT"),
+    );
+    let remaining = (ceiling - current).max(0);
+    Ok(json!({
+        "generatedAt": now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "limits": [{
+            "limit": "REQUEST_RATE", "window": "MINUTE",
+            "resetsAt": millis(minute + Duration::minutes(1)),
+            "scope": scope, "ceiling": ceiling, "current": current, "remaining": remaining,
+            "levels": [{ "scope": scope, "ceiling": ceiling, "current": current, "remaining": remaining }],
+        }],
+    }))
 }
 
 #[cfg(test)]

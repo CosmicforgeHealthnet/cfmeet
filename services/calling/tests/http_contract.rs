@@ -746,7 +746,10 @@ fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
             names::WEBHOOKS_MANAGE
         });
     }
-    if path == "/v1/usage" || path == "/v1/limits" {
+    if matches!(
+        path,
+        "/v1/usage" | "/v1/limits" | "/v1/calling/usage" | "/v1/calling/limits"
+    ) {
         return Some(names::USAGE_READ);
     }
     if !path.starts_with("/v1/enterprise/") {
