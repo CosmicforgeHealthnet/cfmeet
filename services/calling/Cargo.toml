@@ -25,6 +25,8 @@ path = "src/bin/platform_admin.rs"
 calling-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Part VI §55: unified usage facts (call minutes, recordings, artifact storage).
+cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 cf-object-storage = { path = "../../packages/object-storage" }
 cf-webhooks = { path = "../../packages/webhooks" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }

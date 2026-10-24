@@ -316,6 +316,31 @@ async fn main() -> anyhow::Result<()> {
         public_events_destination = public_events.as_str(),
         "public event receivers"
     );
+    // Part VI §55: Calling's usage facts to the Developer Platform's unified ledger.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && developer_platform_configured => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    service_auth.client_arc(),
+                )),
+                s,
+            )
+            .with_events(Arc::new(calling::usage::export::CallFacts::new(db.clone())))
+            .with_intervals(Arc::new(calling::usage::export::ArtifactStorage::new(
+                db.clone(),
+            )));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("call usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => tracing::warn!(
+            "CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off"
+        ),
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "usage export configuration error");
+            std::process::exit(2);
+        }
+    }
     let developer_platform = public_events.includes_developer_platform().then(|| {
         calling::webhooks::publication::DeveloperPlatformTransport::new(service_auth.client_arc())
     });

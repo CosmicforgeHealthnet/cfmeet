@@ -481,6 +481,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-usage-facts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cf-service-auth",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2385,6 +2401,7 @@ dependencies = [
  "cf-messaging-crypto",
  "cf-object-storage",
  "cf-service-auth",
+ "cf-usage-facts",
  "chacha20poly1305",
  "chrono",
  "dotenvy",

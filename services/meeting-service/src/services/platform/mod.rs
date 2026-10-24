@@ -16,7 +16,8 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | `120` | 10–300 |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | `5000` | 100–30000 |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | — | Platform Access (platform access) |
-//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | — | Developer Platform (`developer-platform` destination) |
+//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | — | Developer Platform (`developer-platform` destination, usage export) |
+//! | `CFMEET_USAGE_EXPORT_ENABLED` | `false` | Part VI §55: export usage facts of environment-owned meetings to the Developer Platform (see [`usage_export`]; `CFMEET_USAGE_EXPORT_*` tuning) |
 //! | `MEETING_SERVICE_PUBLIC_EVENTS_INTERVAL_MS` | `1000` | publisher poll interval (100–60000) |
 //!
 //! An enabled but misconfigured feature stops startup (fail closed).
@@ -24,6 +25,7 @@
 pub mod authority;
 pub mod events;
 pub mod operations;
+pub mod usage_export;
 
 use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
 
@@ -81,6 +83,8 @@ pub struct PlatformConfig {
     pub platform_access_url: Option<String>,
     pub developer_platform_url: Option<String>,
     pub publish_interval: Duration,
+    /// Part VI §55 usage export settings (`None`: off).
+    pub usage_export: Option<cf_usage_facts::exporter::ExportSettings>,
 }
 
 fn var(name: &str, why: &str) -> Result<String, String> {
@@ -122,10 +126,15 @@ impl PlatformConfig {
             }
             _ => PublicEventsDestination::default(),
         };
-        if !access_enabled && destination == PublicEventsDestination::None {
+        let usage_export =
+            cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok())?;
+        let usage_export = usage_export.enabled.then_some(usage_export);
+        if !access_enabled && destination == PublicEventsDestination::None && usage_export.is_none()
+        {
             return Ok(None);
         }
-        let why = "MEETING_PLATFORM_ACCESS_ENABLED or a public events destination is set";
+        let why =
+            "MEETING_PLATFORM_ACCESS_ENABLED, a public events destination or usage export is set";
         let runtime = RuntimeEnvironment::parse(&var("CF_RUNTIME_ENVIRONMENT", why)?)
             .map_err(|_| "CF_RUNTIME_ENVIRONMENT must be local, test, staging or production")?;
         let key_id = KeyId::parse(&var("CF_SERVICE_AUTH_KEY_ID", why)?)
@@ -142,12 +151,16 @@ impl PlatformConfig {
         } else {
             (None, None)
         };
-        let developer_platform_url = match destination {
-            PublicEventsDestination::DeveloperPlatform => Some(var(
+        let developer_platform_url = match (destination, &usage_export) {
+            (PublicEventsDestination::DeveloperPlatform, _) => Some(var(
                 "CF_DEVELOPER_PLATFORM_BASE_URL",
                 "MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION is developer-platform",
             )?),
-            PublicEventsDestination::None => None,
+            (PublicEventsDestination::None, Some(_)) => Some(var(
+                "CF_DEVELOPER_PLATFORM_BASE_URL",
+                "CFMEET_USAGE_EXPORT_ENABLED is on",
+            )?),
+            (PublicEventsDestination::None, None) => None,
         };
         Ok(Some(Self {
             access_enabled,
@@ -171,6 +184,7 @@ impl PlatformConfig {
                 100,
                 60_000,
             )?),
+            usage_export,
         }))
     }
 

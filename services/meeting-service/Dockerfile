@@ -16,6 +16,8 @@ WORKDIR /app/services/meeting-service
 COPY services/meeting-service/ ./
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/service-auth/ /app/packages/service-auth/
+# Part VI §55 unified usage facts (shared fact model / exporter).
+COPY packages/usage-facts/ /app/packages/usage-facts/
 # Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
 COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 

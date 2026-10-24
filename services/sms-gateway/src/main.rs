@@ -202,6 +202,27 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_CALLING_BASE_URL is not set: events stay PENDING in the outbox");
     }
     tokio::spawn(sms_gateway::sms::workers::run(state.clone()));
+    // Part VI §55: SMS_SEGMENT usage facts to the Developer Platform's unified ledger.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    service_auth.client(),
+                )),
+                s,
+            )
+            .with_events(Arc::new(
+                sms_gateway::infra::usage_export::SmsSegments::new(db.clone()),
+            ));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("SMS usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => {
+            tracing::warn!("CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off")
+        }
+        Ok(_) => {}
+        Err(e) => fatal("configuration error", e),
+    }
     // Part V H: inbound SMS of bridged parties reach Messaging (durable, retried).
     {
         let inbound: Arc<dyn sms_gateway::sms::bridge::BridgeInbound> =

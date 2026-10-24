@@ -17,6 +17,8 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+# Part VI §55 unified usage facts (shared fact model / exporter).
+COPY packages/usage-facts packages/usage-facts
 COPY packages/messaging-crypto packages/messaging-crypto
 COPY packages/object-storage packages/object-storage
 COPY packages/contracts/messaging packages/contracts/messaging

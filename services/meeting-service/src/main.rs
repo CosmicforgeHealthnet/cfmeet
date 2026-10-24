@@ -95,6 +95,24 @@ async fn main() -> anyhow::Result<()> {
             state = state.with_platform(receiver);
             tracing::info!("Part VI: platform credential access to /api/v2 enabled");
         }
+        // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
+        if let Some(s) = config.usage_export.clone() {
+            use backend::services::platform::usage_export;
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                std::sync::Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    client.clone(),
+                )),
+                s,
+            )
+            .with_events(std::sync::Arc::new(usage_export::MeetingFacts::new(
+                db.clone(),
+            )))
+            .with_intervals(std::sync::Arc::new(usage_export::ArtifactStorage::new(
+                db.clone(),
+            )));
+            tokio::spawn(std::sync::Arc::new(exporter).run());
+            tracing::info!("Part VI: meeting usage facts -> Developer Platform");
+        }
         if config.destination
             == backend::services::platform::PublicEventsDestination::DeveloperPlatform
         {

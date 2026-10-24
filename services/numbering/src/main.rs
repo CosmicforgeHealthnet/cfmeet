@@ -218,6 +218,37 @@ async fn main() -> anyhow::Result<()> {
     let acquisition = Arc::new(state.acquisition());
     let stewardship = Arc::new(state.stewardship());
 
+    // Part VI §55: NUMBER_ACTIVE usage facts to the Developer Platform's unified ledger.
+    {
+        let dp = settings
+            .targets
+            .iter()
+            .any(|(s, _)| s.as_str() == cf_service_auth::services::DEVELOPER_PLATFORM);
+        match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+            Ok(s) if s.enabled && dp => {
+                let exporter = cf_usage_facts::exporter::Exporter::new(
+                    Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                        state.service_auth.client(),
+                    )),
+                    s,
+                )
+                .with_intervals(Arc::new(
+                    numbering::infra::usage_export::ActiveNumbers::new(db.clone()),
+                ));
+                tokio::spawn(Arc::new(exporter).run());
+                tracing::info!("number usage facts are exported to the Developer Platform");
+            }
+            Ok(s) if s.enabled => tracing::warn!(
+                "CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off"
+            ),
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!(error = %e, "usage export configuration error");
+                std::process::exit(2);
+            }
+        }
+    }
+
     // Part VI §53: the Developer Platform consumes the outbox (public lifecycle events of
     // customer scopes; everything else is acknowledged without leaving Numbering).
     {

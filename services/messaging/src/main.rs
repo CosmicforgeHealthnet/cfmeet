@@ -291,6 +291,27 @@ async fn main() -> anyhow::Result<()> {
         public_events_destination = destination.as_str(),
         "webhook relay receivers"
     );
+    // Part VI §55: attachment STORAGE_BYTE_TIME usage facts to the Developer Platform.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    state.service_auth.client(),
+                )),
+                s,
+            )
+            .with_intervals(Arc::new(messaging::usage_export::AttachmentStorage::new(
+                state.db.clone(),
+            )));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("attachment storage usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => tracing::warn!(
+            "CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off"
+        ),
+        Ok(_) => {}
+        Err(e) => anyhow::bail!("usage export configuration: {e}"),
+    }
     tokio::spawn(messaging::webhook_relay::run(
         state.clone(),
         webhook_sinks,

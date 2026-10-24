@@ -347,6 +347,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-usage-facts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cf-service-auth",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "cf-webhooks"
 version = "0.1.0"
 dependencies = [
@@ -2687,6 +2703,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "cf-service-auth",
+ "cf-usage-facts",
  "cf-webhooks",
  "chrono",
  "dotenvy",

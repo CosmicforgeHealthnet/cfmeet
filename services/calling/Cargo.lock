@@ -330,6 +330,7 @@ dependencies = [
  "calling-migration",
  "cf-object-storage",
  "cf-service-auth",
+ "cf-usage-facts",
  "cf-webhooks",
  "chrono",
  "chrono-tz",
@@ -410,6 +411,22 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "cf-usage-facts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cf-service-auth",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

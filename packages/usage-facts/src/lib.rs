@@ -286,9 +286,9 @@ impl UsageFact {
 
     /// Truncates every timestamp to microseconds (the storage precision of both sides).
     pub fn normalized(mut self) -> Self {
-        let micros = |t: DateTime<Utc>| {
+        fn micros(t: DateTime<Utc>) -> DateTime<Utc> {
             DateTime::<Utc>::from_timestamp_micros(t.timestamp_micros()).unwrap_or(t)
-        };
+        }
         self.occurred_at = micros(self.occurred_at);
         self.period_start = self.period_start.map(micros);
         self.period_end = self.period_end.map(micros);
