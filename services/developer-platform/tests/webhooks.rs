@@ -898,6 +898,94 @@ async fn ingestion_dedupes_refuses_spoofing_and_foreign_families_and_projects_sa
 /// Signed exactly as `cf_webhooks::signing::verify` accepts; 5xx / 429 / timeouts retry
 /// with backoff until success; the attempt history records status classes only.
 #[tokio::test]
+async fn conflicting_replays_are_refused_recorded_and_surface_in_ingestion_health() {
+    let Some((c, w, scope, d)) = world(settings()).await else {
+        return;
+    };
+    subscribe(&c, &d, "http://127.0.0.1:9/h", &["call.requested"]).await;
+    let p = &w.producers;
+    let healthy = c
+        .operator(Method::GET, "/internal/v1/operator/ingestion/health", None)
+        .await;
+    assert_eq!(healthy.status, StatusCode::OK, "{}", healthy.json);
+    assert_eq!(healthy.json["status"], "OK", "{}", healthy.json);
+    let env = call_requested(scope);
+    let first = publish(&c, &p.calling, &env).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.json);
+    // The same source event saying something else: another payload, time or scope.
+    let mut other_payload = env.clone();
+    other_payload["payload"]["data"]["reason"] = json!("INBOUND");
+    let mut other_time = env.clone();
+    other_time["occurred_at"] = json!("2026-10-23T10:00:01Z");
+    let mut other_scope = env.clone();
+    let foreign = pa_env(&c, scope.0, scope.1, "SANDBOX");
+    other_scope["ownership"]["application_environment_id"] = json!(foreign.2);
+    for conflict in [&other_payload, &other_time, &other_scope] {
+        let r = publish(&c, &p.calling, conflict).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+        assert_eq!(r.json["error"]["code"], "CONFLICTING_REPLAY");
+    }
+    // The original is kept; an identical replay is still the same duplicate.
+    let again = publish(&c, &p.calling, &env).await;
+    assert_eq!(again.json["eventId"], first.json["eventId"]);
+    assert_eq!(again.json["duplicate"], true);
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_webhook_events").await,
+        1
+    );
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_webhook_deliveries")
+            .await,
+        1
+    );
+    let payload = one(&c, "SELECT payload::text FROM devplat_webhook_events").await;
+    assert!(
+        payload.contains("OUTBOUND") && !payload.contains("INBOUND"),
+        "{payload}"
+    );
+    // Recorded for operators (producer, source id, reason — no payload), append-only.
+    assert_eq!(
+        c.count(
+            "SELECT count(*) FROM devplat_event_rejections WHERE producer = 'cfmeet.calling' \
+                 AND reason_code = 'CONFLICTING_REPLAY'"
+        )
+        .await,
+        3
+    );
+    let cols = one(
+        &c,
+        "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns \
+         WHERE table_name = 'devplat_event_rejections'",
+    )
+    .await;
+    assert_eq!(cols, "id,producer,reason_code,received_at,source_event_id");
+    for sql in [
+        "UPDATE devplat_event_rejections SET reason_code = 'X_Y_Z'",
+        "DELETE FROM devplat_event_rejections",
+    ] {
+        assert!(c.db.conn.execute_unprepared(sql).await.is_err(), "{sql}");
+    }
+    let h = c
+        .operator(Method::GET, "/internal/v1/operator/ingestion/health", None)
+        .await;
+    assert_eq!(h.json["status"], "DEGRADED", "{}", h.json);
+    assert_eq!(
+        h.json["eventRejectionsLast24h"],
+        json!([{ "producer": "cfmeet.calling", "count": 3 }])
+    );
+    // Operator-only.
+    let customer = c
+        .internal(
+            &p.calling,
+            Method::GET,
+            "/internal/v1/operator/ingestion/health",
+            None,
+        )
+        .await;
+    assert_eq!(customer.status, StatusCode::FORBIDDEN, "{}", customer.json);
+}
+
+#[tokio::test]
 async fn deliveries_are_signed_and_retried_until_success() {
     let Some((c, w, scope, d)) = world(settings()).await else {
         return;

@@ -59,6 +59,7 @@ error_codes! {
     InvitationPending = "INVITATION_PENDING" => CONFLICT, "A pending invitation already exists for this address.";
     InvitationInvalid = "INVITATION_INVALID" => NOT_FOUND, "The invitation is invalid, expired or already used.";
     InvitationEmailMismatch = "INVITATION_EMAIL_MISMATCH" => FORBIDDEN, "The invitation was issued to another verified email address.";
+    ConflictingReplay = "CONFLICTING_REPLAY" => BAD_REQUEST, "The publication conflicts with the event already recorded under the same source event id.";
     IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED" => UNPROCESSABLE_ENTITY, "The Idempotency-Key was already used with a different request.";
     PolicyViolation = "POLICY_VIOLATION" => UNPROCESSABLE_ENTITY, "The operation is not permitted by platform policy.";
     OperatorRequired = "OPERATOR_REQUIRED" => BAD_REQUEST, "Operator administration requires a named operator.";

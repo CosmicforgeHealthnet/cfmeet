@@ -198,11 +198,58 @@ async fn insert<C: ConnectionTrait>(
 }
 
 /// One page of a tenant's activity, newest first (cursor: the event sequence).
+/// Optional activity filters (`GET /v1/organizations/{id}/activity`).
+#[derive(Debug, Default, Clone)]
+pub struct ActivityFilter {
+    /// Only events of this project: the project itself, its environments and every event
+    /// whose safe summary references the project or one of its environments.
+    pub project_id: Option<Uuid>,
+    /// Exact action (`credential.created`) or a family prefix ending in `.`
+    /// (`credential.`).
+    pub action: Option<String>,
+}
+
+impl ActivityFilter {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        if let Some(a) = &self.action {
+            let b = a.as_bytes();
+            let ok = (1..=64).contains(&b.len())
+                && b[0].is_ascii_lowercase()
+                && b.iter()
+                    .all(|c| c.is_ascii_lowercase() || *c == b'_' || *c == b'.');
+            if !ok {
+                return Err(ApiError(ErrorCode::ValidationError));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub async fn list<C: ConnectionTrait>(
     db: &C,
     tenant_id: Uuid,
     page: &Page,
+    filter: &ActivityFilter,
 ) -> Result<Value, ApiError> {
+    filter.validate()?;
+    if let Some(project) = filter.project_id {
+        // A project of another organization is not found (no existence leak).
+        let owned = db
+            .query_one(stmt(
+                "SELECT 1 FROM devplat_project_profiles WHERE application_id = $1 AND tenant_id = $2",
+                vec![project.into(), tenant_id.into()],
+            ))
+            .await?
+            .is_some();
+        if !owned {
+            return Err(ApiError(ErrorCode::NotFound));
+        }
+    }
+    let (exact, prefix) = match filter.action.as_deref() {
+        Some(a) if a.ends_with('.') => (None, Some(format!("{a}%"))),
+        Some(a) => (Some(a.to_string()), None),
+        None => (None, None),
+    };
     let before = page.cursor_seq().unwrap_or(i64::MAX);
     let rows = db
         .query_all(stmt(
@@ -211,9 +258,23 @@ pub async fn list<C: ConnectionTrait>(
                  'actorRef', actor_ref, 'action', action, 'targetType', target_type, \
                  'targetId', target_id, 'outcome', outcome, 'requestId', request_id, \
                  'correlationId', correlation_id, 'summary', summary, 'occurredAt', occurred_at) AS v \
-             FROM devplat_activity_events WHERE tenant_id = $1 AND seq < $2 \
+             FROM devplat_activity_events a WHERE tenant_id = $1 AND seq < $2 \
+               AND ($4::uuid IS NULL OR (target_type = 'PROJECT' AND target_id = $4::text) \
+                    OR summary ->> 'projectId' = $4::text \
+                    OR ((target_type = 'ENVIRONMENT' AND target_id IN ( \
+                           SELECT environment_id::text FROM devplat_environment_refs WHERE application_id = $4)) \
+                        OR summary ->> 'environmentId' IN ( \
+                           SELECT environment_id::text FROM devplat_environment_refs WHERE application_id = $4))) \
+               AND ($5::text IS NULL OR action = $5) AND ($6::text IS NULL OR action LIKE $6) \
              ORDER BY seq DESC LIMIT $3",
-            vec![tenant_id.into(), before.into(), (page.limit as i64 + 1).into()],
+            vec![
+                tenant_id.into(),
+                before.into(),
+                (page.limit as i64 + 1).into(),
+                filter.project_id.into(),
+                exact.into(),
+                prefix.into(),
+            ],
         ))
         .await?;
     let mut items = Vec::new();

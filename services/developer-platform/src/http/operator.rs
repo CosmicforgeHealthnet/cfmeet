@@ -75,6 +75,7 @@ pub fn routes() -> Router<AppState> {
         )
         // Section 55: usage ledger operations.
         .route("/operator/usage", get(usage_overview))
+        .route("/operator/ingestion/health", get(ingestion_health))
         .route("/operator/usage/rollups/rebuild", post(rebuild_rollups))
         .route(
             "/operator/usage/backfill/api-operations",
@@ -216,6 +217,15 @@ async fn usage_overview(
 ) -> Result<Json<Value>, ApiError> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
     Ok(Json(crate::ledger::operator_overview(&s.db).await?))
+}
+
+/// `GET /internal/v1/operator/ingestion/health` — failed usage / event ingestion signals.
+async fn ingestion_health(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+) -> Result<Json<Value>, ApiError> {
+    caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
+    Ok(Json(crate::ledger::ingestion_health(&s.db).await?))
 }
 
 #[derive(serde::Deserialize)]

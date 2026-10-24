@@ -26,7 +26,7 @@
 //! tenant activity history.
 
 use axum::http::StatusCode;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -496,22 +496,49 @@ pub async fn submit(
 }
 
 /// `GET /v1/projects/{id}/production-access-requests`.
-pub async fn list(state: &AppState, caller: &Caller, project_id: Uuid) -> Result<Value, ApiError> {
+pub async fn list(
+    state: &AppState,
+    caller: &Caller,
+    project_id: Uuid,
+    page: &super::pagination::Page,
+) -> Result<Value, ApiError> {
     let (tenant_id, _) = project_tenant(&state.db, project_id).await?;
     authorize(state, caller, tenant_id, Action::ProductionAccessRead).await?;
+    if page.has_cursor() && page.cursor_key().is_none() {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
     expire_due(&state.db).await?;
+    let (at, id) = page.cursor_key().unzip();
     let rows = state
         .db
         .query_all(stmt(
             &format!(
-                "SELECT {VIEW} AS v FROM devplat_production_access_requests r \
-                 WHERE r.application_id = $1 ORDER BY r.created_at DESC, r.id LIMIT 100"
+                "SELECT {VIEW} AS v, r.created_at, r.id FROM devplat_production_access_requests r \
+                 WHERE r.application_id = $1 \
+                   AND ($2::timestamptz IS NULL OR (r.created_at, r.id) < ($2, $3)) \
+                 ORDER BY r.created_at DESC, r.id DESC LIMIT $4"
             ),
-            vec![project_id.into()],
+            vec![
+                project_id.into(),
+                at.into(),
+                id.into(),
+                (page.limit as i64 + 1).into(),
+            ],
         ))
         .await?;
-    let items: Result<Vec<Value>, _> = rows.iter().map(|r| r.try_get::<Value>("", "v")).collect();
-    Ok(json!({ "items": items?, "nextCursor": null }))
+    let mut items = Vec::new();
+    let mut last = None;
+    for r in rows.iter().take(page.limit) {
+        items.push(r.try_get::<Value>("", "v")?);
+        last = Some((
+            r.try_get::<DateTime<Utc>>("", "created_at")?,
+            r.try_get::<Uuid>("", "id")?,
+        ));
+    }
+    let next = (rows.len() > page.limit)
+        .then(|| last.map(|(a, i)| super::pagination::Page::key_cursor(a, i)))
+        .flatten();
+    Ok(json!({ "items": items, "nextCursor": next }))
 }
 
 /// `GET /v1/production-access-requests/{id}` (with history).

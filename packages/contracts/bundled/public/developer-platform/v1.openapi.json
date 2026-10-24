@@ -2,10 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet public API — developer-platform",
-    "version": "1.4.0",
-    "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles.",
+    "version": "1.5.0",
+    "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests.",
     "x-cfmeet-source-contract": "cfmeet.developer-platform.http-api",
-    "x-cfmeet-source-version": "1.4.0"
+    "x-cfmeet-source-version": "1.5.0"
   },
   "servers": [
     {
@@ -2024,7 +2024,7 @@
       "get": {
         "operationId": "listActivity",
         "summary": "Immutable activity history of the organization, newest first",
-        "description": "Immutable activity history of the organization, newest first. Roles: OWNER, ADMIN, ANALYST. Machine credentials need `audit.read`.",
+        "description": "Immutable activity history of the organization, newest first. Roles: OWNER, ADMIN, ANALYST. Machine credentials need `audit.read`. Filters: `projectId`, `action` (Chapter 15 tenant / project activity).",
         "tags": [
           "Activity"
         ],
@@ -2050,6 +2050,25 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "description": "Only the project's activity: the project itself, its environments and events whose safe summary references the project or one of its environments. A project of another organization is NOT_FOUND.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "An exact action (`credential.created`) or an action family ending in `.` (`credential.`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z_.]{0,63}$"
+            }
           }
         ],
         "responses": {
@@ -3716,7 +3735,7 @@
       "get": {
         "operationId": "listCredentials",
         "summary": "List a service account's API credentials (metadata only; never a secret)",
-        "description": "List a service account's API credentials (metadata only; never a secret). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `credentials.manage`.",
+        "description": "List a service account's API credentials (metadata only; never a secret). Roles: OWNER, ADMIN, DEVELOPER. Machine credentials need `credentials.manage`. Cursor pages, newest first (`limit` 1–100, `nextCursor`).",
         "tags": [
           "Credentials"
         ],
@@ -3744,6 +3763,12 @@
             "schema": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
           }
         ],
         "responses": {
@@ -4536,7 +4561,7 @@
       "get": {
         "operationId": "listProductionAccessRequests",
         "summary": "List the project's production-access requests",
-        "description": "List the project's production-access requests. Roles: every member. Machine credentials need `projects.read`.",
+        "description": "List the project's production-access requests. Roles: every member. Machine credentials need `projects.read`. Cursor pages, newest first (`limit` 1–100, `nextCursor`).",
         "tags": [
           "Production access"
         ],
@@ -4556,6 +4581,12 @@
             "schema": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
           }
         ],
         "responses": {
@@ -5629,6 +5660,7 @@
           "INVITATION_INVALID",
           "INVITATION_EMAIL_MISMATCH",
           "IDEMPOTENCY_KEY_REUSED",
+          "CONFLICTING_REPLAY",
           "POLICY_VIOLATION",
           "OPERATOR_REQUIRED",
           "APPROVAL_EXPIRED",

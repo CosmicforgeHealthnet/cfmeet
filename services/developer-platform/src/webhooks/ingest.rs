@@ -5,7 +5,10 @@
 //!   its type must belong to that producer's own domain (unknown families are refused).
 //! * Internal-only facts of the producer's domain are acknowledged and never stored.
 //! * `(producer, source event id)` is the dedupe key: a re-published, replayed or
-//!   out-of-order duplicate returns the SAME `whe_` event id and never fans out again —
+//!   out-of-order duplicate returns the SAME `whe_` event id and never fans out again; a
+//!   publication that CONFLICTS with the native event recorded under that key (another
+//!   type, ownership scope, time or projected payload) is refused (`CONFLICTING_REPLAY`)
+//!   and recorded in `devplat_event_rejections`, the original kept —
 //!   also when the event is Calling's history imported by the Section 53 migration (its
 //!   original `whe_` id is returned, so a late re-publication never re-delivers it).
 //! * Fan-out targets ACTIVE subscriptions of the SAME tenant / application / environment
@@ -139,22 +142,70 @@ pub fn validate_envelope(
     })
 }
 
+/// The event recorded under `(producer, source event id)` (native first).
+struct Recorded {
+    event_id: String,
+    native: bool,
+    /// Whether this publication says the same as the recorded native event.
+    same: bool,
+}
+
 async fn existing_event<C: ConnectionTrait>(
     db: &C,
     producer: &str,
-    source_event_id: &str,
-) -> Result<Option<String>, ApiError> {
+    facts: &EnvelopeFacts,
+    event: &catalog::PublicEvent,
+) -> Result<Option<Recorded>, ApiError> {
     let row = db
         .query_one(stmt(
-            "SELECT event_id FROM devplat_webhook_events WHERE producer = $1 AND source_event_id = $2 \
+            "SELECT event_id, origin = 'NATIVE' AS native, \
+                    (event_type = $3 AND tenant_id = $4 AND application_id = $5 AND environment_id = $6 \
+                     AND occurred_at = $7 AND payload -> 'data' = $8) AS same \
+               FROM devplat_webhook_events WHERE producer = $1 AND source_event_id = $2 \
               ORDER BY (origin = 'NATIVE') DESC LIMIT 1",
-            vec![producer.into(), source_event_id.into()],
+            vec![
+                producer.into(),
+                facts.source_event_id.clone().into(),
+                event.event_type.into(),
+                facts.scope.0.into(),
+                facts.scope.1.into(),
+                facts.scope.2.into(),
+                facts.occurred_at.into(),
+                Value::Object(event.data.clone()).into(),
+            ],
         ))
         .await?;
     Ok(match row {
-        Some(r) => Some(r.try_get_by_index::<String>(0)?),
+        Some(r) => Some(Recorded {
+            event_id: r.try_get("", "event_id")?,
+            native: r.try_get("", "native")?,
+            same: r.try_get::<Option<bool>>("", "same")?.unwrap_or(false),
+        }),
         None => None,
     })
+}
+
+/// Records a refused publication (producer, source id and reason only).
+async fn record_rejection<C: ConnectionTrait>(
+    db: &C,
+    producer: &str,
+    source_event_id: &str,
+    reason: &str,
+    at: DateTime<Utc>,
+) -> Result<(), ApiError> {
+    db.execute(stmt(
+        "INSERT INTO devplat_event_rejections (id, producer, source_event_id, reason_code, received_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+        vec![
+            Uuid::new_v4().into(),
+            producer.into(),
+            source_event_id.into(),
+            reason.into(),
+            at.into(),
+        ],
+    ))
+    .await?;
+    Ok(())
 }
 
 impl WebhookService {
@@ -196,9 +247,28 @@ impl WebhookService {
             duplicate: true,
             deliveries: 0,
         };
+        // A native event recorded under the same key must say the same: a conflicting
+        // replay is refused and recorded (imported history keeps its own representation;
+        // its id is returned so a late re-publication never re-delivers it).
+        let settle = |found: Recorded| async move {
+            if found.native && !found.same {
+                tracing::warn!(producer, "conflicting platform event replay refused");
+                record_rejection(
+                    &self.db,
+                    producer,
+                    &facts.source_event_id,
+                    "CONFLICTING_REPLAY",
+                    now,
+                )
+                .await?;
+                return Err(ApiError(ErrorCode::ConflictingReplay));
+            }
+            Ok(duplicate(found.event_id))
+        };
         let txn = self.db.begin().await?;
-        if let Some(found) = existing_event(&txn, producer, &facts.source_event_id).await? {
-            return Ok(duplicate(found));
+        if let Some(found) = existing_event(&txn, producer, facts, event).await? {
+            txn.rollback().await?;
+            return settle(found).await;
         }
         let event_id = format!("whe_{}", Uuid::new_v4().simple());
         let mut body = serde_json::json!({
@@ -234,10 +304,11 @@ impl WebhookService {
             .rows_affected();
         if inserted == 0 {
             // A concurrent publication of the same source event won.
-            let found = existing_event(&txn, producer, &facts.source_event_id)
+            let found = existing_event(&txn, producer, facts, event)
                 .await?
                 .ok_or(ApiError(ErrorCode::ServiceUnavailable))?;
-            return Ok(duplicate(found));
+            txn.rollback().await?;
+            return settle(found).await;
         }
         let shadow = self.settings.mode == DeliveryMode::Shadow;
         let deliveries = txn

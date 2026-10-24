@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.6.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits."
+    "version": "1.7.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health."
   },
   "paths": {
     "/health": {
@@ -898,7 +898,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 53: a producer (Meeting Service, Calling, Privacy Relay, Messaging, Numbering, SMS Gateway) publishes a committed domain event from its transactional outbox (platform envelope). Permission `developer-event.publish`; the envelope's producer_service must be the authenticated caller and its runtime_environment the receiver's; its type must belong to the producer's own domain (unknown families are refused). The event is projected into the public catalog (allow-listed safe keys only; never stored or forwarded verbatim), deduplicated on (producer, event_id) — a duplicate returns the same eventId and creates no delivery — and fanned out to the ACTIVE matching subscriptions of the SAME application environment (recorded SHADOW in shadow mode). 200 = accepted (also for internal-only facts, eventId null); 400 = refused (do not retry); 503 = retry later. Behind DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
+        "description": "Section 53: a producer (Meeting Service, Calling, Privacy Relay, Messaging, Numbering, SMS Gateway) publishes a committed domain event from its transactional outbox (platform envelope). Permission `developer-event.publish`; the envelope's producer_service must be the authenticated caller and its runtime_environment the receiver's; its type must belong to the producer's own domain (unknown families are refused). The event is projected into the public catalog (allow-listed safe keys only; never stored or forwarded verbatim), deduplicated on (producer, event_id) — a duplicate returns the same eventId and creates no delivery — and fanned out to the ACTIVE matching subscriptions of the SAME application environment (recorded SHADOW in shadow mode). 200 = accepted (also for internal-only facts, eventId null); 400 = refused (do not retry); 503 = retry later. Behind DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404). A publication that conflicts with the native event already recorded under the same (producer, event_id) — another type, ownership scope, time or projected payload — is refused 400 `CONFLICTING_REPLAY` and recorded for operators; the original event is kept.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3268,6 +3268,129 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/ingestion/health": {
+      "get": {
+        "operationId": "operatorIngestionHealth",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Part VI §17: ingestion health. `DEGRADED` while a usage fact or platform event was refused in the last 24 hours or a shadow reconciliation mismatched in the last 7 days; counts per producer (no payloads) and the producers' export watermarks. Permission `developer-platform.administer`.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "generatedAt",
+                    "usageRejectionsLast24h",
+                    "eventRejectionsLast24h",
+                    "reconciliationMismatchesLast7d",
+                    "streams"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "OK",
+                        "DEGRADED"
+                      ]
+                    },
+                    "generatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "usageRejectionsLast24h": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "producer",
+                          "count"
+                        ],
+                        "properties": {
+                          "producer": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    },
+                    "eventRejectionsLast24h": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "producer",
+                          "count"
+                        ],
+                        "properties": {
+                          "producer": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    },
+                    "reconciliationMismatchesLast7d": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "producer",
+                          "count"
+                        ],
+                        "properties": {
+                          "producer": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      }
+                    },
+                    "streams": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
                 }
               }
             }

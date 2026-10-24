@@ -758,14 +758,31 @@ async fn environment_entitlements(
     Ok(Json(entitlements::effective(&s.db, id, None).await?))
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ActivityQuery {
+    limit: Option<usize>,
+    cursor: Option<String>,
+    project_id: Option<Uuid>,
+    action: Option<String>,
+}
+
 async fn activity_list(
     State(s): State<AppState>,
     c: Caller,
     Path(id): Path<Uuid>,
-    Query(q): Query<PageQuery>,
+    Query(q): Query<ActivityQuery>,
 ) -> ApiResult<Json<Value>> {
     control::authorize(&s, &c, id, Action::ActivityRead).await?;
-    Ok(Json(activity::list(&s.db, id, &page(&q)?).await?))
+    let p = page(&PageQuery {
+        limit: q.limit,
+        cursor: q.cursor,
+    })?;
+    let filter = activity::ActivityFilter {
+        project_id: q.project_id,
+        action: q.action,
+    };
+    Ok(Json(activity::list(&s.db, id, &p, &filter).await?))
 }
 
 async fn org_commercial(
@@ -902,8 +919,11 @@ async fn list_credentials(
     State(s): State<AppState>,
     c: Caller,
     Path((env, sa)): Path<(Uuid, Uuid)>,
+    Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(control::credentials::list(&s, &c, env, sa).await?))
+    Ok(Json(
+        control::credentials::list(&s, &c, env, sa, &page(&q)?).await?,
+    ))
 }
 
 async fn get_credential(
@@ -1006,8 +1026,11 @@ async fn list_production_requests(
     State(s): State<AppState>,
     c: Caller,
     Path(id): Path<Uuid>,
+    Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(control::production::list(&s, &c, id).await?))
+    Ok(Json(
+        control::production::list(&s, &c, id, &page(&q)?).await?,
+    ))
 }
 
 async fn submit_production_request(

@@ -783,6 +783,69 @@ pub async fn rebuild_rollups<C: TransactionTrait>(
     )
 }
 
+/// Ingestion health (Part VI §17): `DEGRADED` while any usage fact or platform event was
+/// refused in the last 24 hours or a shadow reconciliation mismatched in the last 7 days.
+/// Counts per producer only (no payload); the stream watermarks show export progress.
+pub async fn ingestion_health<C: ConnectionTrait>(db: &C) -> Result<Value, ApiError> {
+    let now = Utc::now();
+    let day = now - chrono::Duration::hours(24);
+    let week = now - chrono::Duration::days(7);
+    let counts = |sql: &'static str, since: DateTime<Utc>| stmt(sql, vec![since.into()]);
+    let by_producer = |rows: Vec<sea_orm::QueryResult>| -> Result<Vec<Value>, ApiError> {
+        rows.iter()
+            .map(|r| {
+                Ok(json!({ "producer": r.try_get::<String>("", "producer")?,
+                           "count": r.try_get::<i64>("", "n")? }))
+            })
+            .collect()
+    };
+    let usage_rejections = by_producer(
+        db.query_all(counts(
+            "SELECT producer, count(*) AS n FROM devplat_usage_rejections WHERE received_at >= $1 \
+             GROUP BY producer ORDER BY producer",
+            day,
+        ))
+        .await?,
+    )?;
+    let event_rejections = by_producer(
+        db.query_all(counts(
+            "SELECT producer, count(*) AS n FROM devplat_event_rejections WHERE received_at >= $1 \
+             GROUP BY producer ORDER BY producer",
+            day,
+        ))
+        .await?,
+    )?;
+    let mismatches = by_producer(
+        db.query_all(counts(
+            "SELECT producer, count(*) AS n FROM devplat_usage_reconciliations \
+             WHERE recorded_at >= $1 AND outcome = 'MISMATCH' GROUP BY producer ORDER BY producer",
+            week,
+        ))
+        .await?,
+    )?;
+    let streams = db
+        .query_all(stmt(
+            "SELECT jsonb_build_object('producer', producer, 'stream', stream, 'positionAt', position_at, \
+                    'factsTotal', facts_total, 'updatedAt', updated_at) AS v \
+               FROM devplat_usage_streams ORDER BY producer, stream",
+            vec![],
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<Value>("", "v").map_err(ApiError::from))
+        .collect::<Result<Vec<_>, _>>()?;
+    let degraded =
+        !(usage_rejections.is_empty() && event_rejections.is_empty() && mismatches.is_empty());
+    Ok(json!({
+        "status": if degraded { "DEGRADED" } else { "OK" },
+        "generatedAt": now,
+        "usageRejectionsLast24h": usage_rejections,
+        "eventRejectionsLast24h": event_rejections,
+        "reconciliationMismatchesLast7d": mismatches,
+        "streams": streams,
+    }))
+}
+
 /// Operator view of streams / rejections / reconciliations.
 pub async fn operator_overview<C: ConnectionTrait>(db: &C) -> Result<Value, ApiError> {
     let q = |sql: &'static str| stmt(sql, vec![]);

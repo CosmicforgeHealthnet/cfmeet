@@ -1451,3 +1451,265 @@ async fn first_party_usage_carries_cost_centres_and_support_profiles_route_incid
         "first-party products are isolated tenants"
     );
 }
+
+/// Part VI Chapters 14–15: the immutable control-plane / ledger records refuse rewrites,
+/// list operations page, and activity filters by project and action.
+#[tokio::test]
+async fn chapter_14_15_immutability_pagination_and_activity_filters() {
+    let Some((c, producers)) = Control::with_flags_and_producers(FeatureFlags {
+        gateway_api: true,
+        ..Default::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@acme.example");
+    let (org, project, env) = sandbox(&c, &owner).await;
+    // Production-access history: three requests (submit, cancel), paged newest first.
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        let r = submit(&c, As::User(&owner), project, &["MEETINGS"]).await;
+        let rid = id(&r);
+        let x = c
+            .req(
+                As::User(&owner),
+                Method::POST,
+                &format!("/v1/production-access-requests/{rid}/cancel"),
+                None,
+            )
+            .await;
+        assert_eq!(x.status, StatusCode::OK, "{}", x.json);
+        ids.push(rid.to_string());
+    }
+    let base = format!("/v1/projects/{project}/production-access-requests?limit=2");
+    let p1 = c.req(As::User(&owner), Method::GET, &base, None).await;
+    assert_eq!(p1.status, StatusCode::OK, "{}", p1.json);
+    let cursor = p1.json["nextCursor"]
+        .as_str()
+        .expect("a next page")
+        .to_string();
+    let p2 = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("{base}&cursor={cursor}"),
+            None,
+        )
+        .await;
+    let seen: Vec<String> = p1.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(p2.json["items"].as_array().unwrap())
+        .map(|v| v["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(p2.json["nextCursor"], Value::Null);
+    ids.reverse();
+    assert_eq!(seen, ids, "newest first, each once");
+    let bad = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("{base}&cursor=czox"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        bad.status,
+        StatusCode::BAD_REQUEST,
+        "a sequence cursor is not a keyset one"
+    );
+    // Credentials page over Platform Access's list.
+    grant(&c, &owner, project, "calls.read").await;
+    let sa = service_account(&c, As::User(&owner), env, "backend").await;
+    let path = format!("/v1/environments/{env}/service-accounts/{sa}/credentials");
+    let mut created = Vec::new();
+    for _ in 0..3 {
+        let r = c
+            .req(
+                As::User(&owner),
+                Method::POST,
+                &path,
+                Some(json!({ "scopes": ["calls.read"] })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+        created.push(r.json["credential"]["id"].as_str().unwrap().to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let mut listed = Vec::new();
+    let mut next = Some(format!("{path}?limit=2"));
+    while let Some(p) = next.take() {
+        let r = c.req(As::User(&owner), Method::GET, &p, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+        assert!(r.json["items"].as_array().unwrap().len() <= 2);
+        assert!(!r.json.to_string().contains("\"secret\""));
+        listed.extend(
+            r.json["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["id"].as_str().unwrap().to_string()),
+        );
+        next = r.json["nextCursor"]
+            .as_str()
+            .map(|cur| format!("{path}?limit=2&cursor={cur}"));
+    }
+    created.reverse();
+    assert_eq!(listed, created, "newest first, each once");
+    // Activity: by project (its own events and its environments'), by action (exact or
+    // family prefix); another organization's project is not found.
+    let other = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/organizations/{org}/projects"),
+            Some(json!({ "displayName": "Other" })),
+        )
+        .await;
+    let other_project = id(&other.json);
+    let activity = |q: String| {
+        let c = &c;
+        let owner = owner.clone();
+        async move {
+            c.req(
+                As::User(&owner),
+                Method::GET,
+                &format!("/v1/organizations/{org}/activity?limit=100{q}"),
+                None,
+            )
+            .await
+        }
+    };
+    let all = activity(String::new()).await;
+    let mine = activity(format!("&projectId={project}")).await;
+    assert_eq!(mine.status, StatusCode::OK, "{}", mine.json);
+    let actions = |v: &Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["action"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let mine_actions = actions(&mine.json);
+    for a in [
+        "environment.created",
+        "scope.granted",
+        "service_account.created",
+        "credential.created",
+        "production_access.requested",
+    ] {
+        assert!(
+            mine_actions.iter().any(|x| x == a),
+            "{a} missing: {mine_actions:?}"
+        );
+    }
+    assert!(
+        mine.json["items"].as_array().unwrap().len() < all.json["items"].as_array().unwrap().len()
+    );
+    assert!(
+        !mine.json.to_string().contains(&other_project.to_string()),
+        "other project's events"
+    );
+    let creds = activity("&action=credential.".into()).await;
+    assert!(!actions(&creds.json).is_empty());
+    assert!(actions(&creds.json)
+        .iter()
+        .all(|a| a.starts_with("credential.")));
+    let exact = activity("&action=credential.created".into()).await;
+    assert_eq!(actions(&exact.json), vec!["credential.created"; 3]);
+    let (stranger, _) = c.sessions.sign_in("stranger@other.example");
+    let (_, foreign_project, _) = sandbox(&c, &stranger).await;
+    let r = activity(format!("&projectId={foreign_project}")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.json);
+    let r = activity("&action=DROP%20TABLE".into()).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // Ledger / history rows: a snapshot, a usage fact, a refused replay, a reconciliation.
+    let lim = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/environments/{env}/limits"),
+            None,
+        )
+        .await;
+    assert_eq!(lim.status, StatusCode::OK, "{}", lim.json);
+    let f = fact((org, project, env), "sms-imm", "SMS_SEGMENT", "SEGMENT", 1);
+    let post = |facts: Vec<cf_usage_facts::UsageFact>| {
+        let c = &c;
+        let signer = producers.sms.clone();
+        async move {
+            c.internal(
+                &signer,
+                Method::POST,
+                "/internal/v1/usage/facts",
+                Some(json!({ "facts": facts })),
+            )
+            .await
+        }
+    };
+    assert_eq!(post(vec![f.clone()]).await.json["recorded"], 1);
+    let mut changed = f.clone();
+    changed.quantity = 7;
+    assert_eq!(
+        post(vec![changed.sealed()]).await.json["results"][0]["reasonCode"],
+        "CONFLICTING_REPLAY"
+    );
+    let start = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
+    let rec = c
+        .internal(&producers.sms.clone(), Method::POST, "/internal/v1/usage/reconciliations", Some(json!({
+            "windowStart": start, "windowEnd": start + chrono::Duration::days(1),
+            "entries": [{ "environmentId": env, "usageType": "SMS_SEGMENT", "quantity": 1, "factCount": 1 }]})))
+        .await;
+    assert_eq!(rec.status, StatusCode::OK, "{}", rec.json);
+    for table in [
+        "devplat_usage_facts",
+        "devplat_entitlement_snapshots",
+        "devplat_production_access_transitions",
+        "devplat_usage_rejections",
+        "devplat_usage_reconciliations",
+    ] {
+        assert!(
+            c.count(&format!("SELECT count(*) FROM {table}")).await > 0,
+            "{table} empty"
+        );
+        for sql in [
+            format!("UPDATE {table} SET environment_id = environment_id"),
+            format!("DELETE FROM {table}"),
+        ] {
+            let sql = if table.ends_with("transitions") || table.ends_with("rejections") {
+                sql.replace("environment_id = environment_id", "id = id")
+            } else {
+                sql
+            };
+            assert!(
+                c.db.conn.execute_unprepared(&sql).await.is_err(),
+                "{sql} succeeded"
+            );
+        }
+    }
+    assert!(c
+        .db
+        .conn
+        .execute_unprepared("TRUNCATE devplat_usage_facts")
+        .await
+        .is_err());
+    // Production-access requests are never deleted; the ledger keeps the original quantity.
+    assert!(c
+        .db
+        .conn
+        .execute_unprepared("DELETE FROM devplat_production_access_requests")
+        .await
+        .is_err());
+    assert_eq!(
+        c.count("SELECT quantity FROM devplat_usage_facts WHERE source_fact_id = 'sms-imm'")
+            .await,
+        1
+    );
+}

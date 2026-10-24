@@ -321,7 +321,11 @@ pub async fn list(
     caller: &Caller,
     environment_id: Uuid,
     service_account_id: Uuid,
+    page: &super::pagination::Page,
 ) -> Result<Value, ApiError> {
+    if page.has_cursor() && page.cursor_key().is_none() {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
     let env = environment(&state.db, environment_id).await?;
     authorize(state, caller, env.tenant_id, Action::CredentialsRead).await?;
     let pa = delegate(
@@ -333,15 +337,48 @@ pub async fn list(
         },
     )
     .await?;
-    let mut items = Vec::new();
+    // Newest first, keyset `(createdAt, id)` over the service account's credentials.
+    let mut all: Vec<(DateTime<Utc>, Uuid, Value)> = Vec::new();
     for c in pa
         .get("credentials")
         .and_then(Value::as_array)
         .ok_or(ApiError(ErrorCode::ServiceUnavailable))?
     {
-        items.push(with_limits(&state.db, view(c, environment_id, &env)?).await?);
+        let v = view(c, environment_id, &env)?;
+        let at = v["createdAt"]
+            .as_str()
+            .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.with_timezone(&Utc))
+            .ok_or(ApiError(ErrorCode::ServiceUnavailable))?;
+        let id = v["id"]
+            .as_str()
+            .and_then(|i| Uuid::parse_str(i).ok())
+            .ok_or(ApiError(ErrorCode::ServiceUnavailable))?;
+        all.push((at, id, v));
     }
-    Ok(json!({ "items": items, "nextCursor": null }))
+    all.sort_by_key(|x| std::cmp::Reverse((x.0, x.1)));
+    let after = page.cursor_key();
+    let mut rest = all
+        .into_iter()
+        .filter(|(at, id, _)| {
+            after.is_none_or(|(ca, ci)| (at.timestamp_micros(), *id) < (ca.timestamp_micros(), ci))
+        })
+        .peekable();
+    let mut items = Vec::new();
+    let mut last = None;
+    while items.len() < page.limit {
+        let Some((at, id, v)) = rest.next() else {
+            break;
+        };
+        last = Some((at, id));
+        items.push(with_limits(&state.db, v).await?);
+    }
+    let next = rest
+        .peek()
+        .is_some()
+        .then(|| last.map(|(at, id)| super::pagination::Page::key_cursor(at, id)))
+        .flatten();
+    Ok(json!({ "items": items, "nextCursor": next }))
 }
 
 /// `GET /v1/environments/{id}/credentials/{credentialId}`.
