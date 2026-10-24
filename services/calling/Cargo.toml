@@ -51,10 +51,10 @@ sha2 = "0.10"
 hex = "0.4"
 secrecy = "0.10"
 zeroize = "1.8"
-# Media provider boundary and signaling credentials: HS256 JWS (RustCrypto backend, same
-# audited implementation the service-auth package uses), provider HTTPS API (rustls, no
-# redirects), async provider trait.
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+# Media provider boundary and signaling credentials: HS256 JWS signed and verified through
+# cf_service_auth::jwt (no bundled crypto backend: only EdDSA / HMAC-SHA2 are linked),
+# provider HTTPS API (rustls, no redirects), async provider trait.
+jsonwebtoken = { version = "11", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 async-trait = "0.1"

@@ -194,7 +194,7 @@ impl SignalingKeys {
         };
         let mut header = Header::new(Algorithm::HS256);
         header.typ = Some(TOKEN_TYPE.to_string());
-        let jws = jsonwebtoken::encode(
+        let jws = cf_service_auth::jwt::encode(
             &header,
             &claims,
             &EncodingKey::from_secret(self.key.expose_secret().as_bytes()),
@@ -221,7 +221,7 @@ impl SignalingKeys {
             return Err(invalid);
         }
         let jws = token.strip_prefix(TOKEN_PREFIX).ok_or(invalid)?;
-        let header = jsonwebtoken::decode_header(jws).map_err(|_| invalid)?;
+        let header = cf_service_auth::jwt::decode_header(jws).map_err(|_| invalid)?;
         if header.alg != Algorithm::HS256 || header.typ.as_deref() != Some(TOKEN_TYPE) {
             return Err(invalid);
         }
@@ -233,7 +233,7 @@ impl SignalingKeys {
         validation.validate_exp = false;
         validation.validate_nbf = false;
         validation.leeway = 0;
-        let claims = jsonwebtoken::decode::<Claims>(
+        let claims = cf_service_auth::jwt::decode::<Claims>(
             jws,
             &DecodingKey::from_secret(self.key.expose_secret().as_bytes()),
             &validation,

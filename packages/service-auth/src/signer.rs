@@ -274,7 +274,7 @@ impl ServiceTokenSigner {
             kid: Some(self.key.kid().as_str().to_string()),
             ..Header::new(Algorithm::EdDSA)
         };
-        let token = jsonwebtoken::encode(&header, &claims, self.key.encoding_key())
+        let token = crate::jwt::encode(&header, &claims, self.key.encoding_key())
             .map_err(|_| SignError::Signing)?;
         Ok(SignedServiceRequest {
             token: ServiceToken(SecretString::from(token)),

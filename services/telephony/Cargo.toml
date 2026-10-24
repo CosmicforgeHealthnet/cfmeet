@@ -56,6 +56,5 @@ base64 = "0.22"
 jsonschema = { version = "0.58", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }

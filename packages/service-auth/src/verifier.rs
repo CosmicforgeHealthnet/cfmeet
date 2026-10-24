@@ -301,7 +301,7 @@ impl ServiceTokenVerifier {
         validation.validate_aud = false;
         validation.leeway = 0;
         let decoded =
-            match jsonwebtoken::decode::<serde_json::Value>(token, &trusted.key, &validation) {
+            match crate::jwt::decode::<serde_json::Value>(token, &trusted.key, &validation) {
                 Ok(d) => d,
                 Err(e) => match e.kind() {
                     ErrorKind::InvalidSignature => fail!(VerificationFailure::BadSignature),

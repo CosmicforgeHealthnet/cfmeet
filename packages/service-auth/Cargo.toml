@@ -23,8 +23,12 @@ default = []
 client = ["dep:reqwest", "dep:url"]
 
 [dependencies]
-# Audited JOSE/JWS implementation; RustCrypto backend (ed25519-dalek) only.
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+# Audited JOSE/JWS implementation WITHOUT a bundled crypto backend: `src/jwt.rs` installs
+# a provider with only EdDSA (ed25519-dalek) and HMAC-SHA2 (hmac / sha2). The bundled
+# `rust_crypto` backend would also link RSA / P-256 / P-384 (RUSTSEC-2026-0387).
+jsonwebtoken = { version = "11", default-features = false }
+hmac = "0.12"
+sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 base64 = "0.22"

@@ -427,7 +427,7 @@ fn f_signature_and_algorithm_attacks_are_rejected() {
     let hs = b64(&json!({"alg":"HS256","typ":"cf-service+jwt","kid":"calling-staging-1"}));
     let message = format!("{hs}.{p}");
     let public_x = fleet.calling_key.jwk.x.clone();
-    let hmac = jsonwebtoken::crypto::sign(
+    let hmac = cf_service_auth::jwt::sign(
         message.as_bytes(),
         &jsonwebtoken::EncodingKey::from_secret(public_x.as_bytes()),
         jsonwebtoken::Algorithm::HS256,

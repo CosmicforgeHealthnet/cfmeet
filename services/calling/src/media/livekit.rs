@@ -378,7 +378,7 @@ impl LiveKitAdapter {
             sip: None,
             attributes,
         };
-        let token = jsonwebtoken::encode(
+        let token = cf_service_auth::jwt::encode(
             &Header::new(Algorithm::HS256),
             &claims,
             &EncodingKey::from_secret(secret.expose_secret().as_bytes()),
@@ -442,7 +442,7 @@ impl LiveKitAdapter {
         secret: &SecretString,
         now: DateTime<Utc>,
     ) -> Option<Value> {
-        let header = jsonwebtoken::decode_header(token).ok()?;
+        let header = cf_service_auth::jwt::decode_header(token).ok()?;
         if header.alg != Algorithm::HS256 {
             return None;
         }
@@ -452,7 +452,7 @@ impl LiveKitAdapter {
         // Time is checked below, explicitly, against the caller's clock.
         validation.validate_exp = false;
         validation.validate_nbf = false;
-        let claims = jsonwebtoken::decode::<Value>(
+        let claims = cf_service_auth::jwt::decode::<Value>(
             token,
             &DecodingKey::from_secret(secret.expose_secret().as_bytes()),
             &validation,
@@ -531,7 +531,7 @@ impl LiveKitAdapter {
         let cap = now.timestamp() + MAX_RESEALED_TTL_SECONDS;
         let exp = object.get("exp").and_then(Value::as_i64)?.min(cap);
         object.insert("exp".into(), Value::from(exp));
-        jsonwebtoken::encode(
+        cf_service_auth::jwt::encode(
             &Header::new(Algorithm::HS256),
             &claims,
             &EncodingKey::from_secret(self.settings.edge_key.expose_secret().as_bytes()),
@@ -641,7 +641,7 @@ impl LiveKitAdapter {
             sip: Some(json!({ "call": true })),
             attributes: BTreeMap::new(),
         };
-        let token = jsonwebtoken::encode(
+        let token = cf_service_auth::jwt::encode(
             &Header::new(Algorithm::HS256),
             &claims,
             &EncodingKey::from_secret(secret.expose_secret().as_bytes()),
@@ -1001,7 +1001,7 @@ impl CallMediaProvider for LiveKitAdapter {
         validation.set_required_spec_claims(&["exp", "iss"]);
         validation.validate_nbf = true;
         validation.leeway = WEBHOOK_LEEWAY_SECONDS;
-        let claims = jsonwebtoken::decode::<WebhookClaims>(
+        let claims = cf_service_auth::jwt::decode::<WebhookClaims>(
             token,
             &DecodingKey::from_secret(self.settings.api_secret.expose_secret().as_bytes()),
             &validation,
@@ -1129,7 +1129,7 @@ mod tests {
     fn decode_with(token: &str, secret: &str) -> Value {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_required_spec_claims(&["exp"]);
-        jsonwebtoken::decode::<Value>(
+        cf_service_auth::jwt::decode::<Value>(
             token,
             &DecodingKey::from_secret(secret.as_bytes()),
             &validation,
@@ -1228,7 +1228,7 @@ mod tests {
         assert_eq!(credential.url, "ws://127.0.0.1:8090/v1/calling/media");
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_required_spec_claims(&["exp"]);
-        assert!(jsonwebtoken::decode::<Value>(
+        assert!(cf_service_auth::jwt::decode::<Value>(
             credential.token.expose(),
             &DecodingKey::from_secret(SECRET.as_bytes()),
             &validation
@@ -1308,7 +1308,7 @@ mod tests {
         assert!(up["exp"].as_i64().unwrap() - now.timestamp() <= UPSTREAM_TOKEN_TTL_SECONDS);
         // Malformed generations and grants are refused.
         let forged = |video: Value, attributes: Value, key: &str, iss: &str| {
-            jsonwebtoken::encode(
+            cf_service_auth::jwt::encode(
                 &Header::new(Algorithm::HS256),
                 &json!({ "iss": iss, "sub": "cfmid_00", "nbf": now.timestamp() - 1, "exp": now.timestamp() + 60, "video": video, "attributes": attributes }),
                 &EncodingKey::from_secret(key.as_bytes()),
@@ -1373,7 +1373,7 @@ mod tests {
         let room = "cfc-00000000000000000000000000000000";
         let now = Utc::now();
         let refreshed = |sub: &str, room: &str, gen: &str, key: &str| {
-            jsonwebtoken::encode(
+            cf_service_auth::jwt::encode(
                 &Header::new(Algorithm::HS256),
                 &json!({ "iss": "callingkey", "sub": sub, "nbf": now.timestamp(), "exp": now.timestamp() + 600,
                          "video": { "roomJoin": true, "room": room, "canPublish": true, "canSubscribe": true },
@@ -1399,7 +1399,7 @@ mod tests {
         // LiveKit's key no longer verifies it.
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_required_spec_claims(&["exp"]);
-        assert!(jsonwebtoken::decode::<Value>(
+        assert!(cf_service_auth::jwt::decode::<Value>(
             &sealed,
             &DecodingKey::from_secret(SECRET.as_bytes()),
             &validation
@@ -1424,7 +1424,7 @@ mod tests {
     fn signed(body: &str, secret: &str) -> String {
         let digest = STANDARD.encode(Sha256::digest(body.as_bytes()));
         let now = Utc::now().timestamp();
-        jsonwebtoken::encode(
+        cf_service_auth::jwt::encode(
             &Header::new(Algorithm::HS256),
             &json!({ "iss": "callingkey", "nbf": now - 1, "exp": now + 300, "sha256": digest }),
             &EncodingKey::from_secret(secret.as_bytes()),
@@ -1479,7 +1479,7 @@ mod tests {
             EventVerificationError::InvalidSignature
         );
         let now = Utc::now().timestamp();
-        let expired = jsonwebtoken::encode(
+        let expired = cf_service_auth::jwt::encode(
             &Header::new(Algorithm::HS256),
             &json!({ "iss": "callingkey", "nbf": now - 900, "exp": now - 600,
                      "sha256": STANDARD.encode(Sha256::digest(body.as_bytes())) }),

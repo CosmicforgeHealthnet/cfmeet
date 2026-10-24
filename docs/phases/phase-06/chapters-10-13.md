@@ -92,10 +92,20 @@ generated manifest at the end of Chapters 6–9 held **470** (corrected there).
   software behaviour is certified on staging / synthetic fixtures only.
 * Producer exporters are off by default (`CFMEET_USAGE_EXPORT_ENABLED`); the gateway
   usage re-pointing is off by default (`API_GATEWAY_CENTRAL_USAGE_ENABLED`).
-* Dependency security (open, not caused by this work): RUSTSEC-2026-0387 (published
-  2026-10-23) flags `crypto-bigint 0.5.5`, pulled into every Rust lockfile by
-  `jsonwebtoken`'s `p256` / `p384` backend through `packages/service-auth` (service tokens
-  are EdDSA-only, so those curves are linked but never used). The fix needs
-  `crypto-bigint >= 0.7.6`, i.e. upstream `jsonwebtoken` / `elliptic-curve` upgrades; no
-  ignore entry was added — that decision is left to the owners.
+* Dependency security, RUSTSEC-2026-0387 (`crypto-bigint 0.5.5`, published 2026-10-23):
+  * **fixed** for the `jsonwebtoken` path: `packages/service-auth/src/jwt.rs` installs an
+    EdDSA + HMAC-only provider (no bundled `rust_crypto` backend, so no RSA / P-256 /
+    P-384); tokens are byte-identical (`tests/jws_provider.rs` golden vectors). `crypto-bigint`
+    is gone from 10 lockfiles (service-auth, usage-facts, platform-access,
+    developer-platform, api-gateway, calling, numbering, sms-gateway, privacy-relay,
+    telephony); messaging, meeting-service and certification lost the `jsonwebtoken`
+    path but keep the MLS one below.
+  * **open (upstream)** for the MLS path in `packages/messaging-crypto` (also locked by
+    services/messaging, services/meeting-service, certification and the wasm /
+    web-harness builds): `openmls_rust_crypto` 0.6.0 and `openmls_basic_credential` 0.6.0
+    (latest releases) require `p256` / `p384` 0.13 → `crypto-bigint` 0.5. The profile uses
+    only `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`. Any dependency change there also
+    changes the committed browser artifact (`apps/web/public/messaging-crypto`, checked
+    byte-for-byte by web-crypto-artifact.yml), which is outside this backend scope. No
+    ignore entry was added.
 * Developer Console UI (§18) unchanged; `apps/web`, `frontend.yml` and Vercel untouched.

@@ -48,7 +48,8 @@ phonenumber = "0.3"
 jsonschema = { version = "0.58", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-# Forging tokens with self-declared claims (negative tests only).
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+# Forging tokens with self-declared claims (negative tests only; signed through
+# cf_service_auth::jwt, no bundled crypto backend).
+jsonwebtoken = { version = "11", default-features = false }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
