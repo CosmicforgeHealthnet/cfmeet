@@ -92,4 +92,10 @@ generated manifest at the end of Chapters 6–9 held **470** (corrected there).
   software behaviour is certified on staging / synthetic fixtures only.
 * Producer exporters are off by default (`CFMEET_USAGE_EXPORT_ENABLED`); the gateway
   usage re-pointing is off by default (`API_GATEWAY_CENTRAL_USAGE_ENABLED`).
+* Dependency security (open, not caused by this work): RUSTSEC-2026-0387 (published
+  2026-10-23) flags `crypto-bigint 0.5.5`, pulled into every Rust lockfile by
+  `jsonwebtoken`'s `p256` / `p384` backend through `packages/service-auth` (service tokens
+  are EdDSA-only, so those curves are linked but never used). The fix needs
+  `crypto-bigint >= 0.7.6`, i.e. upstream `jsonwebtoken` / `elliptic-curve` upgrades; no
+  ignore entry was added — that decision is left to the owners.
 * Developer Console UI (§18) unchanged; `apps/web`, `frontend.yml` and Vercel untouched.
