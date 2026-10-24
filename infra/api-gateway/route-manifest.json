@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 36,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 470,
+    "PUBLIC_CUSTOMER": 497,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -4395,6 +4395,96 @@
       "requiredScope": "projects.read"
     },
     {
+      "id": "developer-platform.getCredential",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.putCredentialLimits",
+      "domain": "developer-platform",
+      "method": "PUT",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}/limits",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}/limits",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.resumeCredential",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}/resume",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}/resume",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.revokeCredential",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}/revoke",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}/revoke",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.rotateCredential",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}/rotate",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}/rotate",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.suspendCredential",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/credentials/{credentialId}/suspend",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/credentials/{credentialId}/suspend",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
       "id": "developer-platform.getEnvironmentEntitlements",
       "domain": "developer-platform",
       "method": "GET",
@@ -4402,6 +4492,21 @@
       "protocol": "REST",
       "upstream": "cfmeet.developer-platform",
       "upstreamPath": "/v1/environments/{environmentId}/entitlements",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
+    },
+    {
+      "id": "developer-platform.getEnvironmentLimits",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/limits",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/limits",
       "auth": [
         "DEVELOPER_SESSION",
         "PLATFORM_CREDENTIAL"
@@ -4470,6 +4575,51 @@
       "requiredScope": "service_accounts.manage"
     },
     {
+      "id": "developer-platform.listCredentials",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.createCredential",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
+      "id": "developer-platform.putServiceAccountLimits",
+      "domain": "developer-platform",
+      "method": "PUT",
+      "pattern": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/limits",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/limits",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "credentials.manage"
+    },
+    {
       "id": "developer-platform.resumeServiceAccount",
       "domain": "developer-platform",
       "method": "POST",
@@ -4513,6 +4663,66 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "projects.manage"
+    },
+    {
+      "id": "developer-platform.getEnvironmentUsage",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/usage",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/usage",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
+    },
+    {
+      "id": "developer-platform.exportEnvironmentUsage",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/usage/export",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/usage/export",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
+    },
+    {
+      "id": "developer-platform.listEnvironmentUsageFacts",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/usage/facts",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/usage/facts",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
+    },
+    {
+      "id": "developer-platform.listEnvironmentUsageWarnings",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/environments/{environmentId}/usage/warnings",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/environments/{environmentId}/usage/warnings",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "usage.read"
     },
     {
       "id": "developer-platform.listWebhookDeliveryAttempts",
@@ -6223,6 +6433,36 @@
       "forwardHeaders": []
     },
     {
+      "id": "developer-platform.getCredentialPolicy",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/organizations/{organizationId}/credential-policy",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/organizations/{organizationId}/credential-policy",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "organizations.read"
+    },
+    {
+      "id": "developer-platform.putCredentialPolicy",
+      "domain": "developer-platform",
+      "method": "PUT",
+      "pattern": "/v1/organizations/{organizationId}/credential-policy",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/organizations/{organizationId}/credential-policy",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "organizations.manage"
+    },
+    {
       "id": "developer-platform.listInvitations",
       "domain": "developer-platform",
       "method": "GET",
@@ -6357,6 +6597,36 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "projects.manage"
+    },
+    {
+      "id": "developer-platform.getSupportProfile",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/organizations/{organizationId}/support-profile",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/organizations/{organizationId}/support-profile",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "organizations.read"
+    },
+    {
+      "id": "developer-platform.putSupportProfile",
+      "domain": "developer-platform",
+      "method": "PUT",
+      "pattern": "/v1/organizations/{organizationId}/support-profile",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/organizations/{organizationId}/support-profile",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "organizations.manage"
     },
     {
       "id": "privacy-relay.createContactAccessGrant",
@@ -6597,6 +6867,51 @@
       "requiredScope": "privacy.sessions.write"
     },
     {
+      "id": "developer-platform.getProductionAccessRequest",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/production-access-requests/{requestId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/production-access-requests/{requestId}",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.read"
+    },
+    {
+      "id": "developer-platform.activateProductionAccess",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/production-access-requests/{requestId}/activate",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/production-access-requests/{requestId}/activate",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "production_access.request"
+    },
+    {
+      "id": "developer-platform.cancelProductionAccessRequest",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/production-access-requests/{requestId}/cancel",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/production-access-requests/{requestId}/cancel",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "production_access.request"
+    },
+    {
       "id": "developer-platform.getProject",
       "domain": "developer-platform",
       "method": "GET",
@@ -6672,6 +6987,51 @@
       "requiredScope": "projects.manage"
     },
     {
+      "id": "developer-platform.getProductionAccess",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/projects/{projectId}/production-access",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/projects/{projectId}/production-access",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.read"
+    },
+    {
+      "id": "developer-platform.listProductionAccessRequests",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/projects/{projectId}/production-access-requests",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/projects/{projectId}/production-access-requests",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.read"
+    },
+    {
+      "id": "developer-platform.submitProductionAccessRequest",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/projects/{projectId}/production-access-requests",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/projects/{projectId}/production-access-requests",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "production_access.request"
+    },
+    {
       "id": "developer-platform.resumeProject",
       "domain": "developer-platform",
       "method": "POST",
@@ -6700,6 +7060,36 @@
       ],
       "forwardHeaders": [],
       "requiredScope": "projects.read"
+    },
+    {
+      "id": "developer-platform.grantProjectScope",
+      "domain": "developer-platform",
+      "method": "POST",
+      "pattern": "/v1/projects/{projectId}/scopes",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/projects/{projectId}/scopes",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.manage"
+    },
+    {
+      "id": "developer-platform.withdrawProjectScope",
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "pattern": "/v1/projects/{projectId}/scopes/{scope}",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/projects/{projectId}/scopes/{scope}",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.manage"
     },
     {
       "id": "developer-platform.suspendProject",
@@ -6745,6 +7135,21 @@
       "forwardHeaders": [
         "cf-acting-principal"
       ]
+    },
+    {
+      "id": "developer-platform.listScopeRegistry",
+      "domain": "developer-platform",
+      "method": "GET",
+      "pattern": "/v1/scopes",
+      "protocol": "REST",
+      "upstream": "cfmeet.developer-platform",
+      "upstreamPath": "/v1/scopes",
+      "auth": [
+        "DEVELOPER_SESSION",
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "projects.read"
     },
     {
       "id": "sms.listMessages",
@@ -8127,9 +8532,65 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getCredential",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "putCredentialLimits",
+      "method": "PUT",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "resumeCredential",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "revokeCredential",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "rotateCredential",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/rotate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "suspendCredential",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "getEnvironmentEntitlements",
       "method": "GET",
       "path": "/v1/environments/{environmentId}/entitlements",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getEnvironmentLimits",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/limits",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -8167,6 +8628,30 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listCredentials",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "createCredential",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "putServiceAccountLimits",
+      "method": "PUT",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "resumeServiceAccount",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
@@ -8186,6 +8671,38 @@
       "operationId": "suspendEnvironment",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getEnvironmentUsage",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "exportEnvironmentUsage",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/export",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listEnvironmentUsageFacts",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/facts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listEnvironmentUsageWarnings",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/warnings",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -8335,6 +8852,22 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getCredentialPolicy",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/credential-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "putCredentialPolicy",
+      "method": "PUT",
+      "path": "/v1/organizations/{organizationId}/credential-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "listInvitations",
       "method": "GET",
       "path": "/v1/organizations/{organizationId}/invitations",
@@ -8415,6 +8948,46 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getSupportProfile",
+      "method": "GET",
+      "path": "/v1/organizations/{organizationId}/support-profile",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "putSupportProfile",
+      "method": "PUT",
+      "path": "/v1/organizations/{organizationId}/support-profile",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getProductionAccessRequest",
+      "method": "GET",
+      "path": "/v1/production-access-requests/{requestId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "activateProductionAccess",
+      "method": "POST",
+      "path": "/v1/production-access-requests/{requestId}/activate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "cancelProductionAccessRequest",
+      "method": "POST",
+      "path": "/v1/production-access-requests/{requestId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "getProject",
       "method": "GET",
       "path": "/v1/projects/{projectId}",
@@ -8455,6 +9028,30 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "getProductionAccess",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/production-access",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listProductionAccessRequests",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/production-access-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "submitProductionAccessRequest",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/production-access-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "resumeProject",
       "method": "POST",
       "path": "/v1/projects/{projectId}/resume",
@@ -8471,9 +9068,33 @@
     {
       "domain": "developer-platform",
       "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "grantProjectScope",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/scopes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "withdrawProjectScope",
+      "method": "DELETE",
+      "path": "/v1/projects/{projectId}/scopes/{scope}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
       "operationId": "suspendProject",
       "method": "POST",
       "path": "/v1/projects/{projectId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "contract": "cfmeet.developer-platform.http-api",
+      "operationId": "listScopeRegistry",
+      "method": "GET",
+      "path": "/v1/scopes",
       "class": "PUBLIC_CUSTOMER"
     },
     {

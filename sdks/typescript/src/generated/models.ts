@@ -2253,6 +2253,11 @@ export namespace DeveloperPlatform {
     /** Returned ONLY by create and rotate-secret; absent from an Idempotency-Key replay of a create (never stored). */
     signingSecret?: string;
   };
+  export type CreateCredentialRequest = {
+    scopes?: Array<string>;
+    label?: string;
+    expiresAt?: string;
+  };
   export type CreateEnvironmentRequest = {
     /** PRODUCTION environments are activated by the production-access workflow (Section 55). */
     kind: "SANDBOX" | "TEST";
@@ -2284,6 +2289,42 @@ export namespace DeveloperPlatform {
     eventTypes: Array<WebhookEventType>;
     description?: string | null;
   };
+  /** Section 54: metadata of a Platform Access API credential. Never a secret or verifier. */
+  export type Credential = {
+    id: Uuid;
+    organizationId: Uuid;
+    projectId: Uuid;
+    environmentId: Uuid;
+    environmentKind: EnvironmentKind | null;
+    serviceAccountId: Uuid | null;
+    publicId: string | null;
+    masked: string | null;
+    label: string | null;
+    scopes: Array<string> | null;
+    status: ("ACTIVE" | "REVOKED") | null;
+    effectiveState: CredentialEffectiveState | null;
+    notBefore: string | null;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    suspendedAt: string | null;
+    rotatedFromCredentialId: Uuid | null;
+    supersededByCredentialId: Uuid | null;
+    supersessionValidUntil: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    limits: QuotaRestrictionValues;
+  };
+  export type CredentialEffectiveState = "ACTIVE" | "ROTATION_OVERLAP" | "NOT_YET_VALID" | "EXPIRED" | "SUPERSEDED" | "REVOKED" | "SUSPENDED";
+  export type CredentialList = {
+    items: Array<Credential>;
+    nextCursor: string | null;
+  };
+  export type CredentialPolicy = {
+    organizationId: Uuid;
+    configured: boolean;
+    maxLifetimeDays: number | null;
+    maxRotationOverlapMinutes: number | null;
+  };
   /** FAILED is the dead letter (replayable). SHADOW: recorded while the platform ran in shadow mode before the cut-over; deliberately not sent. */
   export type DeliveryStatus = "PENDING" | "DELIVERING" | "RETRY_SCHEDULED" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "SHADOW";
   export type EndpointHealth = {
@@ -2302,7 +2343,7 @@ export namespace DeveloperPlatform {
     smsPerDay?: number;
     messagingAttachmentBytes?: number;
   };
-  /** Effective platform entitlements: organization plan, stricter project plan and environment caps; the most restrictive value wins and the limiting level is named. */
+  /** Effective platform entitlements (Section 54 §10.4 precedence: organization plan, explicit operator override, stricter project plan, environment cap, service-account and credential restrictions; the most restrictive value wins and the limiting level is named). Internal reads also carry the versioned snapshot consuming services cache. */
   export type Entitlements = {
     environmentId: Uuid;
     organizationId: Uuid | null;
@@ -2312,8 +2353,8 @@ export namespace DeveloperPlatform {
     apiRequestsPerMinute: number;
     apiRequestsPerDay: number;
     limitingLevel: {
-      apiRequestsPerMinute: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "PROJECT_PLAN" | "ENVIRONMENT";
-      apiRequestsPerDay: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "PROJECT_PLAN" | "ENVIRONMENT";
+      apiRequestsPerMinute: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" | "PROJECT_PLAN" | "ENVIRONMENT" | "SERVICE_ACCOUNT" | "CREDENTIAL";
+      apiRequestsPerDay: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" | "PROJECT_PLAN" | "ENVIRONMENT" | "SERVICE_ACCOUNT" | "CREDENTIAL";
     };
     plan: {
         code: string;
@@ -2324,6 +2365,20 @@ export namespace DeveloperPlatform {
         version: number;
       } | null;
     domainEntitlements: EntitlementValues;
+    /** Internal reads with serviceAccountId / credentialId: the caller's own (never higher) limits and levels; the top-level values stay the environment's. */
+    subject?: {
+      serviceAccountId: Uuid | null;
+      credentialId: Uuid | null;
+      apiRequestsPerMinute?: number;
+      apiRequestsPerDay?: number;
+      limitingLevel?: {
+        apiRequestsPerMinute: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" | "PROJECT_PLAN" | "ENVIRONMENT" | "SERVICE_ACCOUNT" | "CREDENTIAL";
+        apiRequestsPerDay: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" | "PROJECT_PLAN" | "ENVIRONMENT" | "SERVICE_ACCOUNT" | "CREDENTIAL";
+      };
+    };
+    snapshotVersion?: number;
+    snapshotDigest?: string;
+    snapshotAt?: string;
   };
   export type Environment = {
     /** The canonical Platform Access environment id. */
@@ -2342,6 +2397,31 @@ export namespace DeveloperPlatform {
     liveTelecomAllowed?: boolean;
   };
   export type EnvironmentKind = ApplicationEnvironmentKind;
+  export type EnvironmentLimit = {
+    limit: string;
+    window: "MINUTE" | "DAY" | "CURRENT";
+    ceiling: number;
+    limitingLevel?: "PLATFORM_DEFAULT" | "ORGANIZATION_PLAN" | "OPERATOR_OVERRIDE" | "PROJECT_PLAN" | "ENVIRONMENT" | "SERVICE_ACCOUNT" | "CREDENTIAL";
+    current: number | null;
+    remaining: number | null;
+    resetsAt?: string;
+    enforcedBy: string;
+  };
+  /** Section 55: effective limits, current usage and remaining allowance where meaningful, and limit warnings. */
+  export type EnvironmentLimits = {
+    environmentId: Uuid;
+    organizationId: Uuid | null;
+    projectId: Uuid | null;
+    environmentKind: EnvironmentKind | null;
+    organizationState: string | null;
+    generatedAt: string;
+    snapshotVersion: number;
+    snapshotDigest: string;
+    plan: { [key: string]: unknown } | null;
+    projectPlan: { [key: string]: unknown } | null;
+    limits: Array<EnvironmentLimit>;
+    warnings: Array<UsageWarning>;
+  };
   /** A page of results; pass `nextCursor` as `cursor` for the next page (null: last page). */
   export type EnvironmentList = {
     items: Array<Environment>;
@@ -2355,7 +2435,10 @@ export namespace DeveloperPlatform {
       requestId: RequestId | null;
     };
   };
-  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "CAPABILITY_UNAVAILABLE" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
+  export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "INSUFFICIENT_SCOPE" | "ORGANIZATION_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_CLOSED" | "ORGANIZATION_NOT_ACTIVE" | "VERSION_CONFLICT" | "INVALID_STATE" | "LAST_OWNER" | "ALREADY_MEMBER" | "INVITATION_PENDING" | "INVITATION_INVALID" | "INVITATION_EMAIL_MISMATCH" | "IDEMPOTENCY_KEY_REUSED" | "POLICY_VIOLATION" | "OPERATOR_REQUIRED" | "APPROVAL_EXPIRED" | "SELF_APPROVAL_FORBIDDEN" | "PRODUCTION_ACCESS_REQUIRED" | "CAPABILITY_UNAVAILABLE" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR";
+  export type GrantScopeRequest = {
+    scope: string;
+  };
   export type Invitation = {
     id: Uuid;
     organizationId: Uuid;
@@ -2383,6 +2466,15 @@ export namespace DeveloperPlatform {
     decidedAt: string | null;
     /** One-time acceptance token, returned ONLY in this response (stored as a digest; never readable again). */
     token: string;
+  };
+  /** Section 54: an issued or rotated credential; the secret is returned once only. */
+  export type IssuedCredential = {
+    credential: Credential;
+    /** The raw credential, shown exactly once (never on an idempotent replay). */
+    secret?: string;
+    /** Present on an idempotent replay instead of the secret. */
+    secretRedacted?: true;
+    rotatedFromCredentialId?: Uuid;
   };
   export type Member = {
     id: Uuid;
@@ -2448,7 +2540,54 @@ export namespace DeveloperPlatform {
     items: Array<PlanAssignment>;
     nextCursor: string | null;
   };
-  export type ProductionAccessState = "NOT_APPLICABLE" | "SANDBOX_READY" | "PRODUCTION_REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "SUSPENDED";
+  /** Section 55 production-access request: SANDBOX_READY → PRODUCTION_REQUESTED → UNDER_REVIEW → APPROVED / REJECTED → LIVE / SUSPENDED. */
+  export type ProductionAccessRequest = {
+    id: Uuid;
+    organizationId: Uuid;
+    projectId: Uuid;
+    state: ProductionRequestState;
+    requestedCapabilities: Array<ProductionCapability>;
+    approvedCapabilities: Array<ProductionCapability>;
+    useCaseSummary: string | null;
+    requestedBy: string;
+    decision: ({
+        policy: ("OPERATOR" | "AUTOMATIC") | null;
+        reasonCode: string | null;
+        decidedAt: string;
+      }) | null;
+    approvalExpiresAt: string | null;
+    productionEnvironmentId: Uuid | null;
+    activatedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+    version: number;
+    history?: Array<{
+        fromState: ProductionRequestState | null;
+        toState: ProductionRequestState;
+        actorKind: "USER" | "OPERATOR" | "SERVICE" | "POLICY";
+        reasonCode: string | null;
+        occurredAt: string;
+      }>;
+  };
+  export type ProductionAccessRequestList = {
+    items: Array<ProductionAccessRequest>;
+    nextCursor: string | null;
+  };
+  export type ProductionAccessState = "NOT_APPLICABLE" | "SANDBOX_READY" | "PRODUCTION_REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "SUSPENDED" | "LIVE";
+  export type ProductionAccessStatus = {
+    projectId: Uuid;
+    state: "NOT_READY" | "SANDBOX_READY" | "PRODUCTION_REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED" | "LIVE" | "SUSPENDED";
+    enabledCapabilities: Array<ProductionCapability>;
+    productionEnvironmentId: Uuid | null;
+    currentRequest: ProductionAccessRequest | null;
+    capabilityCatalogue: Array<{
+        name: ProductionCapability;
+        regulated: boolean;
+        scopes: Array<string>;
+      }>;
+  };
+  export type ProductionCapability = "PLATFORM_CONTROL" | "MEETINGS" | "MESSAGING" | "APP_CALLING" | "PUBLIC_NETWORK_CALLING" | "PRIVACY_RELAY" | "NUMBERS" | "SMS";
+  export type ProductionRequestState = "PRODUCTION_REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "CANCELLED" | "LIVE" | "SUSPENDED";
   export type Project = {
     /** The project id IS the canonical Platform Access application id. */
     id: Uuid;
@@ -2483,12 +2622,63 @@ export namespace DeveloperPlatform {
     externalBillingRef?: string;
     expectedVersion?: number;
   };
+  export type PutCredentialPolicyRequest = {
+    maxLifetimeDays: number;
+    maxRotationOverlapMinutes: number;
+  };
+  export type PutSupportContactsRequest = {
+    primaryTechnicalContactMemberId?: Uuid | null;
+    incidentContactMemberId?: Uuid | null;
+  };
+  export type QuotaRestriction = {
+    subjectKind: "SERVICE_ACCOUNT" | "CREDENTIAL";
+    subjectId: Uuid;
+    environmentId: Uuid;
+    limits: QuotaRestrictionValues;
+  };
+  export type QuotaRestrictionRequest = {
+    apiRequestsPerMinute?: number | null;
+    apiRequestsPerDay?: number | null;
+  };
+  export type QuotaRestrictionValues = ({
+      apiRequestsPerMinute: number | null;
+      apiRequestsPerDay: number | null;
+    }) | null;
   /** Server-generated identifier of one request / one service hop. */
   export type RequestId = string;
   /** Part VI workspace role (Section 50 permission matrix). */
   export type Role = "OWNER" | "ADMIN" | "DEVELOPER" | "ANALYST" | "BILLING";
+  export type RotateCredentialRequest = {
+    overlapMinutes?: number;
+    scopes?: Array<string>;
+    label?: string;
+    expiresAt?: string;
+  };
   export type RotateWebhookSecretRequest = {
     expectedVersion: number;
+  };
+  export type ScopeGrant = {
+    projectId: Uuid;
+    scope: string;
+    environmentKinds: Array<EnvironmentKind> | null;
+    grantBasis: ("STANDARD" | "PRIVILEGED_OPERATOR") | null;
+  };
+  export type ScopeRegistry = {
+    items: Array<ScopeRegistryEntry>;
+    nextCursor: null;
+  };
+  export type ScopeRegistryEntry = {
+    name: string;
+    description: string | null;
+    trust: "STANDARD" | "FIRST_PARTY_ONLY" | "PRIVILEGED_OPERATOR";
+    selfServiceGrantable: boolean;
+    productionCapability: ("PLATFORM_CONTROL" | "MEETINGS" | "MESSAGING" | "APP_CALLING" | "PUBLIC_NETWORK_CALLING" | "PRIVACY_RELAY" | "NUMBERS" | "SMS") | null;
+    regulated: boolean;
+  };
+  export type ScopeWithdrawal = {
+    projectId: Uuid;
+    scope: string;
+    removed: boolean;
   };
   /** A Platform Access service account (machine identity) of one environment, read through the Developer Platform. Platform Access is its only store; API credentials (secrets) are never part of it (Section 54). */
   export type ServiceAccount = {
@@ -2511,6 +2701,28 @@ export namespace DeveloperPlatform {
   };
   /** Platform Access service-account status. The Developer Platform suspends / resumes (ACTIVE ⇄ SUSPENDED); REVOKED is terminal and an operator decision. A non-ACTIVE service account's API credentials do not authenticate. */
   export type ServiceAccountStatus = "ACTIVE" | "SUSPENDED" | "REVOKED";
+  export type SubmitProductionAccessRequest = {
+    capabilities: Array<ProductionCapability>;
+    useCaseSummary?: string;
+  };
+  /** Section 57 support / incident routing metadata: member references only, no ticket content, emails or phone numbers. */
+  export type SupportProfile = {
+    organizationId: Uuid;
+    supportTier: "COMMUNITY" | "STANDARD" | "PREMIUM" | "ENTERPRISE" | "INTERNAL";
+    supportReference: string | null;
+    primaryTechnicalContactMemberId: Uuid | null;
+    incidentContactMemberId: Uuid | null;
+    productionStatus: "SANDBOX_ONLY" | "PRODUCTION_PENDING" | "LIVE" | "SUSPENDED";
+    lastIncident: ({
+        reference: string;
+        occurredAt: string | null;
+      }) | null;
+    updatedAt: string | null;
+    version: number;
+  };
+  export type SuspendCredentialRequest = {
+    reasonCode?: string;
+  };
   export type TransferOwnershipRequest = {
     memberId: Uuid;
   };
@@ -2533,6 +2745,69 @@ export namespace DeveloperPlatform {
     eventTypes?: Array<WebhookEventType>;
     description?: string | null;
     status?: "ACTIVE" | "DISABLED";
+  };
+  export type UsageFactList = {
+    items: Array<UsageFactView>;
+    nextCursor: string | null;
+  };
+  /** One immutable usage fact: safe resource reference and public dimensions only (no provider ids, rates or content). */
+  export type UsageFactView = {
+    id: Uuid;
+    usageType: UsageType;
+    unit: UsageUnit;
+    quantity: number;
+    resourceRef: string;
+    producer: string;
+    sourceFactId: string;
+    occurredAt: string;
+    usageDay: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    environmentId: Uuid;
+    environmentKind: EnvironmentKind;
+    sandbox: boolean;
+    dimensions: { [key: string]: unknown };
+    recordedAt: string;
+  };
+  /** Section 55: environment-scoped daily usage rollups and period totals (billing-neutral quantities). */
+  export type UsageSummary = {
+    organizationId: Uuid;
+    projectId: Uuid;
+    environmentId: Uuid;
+    environmentKind: EnvironmentKind;
+    sandbox: boolean;
+    from: string;
+    to: string;
+    usageTypes: Array<UsageType>;
+    days: Array<{
+        day: string;
+        usageType: UsageType;
+        unit: UsageUnit;
+        quantity: number;
+        factCount: number;
+        derived: { [key: string]: unknown };
+      }>;
+    totals: Array<{
+        usageType: UsageType;
+        unit: UsageUnit;
+        quantity: number;
+        factCount: number;
+        derived: { [key: string]: unknown };
+      }>;
+  };
+  export type UsageType = "API_OPERATION" | "MEETING_PARTICIPANT_MINUTE" | "CALL_MINUTE_APP" | "CALL_MINUTE_PUBLIC_NETWORK" | "NUMBER_ACTIVE" | "SMS_SEGMENT" | "RECORDING_MINUTE" | "STORAGE_BYTE_TIME";
+  export type UsageUnit = "OPERATION" | "MILLISECOND" | "SEGMENT" | "BYTE_SECOND";
+  export type UsageWarning = {
+    limit: string;
+    level: "WARNING" | "EXHAUSTED";
+    current: number;
+    ceiling: number;
+    ratio: number;
+  };
+  export type UsageWarnings = {
+    environmentId: Uuid;
+    generatedAt: string;
+    items: Array<UsageWarning>;
   };
   /** Lower-case hyphenated UUID. */
   export type Uuid = string;
@@ -2573,10 +2848,20 @@ export namespace DeveloperPlatform {
       params: { body: AcceptInvitationRequest };
       response: Member;
     };
+    /** POST /v1/production-access-requests/{requestId}/activate — scope production_access.request; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    activateProductionAccess: {
+      params: { path: { requestId: Uuid } };
+      response: ProductionAccessRequest;
+    };
     /** POST /v1/projects/{projectId}/archive — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     archiveProject: {
       params: { path: { projectId: Uuid } };
       response: Project;
+    };
+    /** POST /v1/production-access-requests/{requestId}/cancel — scope production_access.request; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    cancelProductionAccessRequest: {
+      params: { path: { requestId: Uuid } };
+      response: ProductionAccessRequest;
     };
     /** PATCH /v1/organizations/{organizationId}/members/{memberId}; auth DEVELOPER_SESSION; retry NO_RETRY */
     changeMemberRole: {
@@ -2587,6 +2872,11 @@ export namespace DeveloperPlatform {
     closeOrganization: {
       params: { path: { organizationId: Uuid } };
       response: Organization;
+    };
+    /** POST /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    createCredential: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid }; body: CreateCredentialRequest; idempotencyKey?: string };
+      response: IssuedCredential;
     };
     /** POST /v1/projects/{projectId}/environments — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     createEnvironment: {
@@ -2623,6 +2913,21 @@ export namespace DeveloperPlatform {
       params: { path: { environmentId: Uuid; webhookId: Uuid }; query: { expectedVersion: number } };
       response: ConsoleWebhook;
     };
+    /** GET /v1/environments/{environmentId}/usage/export — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    exportEnvironmentUsage: {
+      params: { path: { environmentId: Uuid }; query?: { from?: string; to?: string; usageType?: UsageType; format?: "csv" | "json"; granularity?: "daily" | "facts" } };
+      response: ArrayBuffer;
+    };
+    /** GET /v1/environments/{environmentId}/credentials/{credentialId} — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getCredential: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid } };
+      response: Credential;
+    };
+    /** GET /v1/organizations/{organizationId}/credential-policy — scope organizations.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getCredentialPolicy: {
+      params: { path: { organizationId: Uuid } };
+      response: CredentialPolicy;
+    };
     /** GET /v1/environments/{environmentId} — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     getEnvironment: {
       params: { path: { environmentId: Uuid } };
@@ -2632,6 +2937,16 @@ export namespace DeveloperPlatform {
     getEnvironmentEntitlements: {
       params: { path: { environmentId: Uuid } };
       response: Entitlements;
+    };
+    /** GET /v1/environments/{environmentId}/limits — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getEnvironmentLimits: {
+      params: { path: { environmentId: Uuid } };
+      response: EnvironmentLimits;
+    };
+    /** GET /v1/environments/{environmentId}/usage — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getEnvironmentUsage: {
+      params: { path: { environmentId: Uuid }; query?: { from?: string; to?: string; usageType?: UsageType } };
+      response: UsageSummary;
     };
     /** GET /v1/environments/{environmentId}/webhooks/{webhookId}; auth DEVELOPER_SESSION; retry SAFE */
     getEnvironmentWebhook: {
@@ -2648,6 +2963,16 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid } };
       response: OrganizationCommercial;
     };
+    /** GET /v1/projects/{projectId}/production-access — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getProductionAccess: {
+      params: { path: { projectId: Uuid } };
+      response: ProductionAccessStatus;
+    };
+    /** GET /v1/production-access-requests/{requestId} — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getProductionAccessRequest: {
+      params: { path: { requestId: Uuid } };
+      response: ProductionAccessRequest;
+    };
     /** GET /v1/projects/{projectId} — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     getProject: {
       params: { path: { projectId: Uuid } };
@@ -2657,6 +2982,16 @@ export namespace DeveloperPlatform {
     getServiceAccount: {
       params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
       response: ServiceAccount;
+    };
+    /** GET /v1/organizations/{organizationId}/support-profile — scope organizations.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    getSupportProfile: {
+      params: { path: { organizationId: Uuid } };
+      response: SupportProfile;
+    };
+    /** POST /v1/projects/{projectId}/scopes — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    grantProjectScope: {
+      params: { path: { projectId: Uuid }; body: GrantScopeRequest };
+      response: ScopeGrant;
     };
     /** GET /v1/organizations/{organizationId}/activity — scope audit.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listActivity: {
@@ -2668,6 +3003,22 @@ export namespace DeveloperPlatform {
     listCommercialPlans: {
       params: {};
       response: CommercialPlanList;
+    };
+    /** GET /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listCredentials: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
+      response: CredentialList;
+    };
+    /** GET /v1/environments/{environmentId}/usage/facts — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listEnvironmentUsageFacts: {
+      params: { path: { environmentId: Uuid }; query?: { from?: string; to?: string; usageType?: UsageType; limit?: number; cursor?: string } };
+      response: UsageFactList;
+      item: NonNullable<(UsageFactList)["items"]>[number];
+    };
+    /** GET /v1/environments/{environmentId}/usage/warnings — scope usage.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listEnvironmentUsageWarnings: {
+      params: { path: { environmentId: Uuid } };
+      response: UsageWarnings;
     };
     /** GET /v1/environments/{environmentId}/webhooks/{webhookId}/deliveries; auth DEVELOPER_SESSION; retry SAFE */
     listEnvironmentWebhookDeliveries: {
@@ -2711,6 +3062,11 @@ export namespace DeveloperPlatform {
       response: PlanAssignmentList;
       item: NonNullable<(PlanAssignmentList)["items"]>[number];
     };
+    /** GET /v1/projects/{projectId}/production-access-requests — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listProductionAccessRequests: {
+      params: { path: { projectId: Uuid } };
+      response: ProductionAccessRequestList;
+    };
     /** GET /v1/projects/{projectId}/scopes — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listProjectScopes: {
       params: { path: { projectId: Uuid } };
@@ -2721,6 +3077,11 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid }; query?: { limit?: number; cursor?: string } };
       response: ProjectList;
       item: NonNullable<(ProjectList)["items"]>[number];
+    };
+    /** GET /v1/scopes — scope projects.read; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
+    listScopeRegistry: {
+      params: {};
+      response: ScopeRegistry;
     };
     /** GET /v1/environments/{environmentId}/service-accounts — scope service_accounts.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     listServiceAccounts: {
@@ -2739,6 +3100,26 @@ export namespace DeveloperPlatform {
       params: { path: { organizationId: Uuid }; body: PutBillingAccountRequest };
       response: BillingAccount;
     };
+    /** PUT /v1/environments/{environmentId}/credentials/{credentialId}/limits — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    putCredentialLimits: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid }; body: QuotaRestrictionRequest };
+      response: QuotaRestriction;
+    };
+    /** PUT /v1/organizations/{organizationId}/credential-policy — scope organizations.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    putCredentialPolicy: {
+      params: { path: { organizationId: Uuid }; body: PutCredentialPolicyRequest };
+      response: CredentialPolicy;
+    };
+    /** PUT /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/limits — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    putServiceAccountLimits: {
+      params: { path: { environmentId: Uuid; serviceAccountId: Uuid }; body: QuotaRestrictionRequest };
+      response: QuotaRestriction;
+    };
+    /** PUT /v1/organizations/{organizationId}/support-profile — scope organizations.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    putSupportProfile: {
+      params: { path: { organizationId: Uuid }; body: PutSupportContactsRequest };
+      response: SupportProfile;
+    };
     /** DELETE /v1/organizations/{organizationId}/members/{memberId}; auth DEVELOPER_SESSION; retry IDEMPOTENT */
     removeMember: {
       params: { path: { organizationId: Uuid; memberId: Uuid } };
@@ -2748,6 +3129,11 @@ export namespace DeveloperPlatform {
     replayEnvironmentWebhookDelivery: {
       params: { path: { environmentId: Uuid; deliveryId: Uuid } };
       response: WebhookDelivery;
+    };
+    /** POST /v1/environments/{environmentId}/credentials/{credentialId}/resume — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    resumeCredential: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid } };
+      response: Credential;
     };
     /** POST /v1/environments/{environmentId}/resume — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     resumeEnvironment: {
@@ -2764,15 +3150,35 @@ export namespace DeveloperPlatform {
       params: { path: { environmentId: Uuid; serviceAccountId: Uuid } };
       response: ServiceAccount;
     };
+    /** POST /v1/environments/{environmentId}/credentials/{credentialId}/revoke — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    revokeCredential: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid } };
+      response: Credential;
+    };
     /** POST /v1/organizations/{organizationId}/invitations/{invitationId}/revoke; auth DEVELOPER_SESSION; retry NO_RETRY */
     revokeInvitation: {
       params: { path: { organizationId: Uuid; invitationId: Uuid } };
       response: Invitation;
     };
+    /** POST /v1/environments/{environmentId}/credentials/{credentialId}/rotate — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    rotateCredential: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid }; body: RotateCredentialRequest; idempotencyKey?: string };
+      response: IssuedCredential;
+    };
     /** POST /v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret; auth DEVELOPER_SESSION; retry NO_RETRY */
     rotateEnvironmentWebhookSecret: {
       params: { path: { environmentId: Uuid; webhookId: Uuid }; body: RotateWebhookSecretRequest };
       response: ConsoleWebhookWithSecret;
+    };
+    /** POST /v1/projects/{projectId}/production-access-requests — scope production_access.request; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    submitProductionAccessRequest: {
+      params: { path: { projectId: Uuid }; body: SubmitProductionAccessRequest; idempotencyKey?: string };
+      response: ProductionAccessRequest;
+    };
+    /** POST /v1/environments/{environmentId}/credentials/{credentialId}/suspend — scope credentials.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    suspendCredential: {
+      params: { path: { environmentId: Uuid; credentialId: Uuid }; body: SuspendCredentialRequest };
+      response: Credential;
     };
     /** POST /v1/environments/{environmentId}/suspend — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     suspendEnvironment: {
@@ -2808,6 +3214,11 @@ export namespace DeveloperPlatform {
     updateProject: {
       params: { path: { projectId: Uuid }; body: UpdateProjectRequest };
       response: Project;
+    };
+    /** DELETE /v1/projects/{projectId}/scopes/{scope} — scope projects.manage; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    withdrawProjectScope: {
+      params: { path: { projectId: Uuid; scope: string } };
+      response: ScopeWithdrawal;
     };
   }
 }

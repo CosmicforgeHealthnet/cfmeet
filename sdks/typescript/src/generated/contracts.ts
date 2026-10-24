@@ -13,7 +13,7 @@ export interface ContractRef {
 export const CONTRACTS: readonly ContractRef[] = [
   { id: "cfmeet.api-gateway.http-api", version: "1.1.0", kind: "openapi", path: "platform-developer/gateway/http/v1.openapi.json", lifecycle: "experimental" },
   { id: "cfmeet.api-gateway.common", version: "1.1.0", kind: "json-schema", path: "platform-developer/gateway/common/v1.schema.json", lifecycle: "experimental" },
-  { id: "cfmeet.developer-platform.common", version: "1.2.0", kind: "json-schema", path: "platform-developer/common/v1.schema.json", lifecycle: "experimental" },
+  { id: "cfmeet.developer-platform.common", version: "1.3.0", kind: "json-schema", path: "platform-developer/common/v1.schema.json", lifecycle: "experimental" },
   { id: "cfmeet.api-gateway.public-api", version: "1.0.0", kind: "openapi", path: "bundled/public/aggregate/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.api-gateway.public-http-api", version: "1.1.0", kind: "openapi", path: "bundled/public/gateway/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.meeting-service.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/meetings/v1.openapi.json", lifecycle: "beta" },

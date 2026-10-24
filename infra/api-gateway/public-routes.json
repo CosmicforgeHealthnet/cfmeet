@@ -787,7 +787,49 @@
     {
       "domain": "developer-platform",
       "method": "GET",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/resume",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/rotate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/credentials/{credentialId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
       "path": "/v1/environments/{environmentId}/entitlements",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/limits",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -816,6 +858,24 @@
     },
     {
       "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/limits",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/service-accounts/{serviceAccountId}/resume",
       "class": "PUBLIC_CUSTOMER"
@@ -830,6 +890,30 @@
       "domain": "developer-platform",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/export",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/facts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/usage/warnings",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -943,6 +1027,18 @@
     {
       "domain": "developer-platform",
       "method": "GET",
+      "path": "/v1/organizations/{organizationId}/credential-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/organizations/{organizationId}/credential-policy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
       "path": "/v1/organizations/{organizationId}/invitations",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -1003,6 +1099,36 @@
     {
       "domain": "developer-platform",
       "method": "GET",
+      "path": "/v1/organizations/{organizationId}/support-profile",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/organizations/{organizationId}/support-profile",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/production-access-requests/{requestId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/production-access-requests/{requestId}/activate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/production-access-requests/{requestId}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
       "path": "/v1/projects/{projectId}",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -1032,6 +1158,24 @@
     },
     {
       "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/production-access",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/production-access-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/production-access-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
       "method": "POST",
       "path": "/v1/projects/{projectId}/resume",
       "class": "PUBLIC_CUSTOMER"
@@ -1045,7 +1189,25 @@
     {
       "domain": "developer-platform",
       "method": "POST",
+      "path": "/v1/projects/{projectId}/scopes",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "path": "/v1/projects/{projectId}/scopes/{scope}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
       "path": "/v1/projects/{projectId}/suspend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/scopes",
       "class": "PUBLIC_CUSTOMER"
     },
     {
