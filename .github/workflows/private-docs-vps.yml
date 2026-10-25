@@ -71,7 +71,7 @@ jobs:
           RUN_ID="$1"
           [[ "$RUN_ID" =~ ^[0-9]+$ ]]
           [ "$(id -u)" = 0 ] || { echo "ERROR: root required"; exit 1; }
-          for executable in nginx openssl systemctl curl python3; do command -v "$executable" >/dev/null; done
+          for executable in nginx openssl systemctl curl python3 ss cmp; do command -v "$executable" >/dev/null; done
           RELEASE="/opt/cfmeet-private-api-docs-releases/$RUN_ID"
           CONFIG="/etc/nginx/sites-available/cfmeet-private-api-docs"
           ENABLED="/etc/nginx/sites-enabled/cfmeet-private-api-docs"
@@ -188,8 +188,30 @@ jobs:
             if [ "$AUTH" = "200" ]; then break; fi
             sleep 2
           done
+          [ "$AUTH" = "200" ] || { unset PASS; echo "ERROR: authenticated catalog check failed (HTTP $AUTH)"; exit 1; }
+          # Every individual specification, not only the catalog index: 401 without
+          # credentials, 200 with them, and byte-identical to this release's file.
+          CHECKED=0
+          while IFS= read -r DOC; do
+            [[ "$DOC" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$DOC" != *..* ]] || { unset PASS; echo "ERROR: unexpected spec path"; exit 1; }
+            CODE="$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:18099/$DOC" || true)"
+            [ "$CODE" = "401" ] || { unset PASS; echo "ERROR: $DOC served without credentials (HTTP $CODE)"; exit 1; }
+            BODY="$(mktemp)"
+            CODE="$(curl --noproxy '*' -s -o "$BODY" -w '%{http_code}' -u "cfmeet-engineer:$PASS" --max-time 10 "http://127.0.0.1:18099/$DOC" || true)"
+            if [ "$CODE" != "200" ] || ! cmp -s "$BODY" "$RELEASE/$DOC"; then
+              rm -f "$BODY"; unset PASS; echo "ERROR: $DOC authenticated fetch failed (HTTP $CODE)"; exit 1
+            fi
+            rm -f "$BODY"
+            CHECKED=$((CHECKED + 1))
+          done < <(python3 -c 'import json,sys; [print(u["url"].lstrip("./")) for u in json.load(open(sys.argv[1]))["urls"]]' "$RELEASE/swagger-config.json")
           unset PASS
-          [ "$AUTH" = "200" ] || { echo "ERROR: authenticated catalog check failed (HTTP $AUTH)"; exit 1; }
+          [ "$CHECKED" = "12" ] || { echo "ERROR: verified $CHECKED of 12 private specifications"; exit 1; }
+          # The private listener must exist ONLY on loopback.
+          if ss -Hlnt | awk '{print $4}' | grep -E '(^|:)18099$' | grep -vqx '127.0.0.1:18099'; then
+            ss -Hlnt | grep 18099 || true
+            echo "ERROR: private docs port 18099 is bound beyond loopback"; exit 1
+          fi
+          echo "PRIVATE_SPECS_VERIFIED=$CHECKED (each: 401 without credentials, 200 + identical bytes with)"
           echo "PRIVATE_SWAGGER_PROVISIONED=YES"
           echo "PRIVATE_DOCS_COUNT=12"
           echo "PRIVATE_UNAUTH_HTTP=401 PRIVATE_AUTH_HTTP=200"

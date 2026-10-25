@@ -25,6 +25,11 @@ fn action_response(o: ConferenceOutcome) -> Json<ConferenceActionResponse> {
 }
 
 /// Create a one-time scheduled conference occurrence.
+///
+/// Adds a single (non-recurring) conference to an active meeting space in state CREATED, with
+/// optional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and
+/// at most 24 hours later). Requires a bearer user token whose space role may start conferences
+/// (`conference.start`).
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/conferences", tag = "Conferences (v2)", operation_id = "v2_create_conference",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -47,6 +52,10 @@ pub async fn create_conference(
 }
 
 /// List occurrences of a meeting space (members only).
+///
+/// Returns the conferences of the meeting space (full view), ordered by scheduled start. Optional
+/// `from` (inclusive) and `to` (exclusive) RFC 3339 timestamps filter on the scheduled start time.
+/// Requires a bearer user token of the space owner or an active member.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/conferences", tag = "Conferences (v2)", operation_id = "v2_list_conferences",
     params(("id" = Uuid, Path, description = "Meeting space id"), ("from" = Option<String>, Query, description = "RFC 3339"), ("to" = Option<String>, Query, description = "RFC 3339")),
@@ -72,6 +81,10 @@ pub async fn list_conferences(
 }
 
 /// Read a conference. Callers without authority get the SUMMARY view.
+///
+/// Works with or without authentication. The space owner, members and admitted participants get the
+/// FULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY
+/// view with only the id, meeting space id and status.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}", tag = "Conferences (v2)", operation_id = "v2_get_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -88,6 +101,12 @@ pub async fn get_conference(
 }
 
 /// CREATED → PREPARING → (provider room confirmed) → WAITING.
+///
+/// Prepares a CREATED conference: it moves to PREPARING, the media room is requested from the RTC
+/// provider, and it becomes WAITING once the provider confirms the room. Requires
+/// `conference.start`. Calling it on a PREPARING or WAITING conference is a no-op that may retry
+/// provider confirmation; `providerEnforcement` is PENDING_PROVIDER_CONTROL while the room is not
+/// yet confirmed.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/prepare", tag = "Conferences (v2)", operation_id = "v2_prepare_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -108,6 +127,12 @@ pub async fn prepare_conference(
 }
 
 /// Start a conference. Concurrent starts yield exactly one LIVE authority.
+///
+/// Moves a CREATED, PREPARING or WAITING conference to LIVE (a CREATED one is prepared first).
+/// Requires `conference.start`, an active meeting space, and the current time within the start
+/// window (from the space's early-start allowance before the scheduled start until its grace period
+/// after the scheduled end). Starting a LIVE conference is a no-op (`changed: false`), and only one
+/// conference per meeting space can be LIVE at a time.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/start", tag = "Conferences (v2)", operation_id = "v2_start_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -128,6 +153,11 @@ pub async fn start_conference(
 }
 
 /// Lock a live conference: no new non-exempt entrants.
+///
+/// While locked, new entrants whose role lacks `participant.admit` are refused with
+/// CONFERENCE_LOCKED; admitted participants can still reconnect and those already waiting keep
+/// waiting. Requires `conference.lock` and a LIVE conference (CONFERENCE_NOT_LIVE otherwise).
+/// Locking an already locked conference is a no-op (`changed: false`).
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/lock", tag = "Conferences (v2)", operation_id = "v2_lock_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -148,6 +178,10 @@ pub async fn lock_conference(
 }
 
 /// Unlock a live conference.
+///
+/// Lifts the lock so new entrants can join again under the normal access and waiting-room rules.
+/// Requires `conference.lock` and a LIVE conference (CONFERENCE_NOT_LIVE otherwise). Unlocking a
+/// conference that is not locked is a no-op (`changed: false`).
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/unlock", tag = "Conferences (v2)", operation_id = "v2_unlock_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -172,6 +206,12 @@ pub async fn unlock_conference(
 }
 
 /// LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).
+///
+/// Ends a LIVE conference for everyone: active recordings are stopped and the media room is
+/// terminated with the RTC provider. Requires `conference.end`; a conference that never went live
+/// returns CONFERENCE_NOT_LIVE (cancel it instead). Repeating the call while ENDING or ENDED is a
+/// no-op (`changed: false`); while ENDING it retries provider termination. `providerEnforcement`
+/// is ENFORCED once the conference is ENDED.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/end", tag = "Conferences (v2)", operation_id = "v2_end_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -196,6 +236,11 @@ pub async fn end_conference(
 }
 
 /// Cancel an unstarted conference (single-occurrence exception for recurring series).
+///
+/// Moves a CREATED, PREPARING or WAITING conference to CANCELLED and releases any media room
+/// already prepared. Requires `conference.start`. For an occurrence of a recurring series only that
+/// occurrence is cancelled. Cancelling an already cancelled conference is a no-op
+/// (`changed: false`); live or finished conferences return CONFERENCE_STATE_CONFLICT.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/cancel", tag = "Conferences (v2)", operation_id = "v2_cancel_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -216,6 +261,11 @@ pub async fn cancel_conference(
 }
 
 /// Reschedule one unstarted occurrence (series untouched).
+///
+/// Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the
+/// start) for a conference still in state CREATED; any other state returns
+/// CONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For
+/// an occurrence of a recurring series only that occurrence moves.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/reschedule", tag = "Conferences (v2)", operation_id = "v2_reschedule_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -237,8 +287,10 @@ pub async fn reschedule_conference(
     Ok(action_response(o))
 }
 
-/// Join (or reconnect to) a conference. Identity, role and admission are resolved
-/// server-side. A WAITING participant never receives an RTC credential.
+/// Join (or reconnect to) a conference.
+///
+/// Identity, role and admission are resolved server-side. A WAITING participant never receives
+/// an RTC credential.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/join", tag = "Conferences (v2)", operation_id = "v2_join_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -302,6 +354,10 @@ pub async fn join_conference(
 }
 
 /// Leave: close the caller's own session(s). Admission is unchanged.
+///
+/// Disconnects all of the caller's active sessions in the conference, or only the one given in
+/// `participantSessionId`, and returns how many were closed. The caller keeps their admission state
+/// and can join again. Returns PARTICIPANT_NOT_FOUND if the caller has not joined this conference.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/leave", tag = "Conferences (v2)", operation_id = "v2_leave_conference",
     params(("id" = Uuid, Path, description = "Conference id")),

@@ -10,6 +10,11 @@ use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::
 // ---------------------------- profile policy -------------------------------
 
 /// Stored space override plus the effective (resolved, clamped) meeting profile.
+///
+/// Returns the space's sparse profile override as stored, its `profilePolicyVersion` (send it back
+/// when updating) and the effective meeting profile after organization and security limits are
+/// applied, including which fields were clamped. Requires a signed-in owner, host or co-host of the
+/// space.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/profile-policy", tag = "Profiles (v2)", operation_id = "v2_get_profile_policy",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -29,6 +34,13 @@ pub async fn get_profile_policy(
 }
 
 /// Update the space's sparse profile override (cannot exceed org / security ceilings).
+///
+/// Merges `changes` into the space's stored profile override and returns the new override and
+/// effective profile. Requires a signed-in owner or host, and `profilePolicyVersion` must match the
+/// current version (MEETING_VERSION_CONFLICT otherwise). Unknown keys are rejected, and a change
+/// that would disallow public access while the space's access policy is public is refused with
+/// PROFILE_POLICY_DENIED. Live conferences of the space are notified, and recording or
+/// transcription that the new policy no longer allows is stopped (nothing is deleted).
 #[utoipa::path(
     patch, path = "/api/v2/meeting-spaces/{id}/profile-policy", tag = "Profiles (v2)", operation_id = "v2_update_profile_policy",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -59,6 +71,15 @@ pub async fn update_profile_policy(
 // ----------------------------- registration --------------------------------
 
 /// Register for a webinar / town hall (public when the profile enables registration).
+///
+/// Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,
+/// and returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a
+/// signed-in caller's account is linked to the registration. Which fields (email, organization,
+/// custom fields) are required or accepted is set by the meeting profile. Repeating a request with
+/// the same `idempotencyKey` returns 200 with the existing registration and no token. Returns
+/// REGISTRATION_DISABLED (404) when registration is not available for the space and
+/// REGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per
+/// meeting space.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/registrations", tag = "Registrations (v2)", operation_id = "v2_register",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -93,6 +114,10 @@ pub async fn register(
 }
 
 /// Registrations of a meeting space (organizer view).
+///
+/// Returns up to 500 registrations of the space, newest first, including cancelled ones, with the
+/// attendee details collected at registration. Admission tokens are never returned. Requires a
+/// signed-in owner, host or co-host of the space and webinar mode enabled.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/registrations", tag = "Registrations (v2)", operation_id = "v2_list_registrations",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -113,6 +138,10 @@ pub async fn list_registrations(
 }
 
 /// One registration (organizer view).
+///
+/// Returns one registration of the space with the attendee details collected at registration; the
+/// admission token is never returned. Requires a signed-in owner, host or co-host of the space and
+/// webinar mode enabled.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/registrations/{registrationId}", tag = "Registrations (v2)", operation_id = "v2_get_registration",
     params(("id" = Uuid, Path, description = "Meeting space id"), ("registrationId" = Uuid, Path, description = "Registration id")),
@@ -134,6 +163,10 @@ pub async fn get_registration(
 }
 
 /// Cancel a registration (revokes its admission token).
+///
+/// Marks the registration CANCELLED and revokes its admission token so it can no longer be used to
+/// join. Requires a signed-in owner, host or co-host of the space and webinar mode enabled.
+/// Cancelling an already-cancelled registration returns it unchanged.
 #[utoipa::path(
     delete, path = "/api/v2/meeting-spaces/{id}/registrations/{registrationId}", tag = "Registrations (v2)", operation_id = "v2_cancel_registration",
     params(("id" = Uuid, Path, description = "Meeting space id"), ("registrationId" = Uuid, Path, description = "Registration id")),
@@ -157,6 +190,13 @@ pub async fn cancel_registration(
 // ------------------------------- backstage ---------------------------------
 
 /// Move the caller into the backstage media room (presenters / hosts only).
+///
+/// Moves the caller's own admitted participant into the conference's backstage room, separate from
+/// the main stage, creating that room if needed. Requires the backstage permission (owner, host,
+/// co-host, moderator or presenter by default), a meeting profile with backstage enabled, webinar
+/// mode and a LIVE conference. When `credentialRefreshRequired` is true, request a new media
+/// credential (`POST /api/v2/conferences/{id}/media-credential`) to switch rooms; calling it while
+/// already backstage changes nothing. Accepts a bearer user token or a participant token.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/backstage", tag = "Backstage (v2)", operation_id = "v2_enter_backstage",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -176,6 +216,11 @@ pub async fn enter_backstage(
 }
 
 /// Leave backstage (return to the main stage room).
+///
+/// Moves the caller's own admitted participant out of the backstage and back to the main stage room
+/// while the conference is LIVE. When `credentialRefreshRequired` is true, request a new media
+/// credential (`POST /api/v2/conferences/{id}/media-credential`); calling it when not backstage
+/// changes nothing. Accepts a bearer user token or a participant token.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/backstage", tag = "Backstage (v2)", operation_id = "v2_leave_backstage",
     params(("id" = Uuid, Path, description = "Conference id")),

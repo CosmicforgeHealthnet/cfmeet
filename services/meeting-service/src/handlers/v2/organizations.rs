@@ -35,6 +35,10 @@ fn member(m: &organization_memberships::Model) -> OrganizationMemberResponse {
 }
 
 /// Create an organization (platform administrators).
+///
+/// Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a
+/// name of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform
+/// administrator bearer token.
 #[utoipa::path(
     post, path = "/api/v2/admin/organizations", tag = "Organizations (v2)", operation_id = "v2_create_organization",
     request_body = CreateOrganizationRequest,
@@ -55,6 +59,10 @@ pub async fn create_organization(
 }
 
 /// Suspend or reactivate an organization (platform administrators).
+///
+/// Sets the organization's status to ACTIVE or SUSPENDED. While an organization is suspended, its
+/// own OWNERs and ADMINs can no longer list or manage its members. Requires a platform
+/// administrator bearer token.
 #[utoipa::path(
     patch, path = "/api/v2/admin/organizations/{id}", tag = "Organizations (v2)", operation_id = "v2_update_organization",
     params(("id" = Uuid, Path, description = "Organization id")),
@@ -77,6 +85,9 @@ pub async fn update_organization(
 }
 
 /// List members (platform admins, organization OWNER/ADMIN).
+///
+/// Returns every membership of the organization, whatever its status, oldest first. Allowed for
+/// platform administrators and for active OWNER or ADMIN members of an active organization.
 #[utoipa::path(
     get, path = "/api/v2/organizations/{id}/members", tag = "Organizations (v2)", operation_id = "v2_list_organization_members",
     params(("id" = Uuid, Path, description = "Organization id")),
@@ -93,6 +104,11 @@ pub async fn list_organization_members(
 }
 
 /// Add or change a membership (platform admins, organization OWNER/ADMIN within limits).
+///
+/// Creates or updates the user's role and status in the organization; status REMOVED ends an
+/// existing membership. Platform administrators and OWNERs may set any role, while ADMINs may only
+/// manage MEMBER memberships. Except for platform administrators, callers cannot change their own
+/// membership.
 #[utoipa::path(
     put, path = "/api/v2/organizations/{id}/members/{userId}", tag = "Organizations (v2)", operation_id = "v2_upsert_organization_member",
     params(("id" = Uuid, Path, description = "Organization id"), ("userId" = Uuid, Path, description = "User id")),
@@ -115,6 +131,9 @@ pub async fn upsert_organization_member(
 }
 
 /// Organizations the caller verifiably belongs to.
+///
+/// Returns the organizations in which the signed-in user has an active, directory-verified
+/// membership, each with the user's role. Requires a user bearer token.
 #[utoipa::path(
     get, path = "/api/v2/me/organizations", tag = "Organizations (v2)", operation_id = "v2_my_organizations",
     responses((status = 200, description = "Organizations", body = [MyOrganizationResponse]), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope)),

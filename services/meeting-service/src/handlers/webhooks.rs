@@ -86,6 +86,11 @@ fn format_datetime(dt: chrono::NaiveDateTime) -> String {
 }
 
 /// Create a new webhook
+///
+/// Registers a webhook for one event type (`meeting_start`, `meeting_end`, `participant_join` or
+/// `participant_leave`), owned by the authenticated user and active from creation. Create one
+/// webhook per event type you need. The response includes a generated secret, which is returned
+/// only here and never by the list or update endpoints.
 #[utoipa::path(
     post,
     path = "/api/v1/webhooks",
@@ -147,6 +152,9 @@ pub async fn create_webhook(
 }
 
 /// List all webhooks for the authenticated user
+///
+/// Returns all webhooks owned by the authenticated user, active and inactive, newest first. Secrets
+/// are not included. Not paginated.
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks",
@@ -189,6 +197,11 @@ pub async fn list_webhooks(
 }
 
 /// Update a webhook
+///
+/// Changes the endpoint URL and/or status (`active` or `inactive`) of a webhook owned by the
+/// authenticated user; omitted fields are left unchanged. The event type cannot be changed, so
+/// create a new webhook instead. Returns 404 if the webhook does not exist or belongs to another
+/// user.
 #[utoipa::path(
     patch,
     path = "/api/v1/webhooks/{id}",
@@ -253,6 +266,10 @@ pub async fn update_webhook(
 }
 
 /// Delete a webhook
+///
+/// Permanently deletes a webhook owned by the authenticated user. Returns 404 if the webhook does
+/// not exist or belongs to another user. To disable a webhook without deleting it, set its status
+/// to `inactive` with `PATCH /api/v1/webhooks/{id}`.
 #[utoipa::path(
     delete,
     path = "/api/v1/webhooks/{id}",

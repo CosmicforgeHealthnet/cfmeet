@@ -186,6 +186,11 @@ pub async fn create_instant_meeting(
 }
 
 /// List meetings for the authenticated user
+///
+/// Returns meetings hosted by the authenticated user, newest first, with pagination metadata.
+/// Meetings the user only joined as a participant are not included. Use `page` and `limit` to
+/// paginate and `status` to filter (`live` and `ongoing` are equivalent); any other status value
+/// returns a validation error.
 #[utoipa::path(
     get,
     path = "/api/v1/meetings",
@@ -392,6 +397,9 @@ pub async fn create_meeting(
 }
 
 /// Get a meeting by ID
+///
+/// Returns a meeting hosted by the authenticated user, including its join URL. Only the host can
+/// read a meeting through this endpoint; a meeting hosted by someone else returns 404.
 #[utoipa::path(
     get,
     path = "/api/v1/meetings/{id}",
@@ -451,6 +459,11 @@ pub async fn get_meeting(
 }
 
 /// Update a meeting (host only)
+///
+/// Partially updates a meeting hosted by the authenticated user; omitted fields are left unchanged.
+/// Ongoing and ended meetings cannot be edited (409). `start_time` and `end_time` are local times
+/// and require `timezone` (an IANA name); a scheduled meeting's start must be in the future, the
+/// end must be after the start, and the duration may not exceed 24 hours.
 #[utoipa::path(
     put,
     path = "/api/v1/meetings/{id}",
@@ -610,6 +623,10 @@ pub async fn update_meeting(
 }
 
 /// Delete a meeting (host only, only scheduled meetings)
+///
+/// Permanently deletes a meeting hosted by the authenticated user. Only meetings still in
+/// `scheduled` status can be deleted; any other status returns 409 (end a live meeting with
+/// `POST /api/v1/meetings/{id}/end` instead). Returns 204 with no body.
 #[utoipa::path(
     delete,
     path = "/api/v1/meetings/{id}",

@@ -16,6 +16,12 @@ use crate::{
 // ----------------------------- recordings ---------------------------------
 
 /// Start the composite recording (provider called only after REQUESTED commits).
+///
+/// Starts the conference's single composite recording. The conference must be LIVE, the caller
+/// needs the recording-start permission, the meeting policy must allow recording, and where policy
+/// requires explicit consent every affected participant must have consented. Returns 202 with the
+/// recording in REQUESTED state (it becomes RECORDING only once the provider confirms capture);
+/// repeating a request with the same `idempotencyKey` returns the existing recording with 200.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/recordings", tag = "Recordings (v2)", operation_id = "v2_start_recording",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -46,6 +52,10 @@ pub async fn start_recording(
 }
 
 /// Recordings of a conference.
+///
+/// Lists the conference's recordings with their lifecycle status, newest first (at most 100).
+/// Requires authority in the conference plus the artifact-list permission or permission to start or
+/// stop recording.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/recordings", tag = "Recordings (v2)", operation_id = "v2_list_recordings",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -63,6 +73,10 @@ pub async fn list_recordings(
 }
 
 /// One recording (scoped to the conference).
+///
+/// Returns one recording with its current lifecycle status; the recording must belong to the given
+/// conference. The same permissions as listing recordings apply. Use the artifact `access` endpoint
+/// to obtain a download link.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/recordings/{recordingId}", tag = "Recordings (v2)", operation_id = "v2_get_recording",
     params(("id" = Uuid, Path, description = "Conference id"), ("recordingId" = Uuid, Path, description = "Recording id")),
@@ -77,8 +91,10 @@ pub async fn get_recording(
     Ok(Json(state.meeting.recordings.get(&actor, id, rid).await?))
 }
 
-/// Stop a recording (idempotent; READY only after provider finalization + storage
-/// verification).
+/// Stop a recording (idempotent).
+///
+/// Stops an active recording; repeating the call is safe. The recording becomes `READY` only
+/// after the media provider has finalized it and its stored file has been verified.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/recordings/{recordingId}/stop", tag = "Recordings (v2)", operation_id = "v2_stop_recording",
     params(("id" = Uuid, Path, description = "Conference id"), ("recordingId" = Uuid, Path, description = "Recording id")),
@@ -101,6 +117,10 @@ pub async fn stop_recording(
 // ------------------------------ artefacts ---------------------------------
 
 /// Artefacts of a conference (historical access still requires authorization).
+///
+/// Lists the conference's artifacts (recordings, transcripts, reports and other outputs), newest
+/// first, at most 200. Requires the artifact-list permission; transcripts and caption tracks are
+/// omitted unless the caller may also read transcripts. Filter by type with `artifactType`.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/artifacts", tag = "Artifacts (v2)", operation_id = "v2_list_artifacts",
     params(("id" = Uuid, Path, description = "Conference id"), ArtifactListQuery),
@@ -123,6 +143,10 @@ pub async fn list_artifacts(
 }
 
 /// One artefact (conference id + artefact id; knowing an id is not authorization).
+///
+/// Returns the metadata and status of one artifact belonging to the conference (no download link;
+/// use the `access` endpoint for that). Requires the artifact-list or artifact-read permission,
+/// plus transcript-read for transcripts and caption tracks.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/artifacts/{artifactId}", tag = "Artifacts (v2)", operation_id = "v2_get_artifact",
     params(("id" = Uuid, Path, description = "Conference id"), ("artifactId" = Uuid, Path, description = "Artifact id")),
@@ -138,6 +162,11 @@ pub async fn get_artifact(
 }
 
 /// Mint a short-lived, read-only, single-object signed URL (never stored).
+///
+/// Returns a time-limited, read-only download URL for this one artifact. Requires the artifact-read
+/// permission (plus transcript-read for transcripts and caption tracks), and the artifact must be
+/// READY and not deleted or pending deletion. Each grant is audited; request a new URL once
+/// `expiresAt` has passed.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/artifacts/{artifactId}/access", tag = "Artifacts (v2)", operation_id = "v2_artifact_access",
     params(("id" = Uuid, Path, description = "Conference id"), ("artifactId" = Uuid, Path, description = "Artifact id")),
@@ -160,6 +189,11 @@ pub async fn artifact_access(
 }
 
 /// Delete an artefact (DELETED only after the object's absence is confirmed).
+///
+/// Requests deletion of an artifact and attempts it immediately; if the stored object cannot be
+/// confirmed removed yet, deletion stays pending and is retried automatically. Requires the
+/// artifact-delete permission. A recording must be stopped first, and the meeting policy may forbid
+/// manual deletion of recordings. Repeating the call is safe.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/artifacts/{artifactId}", tag = "Artifacts (v2)", operation_id = "v2_delete_artifact",
     params(("id" = Uuid, Path, description = "Conference id"), ("artifactId" = Uuid, Path, description = "Artifact id")),
@@ -178,8 +212,10 @@ pub async fn delete_artifact(
     Ok(Json(state.meeting.artifacts.delete(&actor, id, aid).await?))
 }
 
-/// Conference attendance (Part J). Thin read over the same aggregation as the
-/// `ATTENDANCE_REPORT` export; nothing is stored and no artefact is created.
+/// Conference attendance (Part J).
+///
+/// A thin read over the same aggregation as the `ATTENDANCE_REPORT` export; nothing is stored
+/// and no artefact is created.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/attendance", tag = "Artifacts (v2)", operation_id = "v2_conference_attendance",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -202,6 +238,11 @@ pub async fn conference_attendance(
 }
 
 /// Generate an attendance report, poll report or chat export (policy-gated).
+///
+/// Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and
+/// stores it as a READY JSON artifact. Requires the export permission, and the meeting policy must
+/// allow the requested export type. Anonymous polls stay anonymous and private chat messages are
+/// never exported.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/artifacts/reports", tag = "Artifacts (v2)", operation_id = "v2_generate_report",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -234,6 +275,11 @@ pub async fn generate_report(
 // ------------------------------- consent ----------------------------------
 
 /// The caller's consent requirements (independent types) and current decisions.
+///
+/// For each consent type (RECORDING, TRANSCRIPTION, AI_PROCESSING, DATA_SHARING) returns the
+/// meeting policy's consent mode, whether explicit consent is required, whether that processing is
+/// currently active, the current consent version and the caller's own latest decision.
+/// `recordingNotice` is true while a recording is active.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/consents/requirements", tag = "Consent (v2)", operation_id = "v2_consent_requirements",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -249,6 +295,11 @@ pub async fn consent_requirements(
 }
 
 /// Record the caller's OWN consent decisions (no participant field exists).
+///
+/// Records ACCEPTED or DECLINED decisions for one or more consent types for the caller, who must be
+/// an admitted participant; nobody can decide for another participant. `consentVersion` must match
+/// the current version from the requirements endpoint, otherwise `CONSENT_POLICY_CONFLICT` is
+/// returned. Use the withdraw endpoint to withdraw consent. Returns the updated requirements.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/consents", tag = "Consent (v2)", operation_id = "v2_record_consents",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -275,6 +326,11 @@ fn consent_kind(raw: &str) -> ApiResult<ConsentKind> {
 }
 
 /// Withdraw one consent type (effect follows the profile's withdrawal mode).
+///
+/// Withdraws the caller's consent for one type; the caller must be an admitted participant. The
+/// response reports the effect under the meeting's withdrawal mode: recorded only, the active
+/// recording or transcription stopped, or the caller returned to the waiting room. Previously
+/// retained artifacts are not deleted.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/consents/{consentType}/withdraw", tag = "Consent (v2)", operation_id = "v2_withdraw_consent",
     params(("id" = Uuid, Path, description = "Conference id"), ("consentType" = String, Path, description = "RECORDING / TRANSCRIPTION / AI_PROCESSING / DATA_SHARING")),
@@ -295,6 +351,12 @@ pub async fn withdraw_consent(
 // ---------------------------- transcription -------------------------------
 
 /// Start LIVE or POST_MEETING transcription (policy, location and consent gated).
+///
+/// Creates a transcription job whose output becomes a transcript artifact. LIVE (the default)
+/// requires a live conference; POST_MEETING transcribes the READY recording given in
+/// `sourceRecordingId`. Requires the transcription-start permission, a meeting policy and provider
+/// location that allow it, and participant consent where policy requires it. `language` defaults to
+/// `en`.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/transcription", tag = "Transcription (v2)", operation_id = "v2_start_transcription",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -320,6 +382,10 @@ pub async fn start_transcription(
 }
 
 /// Stop a transcription job.
+///
+/// Requests that an active transcription job stop and returns the job. Requires the
+/// transcription-stop permission. Calling it on a job that is no longer active returns the job
+/// unchanged.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/transcription/{jobId}/stop", tag = "Transcription (v2)", operation_id = "v2_stop_transcription",
     params(("id" = Uuid, Path, description = "Conference id"), ("jobId" = Uuid, Path, description = "Job id")),
@@ -337,6 +403,9 @@ pub async fn stop_transcription(
 }
 
 /// Transcription jobs / transcripts of a conference.
+///
+/// Lists the conference's transcription jobs, newest first (at most 100), with their mode, status,
+/// language, segment count and transcript artifact id. Requires the transcript-read permission.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/transcripts", tag = "Transcription (v2)", operation_id = "v2_list_transcripts",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -354,6 +423,10 @@ pub async fn list_transcripts(
 }
 
 /// Transcript FINAL segments (cursor paginated).
+///
+/// Returns the transcript artifact, its job and a page of FINAL segments in sequence order.
+/// Requires the transcript-read permission. Page with `after` (last sequence seen) and `limit`
+/// (default 200, max 1000); `nextAfter` is set while more segments remain.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/transcripts/{artifactId}", tag = "Transcription (v2)", operation_id = "v2_get_transcript",
     params(("id" = Uuid, Path, description = "Conference id"), ("artifactId" = Uuid, Path, description = "Transcript artifact id"), TranscriptQuery),
@@ -376,6 +449,11 @@ pub async fn get_transcript(
 }
 
 /// Translate a READY transcript (downstream; the original is never overwritten).
+///
+/// Translates every segment of a READY transcript into `targetLanguage` and stores the translations
+/// alongside the original. Requires both the transcript-read and transcription-start permissions,
+/// and the translation provider must be permitted by the meeting's location policy. Segments
+/// already translated into that language are not duplicated.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/transcripts/{artifactId}/translations", tag = "Transcription (v2)", operation_id = "v2_translate_transcript",
     params(("id" = Uuid, Path, description = "Conference id"), ("artifactId" = Uuid, Path, description = "Transcript artifact id")),
@@ -401,6 +479,11 @@ pub async fn translate_transcript(
 // ----------------------------- intelligence -------------------------------
 
 /// Request an intelligence output (disabled by default; policy / consent gated).
+///
+/// Generates a summary or action items from a READY transcript of this conference and stores the
+/// result as a MEETING_SUMMARY artifact. Requires the feature to be enabled, the
+/// intelligence-request and transcript-read permissions, a meeting policy that permits the
+/// provider's location, and AI-processing consent where policy requires it.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/intelligence/requests", tag = "Intelligence (v2)", operation_id = "v2_request_intelligence",
     params(("id" = Uuid, Path, description = "Conference id")),

@@ -37,8 +37,21 @@ fn lock_response(o: MediaOutcome) -> MediaLockResponse {
 }
 
 macro_rules! lock_handler {
-    ($name:ident, $del:ident, $path:literal, $kind:expr, $label:literal, $op:literal, $opdel:literal) => {
-        #[doc = concat!("Lock the participant's ", $label, " (persistent, provider-enforced).")]
+    (
+        $name:ident,
+        $del:ident,
+        $path:literal,
+        $kind:expr,
+        $op:literal,
+        $opdel:literal,
+        $lock_summary:literal,
+        $lock_description:literal,
+        $unlock_summary:literal,
+        $unlock_description:literal
+    ) => {
+        #[doc = $lock_summary]
+        #[doc = ""]
+        #[doc = $lock_description]
         #[utoipa::path(
             post, path = $path, tag = "Media controls (v2)", operation_id = $op,
             params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -59,7 +72,9 @@ macro_rules! lock_handler {
             Ok(Json(lock_response(state.meeting.media.set_lock(&actor, id, pid, $kind, true).await?)))
         }
 
-        #[doc = concat!("Unlock the participant's ", $label, " (grants recomputed from role + policy).")]
+        #[doc = $unlock_summary]
+        #[doc = ""]
+        #[doc = $unlock_description]
         #[utoipa::path(
             delete, path = $path, tag = "Media controls (v2)", operation_id = $opdel,
             params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -85,30 +100,63 @@ lock_handler!(
     audio_unlock,
     "/api/v2/conferences/{id}/participants/{participantId}/audio-lock",
     LockKind::Audio,
-    "microphone",
     "v2_audio_lock",
-    "v2_audio_unlock"
+    "v2_audio_unlock",
+    "Lock the participant's microphone (persistent, provider-enforced).",
+    "Stops an admitted participant from publishing their microphone until the lock is removed; the \
+     lock is stored on the participant and enforced by the media provider (see \
+     `providerEnforcement`). The caller needs the matching media-control permission and may \
+     only target a less privileged participant, never themselves. Repeating the call is a \
+     no-op that returns `changed: false`.",
+    "Unlock the participant's microphone (grants recomputed from role + policy).",
+    "Removes the lock; the participant's effective publication rights are then \
+     recomputed from their role and the conference policy and returned in `permissions`. \
+     Same permission and target rules as locking; repeating the call returns `changed: false`."
 );
 lock_handler!(
     video_lock,
     video_unlock,
     "/api/v2/conferences/{id}/participants/{participantId}/video-lock",
     LockKind::Video,
-    "camera",
     "v2_video_lock",
-    "v2_video_unlock"
+    "v2_video_unlock",
+    "Lock the participant's camera (persistent, provider-enforced).",
+    "Stops an admitted participant from publishing their camera until the lock is removed; the \
+     lock is stored on the participant and enforced by the media provider (see \
+     `providerEnforcement`). The caller needs the matching media-control permission and may \
+     only target a less privileged participant, never themselves. Repeating the call is a \
+     no-op that returns `changed: false`.",
+    "Unlock the participant's camera (grants recomputed from role + policy).",
+    "Removes the lock; the participant's effective publication rights are then \
+     recomputed from their role and the conference policy and returned in `permissions`. \
+     Same permission and target rules as locking; repeating the call returns `changed: false`."
 );
 lock_handler!(
     screen_share_lock,
     screen_share_unlock,
     "/api/v2/conferences/{id}/participants/{participantId}/screen-share-lock",
     LockKind::ScreenShare,
-    "future screen sharing",
     "v2_screen_share_lock",
-    "v2_screen_share_unlock"
+    "v2_screen_share_unlock",
+    "Lock the participant's future screen sharing (persistent, provider-enforced).",
+    "Stops an admitted participant from starting a screen share until the lock is removed (to \
+     end a share already in progress, use the stop-screen-share operation); the lock is stored \
+     on the participant and enforced by the media provider (see `providerEnforcement`). The \
+     caller needs the matching media-control permission and may only target a less privileged \
+     participant, never themselves. Repeating the call is a no-op that returns `changed: false`.",
+    "Unlock the participant's future screen sharing (grants recomputed from role + policy).",
+    "Removes the lock so the participant may share again; the participant's effective \
+     publication rights are then recomputed from their role and the conference policy and \
+     returned in `permissions`. Same permission and target rules as locking; repeating the call returns `changed: false`."
 );
 
 /// STOP SHARE NOW: terminate a participant's active screen share (not a lock).
+///
+/// Ends the participant's current screen share through the RTC provider without blocking future
+/// shares (use the screen-share lock for that). You may stop your own share; stopping someone
+/// else's requires `participant.screen_share_stop` and a target less privileged than you. The
+/// conference must be LIVE and the participant sharing; success is returned only after the provider
+/// confirms.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/screen-share/{participantId}/stop", tag = "Media controls (v2)", operation_id = "v2_stop_screen_share",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Sharing participant id")),
@@ -160,6 +208,12 @@ async fn spotlight_list(
 }
 
 /// Spotlight a participant (shared presentation metadata; personal pins stay client-side).
+///
+/// Adds an ADMITTED participant to the spotlight shown to everyone; media permissions are not
+/// changed. Requires `participant.spotlight` and a LIVE conference. If the meeting allows a single
+/// spotlight the new one replaces the previous one; otherwise going over the policy's maximum
+/// returns VALIDATION_ERROR. Returns the current spotlights (`changed: false` if already
+/// spotlighted).
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/spotlights", tag = "Media controls (v2)", operation_id = "v2_spotlight",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -186,6 +240,10 @@ pub async fn spotlight(
 }
 
 /// Remove a spotlight.
+///
+/// Removes the participant from the shared spotlight. Requires `participant.spotlight` and a LIVE
+/// conference. Returns the remaining spotlights; `changed` is false if the participant was not
+/// spotlighted.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/spotlights/{participantId}", tag = "Media controls (v2)", operation_id = "v2_remove_spotlight",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -225,8 +283,10 @@ async fn policy_response(
     }))
 }
 
-/// Update the conference collaboration policy (media locks, screen-share policy, chat,
-/// reactions, hand raise, Q&A, polls, breakouts, consents).
+/// Update the conference collaboration policy.
+///
+/// Covers media locks, screen-share policy, chat, reactions, hand raise, Q&A, polls, breakouts
+/// and consents.
 #[utoipa::path(
     patch, path = "/api/v2/conferences/{id}/collaboration-policy", tag = "Collaboration (v2)", operation_id = "v2_update_collaboration_policy",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -249,6 +309,12 @@ pub async fn update_policy(
 }
 
 /// Update the chat subset of the collaboration policy.
+///
+/// Updates any of `chatEnabled`, `chatSendMode`, `privateChatMode`, `breakoutChatEnabled` and
+/// `mainChatVisibleInBreakouts`; omitted fields are left unchanged. Send the `collaborationVersion`
+/// you last read; a stale version returns MEETING_VERSION_CONFLICT. Requires
+/// `conference.configure_live` on a conference that has not ended; returns the full effective
+/// collaboration policy and its new version.
 #[utoipa::path(
     patch, path = "/api/v2/conferences/{id}/chat-policy", tag = "Chat (v2)", operation_id = "v2_update_chat_policy",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -273,8 +339,10 @@ pub async fn update_chat_policy(
     policy_response(&state, &actor, id, req.collaboration_version, patch).await
 }
 
-/// Canonical collaboration state (REST recovery source for media restrictions,
-/// spotlight, hand raise, active screen shares and the caller's media context).
+/// Canonical collaboration state.
+///
+/// The REST recovery source for media restrictions, spotlight, hand raise, active screen shares
+/// and the caller's media context.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/collaboration", tag = "Collaboration (v2)", operation_id = "v2_collaboration_state",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -317,8 +385,10 @@ pub async fn collaboration_state(
     }))
 }
 
-/// Fresh media credential for the caller's own session in its current context (main
-/// or breakout) with current effective grants — used after moves and for refresh.
+/// Fresh media credential for the caller's own session.
+///
+/// Issued for the session's current context (main room or breakout) with the current effective
+/// grants; used after moves and for refresh.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/media-credential", tag = "Media controls (v2)", operation_id = "v2_media_credential",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -357,6 +427,12 @@ pub async fn media_credential(
 // ------------------------------- chat -------------------------------------
 
 /// Meeting chat history (database cursor pagination, newest first).
+///
+/// Returns one page of messages for `scope`: MAIN (default), BREAKOUT with `breakoutId`, or PRIVATE
+/// with `peerId` (the caller's conversation with that participant). `limit` defaults to 50 (max
+/// 100); pass the returned `nextCursor` as `before` to load older messages. Requires `chat.read`;
+/// for non-moderators main chat can be disabled or hidden inside breakouts, and breakout chat is
+/// limited to the caller's own room unless they may enter any breakout.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/messages", tag = "Chat (v2)", operation_id = "v2_list_messages",
     params(
@@ -407,6 +483,13 @@ pub async fn list_messages(
 }
 
 /// Send a message (sender is always the caller's own participant).
+///
+/// Posts a message (1–4000 characters) to the main room, to a breakout room (`breakoutId`, normally
+/// the caller's own) or privately to one admitted participant (`recipientParticipantId`). The
+/// caller must be an admitted participant with `chat.send` (private messages also need
+/// `chat.private`) in a LIVE conference, subject to the chat policy, per-participant restrictions
+/// and rate limits. Moderators (`chat.moderate`) are not blocked by disabled chat and may post
+/// `announcement`s.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/messages", tag = "Chat (v2)", operation_id = "v2_send_message",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -436,6 +519,11 @@ pub async fn send_message(
 }
 
 /// Delete / hide a message (moderators, or the sender).
+///
+/// Senders can delete their own messages; moderators with `chat.moderate` can hide main-room and
+/// breakout messages of less privileged participants. Private messages can only be deleted by their
+/// sender and are reported as MESSAGE_NOT_FOUND to anyone outside the conversation. The message
+/// stays in history marked as deleted; repeating the call returns `changed: false`.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/messages/{messageId}", tag = "Chat (v2)", operation_id = "v2_delete_message",
     params(("id" = Uuid, Path, description = "Conference id"), ("messageId" = Uuid, Path, description = "Message id")),
@@ -457,6 +545,10 @@ pub async fn delete_message(
 }
 
 /// Disable chat for a participant.
+///
+/// Prevents the participant from sending chat messages until chat is re-enabled for them. Requires
+/// `chat.moderate`, a target less privileged than the caller (never yourself) and a conference that
+/// has not ended. Idempotent: `changed` is false if chat was already disabled for them.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction", tag = "Chat (v2)", operation_id = "v2_restrict_chat",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -478,6 +570,10 @@ pub async fn restrict_chat(
 }
 
 /// Re-enable chat for a participant.
+///
+/// Lifts a per-participant chat restriction so they can send messages again. Requires
+/// `chat.moderate`, a target less privileged than the caller (never yourself) and a conference that
+/// has not ended. Idempotent: `changed` is false if the participant was not restricted.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction", tag = "Chat (v2)", operation_id = "v2_unrestrict_chat",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -501,6 +597,11 @@ pub async fn unrestrict_chat(
 // --------------------------- reactions / hand -----------------------------
 
 /// Send a transient reaction (no stored row).
+///
+/// Broadcasts a reaction key (e.g. `thumbs_up`, `clap`) from the caller to everyone in the same
+/// room (main room or the caller's breakout). Requires an admitted participant with `reaction.send`
+/// in a LIVE conference, with reactions enabled and the key allowed by the meeting policy; rate
+/// limited. Nothing is stored; `delivered` is false when the realtime channel was unavailable.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/reactions", tag = "Engagement (v2)", operation_id = "v2_send_reaction",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -539,6 +640,10 @@ fn hand(p: crate::models::conference_participants::Model, changed: bool) -> Hand
 }
 
 /// Raise the caller's own hand.
+///
+/// Adds the caller to the raised-hands queue and notifies the conference in realtime. Requires an
+/// admitted participant with `hand.raise` in a LIVE conference with hand raise enabled; rate
+/// limited. Raising an already raised hand returns `changed: false`.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/hand-raise", tag = "Engagement (v2)", operation_id = "v2_raise_hand",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -559,6 +664,10 @@ pub async fn raise_hand(
 }
 
 /// Lower the caller's own hand.
+///
+/// Removes the caller from the raised-hands queue. Requires the caller to be an admitted
+/// participant, and also works after hand raise has been disabled; rate limited. Lowering a hand
+/// that is not raised returns `changed: false`.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/hand-raise", tag = "Engagement (v2)", operation_id = "v2_lower_hand",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -579,6 +688,9 @@ pub async fn lower_hand(
 }
 
 /// Host lowers another participant's hand.
+///
+/// Requires `hand.lower_other` and a target less privileged than the caller; targeting yourself
+/// lowers your own hand. Idempotent: `changed` is false if the hand was not raised.
 #[utoipa::path(
     delete, path = "/api/v2/conferences/{id}/participants/{participantId}/hand-raise", tag = "Engagement (v2)", operation_id = "v2_lower_other_hand",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
@@ -600,6 +712,9 @@ pub async fn lower_other_hand(
 }
 
 /// Raised hands, oldest first.
+///
+/// Returns the admitted participants whose hand is currently raised, ordered by when they raised
+/// it. Available to admitted participants and to the space owner and members.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/hand-raise", tag = "Engagement (v2)", operation_id = "v2_raised_hands",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -620,6 +735,12 @@ pub async fn raised_hands(
 // ------------------------------- pre-join ---------------------------------
 
 /// Pre-join contract: everything a pre-join screen needs before the media join.
+///
+/// Returns the conference status and whether it can be joined now, this caller's access
+/// requirements (sign-in, invitation, passcode, external authorization, expected waiting room),
+/// recording/transcription/AI notices, consents to grant when joining, the role and media
+/// permissions the caller would get, and display-name rules. Works without authentication; for
+/// sensitive meetings the title and organization are hidden until the caller is authorized.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/pre-join", tag = "Collaboration (v2)", operation_id = "v2_pre_join",
     params(("id" = Uuid, Path, description = "Conference id")),
