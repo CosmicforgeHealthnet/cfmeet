@@ -28,6 +28,7 @@ pub mod framing;
 pub mod history_transfer;
 pub mod key_package;
 pub mod profile;
+pub mod provider;
 pub mod transparency;
 pub mod verification;
 

@@ -18,31 +18,39 @@ path = "src/lib.rs"
 default = []
 # Client-side device cryptography: generates and holds MLS signature / HPKE PRIVATE keys.
 # The Messaging backend must never enable it (services/messaging architecture test).
-client = ["dep:openmls_basic_credential", "dep:openmls_traits", "dep:chacha20poly1305", "dep:aead", "dep:zeroize", "dep:hkdf"]
+client = ["dep:openmls_memory_storage", "dep:chacha20poly1305", "dep:aead"]
 # Browser (wasm32-unknown-unknown) builds of the client core: OpenMLS `js` (Web Crypto
-# randomness and time) and the same for the getrandom 0.2 used by the RustCrypto stack.
-web = ["client", "openmls/js", "dep:getrandom02"]
+# randomness and time) and the same for both getrandom lines in the graph (0.4: the MLS
+# provider and HPKE; 0.2: the attachment cipher's `aead`).
+web = ["client", "openmls/js", "dep:getrandom02", "getrandom/wasm_js"]
 
 [dependencies]
 # MLS 1.0 (RFC 9420). Pinned exactly: every bump is a reviewed decision (ADR 0045).
 openmls = { version = "=0.9.1", default-features = false }
-# RustCrypto-backed provider (ed25519-dalek, x25519-dalek, aes-gcm, hpke-rs). Used here
-# for its OpenMlsCrypto implementation (signature verification, hashing) and, in the
-# `client` feature, for key generation.
-openmls_rust_crypto = "=0.6.0"
-openmls_basic_credential = { version = "=0.6.0", optional = true }
-# The `Signer` trait device keys sign with (feature `client`; already in the OpenMLS graph).
-openmls_traits = { version = "=0.6.0", optional = true }
+# The OpenMLS provider is CF Meet's own (src/provider.rs): only the accepted suite's
+# primitives, on RustCrypto crates. It replaced openmls_rust_crypto /
+# openmls_basic_credential 0.6.0, whose P-256 / P-384 support links crypto-bigint 0.5
+# (RUSTSEC-2026-0387).
+openmls_traits = "=0.6.0"
+# The in-memory key / group store the former provider embedded (feature `client`).
+openmls_memory_storage = { version = "=0.6.0", optional = true }
+# RFC 9180 HPKE with the RustCrypto backend (0.8: elliptic-curve 0.14 / crypto-bigint 0.7).
+hpke-rs = { version = "=0.8.0", default-features = false, features = ["hazmat", "std"] }
+hpke-rs-crypto = { version = "=0.8.0", default-features = false }
+hpke-rs-rust-crypto = { version = "=0.8.0", default-features = false, features = ["std"] }
+ed25519-dalek = "2"
+hmac = "0.12"
+hkdf = "0.12"
+tls_codec = { version = "0.5", features = ["derive"] }
+getrandom = "0.4"
+zeroize = "1"
 sha2 = "0.10"
 getrandom02 = { package = "getrandom", version = "0.2", features = ["js"], optional = true }
 thiserror = "2"
 # Client-side attachment encryption (feature `client`): XChaCha20-Poly1305 in the STREAM
-# construction of RustCrypto `aead` (already in the OpenMLS provider's graph).
+# construction of RustCrypto `aead`.
 chacha20poly1305 = { version = "0.10", optional = true }
 aead = { version = "0.5", features = ["stream", "getrandom"], optional = true }
-zeroize = { version = "1", optional = true }
-# HKDF-SHA256 for backup content keys (feature `client`; already in the OpenMLS graph).
-hkdf = { version = "0.12", optional = true }
 uuid = "1"
 
 [dev-dependencies]

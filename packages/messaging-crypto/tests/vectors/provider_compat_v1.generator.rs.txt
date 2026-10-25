@@ -1,0 +1,135 @@
+//! Generates provider-compatibility fixtures with the CURRENT (pre-change) provider:
+//! openmls_rust_crypto 0.6.0 + openmls_basic_credential 0.6.0.
+use cf_messaging_crypto::{device::Device, group::Processed};
+use openmls_rust_crypto::RustCrypto;
+use openmls_traits::{
+    crypto::OpenMlsCrypto,
+    types::{AeadType, HashType, HpkeAeadType, HpkeConfig, HpkeKdfType, HpkeKemType, SignatureScheme},
+};
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+const HPKE: HpkeConfig = HpkeConfig(HpkeKemType::DhKem25519, HpkeKdfType::HkdfSha256, HpkeAeadType::AesGcm128);
+
+fn h(b: &[u8]) -> Value { Value::String(hex::encode(b)) }
+
+fn text(p: Processed) -> String {
+    match p {
+        Processed::Application { plaintext, .. } => String::from_utf8(plaintext).unwrap(),
+        o => panic!("{o:?}"),
+    }
+}
+
+fn primitives() -> Value {
+    let c = RustCrypto::default();
+    let msg = b"cfmeet provider compatibility vector";
+    let salt = [0x0bu8; 32];
+    let ikm = [0x16u8; 32];
+    let prk = c.hkdf_extract(HashType::Sha2_256, &salt, &ikm).unwrap();
+    let okm = c.hkdf_expand(HashType::Sha2_256, prk.as_slice(), b"info", 42).unwrap();
+    let hmac = c.hmac(HashType::Sha2_256, &salt, msg).unwrap();
+    let key = [0x42u8; 16];
+    let nonce = [0x24u8; 12];
+    let ct = c.aead_encrypt(AeadType::Aes128Gcm, &key, msg, &nonce, b"aad").unwrap();
+    // Fixed Ed25519 private key (test only).
+    let sk = [0x5au8; 32];
+    let sig = c.sign(SignatureScheme::ED25519, msg, &sk).unwrap();
+    let (gsk, gpk) = c.signature_key_gen(SignatureScheme::ED25519).unwrap();
+    let gsig = c.sign(SignatureScheme::ED25519, msg, &gsk).unwrap();
+    let hikm = [0x33u8; 32];
+    let kp = c.derive_hpke_keypair(HPKE, &hikm).unwrap();
+    let sealed = c.hpke_seal(HPKE, kp.public.as_slice(), b"hpke info", b"hpke aad", msg).unwrap();
+    let (enc, exported) = c
+        .hpke_setup_sender_and_export(HPKE, kp.public.as_slice(), b"hpke info", b"exporter ctx", 32)
+        .unwrap();
+    const CHACHA: HpkeConfig = HpkeConfig(HpkeKemType::DhKem25519, HpkeKdfType::HkdfSha256, HpkeAeadType::ChaCha20Poly1305);
+    let ckp = c.derive_hpke_keypair(CHACHA, &[0x44u8; 32]).unwrap();
+    let csealed = c.hpke_seal(CHACHA, ckp.public.as_slice(), b"cfmeet-messaging-history-transfer:v1", b"transfer aad", msg).unwrap();
+    json!({
+        "hpke_chacha20poly1305": {
+            "ikm": h(&[0x44u8; 32]),
+            "private": h(ckp.private.as_ref()),
+            "public": h(ckp.public.as_slice()),
+            "info": h(b"cfmeet-messaging-history-transfer:v1"), "aad": h(b"transfer aad"),
+            "kem_output": h(csealed.kem_output.as_slice()),
+            "ciphertext": h(csealed.ciphertext.as_slice()),
+        },
+        "message": h(msg),
+        "sha256": h(&c.hash(HashType::Sha2_256, msg).unwrap()),
+        "hkdf": { "salt": h(&salt), "ikm": h(&ikm), "prk": h(prk.as_slice()), "info": h(b"info"), "length": 42, "okm": h(okm.as_slice()) },
+        "hmac_sha256": { "key": h(&salt), "mac": h(hmac.as_slice()) },
+        "aes128gcm": { "key": h(&key), "nonce": h(&nonce), "aad": h(b"aad"), "ciphertext": h(&ct) },
+        "ed25519": { "private": h(&sk), "signature": h(&sig) },
+        "ed25519_generated": { "private": h(&gsk), "public": h(&gpk), "signature": h(&gsig) },
+        "hpke": {
+            "ikm": h(&hikm),
+            "private": h(kp.private.as_ref()),
+            "public": h(kp.public.as_slice()),
+            "info": h(b"hpke info"), "aad": h(b"hpke aad"),
+            "kem_output": h(sealed.kem_output.as_slice()),
+            "ciphertext": h(sealed.ciphertext.as_slice()),
+            "export_enc": h(&enc), "exporter_context": h(b"exporter ctx"), "exported": h(exported.as_ref()),
+        }
+    })
+}
+
+fn main() {
+    let alice = Device::generate(Uuid::new_v4()).unwrap();
+    let bob = Device::generate(Uuid::new_v4()).unwrap();
+    let carol = Device::generate(Uuid::new_v4()).unwrap();
+    let dave = Device::generate(Uuid::new_v4()).unwrap();
+    let gid = [0xc5u8; 32];
+
+    // Epoch 0 -> 1: Alice adds Bob and Carol.
+    let mut ga = alice.create_group(&gid).unwrap();
+    let add = alice
+        .add_devices(&mut ga, &[bob.key_package().unwrap(), carol.key_package().unwrap()])
+        .unwrap();
+    let mut gb = bob.join(add.welcome.as_ref().unwrap()).unwrap();
+    let mut gc = carol.join(add.welcome.as_ref().unwrap()).unwrap();
+    let m = alice.encrypt(&mut ga, b"a1", b"alice to all").unwrap();
+    assert_eq!(text(bob.process(&mut gb, &m).unwrap()), "alice to all");
+    assert_eq!(text(carol.process(&mut gc, &m).unwrap()), "alice to all");
+    // Epoch 1 -> 2: Bob updates his leaf.
+    let up = bob.update_keys(&mut gb).unwrap();
+    alice.process(&mut ga, &up.commit).unwrap();
+    carol.process(&mut gc, &up.commit).unwrap();
+    let m = carol.encrypt(&mut gc, b"c1", b"carol before removal").unwrap();
+    assert_eq!(text(alice.process(&mut ga, &m).unwrap()), "carol before removal");
+    assert_eq!(text(bob.process(&mut gb, &m).unwrap()), "carol before removal");
+    // Epoch 2 -> 3: Alice removes Carol.
+    let rm = alice.remove_devices(&mut ga, &[carol.device_id()]).unwrap();
+    bob.process(&mut gb, &rm.commit).unwrap();
+    let m = bob.encrypt(&mut gb, b"b1", b"bob after removal").unwrap();
+    assert_eq!(text(alice.process(&mut ga, &m).unwrap()), "bob after removal");
+    assert_eq!(ga.epoch(), 3);
+    assert_eq!(gb.epoch(), 3);
+
+    // Messages Bob has NOT processed when the states are persisted:
+    // an application message (epoch 3), Alice's update commit (3 -> 4), and one at epoch 4.
+    let q1 = alice.encrypt(&mut ga, b"q1", b"queued at epoch 3").unwrap();
+    let q2 = alice.update_keys(&mut ga).unwrap();
+    let q3 = alice.encrypt(&mut ga, b"q3", b"queued at epoch 4").unwrap();
+    assert_eq!(ga.epoch(), 4);
+
+    // Dave holds an unused KeyPackage whose HPKE private key only his storage has.
+    // Long lifetime so the fixture stays usable (OpenMLS checks only the window when adding).
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let dave_kp = dave.key_package_with_lifetime(now - 3600, now + 20 * 365 * 86400).unwrap();
+
+    let out = json!({
+        "description": "Generated by openmls 0.9.1 + openmls_rust_crypto 0.6.0 + openmls_basic_credential 0.6.0 (the provider in use before RUSTSEC-2026-0387 was fixed). TEST KEYS ONLY.",
+        "primitives": primitives(),
+        "group_id": h(&gid),
+        "alice": { "device_id": alice.device_id().to_string(), "public": h(&alice.signature_public_key()), "state": h(&alice.export_state()), "epoch": ga.epoch() },
+        "bob": { "device_id": bob.device_id().to_string(), "public": h(&bob.signature_public_key()), "state": h(&bob.export_state()), "epoch": gb.epoch() },
+        "carol": { "device_id": carol.device_id().to_string() },
+        "dave": { "device_id": dave.device_id().to_string(), "public": h(&dave.signature_public_key()), "state": h(&dave.export_state()), "key_package": h(&dave_kp) },
+        "queued_for_bob": [
+            { "kind": "application", "message": h(&q1), "aad": h(b"q1"), "plaintext": "queued at epoch 3" },
+            { "kind": "commit", "message": h(&q2.commit), "epoch_after": 4 },
+            { "kind": "application", "message": h(&q3), "aad": h(b"q3"), "plaintext": "queued at epoch 4" }
+        ]
+    });
+    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+}

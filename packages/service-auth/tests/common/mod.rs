@@ -255,7 +255,7 @@ pub fn forge(key: &ServiceSigningKey, header: &Value, claims: &Value) -> String 
     let encoding =
         jsonwebtoken::EncodingKey::from_ed_der(signing.to_pkcs8_der().unwrap().as_bytes());
     let message = format!("{}.{}", b64(header), b64(claims));
-    let signature = jsonwebtoken::crypto::sign(
+    let signature = cf_service_auth::jwt::sign(
         message.as_bytes(),
         &encoding,
         jsonwebtoken::Algorithm::EdDSA,
