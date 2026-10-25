@@ -111,6 +111,10 @@
       "description": "Internal — Telephony operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
     },
     {
+      "name": "Internal — Webhook Migration",
+      "description": "Part VI webhook migration to the platform webhook system: inventory, digest, exports and rollback (internal service tokens only)."
+    },
+    {
       "name": "Recording Policies",
       "description": "Recording Policies operations in the Calling API. Review each operation's description for its behavior, access requirements and schemas."
     },
@@ -9930,7 +9934,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Usage & Limits"
+        ]
       }
     },
     "/v1/limits": {
@@ -10063,6 +10070,9 @@
               "format": "uuid"
             }
           }
+        ],
+        "tags": [
+          "Usage & Limits"
         ]
       }
     },
@@ -10548,7 +10558,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/digest": {
@@ -10594,7 +10607,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/subscriptions": {
@@ -10664,7 +10680,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/events": {
@@ -10734,7 +10753,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/deliveries": {
@@ -10814,7 +10836,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/attempts": {
@@ -10884,7 +10909,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/rollback/subscriptions": {
@@ -10940,7 +10968,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     },
     "/internal/v1/webhook-migration/rollback/deliveries": {
@@ -10996,7 +11027,10 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "tags": [
+          "Internal — Webhook Migration"
+        ]
       }
     }
   },

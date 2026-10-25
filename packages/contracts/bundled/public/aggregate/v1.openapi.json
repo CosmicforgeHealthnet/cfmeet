@@ -9875,6 +9875,9 @@
     "/v1/abuse-reports": {
       "get": {
         "operationId": "listAbuseReports",
+        "tags": [
+          "calling"
+        ],
         "summary": "List abuse reports",
         "description": "Reports filed in the caller's scope, optionally by one principal.",
         "security": [
@@ -9939,15 +9942,15 @@
         "x-cfmeet-route-id": "calling.listAbuseReports",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/blocks": {
       "post": {
         "operationId": "createBlock",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a block / opt-out rule",
         "description": "Part H §70: a principal blocks a principal or a protected ContactReference (calls.write), or the application blocks a ContactReference (enterprise.config.write). Never a raw number. Idempotent for an active pair (200 returns the existing rule).",
         "security": [
@@ -10028,13 +10031,13 @@
         "x-cfmeet-route-id": "calling.createBlock",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listBlocks",
+        "tags": [
+          "calling"
+        ],
         "summary": "List block rules",
         "description": "Active block rules of the caller's scope, optionally of one principal.",
         "security": [
@@ -10099,15 +10102,15 @@
         "x-cfmeet-route-id": "calling.listBlocks",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/blocks/{block_id}": {
       "delete": {
         "operationId": "releaseBlock",
+        "tags": [
+          "calling"
+        ],
         "summary": "Release a block rule",
         "description": "Releases (never deletes) a rule; a rule of another scope is not found.",
         "security": [
@@ -10172,15 +10175,15 @@
         "x-cfmeet-route-id": "calling.releaseBlock",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/endpoints": {
       "post": {
         "operationId": "registerEndpoint",
+        "tags": [
+          "calling"
+        ],
         "summary": "Register an application endpoint of a principal",
         "description": "Requires calls.write. The principal is resolved inside the credential's scope (unknown, foreign or inactive: 404). Registering the same endpointKey again for the same principal refreshes the endpoint (200); a key held by another principal is 409.",
         "security": [
@@ -10264,13 +10267,13 @@
         "x-cfmeet-route-id": "calling.registerEndpoint",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listEndpoints",
+        "tags": [
+          "calling"
+        ],
         "summary": "List a principal's endpoints",
         "description": "Requires calls.read. Only endpoints of the credential's scope; a foreign principal has none.",
         "security": [
@@ -10339,15 +10342,15 @@
         "x-cfmeet-route-id": "calling.listEndpoints",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/endpoints/{endpoint_id}": {
       "delete": {
         "operationId": "revokeEndpoint",
+        "tags": [
+          "calling"
+        ],
         "summary": "Revoke an endpoint",
         "description": "Requires calls.write. The endpoint is never rung again; its live offers are cancelled and its signaling credentials stop working. Revoking a revoked endpoint is a no-op.",
         "security": [
@@ -10402,15 +10405,15 @@
         "x-cfmeet-route-id": "calling.revokeEndpoint",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/history": {
       "get": {
         "operationId": "recoverCallHistory",
+        "tags": [
+          "calling"
+        ],
         "summary": "The endpoint's principal's call history",
         "description": "Signaling credential. Recovery after a reconnect: the canonical call history of the credential's principal (every device of it sees the same entries), with the same derivation and filters as GET /v1/calls?principalId= — a client that missed every push and realtime signal reads the authoritative missed / answered outcome here. principalId is not accepted (an endpoint reads its own principal only).",
         "security": [
@@ -10556,15 +10559,15 @@
         "x-cfmeet-route-id": "calling.recoverCallHistory",
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/invitations": {
       "get": {
         "operationId": "recoverInvitations",
+        "tags": [
+          "calling"
+        ],
         "summary": "Recover the endpoint's offers",
         "description": "Signaling credential. The endpoint's live and recently finished offers with the authoritative Call state; only unexpired RINGING offers of answerable calls are actionable. Stale client state is never trusted.",
         "security": [
@@ -10602,15 +10605,15 @@
         "x-cfmeet-route-id": "calling.recoverInvitations",
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/invitations/{invitation_id}/accept": {
       "post": {
         "operationId": "acceptInvitation",
+        "tags": [
+          "calling"
+        ],
         "summary": "Accept one's own ring offer",
         "description": "Signaling credential: only an offer addressed to the credential's own endpoint (any other offer is 404). Same arbitration and semantics as POST /v1/calls/{call_id}/accept.",
         "security": [
@@ -10684,15 +10687,15 @@
         "x-cfmeet-route-id": "calling.acceptInvitation",
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/invitations/{invitation_id}/decline": {
       "post": {
         "operationId": "declineInvitation",
+        "tags": [
+          "calling"
+        ],
         "summary": "Decline one's own ring offer",
         "description": "Signaling credential: only an offer addressed to the credential's own endpoint (any other offer is 404). Same arbitration and semantics as POST /v1/calls/{call_id}/decline.",
         "security": [
@@ -10766,9 +10769,6 @@
         "x-cfmeet-route-id": "calling.declineInvitation",
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
@@ -10835,19 +10835,22 @@
             }
           }
         ],
+        "tags": [
+          "calling"
+        ],
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.getCallingLimits",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueOwnMediaCredential",
+        "tags": [
+          "calling"
+        ],
         "summary": "Issue a media credential for one's own session",
         "description": "Signaling credential: only a session running on the credential's own endpoint (any other session is 404). Same rules as POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials.",
         "security": [
@@ -10915,15 +10918,15 @@
         "x-cfmeet-route-id": "calling.issueOwnMediaCredential",
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calling/signaling": {
       "get": {
         "operationId": "openSignalingChannel",
+        "tags": [
+          "calling"
+        ],
         "summary": "Open the endpoint's realtime signaling channel (WebSocket)",
         "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong and closes with code 4001 when the credential expires. Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
         "security": [
@@ -10950,15 +10953,15 @@
         "x-cfmeet-auth": [
           "SIGNALING_CREDENTIAL"
         ],
-        "x-cfmeet-protocol": "websocket",
-        "tags": [
-          "calling"
-        ]
+        "x-cfmeet-protocol": "websocket"
       }
     },
     "/v1/calling/signaling-credentials": {
       "post": {
         "operationId": "mintSignalingCredential",
+        "tags": [
+          "calling"
+        ],
         "summary": "Mint a signaling credential for one endpoint",
         "description": "Requires calls.write. Called by the application backend, which hands the short-lived credential to the device. The device never receives the platform API credential.",
         "security": [
@@ -11021,9 +11024,6 @@
         "x-cfmeet-route-id": "calling.mintSignalingCredential",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
@@ -11148,19 +11148,22 @@
             "$ref": "#/components/responses/calling.ServiceUnavailable"
           }
         },
+        "tags": [
+          "calling"
+        ],
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.listCallingUsage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls": {
       "get": {
         "operationId": "listCalls",
+        "tags": [
+          "calling"
+        ],
         "summary": "List the caller's calls, or one principal's call history (newest first, keyset pagination)",
         "description": "Requires the calls.read scope. Ordered by createdAt descending, then callId descending. Only the bounded filters below are accepted; unknown or repeated query parameters are rejected with 400. The cursor is opaque, carries position only and never scope. Part F §62: with principalId the response is that principal's canonical call history (CallHistoryList): only Calls it participates in, each with its participant-relative direction and outcome derived from Call evidence (never from push or realtime delivery), safe enterprise labels, the voicemail link for mailbox owners and recording availability; direction / outcome / missed need principalId. enterpriseDestinationType + enterpriseDestinationId narrow either listing.",
         "security": [
@@ -11331,13 +11334,13 @@
         "x-cfmeet-route-id": "calling.listCalls",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "post": {
         "operationId": "createCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create and ring an application call",
         "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice.",
         "security": [
@@ -11414,15 +11417,15 @@
         "x-cfmeet-route-id": "calling.createCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}": {
       "get": {
         "operationId": "getCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get one call with its participants, sessions and durations",
         "description": "Requires the calls.read scope. A call that does not exist, belongs to another tenant, application or environment, or whose id is malformed is answered with the same 404.",
         "security": [
@@ -11483,15 +11486,15 @@
         "x-cfmeet-route-id": "calling.getCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/abuse-reports": {
       "post": {
         "operationId": "createAbuseReport",
+        "tags": [
+          "calling"
+        ],
         "summary": "Report an unwanted or abusive call",
         "description": "Part H §69: a participant principal of the call reports it with a bounded category and optional code (no free text, no number). Idempotent per reporter and call.",
         "security": [
@@ -11584,15 +11587,15 @@
         "x-cfmeet-route-id": "calling.createAbuseReport",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/accept": {
       "post": {
         "operationId": "acceptCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Accept a ring offer on behalf of one endpoint",
         "description": "Requires calls.write. Exactly one device per participant wins (single-winner arbitration in the database); the participant's other offers become ANSWERED_ELSEWHERE and lose every media path. The first winning participant moves the Call to ANSWERED. An expired offer is 410; an offer that is no longer live (cancelled, answered elsewhere, declined) is 409.",
         "security": [
@@ -11672,15 +11675,15 @@
         "x-cfmeet-route-id": "calling.acceptCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/actions": {
       "get": {
         "operationId": "getCallActions",
+        "tags": [
+          "calling"
+        ],
         "summary": "Actions currently available on a call",
         "description": "Requires calls.read. Server-derived from the Call's state, its live offers, the credential's scopes and the media provider's capabilities.",
         "security": [
@@ -11735,15 +11738,15 @@
         "x-cfmeet-route-id": "calling.getCallActions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/cancel": {
       "post": {
         "operationId": "cancelCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Cancel a call before it is active",
         "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. Repeating it on a CANCELLED call is a no-op.",
         "security": [
@@ -11820,15 +11823,15 @@
         "x-cfmeet-route-id": "calling.cancelCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/decline": {
       "post": {
         "operationId": "declineCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Decline a ring offer on behalf of one endpoint",
         "description": "Requires calls.write. Declines only this endpoint's offer; other devices keep ringing. The Call ends as DECLINED only when every live offer of every pending target is declined.",
         "security": [
@@ -11908,15 +11911,15 @@
         "x-cfmeet-route-id": "calling.declineCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/end": {
       "post": {
         "operationId": "endCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "End an active call",
         "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized.",
         "security": [
@@ -11993,15 +11996,15 @@
         "x-cfmeet-route-id": "calling.endCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/hold": {
       "post": {
         "operationId": "holdCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Hold a connected call",
         "description": "Requires calls.write. Enforced at the media provider: every admitted connection loses audio and video publishing (subscription unchanged) before the Call becomes HELD. A provider that cannot update permissions is 422 CAPABILITY_UNAVAILABLE; an unconfirmed update is 503 MEDIA_UNAVAILABLE and the Call stays CONNECTED.",
         "security": [
@@ -12081,15 +12084,15 @@
         "x-cfmeet-route-id": "calling.holdCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/ivr/input": {
       "post": {
         "operationId": "sendIvrInput",
+        "tags": [
+          "calling"
+        ],
         "summary": "Send one key to the IVR (RTC caller)",
         "description": "Part F section 57. Requires calls.write and enterprise.calls.use. Only the Call's initiator endpoint may press keys (another endpoint or scope: 404). The key is used once and never stored or logged. accepted=false when the Call does not wait for a key (stale input is ignored).",
         "security": [
@@ -12164,15 +12167,15 @@
         "x-cfmeet-route-id": "calling.sendIvrInput",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/recording-authorizations": {
       "get": {
         "operationId": "listRecordingAuthorizations",
+        "tags": [
+          "calling"
+        ],
         "summary": "List a Call's recording decisions",
         "description": "Requires enterprise.recording.read; a participant or a recording administrator.",
         "security": [
@@ -12245,15 +12248,15 @@
         "x-cfmeet-route-id": "calling.listRecordingAuthorizations",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/recording-consent": {
       "post": {
         "operationId": "recordRecordingConsent",
+        "tags": [
+          "calling"
+        ],
         "summary": "Record a participant's recording consent",
         "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay.",
         "security": [
@@ -12331,15 +12334,15 @@
         "x-cfmeet-route-id": "calling.recordRecordingConsent",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/recordings": {
       "post": {
         "operationId": "startRecording",
+        "tags": [
+          "calling"
+        ],
         "summary": "Start recording a Call",
         "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations).",
         "security": [
@@ -12413,13 +12416,13 @@
         "x-cfmeet-route-id": "calling.startRecording",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listCallRecordings",
+        "tags": [
+          "calling"
+        ],
         "summary": "List a Call's recordings",
         "description": "Requires enterprise.recording.read; a participant (principalId) or a recording administrator.",
         "security": [
@@ -12492,15 +12495,15 @@
         "x-cfmeet-route-id": "calling.listCallRecordings",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/recordings/{recording_id}/stop": {
       "post": {
         "operationId": "stopRecording",
+        "tags": [
+          "calling"
+        ],
         "summary": "Stop a recording",
         "description": "Requires enterprise.recording.manage; a participant or a recording administrator. STOPPING (EXPLICIT); the capture is then finalized into protected storage. Never blocked by a kill switch. Audited.",
         "security": [
@@ -12586,15 +12589,15 @@
         "x-cfmeet-route-id": "calling.stopRecording",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/resume": {
       "post": {
         "operationId": "resumeCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Resume a held call",
         "description": "Requires calls.write. Re-derives every connection's permissions from the currently authorized server state (never from a stored pre-hold grant) and applies them at the provider before the Call becomes CONNECTED.",
         "security": [
@@ -12674,15 +12677,15 @@
         "x-cfmeet-route-id": "calling.resumeCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueSessionMediaCredential",
+        "tags": [
+          "calling"
+        ],
         "summary": "Issue a media credential for a session",
         "description": "Requires calls.write. Issues a short-lived join credential for one session whose media access the server authorized (the initiator's session, or a participant's single winning device) while the Call is in a media state. Capabilities derive from server state only; the body must be empty. A losing, removed or ended session, or a terminal Call, is 409.",
         "security": [
@@ -12759,15 +12762,15 @@
         "x-cfmeet-route-id": "calling.issueSessionMediaCredential",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/sessions/{session_id}/remove": {
       "post": {
         "operationId": "removeCallSession",
+        "tags": [
+          "calling"
+        ],
         "summary": "Remove one session from a call",
         "description": "Requires calls.write. Ends the session and revokes its media access for ever: its credentials stop working, the provider connection is removed (or queued for enforcement) and any re-entry is evicted. The Call's state is not changed; removing a removed session again is a no-op.",
         "security": [
@@ -12847,15 +12850,15 @@
         "x-cfmeet-route-id": "calling.removeCallSession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/calls/{call_id}/transfer": {
       "post": {
         "operationId": "transferCall",
+        "tags": [
+          "calling"
+        ],
         "summary": "Transfer a participant's place to another principal",
         "description": "Requires calls.write and an Idempotency-Key. The same Call continues (TRANSFERRING): the target's endpoints are rung with TRANSFER offers; when the target joins with a media path the transferring participant is retired and the Call returns to CONNECTED. If the target declines, does not answer or cannot join, the transfer FAILS and the Call returns to its pre-transfer state (CONNECTED or HELD) when the remaining parties still have a media path.",
         "security": [
@@ -12935,9 +12938,6 @@
         "x-cfmeet-route-id": "calling.transferCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
@@ -12988,6 +12988,10 @@
     "/v1/conversations": {
       "post": {
         "operationId": "createConversation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Conversation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13061,13 +13065,14 @@
         "x-cfmeet-route-id": "messaging.createConversation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "get": {
         "operationId": "listConversations",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Conversations",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13154,15 +13159,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}": {
       "get": {
         "operationId": "getConversation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Conversation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13226,13 +13232,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "patch": {
         "operationId": "updateConversation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "update Conversation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13305,15 +13312,16 @@
         "x-cfmeet-route-id": "messaging.updateConversation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments": {
       "post": {
         "operationId": "createAttachmentIntent",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Attachment Intent",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13403,15 +13411,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}": {
       "get": {
         "operationId": "getAttachment",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Attachment",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13486,15 +13495,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/content": {
       "get": {
         "operationId": "readAttachmentContent",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "read Attachment Content",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13573,15 +13583,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/download-grants": {
       "post": {
         "operationId": "grantAttachmentDownload",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "grant Attachment Download",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13656,15 +13667,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize": {
       "post": {
         "operationId": "finalizeAttachment",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "finalize Attachment",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13742,15 +13754,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/attachments/{attachmentId}/thumbnail-grants": {
       "post": {
         "operationId": "createThumbnailGrant",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Thumbnail Grant",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13825,15 +13838,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/bans": {
       "get": {
         "operationId": "listBans",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Bans",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13899,13 +13913,14 @@
         "x-cfmeet-route-id": "messaging.listBans",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "banMember",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "ban Member",
         "security": [
           {
             "messaging.customerCredential": []
@@ -13981,15 +13996,16 @@
         "x-cfmeet-route-id": "messaging.banMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/bans/{principalId}": {
       "delete": {
         "operationId": "unbanMember",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "unban Member",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14063,15 +14079,16 @@
         "x-cfmeet-route-id": "messaging.unbanMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/events": {
       "get": {
         "operationId": "replayConversationEvents",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "replay Conversation Events",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14157,15 +14174,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/invitation/accept": {
       "post": {
         "operationId": "messaging_acceptInvitation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "accept Invitation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14235,15 +14253,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/invitation/decline": {
       "post": {
         "operationId": "messaging_declineInvitation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "decline Invitation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14313,15 +14332,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/members": {
       "get": {
         "operationId": "listMembers",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Members",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14408,13 +14428,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "addMember",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "add Member",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14497,15 +14518,16 @@
         "x-cfmeet-route-id": "messaging.addMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/members/{principalId}": {
       "delete": {
         "operationId": "removeMember",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "remove Member",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14592,13 +14614,14 @@
         "x-cfmeet-route-id": "messaging.removeMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "patch": {
         "operationId": "changeMemberRole",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "change Member Role",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14682,15 +14705,16 @@
         "x-cfmeet-route-id": "messaging.changeMemberRole",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages": {
       "get": {
         "operationId": "listMessages",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Messages",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14795,13 +14819,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "sendMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "send Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14891,15 +14916,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}": {
       "get": {
         "operationId": "resolveMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "resolve Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -14974,13 +15000,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "patch": {
         "operationId": "editManagedMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "edit Managed Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15068,13 +15095,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "delete": {
         "operationId": "deleteMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "delete Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15160,15 +15188,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions": {
       "get": {
         "operationId": "listReactions",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Reactions",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15246,15 +15275,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}": {
       "put": {
         "operationId": "addReaction",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "add Reaction",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15343,13 +15373,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "delete": {
         "operationId": "removeReaction",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "remove Reaction",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15438,15 +15469,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/revisions": {
       "get": {
         "operationId": "listMessageRevisions",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Message Revisions",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15524,15 +15556,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/sms-transport": {
       "get": {
         "operationId": "getSmsTransport",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get SMS Transport",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15610,15 +15643,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/messages/{messageId}/thread": {
       "get": {
         "operationId": "getThreadSummary",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Thread Summary",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15696,15 +15730,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/mls/commits": {
       "post": {
         "operationId": "submitMlsCommit",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "submit MLS Commit",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15794,15 +15829,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/mls/key-package-claims": {
       "post": {
         "operationId": "claimKeyPackages",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "claim Key Packages",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15879,15 +15915,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/mls/state": {
       "get": {
         "operationId": "getMlsGroupState",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get MLS Group State",
         "security": [
           {
             "messaging.customerCredential": []
@@ -15954,15 +15991,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/pins": {
       "get": {
         "operationId": "listPins",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Pins",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16032,15 +16070,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/pins/{messageId}": {
       "put": {
         "operationId": "pinMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "pin Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16124,13 +16163,14 @@
         "x-cfmeet-route-id": "messaging.pinMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "delete": {
         "operationId": "unpinMessage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "unpin Message",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16204,15 +16244,16 @@
         "x-cfmeet-route-id": "messaging.unpinMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/read-cursor": {
       "put": {
         "operationId": "setReadCursor",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "set Read Cursor",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16289,15 +16330,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/reports": {
       "post": {
         "operationId": "createReport",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Report",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16374,15 +16416,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/search": {
       "get": {
         "operationId": "searchConversation",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "search Conversation",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16477,15 +16520,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/sms-bridges": {
       "get": {
         "operationId": "listSmsBridges",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list SMS Bridges",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16551,13 +16595,14 @@
         "x-cfmeet-route-id": "messaging.listSmsBridges",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "createSmsBridge",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create SMS Bridge",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16633,15 +16678,16 @@
         "x-cfmeet-route-id": "messaging.createSmsBridge",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/sms-bridges/{bridgeId}/close": {
       "post": {
         "operationId": "closeSmsBridge",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "close SMS Bridge",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16715,15 +16761,16 @@
         "x-cfmeet-route-id": "messaging.closeSmsBridge",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/conversations/{conversationId}/unread": {
       "get": {
         "operationId": "getUnreadCount",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Unread Count",
         "security": [
           {
             "messaging.customerCredential": []
@@ -16793,9 +16840,6 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
@@ -16854,6 +16898,9 @@
     "/v1/enterprise/audit": {
       "get": {
         "operationId": "listEnterpriseAudit",
+        "tags": [
+          "calling"
+        ],
         "summary": "Administrative audit records",
         "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope.",
         "security": [
@@ -16934,15 +16981,15 @@
         "x-cfmeet-route-id": "calling.listEnterpriseAudit",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/business-hours": {
       "post": {
         "operationId": "createBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a business-hours schedule",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The time zone is an IANA identifier; windows never overlap; routes are typed destinations of the same scope. Audited.",
         "security": [
@@ -17008,13 +17055,13 @@
         "x-cfmeet-route-id": "calling.createBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "List business-hours schedules",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -17099,15 +17146,15 @@
         "x-cfmeet-route-id": "calling.listBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/business-hours/{business_hours_id}": {
       "get": {
         "operationId": "getBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a schedule",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -17171,13 +17218,13 @@
         "x-cfmeet-route-id": "calling.getBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "put": {
         "operationId": "replaceBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "Replace a schedule",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic. Audited.",
         "security": [
@@ -17254,13 +17301,13 @@
         "x-cfmeet-route-id": "calling.replaceBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a schedule",
         "description": "Requires enterprise.config.write and expectedVersion. Routing through a disabled schedule ends in NO_ROUTE / DESTINATION_DISABLED. Never blocked. Audited.",
         "security": [
@@ -17337,15 +17384,15 @@
         "x-cfmeet-route-id": "calling.disableBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/business-hours/{business_hours_id}/evaluation": {
       "post": {
         "operationId": "evaluateBusinessHours",
+        "tags": [
+          "calling"
+        ],
         "summary": "Evaluate a schedule",
         "description": "Requires enterprise.config.read. Deterministic: the same schedule version and instant always give the same result.",
         "security": [
@@ -17419,15 +17466,15 @@
         "x-cfmeet-route-id": "calling.evaluateBusinessHours",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/departments": {
       "post": {
         "operationId": "createDepartment",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a department",
         "description": "Requires enterprise.config.write. Departments group principals for administration and routing; membership grants nothing. Audited.",
         "security": [
@@ -17490,13 +17537,13 @@
         "x-cfmeet-route-id": "calling.createDepartment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listDepartments",
+        "tags": [
+          "calling"
+        ],
         "summary": "List departments",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -17581,15 +17628,15 @@
         "x-cfmeet-route-id": "calling.listDepartments",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/departments/{department_id}": {
       "get": {
         "operationId": "getDepartment",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a department",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -17653,13 +17700,13 @@
         "x-cfmeet-route-id": "calling.getDepartment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateDepartment",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a department",
         "description": "Requires enterprise.config.write and expectedVersion. Audited.",
         "security": [
@@ -17736,13 +17783,13 @@
         "x-cfmeet-route-id": "calling.updateDepartment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableDepartment",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a department",
         "description": "Requires enterprise.config.write and expectedVersion. Membership is kept as history. Audited.",
         "security": [
@@ -17819,15 +17866,15 @@
         "x-cfmeet-route-id": "calling.disableDepartment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/departments/{department_id}/members": {
       "put": {
         "operationId": "replaceDepartmentMembers",
+        "tags": [
+          "calling"
+        ],
         "summary": "Replace a department's members",
         "description": "Requires enterprise.config.write and expectedVersion. Atomic, bounded (500), distinct ACTIVE principals of the same scope (a foreign or unknown principal is 404 and nothing changes). Audited.",
         "security": [
@@ -17904,15 +17951,15 @@
         "x-cfmeet-route-id": "calling.replaceDepartmentMembers",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/effective-policy": {
       "get": {
         "operationId": "getEffectiveEnterprisePolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "The environment's policy in force",
         "description": "Requires enterprise.config.read. The ACTIVE default policy, else the restrictive built-in default (policyId null, version 0).",
         "security": [
@@ -17962,15 +18009,15 @@
         "x-cfmeet-route-id": "calling.getEffectiveEnterprisePolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/extensions": {
       "post": {
         "operationId": "createExtension",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create an extension",
         "description": "Requires enterprise.config.write and the MANAGE_ROUTING capability of the organization's baseline policy (403 ENTERPRISE_POLICY_DENIED). The number is normalized to lower case and must match the governing policy's format; a used or ambiguous number is 409 CONFLICT. The destination must be an ACTIVE principal / enterprise member of the same scope (404 otherwise); a raw public number is never accepted. Audited.",
         "security": [
@@ -18036,13 +18083,13 @@
         "x-cfmeet-route-id": "calling.createExtension",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listExtensions",
+        "tags": [
+          "calling"
+        ],
         "summary": "List extensions",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -18136,15 +18183,15 @@
         "x-cfmeet-route-id": "calling.listExtensions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/extensions/{extension_id}": {
       "get": {
         "operationId": "getExtension",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get an extension",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -18208,13 +18255,13 @@
         "x-cfmeet-route-id": "calling.getExtension",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateExtension",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change an extension",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Renumbering re-checks uniqueness and ambiguity. Audited.",
         "security": [
@@ -18291,13 +18338,13 @@
         "x-cfmeet-route-id": "calling.updateExtension",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableExtension",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable (offboard) an extension",
         "description": "Requires enterprise.config.write and expectedVersion. Future routing stops; the extension and every historical Call's reference and number snapshot remain. Never blocked by a kill switch or capability. Audited.",
         "security": [
@@ -18374,15 +18421,15 @@
         "x-cfmeet-route-id": "calling.disableExtension",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/forwarding-rules": {
       "post": {
         "operationId": "createForwardingRule",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a forwarding rule",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited.",
         "security": [
@@ -18448,13 +18495,13 @@
         "x-cfmeet-route-id": "calling.createForwardingRule",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listForwardingRules",
+        "tags": [
+          "calling"
+        ],
         "summary": "List forwarding rules",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -18548,15 +18595,15 @@
         "x-cfmeet-route-id": "calling.listForwardingRules",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/forwarding-rules/{forwarding_rule_id}": {
       "get": {
         "operationId": "getForwardingRule",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a forwarding rule",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -18620,13 +18667,13 @@
         "x-cfmeet-route-id": "calling.getForwardingRule",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateForwardingRule",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a forwarding rule's target",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -18703,13 +18750,13 @@
         "x-cfmeet-route-id": "calling.updateForwardingRule",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableForwardingRule",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a forwarding rule",
         "description": "Requires enterprise.config.write and expectedVersion. Never blocked. Audited.",
         "security": [
@@ -18786,15 +18833,15 @@
         "x-cfmeet-route-id": "calling.disableForwardingRule",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ivr-flows": {
       "post": {
         "operationId": "createIvrFlow",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create an IVR flow",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The flow has no version until one is published. Audited.",
         "security": [
@@ -18857,13 +18904,13 @@
         "x-cfmeet-route-id": "calling.createIvrFlow",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listIvrFlows",
+        "tags": [
+          "calling"
+        ],
         "summary": "List IVR flows",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -18948,15 +18995,15 @@
         "x-cfmeet-route-id": "calling.listIvrFlows",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ivr-flows/{ivr_flow_id}": {
       "get": {
         "operationId": "getIvrFlow",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get an IVR flow",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -19020,13 +19067,13 @@
         "x-cfmeet-route-id": "calling.getIvrFlow",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "renameIvrFlow",
+        "tags": [
+          "calling"
+        ],
         "summary": "Rename an IVR flow",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -19103,13 +19150,13 @@
         "x-cfmeet-route-id": "calling.renameIvrFlow",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableIvrFlow",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable an IVR flow",
         "description": "Requires enterprise.config.write and expectedVersion. New Calls routed to it fail safe; Calls already inside finish their version. Never blocked. Audited.",
         "security": [
@@ -19186,15 +19233,15 @@
         "x-cfmeet-route-id": "calling.disableIvrFlow",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/activation": {
       "put": {
         "operationId": "activateIvrVersion",
+        "tags": [
+          "calling"
+        ],
         "summary": "Activate an IVR version",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. NEW Calls run the activated version; a Call already in the IVR keeps the version it started with. Audited (ACTIVATE).",
         "security": [
@@ -19271,15 +19318,15 @@
         "x-cfmeet-route-id": "calling.activateIvrVersion",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions": {
       "post": {
         "operationId": "publishIvrVersion",
+        "tags": [
+          "calling"
+        ],
         "summary": "Publish an IVR version",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. The graph is validated (400 for an unknown node, missing or foreign destination (404), invalid digit mapping, unreachable node, loop without input, excessive size) and stored immutably as the next version number. Audited.",
         "security": [
@@ -19356,13 +19403,13 @@
         "x-cfmeet-route-id": "calling.publishIvrVersion",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listIvrVersions",
+        "tags": [
+          "calling"
+        ],
         "summary": "List IVR versions",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -19426,15 +19473,15 @@
         "x-cfmeet-route-id": "calling.listIvrVersions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ivr-flows/{ivr_flow_id}/versions/{version_number}": {
       "get": {
         "operationId": "getIvrVersion",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get an IVR version",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -19507,15 +19554,15 @@
         "x-cfmeet-route-id": "calling.getIvrVersion",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/policies": {
       "post": {
         "operationId": "createEnterprisePolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create an enterprise call policy",
         "description": "Requires enterprise.config.write. Typed rules only. isDefault makes it the environment's baseline (the previous default is cleared, a versioned change). Enabling public forwarding or granting MANAGE_PUBLIC_FORWARDING / MANAGE_RECORDING needs that capability in the current baseline (granted by a CF Meet operator): otherwise 403 ENTERPRISE_POLICY_DENIED. Audited.",
         "security": [
@@ -19578,13 +19625,13 @@
         "x-cfmeet-route-id": "calling.createEnterprisePolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listEnterprisePolicies",
+        "tags": [
+          "calling"
+        ],
         "summary": "List enterprise call policies",
         "description": "Requires enterprise.config.read. Keyset pagination in creation order.",
         "security": [
@@ -19669,15 +19716,15 @@
         "x-cfmeet-route-id": "calling.listEnterprisePolicies",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/policies/{policy_id}": {
       "get": {
         "operationId": "getEnterprisePolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get an enterprise call policy",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -19741,13 +19788,13 @@
         "x-cfmeet-route-id": "calling.getEnterprisePolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateEnterprisePolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change an enterprise call policy",
         "description": "Requires enterprise.config.write and the current expectedVersion (409 VERSION_CONFLICT otherwise; nothing changes). Audited.",
         "security": [
@@ -19824,13 +19871,13 @@
         "x-cfmeet-route-id": "calling.updateEnterprisePolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableEnterprisePolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable an enterprise call policy",
         "description": "Requires enterprise.config.write and expectedVersion. Never deleted (historical references stay valid); never blocked by a kill switch. Audited.",
         "security": [
@@ -19907,15 +19954,15 @@
         "x-cfmeet-route-id": "calling.disableEnterprisePolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/public-contacts": {
       "post": {
         "operationId": "createPublicContact",
+        "tags": [
+          "calling"
+        ],
         "summary": "Register a protected public destination",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting public forwarding (else 403). Opaque references only. Audited.",
         "security": [
@@ -19978,13 +20025,13 @@
         "x-cfmeet-route-id": "calling.createPublicContact",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listPublicContacts",
+        "tags": [
+          "calling"
+        ],
         "summary": "List public contacts",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -20069,15 +20116,15 @@
         "x-cfmeet-route-id": "calling.listPublicContacts",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/public-contacts/{public_contact_id}": {
       "get": {
         "operationId": "getPublicContact",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a public contact",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -20141,13 +20188,13 @@
         "x-cfmeet-route-id": "calling.getPublicContact",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disablePublicContact",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a public contact",
         "description": "Requires enterprise.config.write and expectedVersion. Stops new forwarding to it. Never blocked. Audited.",
         "security": [
@@ -20224,15 +20271,15 @@
         "x-cfmeet-route-id": "calling.disablePublicContact",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/queues": {
       "post": {
         "operationId": "createQueue",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a call queue",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. Audited.",
         "security": [
@@ -20298,13 +20345,13 @@
         "x-cfmeet-route-id": "calling.createQueue",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listQueues",
+        "tags": [
+          "calling"
+        ],
         "summary": "List call queues",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -20389,15 +20436,15 @@
         "x-cfmeet-route-id": "calling.listQueues",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/queues/{queue_id}": {
       "get": {
         "operationId": "getQueue",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a call queue",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -20461,13 +20508,13 @@
         "x-cfmeet-route-id": "calling.getQueue",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateQueue",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a call queue",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -20544,13 +20591,13 @@
         "x-cfmeet-route-id": "calling.updateQueue",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableQueue",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a call queue",
         "description": "Requires enterprise.config.write and expectedVersion. No new Call enters a disabled queue; Calls already waiting are still offered until answered, overflowed or timed out. Never blocked. Audited.",
         "security": [
@@ -20627,15 +20674,15 @@
         "x-cfmeet-route-id": "calling.disableQueue",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/queues/{queue_id}/entries": {
       "get": {
         "operationId": "listQueueEntries",
+        "tags": [
+          "calling"
+        ],
         "summary": "List a queue's entries",
         "description": "Requires enterprise.config.read. state=ACTIVE (default): waiting Calls in FIFO order with their authoritative positions; state=FINISHED: the most recent finished entries.",
         "security": [
@@ -20723,15 +20770,15 @@
         "x-cfmeet-route-id": "calling.listQueueEntries",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/queues/{queue_id}/members": {
       "put": {
         "operationId": "replaceQueueMembers",
+        "tags": [
+          "calling"
+        ],
         "summary": "Replace a queue's agents",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic; an agent of another scope or not ACTIVE is 404. Audited.",
         "security": [
@@ -20808,15 +20855,15 @@
         "x-cfmeet-route-id": "calling.replaceQueueMembers",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/recording-policies": {
       "post": {
         "operationId": "createRecordingPolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a call recording policy",
         "description": "Requires enterprise.recording.manage and the operator-granted MANAGE_RECORDING capability. Typed: mode, notice, consent participants, an opaque jurisdiction reference, retention, maximum length. Audited.",
         "security": [
@@ -20879,13 +20926,13 @@
         "x-cfmeet-route-id": "calling.createRecordingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listRecordingPolicies",
+        "tags": [
+          "calling"
+        ],
         "summary": "List recording policies",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -20970,15 +21017,15 @@
         "x-cfmeet-route-id": "calling.listRecordingPolicies",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/recording-policies/{recording_policy_id}": {
       "get": {
         "operationId": "getRecordingPolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a recording policy",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -21042,13 +21089,13 @@
         "x-cfmeet-route-id": "calling.getRecordingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateRecordingPolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a recording policy",
         "description": "Requires enterprise.recording.manage, MANAGE_RECORDING and expectedVersion. A change that stops permitting running recordings stops them (POLICY_REVOKED). Audited.",
         "security": [
@@ -21125,13 +21172,13 @@
         "x-cfmeet-route-id": "calling.updateRecordingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableRecordingPolicy",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a recording policy",
         "description": "Requires enterprise.recording.manage and expectedVersion. Never blocked; running recordings under it stop (POLICY_REVOKED). Audited.",
         "security": [
@@ -21208,15 +21255,15 @@
         "x-cfmeet-route-id": "calling.disableRecordingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/recordings/{recording_id}": {
       "get": {
         "operationId": "getCallRecording",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a recording",
         "description": "Requires enterprise.recording.read; a participant of the Call or a recording administrator. Audited (READ_METADATA; a refused principal is audited DENIED and gets 404).",
         "security": [
@@ -21289,13 +21336,13 @@
         "x-cfmeet-route-id": "calling.getCallRecording",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "deleteCallRecording",
+        "tags": [
+          "calling"
+        ],
         "summary": "Delete a recording",
         "description": "Requires enterprise.recording.manage and expectedVersion; a participant or a recording administrator. Asynchronous: DELETING (audited), the protected object is removed, DELETED (calling.recording-deleted).",
         "security": [
@@ -21381,15 +21428,15 @@
         "x-cfmeet-route-id": "calling.deleteCallRecording",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/recordings/{recording_id}/access-audit": {
       "get": {
         "operationId": "getRecordingAccessAudit",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a recording's access-audit trail",
         "description": "Requires enterprise.recording.manage.",
         "security": [
@@ -21453,15 +21500,15 @@
         "x-cfmeet-route-id": "calling.getRecordingAccessAudit",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/recordings/{recording_id}/media-access": {
       "post": {
         "operationId": "accessRecordingMedia",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get short-lived access to a recording's audio",
         "description": "Requires enterprise.recording.read; a participant or a recording administrator — authorized BEFORE any URL is minted. READY only (else 409). A read-only signed URL of ONE object valid for at most 300 s; nothing is stored. Audited (granted or denied).",
         "security": [
@@ -21541,15 +21588,15 @@
         "x-cfmeet-route-id": "calling.accessRecordingMedia",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ring-groups": {
       "post": {
         "operationId": "createRingGroup",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a ring group",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. Audited.",
         "security": [
@@ -21615,13 +21662,13 @@
         "x-cfmeet-route-id": "calling.createRingGroup",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listRingGroups",
+        "tags": [
+          "calling"
+        ],
         "summary": "List ring groups",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -21706,15 +21753,15 @@
         "x-cfmeet-route-id": "calling.listRingGroups",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ring-groups/{ring_group_id}": {
       "get": {
         "operationId": "getRingGroup",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a ring group",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -21778,13 +21825,13 @@
         "x-cfmeet-route-id": "calling.getRingGroup",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateRingGroup",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a ring group",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Audited.",
         "security": [
@@ -21861,13 +21908,13 @@
         "x-cfmeet-route-id": "calling.updateRingGroup",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableRingGroup",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a ring group",
         "description": "Requires enterprise.config.write and expectedVersion. Routing to a disabled group fails safe. Never blocked. Audited.",
         "security": [
@@ -21944,15 +21991,15 @@
         "x-cfmeet-route-id": "calling.disableRingGroup",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/ring-groups/{ring_group_id}/members": {
       "put": {
         "operationId": "replaceRingGroupMembers",
+        "tags": [
+          "calling"
+        ],
         "summary": "Replace a ring group's members",
         "description": "Requires enterprise.config.write, MANAGE_ROUTING and expectedVersion. Atomic; members in ring order; a member of another scope is 404; a member extension that does not route directly to a principal is 400 (no nesting). Audited.",
         "security": [
@@ -22029,15 +22076,15 @@
         "x-cfmeet-route-id": "calling.replaceRingGroupMembers",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/sip-devices": {
       "post": {
         "operationId": "bindSipDevice",
+        "tags": [
+          "calling"
+        ],
         "summary": "Bind an enterprise SIP device",
         "description": "Requires enterprise.config.write and MANAGE_ROUTING. A device reference has at most one ACTIVE binding (409 otherwise); the principal must be ACTIVE in the scope (404). Audited.",
         "security": [
@@ -22103,13 +22150,13 @@
         "x-cfmeet-route-id": "calling.bindSipDevice",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listSipDevices",
+        "tags": [
+          "calling"
+        ],
         "summary": "List SIP device bindings",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -22194,15 +22241,15 @@
         "x-cfmeet-route-id": "calling.listSipDevices",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/sip-devices/{sip_device_id}": {
       "get": {
         "operationId": "getSipDevice",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a SIP device binding",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -22266,13 +22313,13 @@
         "x-cfmeet-route-id": "calling.getSipDevice",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableSipDevice",
+        "tags": [
+          "calling"
+        ],
         "summary": "Unbind a SIP device",
         "description": "Requires enterprise.config.write and expectedVersion. The device's new dialogs are refused. Never blocked. Audited.",
         "security": [
@@ -22349,15 +22396,15 @@
         "x-cfmeet-route-id": "calling.disableSipDevice",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/mailboxes": {
       "post": {
         "operationId": "createVoicemailMailbox",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a voicemail mailbox",
         "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and an enterprise policy permitting voicemail. The owner is a typed principal / extension / queue / ring group of the scope. Audited.",
         "security": [
@@ -22423,13 +22470,13 @@
         "x-cfmeet-route-id": "calling.createVoicemailMailbox",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listVoicemailMailboxes",
+        "tags": [
+          "calling"
+        ],
         "summary": "List mailboxes",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -22514,15 +22561,15 @@
         "x-cfmeet-route-id": "calling.listVoicemailMailboxes",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/mailboxes/{mailbox_id}": {
       "get": {
         "operationId": "getVoicemailMailbox",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a mailbox",
         "description": "Requires enterprise.config.read.",
         "security": [
@@ -22586,13 +22633,13 @@
         "x-cfmeet-route-id": "calling.getVoicemailMailbox",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateVoicemailMailbox",
+        "tags": [
+          "calling"
+        ],
         "summary": "Change a mailbox",
         "description": "Requires enterprise.voicemail.manage, MANAGE_VOICEMAIL and expectedVersion. Audited.",
         "security": [
@@ -22669,13 +22716,13 @@
         "x-cfmeet-route-id": "calling.updateVoicemailMailbox",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "disableVoicemailMailbox",
+        "tags": [
+          "calling"
+        ],
         "summary": "Disable a mailbox",
         "description": "Requires enterprise.voicemail.manage and expectedVersion. Routing to a disabled mailbox ends in NO_ROUTE; its messages remain (retention still applies). Never blocked. Audited.",
         "security": [
@@ -22752,15 +22799,15 @@
         "x-cfmeet-route-id": "calling.disableVoicemailMailbox",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/messages": {
       "get": {
         "operationId": "listVoicemailMessages",
+        "tags": [
+          "calling"
+        ],
         "summary": "List a mailbox's messages",
         "description": "Requires enterprise.voicemail.read. Authorization first: the owner (principalId) or a voicemail administrator. Newest first; DELETED messages only with state=DELETED.",
         "security": [
@@ -22883,15 +22930,15 @@
         "x-cfmeet-route-id": "calling.listVoicemailMessages",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/messages/{message_id}": {
       "get": {
         "operationId": "getVoicemailMessage",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a message",
         "description": "Requires enterprise.voicemail.read; owner or voicemail administrator.",
         "security": [
@@ -22964,13 +23011,13 @@
         "x-cfmeet-route-id": "calling.getVoicemailMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "deleteVoicemailMessage",
+        "tags": [
+          "calling"
+        ],
         "summary": "Delete a message",
         "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Asynchronous: DELETING now (audited), the protected object is removed by the worker, then DELETED (calling.voicemail-deleted). A message still being captured is 409. The originating Call is untouched.",
         "security": [
@@ -23056,15 +23103,15 @@
         "x-cfmeet-route-id": "calling.deleteVoicemailMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/messages/{message_id}/media-access": {
       "post": {
         "operationId": "accessVoicemailMedia",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get short-lived access to a message's audio",
         "description": "Requires enterprise.voicemail.read; owner or voicemail administrator — authorized BEFORE any URL is minted; another scope's message is 404. READY messages only (else 409). Returns a read-only signed URL of ONE object valid for at most 300 s; nothing is stored. Audited (MEDIA_ACCESS).",
         "security": [
@@ -23144,15 +23191,15 @@
         "x-cfmeet-route-id": "calling.accessVoicemailMedia",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/enterprise/voicemail/messages/{message_id}/read-state": {
       "put": {
         "operationId": "setVoicemailReadState",
+        "tags": [
+          "calling"
+        ],
         "summary": "Mark a message read / unread",
         "description": "Requires enterprise.voicemail.manage and expectedVersion; owner or voicemail administrator. Audited (MARK_READ / MARK_UNREAD).",
         "security": [
@@ -23229,9 +23276,6 @@
         "x-cfmeet-route-id": "calling.setVoicemailReadState",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
@@ -25872,6 +25916,9 @@
     "/v1/limits": {
       "get": {
         "operationId": "getLimits",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get limit status",
         "description": "The authenticated credential's limits (Part G §70): request rate, concurrent calls and telecom spend (daily / monthly). Each reports every configured level of the API-client chain TENANT → APPLICATION → SERVICE_ACCOUNT → CREDENTIAL (the environment's spend policy for spend) and the binding level — the one with the least remaining headroom; the most restrictive applicable ceiling denies first. Tenant, application, service account and credential always come from the authenticated credential and are never parameters. With `principalId` (also needs `principals.read`) the principal's own PRINCIPAL levels are added; the principal must resolve in the caller's own scope, otherwise 404. No level carries an identifier.",
         "security": [
@@ -25936,15 +25983,16 @@
         "x-cfmeet-route-id": "calling.getLimits",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/messaging/audit": {
       "get": {
         "operationId": "listAudit",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Audit",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26035,15 +26083,16 @@
         "x-cfmeet-route-id": "messaging.listAudit",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/backups": {
       "post": {
         "operationId": "createBackupUpload",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Backup Upload",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26115,15 +26164,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/backups/latest": {
       "get": {
         "operationId": "getLatestBackup",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Latest Backup",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26179,15 +26229,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/backups/{backupId}": {
       "delete": {
         "operationId": "deleteBackup",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "delete Backup",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26251,15 +26302,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/backups/{backupId}/download-grants": {
       "post": {
         "operationId": "createBackupDownloadGrant",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Backup Download Grant",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26329,15 +26381,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/backups/{backupId}/finalize": {
       "post": {
         "operationId": "finalizeBackup",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "finalize Backup",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26407,15 +26460,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/blocks": {
       "get": {
         "operationId": "messaging_listBlocks",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Blocks",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26474,13 +26528,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "messaging_createBlock",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Block",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26559,15 +26614,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/blocks/{principalId}": {
       "delete": {
         "operationId": "removeBlock",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "remove Block",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26634,15 +26690,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/client-sessions/revoke-all": {
       "post": {
         "operationId": "revokeAllClientSessions",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "revoke All Client Sessions",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26697,15 +26754,16 @@
         "x-cfmeet-route-id": "messaging.revokeAllClientSessions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/client-sessions/{sessionId}/revoke": {
       "post": {
         "operationId": "revokeClientSession",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "revoke Client Session",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26768,15 +26826,16 @@
         "x-cfmeet-route-id": "messaging.revokeClientSession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/client-tokens": {
       "post": {
         "operationId": "issueClientToken",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "issue Client Token",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26841,15 +26900,16 @@
         "x-cfmeet-route-id": "messaging.issueClientToken",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/deletion-requests": {
       "post": {
         "operationId": "requestDataDeletion",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "request Data Deletion",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26904,15 +26964,16 @@
         "x-cfmeet-route-id": "messaging.requestDataDeletion",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/deletion-requests/{requestId}": {
       "get": {
         "operationId": "getDataDeletion",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Data Deletion",
         "security": [
           {
             "messaging.customerCredential": []
@@ -26966,15 +27027,16 @@
         "x-cfmeet-route-id": "messaging.getDataDeletion",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices": {
       "post": {
         "operationId": "registerDevice",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "register Device",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27042,15 +27104,16 @@
         "x-cfmeet-route-id": "messaging.registerDevice",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/registration-challenges": {
       "post": {
         "operationId": "createDeviceRegistrationChallenge",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Device Registration Challenge",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27099,15 +27162,16 @@
         "x-cfmeet-route-id": "messaging.createDeviceRegistrationChallenge",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/{deviceId}/key-packages": {
       "post": {
         "operationId": "publishKeyPackages",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "publish Key Packages",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27190,15 +27254,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/{deviceId}/push-registration": {
       "put": {
         "operationId": "registerPush",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "register Push",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27275,13 +27340,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "delete": {
         "operationId": "unregisterPush",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "unregister Push",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27348,15 +27414,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/{deviceId}/revoke": {
       "post": {
         "operationId": "revokeDevice",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "revoke Device",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27426,15 +27493,16 @@
         "x-cfmeet-route-id": "messaging.revokeDevice",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/{deviceId}/welcomes": {
       "get": {
         "operationId": "listWelcomes",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Welcomes",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27501,15 +27569,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume": {
       "post": {
         "operationId": "consumeWelcome",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "consume Welcome",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27584,15 +27653,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/exports": {
       "post": {
         "operationId": "requestExport",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "request Export",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27647,15 +27717,16 @@
         "x-cfmeet-route-id": "messaging.requestExport",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/exports/{exportId}": {
       "get": {
         "operationId": "getExport",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Export",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27709,15 +27780,16 @@
         "x-cfmeet-route-id": "messaging.getExport",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/exports/{exportId}/download-grants": {
       "post": {
         "operationId": "grantExportDownload",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "grant Export Download",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27771,15 +27843,16 @@
         "x-cfmeet-route-id": "messaging.grantExportDownload",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/history-transfers": {
       "post": {
         "operationId": "createHistoryTransfer",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create History Transfer",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27848,13 +27921,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "get": {
         "operationId": "listHistoryTransfers",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list History Transfers",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27918,15 +27992,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/history-transfers/{transferId}": {
       "get": {
         "operationId": "getHistoryTransfer",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get History Transfer",
         "security": [
           {
             "messaging.customerCredential": []
@@ -27990,15 +28065,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/history-transfers/{transferId}/cancel": {
       "post": {
         "operationId": "cancelHistoryTransfer",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "cancel History Transfer",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28075,15 +28151,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/history-transfers/{transferId}/complete": {
       "post": {
         "operationId": "completeHistoryTransfer",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "complete History Transfer",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28150,15 +28227,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/history-transfers/{transferId}/sealed-history": {
       "put": {
         "operationId": "sealHistoryTransfer",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "seal History Transfer",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28238,13 +28316,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "get": {
         "operationId": "getSealedHistory",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Sealed History",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28311,15 +28390,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/invitations": {
       "get": {
         "operationId": "listInvitations",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Invitations",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28381,15 +28461,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/key-transparency/proofs": {
       "get": {
         "operationId": "getKeyTransparencyProofs",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Key Transparency Proofs",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28462,15 +28543,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/legal-holds": {
       "get": {
         "operationId": "listLegalHolds",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Legal Holds",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28515,13 +28597,14 @@
         "x-cfmeet-route-id": "messaging.listLegalHolds",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "createLegalHold",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "create Legal Hold",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28576,15 +28659,16 @@
         "x-cfmeet-route-id": "messaging.createLegalHold",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/legal-holds/{holdId}": {
       "get": {
         "operationId": "getLegalHold",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Legal Hold",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28638,15 +28722,16 @@
         "x-cfmeet-route-id": "messaging.getLegalHold",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/legal-holds/{holdId}/release": {
       "post": {
         "operationId": "releaseLegalHold",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "release Legal Hold",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28710,15 +28795,16 @@
         "x-cfmeet-route-id": "messaging.releaseLegalHold",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/moderation/actions": {
       "get": {
         "operationId": "listModerationActions",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Moderation Actions",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28774,13 +28860,14 @@
         "x-cfmeet-route-id": "messaging.listModerationActions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "post": {
         "operationId": "applyModerationAction",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "apply Moderation Action",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28835,15 +28922,16 @@
         "x-cfmeet-route-id": "messaging.applyModerationAction",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/policy": {
       "get": {
         "operationId": "getMessagingPolicy",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Messaging Policy",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28879,13 +28967,14 @@
         "x-cfmeet-route-id": "messaging.getMessagingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "put": {
         "operationId": "updateMessagingPolicy",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "update Messaging Policy",
         "security": [
           {
             "messaging.customerCredential": []
@@ -28937,15 +29026,16 @@
         "x-cfmeet-route-id": "messaging.updateMessagingPolicy",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/presence/settings": {
       "get": {
         "operationId": "getPresenceSettings",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Presence Settings",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29004,13 +29094,14 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       },
       "put": {
         "operationId": "putPresenceSettings",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "put Presence Settings",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29079,15 +29170,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/principals/{principalId}/devices": {
       "get": {
         "operationId": "listPrincipalDevices",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Principal Devices",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29151,15 +29243,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/reports": {
       "get": {
         "operationId": "listReports",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "list Reports",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29227,15 +29320,16 @@
         "x-cfmeet-route-id": "messaging.listReports",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/reports/{reportId}": {
       "get": {
         "operationId": "getReport",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Report",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29289,15 +29383,16 @@
         "x-cfmeet-route-id": "messaging.getReport",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/search": {
       "get": {
         "operationId": "searchMessages",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "search Messages",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29376,15 +29471,16 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/sms-bridge/disclosure": {
       "get": {
         "operationId": "getSmsBridgeDisclosure",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get SMS Bridge Disclosure",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29431,15 +29527,16 @@
         "x-cfmeet-route-id": "messaging.getSmsBridgeDisclosure",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/messaging/usage": {
       "get": {
         "operationId": "getMessagingUsage",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "get Messaging Usage",
         "security": [
           {
             "messaging.customerCredential": []
@@ -29497,15 +29594,16 @@
         "x-cfmeet-route-id": "messaging.getMessagingUsage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
     "/v1/numbers/acquisitions": {
       "get": {
         "operationId": "listAcquisitions",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Acquisitions",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29569,13 +29667,14 @@
         "x-cfmeet-route-id": "numbering.listAcquisitions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "createAcquisition",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create Acquisition",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29657,15 +29756,16 @@
         "x-cfmeet-route-id": "numbering.createAcquisition",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/acquisitions/{acquisitionId}": {
       "get": {
         "operationId": "getAcquisition",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Acquisition",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29716,15 +29816,16 @@
         "x-cfmeet-route-id": "numbering.getAcquisition",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/acquisitions/{acquisitionId}/routes": {
       "post": {
         "operationId": "configureAcquisitionRoutes",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "configure Acquisition Routes",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29814,15 +29915,16 @@
         "x-cfmeet-route-id": "numbering.configureAcquisitionRoutes",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments": {
       "get": {
         "operationId": "listAssignments",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Assignments",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29904,13 +30006,14 @@
         "x-cfmeet-route-id": "numbering.listAssignments",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "createAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -29992,15 +30095,16 @@
         "x-cfmeet-route-id": "numbering.createAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}": {
       "get": {
         "operationId": "getAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30051,15 +30155,16 @@
         "x-cfmeet-route-id": "numbering.getAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/activate": {
       "post": {
         "operationId": "activateAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "activate Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30116,15 +30221,16 @@
         "x-cfmeet-route-id": "numbering.activateAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/capabilities": {
       "get": {
         "operationId": "getAssignmentCapabilities",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment Capabilities",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30175,15 +30281,16 @@
         "x-cfmeet-route-id": "numbering.getAssignmentCapabilities",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/history": {
       "get": {
         "operationId": "getAssignmentHistory",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment History",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30234,15 +30341,16 @@
         "x-cfmeet-route-id": "numbering.getAssignmentHistory",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/offboarding": {
       "post": {
         "operationId": "offboardEmployee",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "offboard Employee",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30312,15 +30420,16 @@
         "x-cfmeet-route-id": "numbering.offboardEmployee",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/quarantine": {
       "get": {
         "operationId": "getAssignmentQuarantine",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment Quarantine",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30371,15 +30480,16 @@
         "x-cfmeet-route-id": "numbering.getAssignmentQuarantine",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/release": {
       "post": {
         "operationId": "releaseAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "release Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30462,15 +30572,16 @@
         "x-cfmeet-route-id": "numbering.releaseAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/restore": {
       "post": {
         "operationId": "restoreAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "restore Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30530,15 +30641,16 @@
         "x-cfmeet-route-id": "numbering.restoreAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/routing": {
       "get": {
         "operationId": "getAssignmentRouting",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment Routing",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30589,13 +30701,14 @@
         "x-cfmeet-route-id": "numbering.getAssignmentRouting",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "updateAssignmentRouting",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "update Assignment Routing",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30665,15 +30778,16 @@
         "x-cfmeet-route-id": "numbering.updateAssignmentRouting",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/suspend": {
       "post": {
         "operationId": "suspendAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "suspend Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30743,15 +30857,16 @@
         "x-cfmeet-route-id": "numbering.suspendAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/suspension": {
       "get": {
         "operationId": "getAssignmentSuspension",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Assignment Suspension",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30802,15 +30917,16 @@
         "x-cfmeet-route-id": "numbering.getAssignmentSuspension",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/assignments/{assignmentId}/transfer": {
       "post": {
         "operationId": "transferAssignment",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "transfer Assignment",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30890,15 +31006,16 @@
         "x-cfmeet-route-id": "numbering.transferAssignment",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/catalog/countries/{countryCode}": {
       "get": {
         "operationId": "getCatalogCountry",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Catalog Country",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30949,15 +31066,16 @@
         "x-cfmeet-route-id": "numbering.getCatalogCountry",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/countries": {
       "get": {
         "operationId": "listNumberCountries",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Number Countries",
         "security": [
           {
             "numbering.customerCredential": []
@@ -30992,15 +31110,16 @@
         "x-cfmeet-route-id": "numbering.listNumberCountries",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/countries/{countryCode}/number-types": {
       "get": {
         "operationId": "listNumberTypes",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Number Types",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31051,15 +31170,16 @@
         "x-cfmeet-route-id": "numbering.listNumberTypes",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/eligibility": {
       "post": {
         "operationId": "evaluateEligibility",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "evaluate Eligibility",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31120,15 +31240,16 @@
         "x-cfmeet-route-id": "numbering.evaluateEligibility",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/eligibility/{decisionId}": {
       "get": {
         "operationId": "getEligibilityDecision",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Eligibility Decision",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31188,15 +31309,16 @@
         "x-cfmeet-route-id": "numbering.getEligibilityDecision",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases": {
       "post": {
         "operationId": "createKycCase",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create KYC Case",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31271,15 +31393,16 @@
         "x-cfmeet-route-id": "numbering.createKycCase",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases/{caseId}": {
       "get": {
         "operationId": "getKycCase",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get KYC Case",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31339,15 +31462,16 @@
         "x-cfmeet-route-id": "numbering.getKycCase",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases/{caseId}/appeals": {
       "post": {
         "operationId": "appealKycCase",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "appeal KYC Case",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31430,15 +31554,16 @@
         "x-cfmeet-route-id": "numbering.appealKycCase",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases/{caseId}/evidence": {
       "post": {
         "operationId": "submitKycEvidence",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "submit KYC Evidence",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31521,15 +31646,16 @@
         "x-cfmeet-route-id": "numbering.submitKycEvidence",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases/{caseId}/history": {
       "get": {
         "operationId": "getKycCaseHistory",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get KYC Case History",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31589,15 +31715,16 @@
         "x-cfmeet-route-id": "numbering.getKycCaseHistory",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/cases/{caseId}/submit": {
       "post": {
         "operationId": "submitKycCase",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "submit KYC Case",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31670,15 +31797,16 @@
         "x-cfmeet-route-id": "numbering.submitKycCase",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/kyc/requirements/{countryCode}/{numberType}/{ownershipClass}": {
       "get": {
         "operationId": "getKycRequirements",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get KYC Requirements",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31759,15 +31887,16 @@
         "x-cfmeet-route-id": "numbering.getKycRequirements",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/pools": {
       "get": {
         "operationId": "listPools",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Pools",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31808,13 +31937,14 @@
         "x-cfmeet-route-id": "numbering.listPools",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "createPool",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create Pool",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31874,15 +32004,16 @@
         "x-cfmeet-route-id": "numbering.createPool",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/pools/{poolId}": {
       "get": {
         "operationId": "getPool",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Pool",
         "security": [
           {
             "numbering.customerCredential": []
@@ -31933,15 +32064,16 @@
         "x-cfmeet-route-id": "numbering.getPool",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/pools/{poolId}/members": {
       "post": {
         "operationId": "addPoolMember",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "add Pool Member",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32011,15 +32143,16 @@
         "x-cfmeet-route-id": "numbering.addPoolMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/pools/{poolId}/members/{assignmentId}": {
       "delete": {
         "operationId": "removePoolMember",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "remove Pool Member",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32081,15 +32214,16 @@
         "x-cfmeet-route-id": "numbering.removePoolMember",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/ports": {
       "get": {
         "operationId": "listPortRequests",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Port Requests",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32128,13 +32262,14 @@
         "x-cfmeet-route-id": "numbering.listPortRequests",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "createPortRequest",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create Port Request",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32209,15 +32344,16 @@
         "x-cfmeet-route-id": "numbering.createPortRequest",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/ports/{portId}": {
       "get": {
         "operationId": "getPortRequest",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Port Request",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32268,15 +32404,16 @@
         "x-cfmeet-route-id": "numbering.getPortRequest",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/ports/{portId}/cancel": {
       "post": {
         "operationId": "cancelPortRequest",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "cancel Port Request",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32336,15 +32473,16 @@
         "x-cfmeet-route-id": "numbering.cancelPortRequest",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/ports/{portId}/evidence": {
       "post": {
         "operationId": "addPortEvidence",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "add Port Evidence",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32414,15 +32552,16 @@
         "x-cfmeet-route-id": "numbering.addPortEvidence",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/ports/{portId}/submit": {
       "post": {
         "operationId": "submitPortRequest",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "submit Port Request",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32482,15 +32621,16 @@
         "x-cfmeet-route-id": "numbering.submitPortRequest",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/reassignments": {
       "post": {
         "operationId": "reassignNumber",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "reassign Number",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32565,15 +32705,16 @@
         "x-cfmeet-route-id": "numbering.reassignNumber",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/releases/{releaseId}": {
       "get": {
         "operationId": "getRelease",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Release",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32624,15 +32765,16 @@
         "x-cfmeet-route-id": "numbering.getRelease",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/reservations": {
       "get": {
         "operationId": "listReservations",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "list Reservations",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32705,13 +32847,14 @@
         "x-cfmeet-route-id": "numbering.listReservations",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       },
       "post": {
         "operationId": "createReservation",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "create Reservation",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32793,15 +32936,16 @@
         "x-cfmeet-route-id": "numbering.createReservation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/reservations/{reservationId}": {
       "get": {
         "operationId": "getReservation",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Reservation",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32852,15 +32996,16 @@
         "x-cfmeet-route-id": "numbering.getReservation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/reservations/{reservationId}/cancel": {
       "post": {
         "operationId": "cancelReservation",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "cancel Reservation",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32917,15 +33062,16 @@
         "x-cfmeet-route-id": "numbering.cancelReservation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/risk-decisions/{decisionId}": {
       "get": {
         "operationId": "getRiskDecision",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Risk Decision",
         "security": [
           {
             "numbering.customerCredential": []
@@ -32976,15 +33122,16 @@
         "x-cfmeet-route-id": "numbering.getRiskDecision",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/risk-decisions/{decisionId}/appeals": {
       "post": {
         "operationId": "appealRiskDecision",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "appeal Risk Decision",
         "security": [
           {
             "numbering.customerCredential": []
@@ -33054,15 +33201,16 @@
         "x-cfmeet-route-id": "numbering.appealRiskDecision",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/search": {
       "get": {
         "operationId": "searchNumbers",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "search Numbers",
         "security": [
           {
             "numbering.customerCredential": []
@@ -33182,15 +33330,16 @@
         "x-cfmeet-route-id": "numbering.searchNumbers",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
     "/v1/numbers/usage": {
       "get": {
         "operationId": "getNumberUsage",
+        "tags": [
+          "numbering"
+        ],
+        "summary": "get Number Usage",
         "security": [
           {
             "numbering.customerCredential": []
@@ -33251,9 +33400,6 @@
         "x-cfmeet-route-id": "numbering.getNumberUsage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "numbering"
         ]
       }
     },
@@ -34856,6 +35002,9 @@
     "/v1/privacy-relay/contact-access-grants": {
       "post": {
         "operationId": "createContactAccessGrant",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Mint a Contact Vault access token",
         "description": "Served by Calling. Authenticates the platform credential and returns a short-lived Contact Vault access token for the requested privacy.contacts.* scopes; the credential must itself hold every requested scope (403 INSUFFICIENT_SCOPE otherwise). The body never contains a telephone number. 503 when Contact Vault delegated access is not configured.",
         "security": [
@@ -34917,15 +35066,15 @@
         "x-cfmeet-route-id": "privacy-relay.createContactAccessGrant",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts": {
       "post": {
         "operationId": "createContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Create a communication context",
         "description": "Creates a Communication Context (version 1): the consumer-neutral authority for WHY (opaque externalContextReference), WHO (participants: principal ids or opaque ContactReference ids), in which DIRECTION, over which CHANNEL, during which window and under which bounded policy parties may communicate. Requires privacy.contexts.write and an Idempotency-Key. Referenced principals must be active principals of the credential's own application environment. Scope comes only from the credential; status, version, authorization results, telephone numbers, providers and relay numbers are never inputs. One context per external reference in an application environment. 503 PRIVACY_RELAY_DISABLED while the feature is disabled.",
         "security": [
@@ -35002,13 +35151,13 @@
         "x-cfmeet-route-id": "privacy-relay.createContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       },
       "get": {
         "operationId": "listContexts",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "List communication contexts",
         "description": "Contexts of the credential's application environment, newest first, keyset-paginated (no offsets). Requires privacy.contexts.read.",
         "security": [
@@ -35072,15 +35221,15 @@
         "x-cfmeet-route-id": "privacy-relay.listContexts",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}": {
       "get": {
         "operationId": "getContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Get a communication context",
         "description": "Requires privacy.contexts.read. A context of another tenant, application or environment is answered exactly like a missing one (404 CONTEXT_NOT_FOUND).",
         "security": [
@@ -35135,13 +35284,13 @@
         "x-cfmeet-route-id": "privacy-relay.getContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       },
       "patch": {
         "operationId": "updateContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Update a communication context",
         "description": "Typed, versioned configuration update (participant replacement / reassignment on the SAME context, channels, directions, validity, bounded policy, allowed strategies) — never a status patch or an arbitrary merge patch. Requires privacy.contexts.write, expectedVersion (409 CONTEXT_VERSION_CONFLICT when stale; a stale write can never restore removed authority) and an Idempotency-Key. The version increments exactly once; removed participants lose authority the moment the update commits, in every relay session; active calls of removed participants are terminated when the policy says so (enforcement.status APPLIED or PENDING, never claimed early).",
         "security": [
@@ -35221,15 +35370,15 @@
         "x-cfmeet-route-id": "privacy-relay.updateContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/complete": {
       "post": {
         "operationId": "completeContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Complete a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> COMPLETED (never back to ACTIVE): relay sessions complete; new calls during the grace period only when graceAllowsNewCalls; without remaining grace active calls are terminated; after the final grace all authority ends.",
         "security": [
@@ -35309,15 +35458,15 @@
         "x-cfmeet-route-id": "privacy-relay.completeContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/evidence": {
       "get": {
         "operationId": "getContextEvidence",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Privacy-safe context evidence",
         "description": "Lifecycle, versions, participant and direction history, sessions, recent authorization decisions, audit events and enforcement status for support and debugging. Never contact values. Requires privacy.contexts.read.",
         "security": [
@@ -35372,15 +35521,15 @@
         "x-cfmeet-route-id": "privacy-relay.getContextEvidence",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/resume": {
       "post": {
         "operationId": "resumeContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Resume a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. SUSPENDED -> ACTIVE, only while the validity window remains and never from COMPLETED, REVOKED or EXPIRED.",
         "security": [
@@ -35460,15 +35609,15 @@
         "x-cfmeet-route-id": "privacy-relay.resumeContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/revoke": {
       "post": {
         "operationId": "revokeContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Revoke a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> REVOKED (terminal, irreversible): every relay session is revoked, all new authority is denied, active calls are terminated when terminateActiveCallsOnRevoke. Repeating it is a safe idempotent answer.",
         "security": [
@@ -35548,15 +35697,15 @@
         "x-cfmeet-route-id": "privacy-relay.revokeContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/sessions": {
       "post": {
         "operationId": "createRelaySession",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Create a Privacy Relay Session",
         "description": "Creates a Privacy Relay Session (NOT a call: one session may authorize many call attempts during its window) under a relay strategy. Requires privacy.sessions.write and an Idempotency-Key. Participants, channels, directions, validity and strategy may only NARROW the context; anything broader is refused (PARTICIPANT_NOT_AUTHORIZED, CHANNEL_NOT_ALLOWED, DIRECTION_NOT_ALLOWED, STRATEGY_NOT_ALLOWED, VALIDITY_NOT_CONTAINED). Strategies are policy: only the application route is executable today.",
         "security": [
@@ -35636,15 +35785,15 @@
         "x-cfmeet-route-id": "privacy-relay.createRelaySession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/contexts/{context_id}/suspend": {
       "post": {
         "operationId": "suspendContext",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Suspend a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. ACTIVE -> SUSPENDED: new authority is denied immediately; active calls are terminated when terminateActiveCallsOnSuspend.",
         "security": [
@@ -35724,15 +35873,15 @@
         "x-cfmeet-route-id": "privacy-relay.suspendContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions": {
       "get": {
         "operationId": "listRelaySessions",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "List Privacy Relay Sessions",
         "description": "Sessions of the credential's application environment, newest first, keyset-paginated. Requires privacy.sessions.read.",
         "security": [
@@ -35796,15 +35945,15 @@
         "x-cfmeet-route-id": "privacy-relay.listRelaySessions",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions/{relay_session_id}": {
       "get": {
         "operationId": "getRelaySession",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Get a Privacy Relay Session",
         "description": "Requires privacy.sessions.read. A session of another scope is answered exactly like a missing one (404 SESSION_NOT_FOUND).",
         "security": [
@@ -35859,15 +36008,15 @@
         "x-cfmeet-route-id": "privacy-relay.getRelaySession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions/{relay_session_id}/evidence": {
       "get": {
         "operationId": "getRelaySessionCallEvidence",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Privacy-safe call evidence of a Relay Session",
         "description": "Requires privacy.evidence.read (knowing a session id is never enough). Calling verifies with Privacy Relay, in the credential's scope, that the session exists for the caller — a session of another scope is exactly 404 SESSION_NOT_FOUND — then returns evidence from its OWN Call records: canonical timestamps, final state, normalized terminal reason and failure category, Calling's authoritative connected duration (never requestedAt -> endedAt), per-participant connected time, attempts, route class and the Privacy Relay decision ids. NO_ANSWER comes from the canonical Call record (independent of push delivery). Never a telephone number, masked number, Contact Vault material, provider / carrier identifier, provider payload or credential. Keyset pages (limit 1-100, default 25); 503 when ownership cannot be proven.",
         "security": [
@@ -35931,15 +36080,15 @@
         "x-cfmeet-route-id": "privacy-relay.getRelaySessionCallEvidence",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions/{relay_session_id}/resume": {
       "post": {
         "operationId": "resumeSession",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Resume a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Only within the session window and while its context is not terminal.",
         "security": [
@@ -36019,15 +36168,15 @@
         "x-cfmeet-route-id": "privacy-relay.resumeSession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions/{relay_session_id}/revoke": {
       "post": {
         "operationId": "revokeSession",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Revoke a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Terminal; active protected calls under the session are terminated when the context policy says so.",
         "security": [
@@ -36107,15 +36256,15 @@
         "x-cfmeet-route-id": "privacy-relay.revokeSession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
     "/v1/privacy-relay/sessions/{relay_session_id}/suspend": {
       "post": {
         "operationId": "suspendSession",
+        "tags": [
+          "privacy-relay"
+        ],
         "summary": "Suspend a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. New authority under this session is denied immediately.",
         "security": [
@@ -36195,9 +36344,6 @@
         "x-cfmeet-route-id": "privacy-relay.suspendSession",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "privacy-relay"
         ]
       }
     },
@@ -37374,6 +37520,10 @@
     "/v1/realtime": {
       "get": {
         "operationId": "connectRealtime",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "connect Realtime",
         "security": [
           {
             "messaging.realtimeTicket": []
@@ -37409,15 +37559,16 @@
         "x-cfmeet-auth": [
           "REALTIME_TICKET"
         ],
-        "x-cfmeet-protocol": "websocket",
-        "tags": [
-          "messaging"
-        ]
+        "x-cfmeet-protocol": "websocket"
       }
     },
     "/v1/realtime/tickets": {
       "post": {
         "operationId": "issueRealtimeTicket",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "issue Realtime Ticket",
         "security": [
           {
             "messaging.clientToken": []
@@ -37453,9 +37604,6 @@
         "x-cfmeet-route-id": "messaging.issueRealtimeTicket",
         "x-cfmeet-auth": [
           "CLIENT_TOKEN"
-        ],
-        "tags": [
-          "messaging"
         ]
       }
     },
@@ -37514,6 +37662,10 @@
     "/v1/sms/messages": {
       "get": {
         "operationId": "sms_listMessages",
+        "tags": [
+          "sms"
+        ],
+        "summary": "list Messages",
         "security": [
           {
             "sms.customerCredential": []
@@ -37588,13 +37740,14 @@
         "x-cfmeet-route-id": "sms.listMessages",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       },
       "post": {
         "operationId": "sms_sendMessage",
+        "tags": [
+          "sms"
+        ],
+        "summary": "send Message",
         "security": [
           {
             "sms.customerCredential": []
@@ -37669,15 +37822,16 @@
         "x-cfmeet-route-id": "sms.sendMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       }
     },
     "/v1/sms/messages/{messageId}": {
       "get": {
         "operationId": "getMessage",
+        "tags": [
+          "sms"
+        ],
+        "summary": "get Message",
         "security": [
           {
             "sms.customerCredential": []
@@ -37725,15 +37879,16 @@
         "x-cfmeet-route-id": "sms.getMessage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       }
     },
     "/v1/sms/opt-outs": {
       "post": {
         "operationId": "createOptOut",
+        "tags": [
+          "sms"
+        ],
+        "summary": "create Opt Out",
         "security": [
           {
             "sms.customerCredential": []
@@ -37781,15 +37936,16 @@
         "x-cfmeet-route-id": "sms.createOptOut",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       }
     },
     "/v1/sms/threads": {
       "get": {
         "operationId": "listThreads",
+        "tags": [
+          "sms"
+        ],
+        "summary": "list Threads",
         "security": [
           {
             "sms.customerCredential": []
@@ -37856,15 +38012,16 @@
         "x-cfmeet-route-id": "sms.listThreads",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       }
     },
     "/v1/sms/threads/{threadId}/messages": {
       "get": {
         "operationId": "listThreadMessages",
+        "tags": [
+          "sms"
+        ],
+        "summary": "list Thread Messages",
         "security": [
           {
             "sms.customerCredential": []
@@ -37934,15 +38091,15 @@
         "x-cfmeet-route-id": "sms.listThreadMessages",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "sms"
         ]
       }
     },
     "/v1/usage": {
       "get": {
         "operationId": "listUsage",
+        "tags": [
+          "calling"
+        ],
         "summary": "List usage facts",
         "description": "Final consumption facts of the authenticated application environment (Part G §69), oldest first by recording time, keyset-paginated. A ledger, not a bill: public-network legs carry cost evidence (KNOWN / ESTIMATED / UNKNOWN — an UNKNOWN cost has no amount). Never a provider identifier, telephone number, SIP URI or object key.",
         "security": [
@@ -38065,15 +38222,15 @@
         "x-cfmeet-route-id": "calling.listUsage",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/webhook-deliveries/{delivery_id}/replay": {
       "post": {
         "operationId": "replayWebhookDelivery",
+        "tags": [
+          "calling"
+        ],
         "summary": "Replay a webhook delivery",
         "description": "Requires webhooks.manage. Creates a NEW delivery (new CF-Webhook-Id) of the same event (same CF-Webhook-Event-Id) to the same active subscription; the domain action is never re-executed.",
         "security": [
@@ -38135,15 +38292,15 @@
         "x-cfmeet-route-id": "calling.replayWebhookDelivery",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/webhooks": {
       "post": {
         "operationId": "createWebhook",
+        "tags": [
+          "calling"
+        ],
         "summary": "Create a webhook subscription",
         "description": "Requires webhooks.manage. Every subscribed event type also requires its own read scope (call.* calls.read, voicemail.* enterprise.voicemail.read, recording.* enterprise.recording.read, relay.* privacy.sessions.read, usage.* / limit.* usage.read). The endpoint must be a public https URL (no local, private, link-local, CGNAT or metadata address; re-checked at delivery and connection time; redirects are never followed). The signing secret is returned ONCE.",
         "security": [
@@ -38203,13 +38360,13 @@
         "x-cfmeet-route-id": "calling.createWebhook",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "get": {
         "operationId": "listWebhooks",
+        "tags": [
+          "calling"
+        ],
         "summary": "List webhook subscriptions",
         "description": "Requires webhooks.read. Only the application's own subscriptions (scope from the credential).",
         "security": [
@@ -38281,15 +38438,15 @@
         "x-cfmeet-route-id": "calling.listWebhooks",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/webhooks/{webhook_id}": {
       "get": {
         "operationId": "getWebhook",
+        "tags": [
+          "calling"
+        ],
         "summary": "Get a webhook subscription",
         "description": "Requires webhooks.read. Another application's subscription is 404.",
         "security": [
@@ -38351,13 +38508,13 @@
         "x-cfmeet-route-id": "calling.getWebhook",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "patch": {
         "operationId": "updateWebhook",
+        "tags": [
+          "calling"
+        ],
         "summary": "Update a webhook subscription",
         "description": "Requires webhooks.manage (and the read scope of every event type). expectedVersion is required; a stale one is 409 VERSION_CONFLICT.",
         "security": [
@@ -38435,13 +38592,13 @@
         "x-cfmeet-route-id": "calling.updateWebhook",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       },
       "delete": {
         "operationId": "deleteWebhook",
+        "tags": [
+          "calling"
+        ],
         "summary": "Delete a webhook subscription",
         "description": "Requires webhooks.manage. Open deliveries are CANCELLED; history is kept.",
         "security": [
@@ -38519,15 +38676,15 @@
         "x-cfmeet-route-id": "calling.deleteWebhook",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/webhooks/{webhook_id}/deliveries": {
       "get": {
         "operationId": "listWebhookDeliveries",
+        "tags": [
+          "calling"
+        ],
         "summary": "List deliveries of a webhook subscription",
         "description": "Requires webhooks.read. Delivery history including dead-lettered (FAILED) deliveries; status class and bounded failure category only (never a response body).",
         "security": [
@@ -38629,15 +38786,15 @@
         "x-cfmeet-route-id": "calling.listWebhookDeliveries",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     },
     "/v1/webhooks/{webhook_id}/rotate-secret": {
       "post": {
         "operationId": "rotateWebhookSecret",
+        "tags": [
+          "calling"
+        ],
         "summary": "Rotate a webhook signing secret",
         "description": "Requires webhooks.manage. Deliveries from now on are signed with the new secret, returned ONCE.",
         "security": [
@@ -38715,9 +38872,6 @@
         "x-cfmeet-route-id": "calling.rotateWebhookSecret",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "calling"
         ]
       }
     }

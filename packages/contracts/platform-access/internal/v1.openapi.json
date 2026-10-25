@@ -153,6 +153,26 @@
       "description": "Internal Admin — Tenants operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
     },
     {
+      "name": "Internal Delegation — Applications",
+      "description": "Developer Platform delegation: applications, scope grants and production activation (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Credentials",
+      "description": "Developer Platform delegation: credential issue, rotation, suspension and revocation (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Environments",
+      "description": "Developer Platform delegation: sandbox, test and production environments and live telecom (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Service Accounts",
+      "description": "Developer Platform delegation: service accounts of non-production environments (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Tenants",
+      "description": "Developer Platform delegation: canonical tenants of developer organizations (Developer Platform only, audited)."
+    },
+    {
       "name": "Internal — Authorization",
       "description": "Internal — Authorization operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
     },
@@ -2490,7 +2510,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "Resolve the current authority chain of a gateway-authenticated credential"
       }
     },
     "/internal/v1/delegation/tenants": {
@@ -2550,7 +2574,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Create the external tenant of a developer organization"
       }
     },
     "/internal/v1/delegation/tenants/{tenantId}": {
@@ -2605,7 +2633,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Get a tenant"
       }
     },
     "/internal/v1/delegation/tenants/{tenantId}/status": {
@@ -2673,7 +2705,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Suspend or reactivate a tenant"
       }
     },
     "/internal/v1/delegation/tenants/{tenantId}/applications": {
@@ -2741,7 +2777,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Create the application of a developer project"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}": {
@@ -2796,7 +2836,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Get an application"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}/status": {
@@ -2864,7 +2908,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Suspend or reactivate an application"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}/environments": {
@@ -2932,7 +2980,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Create a sandbox or test environment"
       },
       "get": {
         "operationId": "delegateListEnvironments",
@@ -2985,7 +3037,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "List an application's environments"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}/scopes": {
@@ -3040,7 +3096,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "List an application's scope grants"
       },
       "post": {
         "operationId": "delegateGrantApplicationScope",
@@ -3106,7 +3166,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Grant a standard scope to an application"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}": {
@@ -3161,7 +3225,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Get an environment"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/status": {
@@ -3229,7 +3297,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Suspend or reactivate a non-production environment"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/service-accounts": {
@@ -3297,7 +3369,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Create a service account in a non-production environment"
       },
       "get": {
         "operationId": "delegateListServiceAccounts",
@@ -3350,7 +3426,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "List an environment's service accounts"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}": {
@@ -3413,7 +3493,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Get a service account"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/status": {
@@ -3489,7 +3573,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Suspend or reactivate a service account"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials": {
@@ -3552,7 +3640,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "List a service account's credentials (metadata only)"
       },
       "post": {
         "operationId": "delegateIssueCredential",
@@ -3626,7 +3718,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Issue a credential to a service account"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}": {
@@ -3689,7 +3785,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Get a credential"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/rotate": {
@@ -3765,7 +3865,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Rotate a credential"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/revoke": {
@@ -3831,7 +3935,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Revoke a credential"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/suspend": {
@@ -3907,7 +4015,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Suspend a credential"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/resume": {
@@ -3973,7 +4085,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Resume a suspended credential"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}/scopes/{scope}": {
@@ -4039,7 +4155,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Withdraw a scope from an application and its credentials"
       }
     },
     "/internal/v1/delegation/applications/{applicationId}/production-environment": {
@@ -4107,7 +4227,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Activate an approved production environment"
       }
     },
     "/internal/v1/delegation/environments/{environmentId}/live-telecom": {
@@ -4175,7 +4299,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Enable or disable live telecom for a production environment"
       }
     },
     "/internal/v1/admin/credentials/{credentialId}/suspend": {
@@ -4243,7 +4371,11 @@
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "Suspend a credential (operator)"
       }
     },
     "/internal/v1/admin/credentials/{credentialId}/resume": {
@@ -4301,7 +4433,11 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "Resume a suspended credential (operator)"
       }
     }
   }

@@ -17,6 +17,10 @@
     "/v1/sms/messages/{messageId}": {
       "get": {
         "operationId": "getMessage",
+        "tags": [
+          "SMS Messages & Delivery"
+        ],
+        "summary": "get Message",
         "security": [
           {
             "customerCredential": []
@@ -70,6 +74,10 @@
     "/v1/sms/messages": {
       "get": {
         "operationId": "listMessages",
+        "tags": [
+          "SMS Messages & Delivery"
+        ],
+        "summary": "list Messages",
         "security": [
           {
             "customerCredential": []
@@ -148,6 +156,10 @@
       },
       "post": {
         "operationId": "sendMessage",
+        "tags": [
+          "SMS Messages & Delivery"
+        ],
+        "summary": "send Message",
         "security": [
           {
             "customerCredential": []
@@ -228,6 +240,10 @@
     "/v1/sms/threads": {
       "get": {
         "operationId": "listThreads",
+        "tags": [
+          "SMS Threads"
+        ],
+        "summary": "list Threads",
         "security": [
           {
             "customerCredential": []
@@ -300,6 +316,10 @@
     "/v1/sms/threads/{threadId}/messages": {
       "get": {
         "operationId": "listThreadMessages",
+        "tags": [
+          "SMS Threads"
+        ],
+        "summary": "list Thread Messages",
         "security": [
           {
             "customerCredential": []
@@ -375,6 +395,10 @@
     "/v1/sms/opt-outs": {
       "post": {
         "operationId": "createOptOut",
+        "tags": [
+          "SMS Opt-Outs"
+        ],
+        "summary": "create Opt Out",
         "security": [
           {
             "customerCredential": []
