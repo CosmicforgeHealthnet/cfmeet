@@ -23,7 +23,7 @@ used synthetic tenants, per-run databases and test keys only.
 | Starting `origin/staging` | `4d92f24820ab3f29fa41b6658ffb3bad9e83650d` (CI green) |
 | `origin/main` (unchanged) | `454440c66a84cc643a446fdcb8fb14de30235463` (21 commits not in `staging`) |
 | Part VI base | `5c2430c19449bbde28993dda2bd88fe1ffde9e92` |
-| Commits of this pass | `d75e4b8` (Ch19), `2522f06` (Ch20), `1b16fc1` (Ch21 controls), the Ch20–24 closure commit (this file) and the CI-record commit — final SHA and CI in §16 |
+| Commits of this pass | `d75e4b8` (Ch19), `2522f06` (Ch20), `1b16fc1` (Ch21 controls), `2d11ce8` (Ch20–21 defects, deployment readiness), `672f4ed` (Ch22–24, guard wording fix) and this CI-record commit (docs only) |
 
 Reconciliation with `main`: [`baseline-and-branch-reconciliation.md`](baseline-and-branch-reconciliation.md).
 
@@ -179,6 +179,23 @@ webhook takeover, producer usage exports, SDK publication (`SDK_PUBLICATION_ENAB
 live telecom / numbering activation for approved customers, `staging` → `main`
 promotion.
 
-## 16. Final SHA and CI
+## 16. Final certified code SHA and CI
 
-Recorded in the CI-record commit that follows the closure commit.
+Certified code: **`672f4edfaec652e0c03698f787c587ae9b761aa0`** (the commit after it only
+records this section). GitHub Actions on that SHA (push to `staging`): **18 of 18
+workflows green** — Part VI cross-service certification, Developer Platform service, API
+Gateway service, Calling service, Calling RTC certification, Enterprise calling
+certification, Messaging, Unified Messaging integration journeys, Communications
+end-to-end journeys, Numbering service, SMS Gateway service, Privacy Relay service,
+Telephony service, Telephony SIP certification, Platform Access service, Dependency and
+image security (RustSec, SBOM, image builds incl. `developer-platform` and
+`api-gateway`), Service boundaries.
+
+History of red CI during this pass, all resolved:
+
+| SHA | Failure | Cause | Resolution |
+|---|---|---|---|
+| `d75e4b8` | Part VI certification | journeys still asserted the old (non-contract) `/v1/usage` shape | assertions updated in `2d11ce8` |
+| `1b16fc1` | Part VI certification | same as above (fix not yet pushed) | `2d11ce8` |
+| `1b16fc1` | Unified Messaging integration journeys (web browser test, `CRYPTO_WORKER_CLOSED` at logout) | frontend test, code untouched by this pass | not reproduced: green on `2d11ce8` and `672f4ed` |
+| `2d11ce8` | Calling, Developer Platform, Messaging, SMS Gateway (repository guards / Calling architecture test) | a doc comment quoting `CREATE TABLE IF NOT EXISTS` read as a foreign table | comment reworded in `672f4ed` |
