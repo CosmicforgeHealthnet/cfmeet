@@ -749,10 +749,17 @@ const SMS_GATEWAY_API: &str =
     include_str!("../../../../packages/contracts/bundled/sms-gateway/http/v1.openapi.json");
 const MESSAGING_API: &str =
     include_str!("../../../../packages/contracts/bundled/messaging/http/v1.openapi.json");
+// Part VI: already audience-filtered, bundled OpenAPI from the gateway route catalogue.
+// This documentation host never proxies these APIs or exposes their internal variants.
+const DEVELOPER_PLATFORM_PUBLIC_API: &str = include_str!(
+    "../../../../packages/contracts/bundled/public/developer-platform/v1.openapi.json"
+);
+const API_GATEWAY_PUBLIC_API: &str =
+    include_str!("../../../../packages/contracts/bundled/public/gateway/v1.openapi.json");
 
 /// (Swagger name, served path, document). The Meeting Service document is generated at
 /// runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 8] = [
+const PEER_DOCS: [(&str, &str, &str); 10] = [
     ("Calling", "/api-docs/calling.json", CALLING_API),
     (
         "Platform Access (internal)",
@@ -781,6 +788,16 @@ const PEER_DOCS: [(&str, &str, &str); 8] = [
     ),
     ("SMS Gateway", "/api-docs/sms-gateway.json", SMS_GATEWAY_API),
     ("Messaging", "/api-docs/messaging.json", MESSAGING_API),
+    (
+        "Developer Platform",
+        "/api-docs/developer-platform.json",
+        DEVELOPER_PLATFORM_PUBLIC_API,
+    ),
+    (
+        "API Gateway",
+        "/api-docs/api-gateway.json",
+        API_GATEWAY_PUBLIC_API,
+    ),
 ];
 
 /// swagger-ui-dist, pinned by version AND by Subresource Integrity (sha384 of the exact
@@ -934,6 +951,22 @@ fn public_doc(service: &str, raw: &str) -> String {
             )
         })
     });
+    // The source Developer Platform public bundle uses operation tags but currently omits
+    // the top-level tag declarations. Swagger can render those operations only if their
+    // existing source tags are declared. Do not invent any additional API operation.
+    // The public gateway contract has one context operation without a tag/summary;
+    // provide read-only documentation labels while keeping its canonical contract intact.
+    if service == "API Gateway" {
+        let context = doc["paths"]["/v1/developer-platform/context"]["get"]
+            .as_object_mut()
+            .expect("gateway context operation must be present");
+        context
+            .entry("tags".to_string())
+            .or_insert_with(|| serde_json::json!(["API Gateway"]));
+        context
+            .entry("summary".to_string())
+            .or_insert_with(|| serde_json::json!("Read the delegated Developer Platform context."));
+    }
     // A section whose operations were all filtered out (e.g. "Admin") would still render
     // as an empty Swagger heading; publish only the sections that still hold operations.
     let used: std::collections::BTreeSet<String> = doc["paths"]
@@ -946,8 +979,18 @@ fn public_doc(service: &str, raw: &str) -> String {
         .flatten()
         .filter_map(|tag| tag.as_str().map(str::to_owned))
         .collect();
+    if doc["tags"].as_array().is_none() {
+        doc["tags"] = serde_json::json!([]);
+    }
     if let Some(tags) = doc["tags"].as_array_mut() {
         tags.retain(|tag| tag["name"].as_str().is_some_and(|name| used.contains(name)));
+        let declared: std::collections::BTreeSet<String> = tags
+            .iter()
+            .filter_map(|tag| tag["name"].as_str().map(str::to_owned))
+            .collect();
+        for name in used.difference(&declared) {
+            tags.push(serde_json::json!({ "name": name }));
+        }
     }
     serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
 }
@@ -965,16 +1008,15 @@ fn contract_doc(body: String) -> impl IntoResponse {
 /// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
 /// the default and keeps its original /api-docs/openapi.json contract unchanged.
 /// Peer service documents come from the bundled renderings of the checked-in contracts.
-pub fn swagger_router(server_addr: &str) -> Router {
+pub fn swagger_router(_server_addr: &str) -> Router {
     let mut openapi = ApiDoc::openapi();
 
-    // Meeting Service Try It Out continues to use its configured deployment URL.
-    let mut current_server = utoipa::openapi::Server::new(format!("http://{}", server_addr));
-    current_server.description = Some("Current Meeting Service".to_string());
+    // Documentation is read-only: never advertise a bind address such as 0.0.0.0
+    // as a callable OpenAPI server. Only the configured public origin is meaningful.
     let configured = std::env::var("SWAGGER_SERVER_URL").ok();
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
-    openapi.servers = Some(vec![current_server, public_server]);
+    openapi.servers = Some(vec![public_server]);
     let meeting_doc = public_doc(
         "Meetings",
         &openapi.to_json().expect("OpenAPI document serializes"),
@@ -1080,6 +1122,8 @@ mod tests {
             "/api-docs/privacy-relay.json",
             "/api-docs/sms-gateway.json",
             "/api-docs/messaging.json",
+            "/api-docs/developer-platform.json",
+            "/api-docs/api-gateway.json",
             "/api-docs/swagger-config.json",
             "/swagger-ui/",
         ] {
@@ -1217,7 +1261,8 @@ mod tests {
         );
     }
 
-    /// The Swagger selector offers exactly the six public services, and every operation of
+    /// The Swagger selector offers the six legacy services plus Part VI Developer
+    /// Platform and API Gateway. Every operation of
     /// every document it serves sits in a named, declared section (never Swagger's
     /// `default`) with a summary, a description and a unique operationId. Checked on the
     /// bytes the router serves, after public filtering, so neither the contracts nor the
@@ -1252,10 +1297,23 @@ mod tests {
                 "Numbering / DCNs",
                 "Privacy Relay",
                 "SMS Gateway",
-                "Messaging"
+                "Messaging",
+                "Developer Platform",
+                "API Gateway"
             ],
             "public Swagger selector"
         );
+
+        let dp = get_json(&router, "/api-docs/developer-platform.json").await;
+        assert!(dp["paths"]["/v1/organizations"]["get"].is_object());
+        assert!(dp["paths"]["/internal/v1/operator/organizations"].is_null());
+        let gateway = get_json(&router, "/api-docs/api-gateway.json").await;
+        assert!(gateway["paths"]["/v1/developer-platform/context"]["get"].is_object());
+        assert!(gateway["paths"]["/internal/v1/gateway/context"].is_null());
+        let meeting = get_json(&router, "/api-docs/openapi.json").await;
+        let servers = meeting["servers"].as_array().expect("public server list");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["url"], DEFAULT_PUBLIC_SERVER_URL);
 
         let mut problems = Vec::new();
         for entry in urls {
