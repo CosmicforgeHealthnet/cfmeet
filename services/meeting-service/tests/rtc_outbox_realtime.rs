@@ -496,3 +496,42 @@ async fn o8_realtime_flag() {
         .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+/// A realtime ticket is one-shot: it opens exactly one subscription; a replay (another
+/// client, or a reconnect reusing it) is refused before the upgrade like an invalid
+/// ticket, and a fresh ticket works.
+#[tokio::test]
+async fn realtime_tickets_are_single_use() {
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "one-shot", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let addr = app.serve().await;
+    let (s, t) = app
+        .post(
+            &format!("/api/v2/conferences/{cid}/realtime/ticket"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{t}");
+    let url = format!(
+        "ws://{addr}/api/v2/conferences/{cid}/realtime?ticket={}",
+        t["ticket"].as_str().unwrap()
+    );
+    let (mut first, _) = tokio_tungstenite::connect_async(url.clone()).await.unwrap();
+    assert_eq!(frame(&mut first).await.unwrap()["type"], "subscribed");
+    match tokio_tungstenite::connect_async(url).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(r)) => {
+            assert_eq!(r.status(), StatusCode::UNAUTHORIZED)
+        }
+        Err(e) => panic!("unexpected error {e:?}"),
+        Ok(_) => panic!("a replayed realtime ticket opened a second subscription"),
+    }
+    let mut again = ws(&app, addr, cid, Auth::Bearer(&owner.token)).await;
+    assert_eq!(frame(&mut again).await.unwrap()["type"], "subscribed");
+}

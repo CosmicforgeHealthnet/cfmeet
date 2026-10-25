@@ -12,7 +12,8 @@ pub struct Model {
     pub id: Uuid,
     pub meeting_space_id: Uuid,
     pub conference_id: Option<Uuid>,
-    pub inviter_user_id: Uuid,
+    /// `None` when issued by an environment's machine caller (no CF Meet account).
+    pub inviter_user_id: Option<Uuid>,
     pub invitee_email: Option<String>,
     pub requested_role: Role,
     #[serde(skip_serializing)]

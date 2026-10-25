@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "paths": {
     "/": {
@@ -2791,8 +2791,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       }
     },
     "/api/v2/conferences/{id}/artifacts": {
@@ -3240,8 +3246,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       }
     },
     "/api/v2/conferences/{id}/backstage": {
@@ -4331,8 +4343,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/conferences/{id}/chat-policy": {
@@ -4789,8 +4807,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/conferences/{id}/events": {
@@ -5757,8 +5781,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       }
     },
     "/api/v2/conferences/{id}/participants/me": {
@@ -6421,8 +6451,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/conferences/{id}/participants/{participantId}/return-to-waiting": {
@@ -9248,8 +9284,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/conferences/{id}/transcription": {
@@ -9708,8 +9750,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       }
     },
     "/api/v2/conferences/{id}/waiting-room/admit": {
@@ -9789,8 +9837,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/conferences/{id}/waiting-room/deny": {
@@ -9850,8 +9904,14 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/instant-meetings": {
@@ -9896,8 +9956,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/invitations/{token}/resolve": {
@@ -10016,8 +10082,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       },
       "post": {
         "tags": [
@@ -10080,8 +10152,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}": {
@@ -10129,8 +10207,14 @@
           {},
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       },
       "patch": {
         "tags": [
@@ -10195,8 +10279,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}/archive": {
@@ -10254,8 +10344,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}/conferences": {
@@ -10322,8 +10418,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       },
       "post": {
         "tags": [
@@ -10378,8 +10480,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}/duplicate": {
@@ -10487,8 +10595,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.read"
       },
       "post": {
         "tags": [
@@ -10543,8 +10657,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke": {
@@ -10601,8 +10721,14 @@
         "security": [
           {
             "bearer_auth": []
+          },
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
           }
-        ]
+        ],
+        "x-cfmeet-required-scope": "meetings.write"
       }
     },
     "/api/v2/meeting-spaces/{id}/members": {
@@ -20912,6 +21038,12 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Participant-Token"
+      },
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
+        "description": "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes."
       }
     }
   },

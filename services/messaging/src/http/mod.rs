@@ -23,7 +23,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use messaging_migration::MigratorTrait;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::json;
 
@@ -145,7 +144,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    let pending = messaging_migration::Migrator::get_pending_migrations(&state.db).await;
+    let pending = messaging_migration::pending_migrations(&state.db).await;
     let draining = state.realtime.hub.is_draining();
     let (ok, database, migrations) = match pending {
         Ok(p) if p.is_empty() && !draining => (true, "ok", "current"),

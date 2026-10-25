@@ -8,6 +8,7 @@
 
 pub mod outbox;
 pub mod platform_events;
+pub mod usage_export;
 
 use chrono::Duration;
 

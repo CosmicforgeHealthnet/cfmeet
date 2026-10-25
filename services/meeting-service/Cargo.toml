@@ -61,6 +61,8 @@ url = "2"
 # Part V H: signed internal service calls to Platform Access and Messaging (no service
 # credential ever reaches a browser or mobile client).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Part VI §55: unified usage facts (participant minutes, recordings, artefact storage).
+cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 
 [[bin]]
 name = "test_email"

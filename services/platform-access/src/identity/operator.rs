@@ -66,6 +66,9 @@ text_enum!(
         PrincipalStatusSet = "PRINCIPAL_STATUS_SET",
         PrincipalTombstoned = "PRINCIPAL_TOMBSTONED",
         IdentityImported = "IDENTITY_IMPORTED",
+        CredentialSuspended = "CREDENTIAL_SUSPENDED",
+        CredentialResumed = "CREDENTIAL_RESUMED",
+        ProductionEnvironmentActivated = "PRODUCTION_ENVIRONMENT_ACTIVATED",
     }
 );
 
@@ -425,6 +428,144 @@ impl PlatformService {
         })
     }
 
+    /// Suspends a credential (audited, reversible; Part VI §54).
+    pub async fn operator_suspend_credential(
+        &self,
+        op: &OperatorContext,
+        credential_id: CredentialId,
+        reason_code: &str,
+    ) -> PlatformResult<CredentialView> {
+        audited!(self, op, |txn| {
+            let (view, _) = self
+                .suspend_credential_in(&txn, credential_id, op.operator(), reason_code)
+                .await?;
+            let mut entry = credential_entry(OperatorAction::CredentialSuspended, &view);
+            entry.detail["reasonCode"] = json!(reason_code);
+            (view, entry)
+        })
+    }
+
+    /// Lifts a credential suspension (audited).
+    pub async fn operator_resume_credential(
+        &self,
+        op: &OperatorContext,
+        credential_id: CredentialId,
+    ) -> PlatformResult<CredentialView> {
+        audited!(self, op, |txn| {
+            let (view, _) = self.resume_credential_in(&txn, credential_id).await?;
+            let entry = credential_entry(OperatorAction::CredentialResumed, &view);
+            (view, entry)
+        })
+    }
+
+    /// Activates the PRODUCTION environment of an application for an approved Developer
+    /// Platform production-access request (audited, Part VI §55): creates it when absent
+    /// and records the approval reference. An application is activated at most once; an
+    /// already activated environment is returned unchanged (idempotent on the reference).
+    pub async fn operator_activate_production_environment(
+        &self,
+        op: &OperatorContext,
+        application_id: ApplicationId,
+        approval_reference: &str,
+    ) -> PlatformResult<EnvironmentView> {
+        let valid = (1..=128).contains(&approval_reference.len())
+            && approval_reference.as_bytes()[0].is_ascii_alphanumeric()
+            && approval_reference
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_:-".contains(&b));
+        if !valid {
+            return Err(PlatformError::Validation(
+                "approval_reference is malformed".to_string(),
+            ));
+        }
+        if let Some((environment_id, reference)) =
+            self.production_activation(application_id).await?
+        {
+            if reference != approval_reference {
+                return Err(PlatformError::Conflict(
+                    "the application's PRODUCTION environment was activated by another approval"
+                        .to_string(),
+                ));
+            }
+            return self.environment(environment_id).await;
+        }
+        let existing = match self
+            .environment_by_kind(application_id, EnvironmentKind::Production)
+            .await
+        {
+            Ok(e) => Some(e),
+            Err(PlatformError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        };
+        audited!(self, op, |txn| {
+            let e = match existing {
+                Some(e) => e,
+                None => {
+                    self.create_environment_in(&txn, application_id, EnvironmentKind::Production)
+                        .await?
+                }
+            };
+            txn.execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO platform_production_activations (environment_id, tenant_id, \
+                   application_id, approval_reference, activated_by, activated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+                [
+                    e.id.as_uuid().into(),
+                    e.tenant_id.as_uuid().into(),
+                    e.application_id.as_uuid().into(),
+                    approval_reference.into(),
+                    op.operator().into(),
+                    self.clock.now().into(),
+                ],
+            ))
+            .await?;
+            let entry = environment_entry(OperatorAction::ProductionEnvironmentActivated, &e)
+                .detail(json!({ "approvalReference": approval_reference }));
+            (e, entry)
+        })
+    }
+
+    /// `(environment id, approval reference)` of an application's activated PRODUCTION
+    /// environment.
+    pub async fn production_activation(
+        &self,
+        application_id: ApplicationId,
+    ) -> PlatformResult<Option<(EnvironmentId, String)>> {
+        let row = self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT environment_id, approval_reference FROM platform_production_activations \
+                 WHERE application_id = $1",
+                [application_id.as_uuid().into()],
+            ))
+            .await?;
+        Ok(match row {
+            Some(r) => Some((
+                EnvironmentId::from_uuid(r.try_get("", "environment_id")?),
+                r.try_get("", "approval_reference")?,
+            )),
+            None => None,
+        })
+    }
+
+    /// Whether `environment_id` is a PRODUCTION environment activated by an approval.
+    pub async fn is_activated_production(
+        &self,
+        environment_id: EnvironmentId,
+    ) -> PlatformResult<bool> {
+        Ok(self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 FROM platform_production_activations WHERE environment_id = $1",
+                [environment_id.as_uuid().into()],
+            ))
+            .await?
+            .is_some())
+    }
+
     pub async fn operator_revoke_credential(
         &self,
         op: &OperatorContext,
@@ -660,8 +801,8 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migration 000003 (an unknown code is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 20);
+        // Kept in step with migrations 000003 / 000004 (an unknown code is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 23);
         assert_eq!(AuditTargetKind::ALL.len(), 7);
     }
 }

@@ -6,6 +6,20 @@
 //!   come ONLY from the authority chain. Every failure is the same 401; throttling is a
 //!   429; the authority unreachable is a 503 (fail closed). A service token is never a
 //!   customer credential.
+//! * Gateway-forwarded customer requests (Part VI §51), ONLY on the customer numbers
+//!   family (`/v1/numbers/**` route patterns — never `/v1/admin/**`, unknown paths or any
+//!   other surface): the API Gateway authenticated the customer's credential and forwards
+//!   the request WITHOUT `Authorization`, carrying its own signed service token instead.
+//!   Numbering verifies that token with its trust bundle, requires
+//!   `numbering-request.forward` and a delegated context naming the credential
+//!   (`initiating_credential_id`), and asks Platform Access to re-verify that credential
+//!   live (`delegated-authority`). The returned chain must be exactly the delegated scope;
+//!   from there the request is admitted EXACTLY like a bearer request (the same SAFETY_ONLY
+//!   refusal, throttling, scopes and [`CustomerCaller`], see [`admit`]) and continues the
+//!   gateway's signed correlation id. A token AND an `Authorization` header, a token on any
+//!   other route, an untrusted / unpermitted issuer or a missing credential id are the
+//!   same normalized 401; the authority unreachable is the same 503. Administration
+//!   additionally refuses a gateway-forwarded caller ([`AdminCaller`]).
 //! * `/internal/v1/**` (services): a valid `X-CF-Service-Authorization` service token
 //!   whose issuer Numbering's trust bundle grants the route's permission
 //!   ([`InternalCaller`]); the request continues the signed correlation id and records the
@@ -20,13 +34,15 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use cf_service_auth::{headers, InternalPermission, InternalServiceContext};
+use cf_service_auth::{
+    headers, DelegatedPlatformContext, InternalPermission, InternalServiceContext,
+};
 use tracing::Instrument;
 
 use super::error::{ApiError, ErrorCode};
 use crate::{
     domain::{scoped, CausationId, RequestContext},
-    identity::{Authentication, TrustedContext},
+    identity::{Authentication, AuthorityUnavailable, TrustedContext},
     state::AppState,
 };
 
@@ -105,6 +121,12 @@ impl<S: Send + Sync> FromRequestParts<S> for AdminCaller {
             .get::<CustomerCaller>()
             .cloned()
             .ok_or(ApiError::Code(ErrorCode::AuthenticationFailed))?;
+        // Administration is never reachable through the API Gateway (defence in depth:
+        // the gateway branch is admitted only on `/v1/numbers/**` routes).
+        if parts.extensions.get::<GatewayForwarded>().is_some() {
+            tracing::warn!("administration refused (gateway-forwarded caller)");
+            return Err(ApiError::Code(ErrorCode::AuthenticationFailed));
+        }
         if !caller.0.first_party || !caller.0.has_scope(NUMBERS_ADMIN) {
             crate::metrics::inc("numbering_scope_denied_total", &[]);
             tracing::warn!(
@@ -154,50 +176,140 @@ fn bearer(request: &Request) -> Option<String> {
         .then(|| token.trim().to_string())
 }
 
+/// Marks a customer request the API Gateway forwarded (Part VI §51): set next to the
+/// [`CustomerCaller`] by [`require_customer`]; [`AdminCaller`] refuses such a caller.
+#[derive(Debug, Clone, Copy)]
+pub struct GatewayForwarded;
+
+/// The only route patterns a gateway-forwarded request may reach: the customer numbers
+/// family. Matched against the ROUTE PATTERN (an unmatched path has none), never the raw
+/// path.
+const GATEWAY_ROUTE_PREFIX: &str = "/v1/numbers/";
+
+struct Forwarded {
+    token: InternalServiceContext,
+    delegated: DelegatedPlatformContext,
+}
+
+/// How a `/v1` request presents its customer.
+enum Presented {
+    /// `Authorization: Bearer <credential>`.
+    Bearer(String),
+    /// A verified API Gateway token (with `numbering-request.forward`) and its delegated
+    /// context naming the credential.
+    Gateway(Box<Forwarded>),
+    /// Not authenticatable; the reason is for logs and metrics only.
+    Refused(&'static str),
+}
+
+fn presented(state: &AppState, request: &Request) -> Presented {
+    if !request
+        .headers()
+        .contains_key(headers::SERVICE_AUTHORIZATION)
+    {
+        return match bearer(request) {
+            Some(token) => Presented::Bearer(token),
+            None => Presented::Refused("missing_credential"),
+        };
+    }
+    if request.headers().contains_key(header::AUTHORIZATION) {
+        return Presented::Refused("service_token_with_authorization");
+    }
+    if !route_pattern(request).starts_with(GATEWAY_ROUTE_PREFIX) {
+        return Presented::Refused("service_token_outside_gateway_routes");
+    }
+    let token = match state
+        .service_auth
+        .verifier()
+        .verify_headers(request.headers())
+    {
+        Ok(token) => token,
+        Err(error) => {
+            let d = &error.diagnostics;
+            tracing::warn!(
+                reason = error.failure.as_str(),
+                kid = d.kid.as_ref().map(|k| k.as_str()).unwrap_or(""),
+                issuer = d.issuer.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                "gateway service token rejected"
+            );
+            return Presented::Refused(error.failure.as_str());
+        }
+    };
+    if let Err(denied) = token.require_permission(InternalPermission::NumberingRequestForward) {
+        tracing::warn!(
+            caller = %denied.service,
+            permission = denied.permission.as_str(),
+            "gateway forwarding permission denied"
+        );
+        return Presented::Refused("forward_permission_denied");
+    }
+    match token.delegated_platform_context().cloned() {
+        Some(delegated) if delegated.initiating_credential_id().is_some() => {
+            Presented::Gateway(Box::new(Forwarded { token, delegated }))
+        }
+        _ => Presented::Refused("delegated_credential_missing"),
+    }
+}
+
 pub async fn require_customer(
     State(state): State<AppState>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
-    let context = RequestContext::generate();
+    let presented = presented(&state, &request);
+    let context = match &presented {
+        // The gateway's operation (signed correlation id), caused by its forwarding hop.
+        Presented::Gateway(forwarded) => RequestContext {
+            request_id: forwarded.token.request_id().clone(),
+            correlation_id: forwarded.token.correlation_id().clone(),
+            causation_id: Some(CausationId::of_request(forwarded.token.request_id())),
+        },
+        _ => RequestContext::generate(),
+    };
+    let via_gateway = matches!(presented, Presented::Gateway(_));
     let span = tracing::info_span!("customer_request", request_id = %context.request_id,
-        correlation_id = %context.correlation_id, method = %request.method(), route = route_pattern(&request));
+        correlation_id = %context.correlation_id, via_gateway, method = %request.method(),
+        route = route_pattern(&request));
     let response = scoped(
         context.clone(),
         async move {
-            // A service token never authenticates a customer route.
-            if request
-                .headers()
-                .contains_key(headers::SERVICE_AUTHORIZATION)
-            {
-                return ApiError::Code(ErrorCode::AuthenticationFailed).into_response();
-            }
-            let Some(token) = bearer(&request) else {
-                return ApiError::Code(ErrorCode::AuthenticationFailed).into_response();
-            };
-            match state.authority.authenticate(&token).await {
-                Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
-                    request.extensions_mut().insert(CustomerCaller(*ctx));
-                    next.run(request).await
-                }
-                Ok(Authentication::Authenticated(_)) => {
-                    tracing::info!("customer authentication refused (suspended scope)");
+            match presented {
+                Presented::Refused(reason) => {
+                    crate::metrics::inc(
+                        "numbering_customer_auth_refused_total",
+                        &[("reason", reason)],
+                    );
+                    tracing::info!(reason, "customer authentication refused");
                     ApiError::Code(ErrorCode::AuthenticationFailed).into_response()
                 }
-                Ok(Authentication::Rejected { reason, throttle }) => {
-                    crate::metrics::inc("numbering_customer_auth_rejected_total", &[]);
-                    tracing::info!(%reason, "customer authentication rejected");
-                    match throttle {
-                        Some(t) => ApiError::RateLimited {
-                            retry_after_seconds: t.retry_after_seconds,
-                        }
-                        .into_response(),
-                        None => ApiError::Code(ErrorCode::AuthenticationFailed).into_response(),
-                    }
+                Presented::Bearer(token) => {
+                    let outcome = state.authority.authenticate(&token).await;
+                    admit(outcome, request, next).await
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "identity authority unavailable");
-                    ApiError::Code(ErrorCode::ServiceUnavailable).into_response()
+                Presented::Gateway(forwarded) => {
+                    let Forwarded { token, delegated } = *forwarded;
+                    let outcome = state
+                        .authority
+                        .authenticate_delegated(&delegated, token.correlation_id())
+                        .await
+                        .map(|authentication| match authentication {
+                            Authentication::Authenticated(ctx)
+                                if !ctx.is_delegated_by(&delegated) =>
+                            {
+                                tracing::warn!(
+                                    caller = %token.authenticated_service(),
+                                    "delegated authority chain does not match the delegated context"
+                                );
+                                Authentication::Rejected {
+                                    reason: "delegated_scope_mismatch".into(),
+                                    throttle: None,
+                                }
+                            }
+                            other => other,
+                        });
+                    let mut request = request;
+                    request.extensions_mut().insert(GatewayForwarded);
+                    admit(outcome, request, next).await
                 }
             }
         }
@@ -205,6 +317,42 @@ pub async fn require_customer(
     )
     .await;
     with_request_id(response, &context)
+}
+
+/// Everything after the identity authority answered — identical for a presented and a
+/// gateway-forwarded credential: only a FULL chain becomes the [`CustomerCaller`]; a
+/// suspended (SAFETY_ONLY) chain and every rejection are the same 401, throttling a 429,
+/// the authority unreachable a 503.
+async fn admit(
+    outcome: Result<Authentication, AuthorityUnavailable>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    match outcome {
+        Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
+            request.extensions_mut().insert(CustomerCaller(*ctx));
+            next.run(request).await
+        }
+        Ok(Authentication::Authenticated(_)) => {
+            tracing::info!("customer authentication refused (suspended scope)");
+            ApiError::Code(ErrorCode::AuthenticationFailed).into_response()
+        }
+        Ok(Authentication::Rejected { reason, throttle }) => {
+            crate::metrics::inc("numbering_customer_auth_rejected_total", &[]);
+            tracing::info!(%reason, "customer authentication rejected");
+            match throttle {
+                Some(t) => ApiError::RateLimited {
+                    retry_after_seconds: t.retry_after_seconds,
+                }
+                .into_response(),
+                None => ApiError::Code(ErrorCode::AuthenticationFailed).into_response(),
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "identity authority unavailable");
+            ApiError::Code(ErrorCode::ServiceUnavailable).into_response()
+        }
+    }
 }
 
 /// The authenticated internal caller of the current request.
@@ -291,5 +439,48 @@ pub async fn require_internal_service(
             .await;
             with_request_id(response, &context)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn admin_parts(forwarded: bool) -> Parts {
+        let id = || uuid::Uuid::new_v4().to_string();
+        let context = TrustedContext::from_authority(&serde_json::json!({
+            "authorityMode": "FULL",
+            "tenant": { "id": id(), "classification": "FIRST_PARTY" },
+            "application": { "id": id() },
+            "environment": { "id": id(), "kind": "PRODUCTION" },
+            "serviceAccount": { "id": id() },
+            "credential": { "id": id() },
+            "scopes": [NUMBERS_ADMIN],
+        }))
+        .unwrap();
+        let (mut parts, ()) = axum::http::Request::get("/v1/admin/controls")
+            .header(OPERATOR_HEADER, "ops.alice")
+            .body(())
+            .unwrap()
+            .into_parts();
+        parts.extensions.insert(CustomerCaller(context));
+        if forwarded {
+            parts.extensions.insert(GatewayForwarded);
+        }
+        parts
+    }
+
+    #[tokio::test]
+    async fn administration_refuses_a_gateway_forwarded_caller() {
+        assert!(
+            AdminCaller::from_request_parts(&mut admin_parts(false), &())
+                .await
+                .is_ok()
+        );
+        let refused = AdminCaller::from_request_parts(&mut admin_parts(true), &()).await;
+        assert!(matches!(
+            refused,
+            Err(ApiError::Code(ErrorCode::AuthenticationFailed))
+        ));
     }
 }

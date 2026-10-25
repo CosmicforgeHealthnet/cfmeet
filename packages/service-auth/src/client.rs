@@ -33,8 +33,10 @@ pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// The only request headers a caller may forward on an internal call
 /// ([`InternalServiceClient::exchange_json_query_with_headers`]): never an authorization,
-/// identity or routing header.
-pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &["idempotency-key"];
+/// identity or routing header. `x-cf-delegated-actor` names the acting member of a
+/// Developer Platform delegation (Platform Access honours it only under
+/// `platform-identity.delegate`).
+pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &["idempotency-key", "x-cf-delegated-actor"];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientConfigError {

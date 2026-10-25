@@ -25,6 +25,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, FromQueryRe
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use super::platform_events::EventDestination;
 use super::{bounded_error, RetryPolicy};
 use crate::domain::{RequestContext, SharedClock};
 
@@ -50,6 +51,15 @@ pub struct NewEvent {
 
 fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
     Statement::from_sql_and_values(DbBackend::Postgres, sql, values)
+}
+
+/// The recorded error of a receiver: Calling's as-is (today's codes), the Developer
+/// Platform's prefixed so the two are told apart.
+fn destination_error(destination: EventDestination, reason: &str) -> String {
+    match destination {
+        EventDestination::Calling => reason.to_string(),
+        other => format!("{}: {reason}", other.as_str()),
+    }
 }
 
 /// Records `event` in the caller's transaction. Returns the event id.
@@ -99,11 +109,39 @@ pub struct OutboxEvent {
     pub payload: Value,
     pub occurred_at: DateTime<Utc>,
     pub attempts: i32,
+    /// Durable outcome at Calling (`ACCEPTED` / `REJECTED`; `None`: not settled yet).
+    pub calling_outcome: Option<String>,
+    /// Durable outcome at the Developer Platform (same vocabulary).
+    pub developer_platform_outcome: Option<String>,
 }
+
+/// How one delivery completes: status, last error, next attempt, published at, metric
+/// label.
+type Completion = (
+    &'static str,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    Option<DateTime<Utc>>,
+    &'static str,
+);
+
+/// A receiver accepted the event (it is never re-sent there).
+pub const OUTCOME_ACCEPTED: &str = "ACCEPTED";
+/// A receiver refused the event for good (never re-sent there; the event dead-letters
+/// once every receiver has settled).
+pub const OUTCOME_REJECTED: &str = "REJECTED";
 
 impl OutboxEvent {
     pub fn event_id(&self) -> String {
         format!("evt_{}", self.id.simple())
+    }
+
+    /// The settled outcome of `destination`, if any.
+    pub fn outcome(&self, destination: EventDestination) -> Option<&str> {
+        match destination {
+            EventDestination::Calling => self.calling_outcome.as_deref(),
+            EventDestination::DeveloperPlatform => self.developer_platform_outcome.as_deref(),
+        }
     }
 
     /// The `cfmeet.platform.event-envelope` of this event. The causation id is carried
@@ -174,15 +212,24 @@ pub struct PublishReport {
     pub lost_claims: usize,
 }
 
+/// Publishes committed events to one or more receivers ([`EventDestination`]).
+///
+/// With several receivers (`both`, shadow comparison) every receiver's outcome is
+/// recorded on the row together with the attempt, so a retry re-sends only to the
+/// receivers that have not settled; the event is PUBLISHED once every receiver accepted
+/// it and DEAD_LETTER once every receiver settled with at least one permanent refusal
+/// (or when the attempts are exhausted). The retry / dead-letter rules of one receiver
+/// are unchanged (4xx except `RATE_LIMITED` refuses for good; anything else retries).
 pub struct OutboxPublisher {
     db: DatabaseConnection,
-    transport: Arc<dyn EventTransport>,
+    destinations: Vec<(EventDestination, Arc<dyn EventTransport>)>,
     clock: SharedClock,
     settings: PublisherSettings,
     runtime_environment: String,
 }
 
 impl OutboxPublisher {
+    /// A publisher to Calling only (today's single receiver).
     pub fn new(
         db: DatabaseConnection,
         transport: Arc<dyn EventTransport>,
@@ -190,9 +237,32 @@ impl OutboxPublisher {
         settings: PublisherSettings,
         runtime_environment: impl Into<String>,
     ) -> Self {
+        Self::with_destinations(
+            db,
+            vec![(EventDestination::Calling, transport)],
+            clock,
+            settings,
+            runtime_environment,
+        )
+    }
+
+    /// A publisher to every listed receiver (each at most once, in order).
+    pub fn with_destinations(
+        db: DatabaseConnection,
+        mut destinations: Vec<(EventDestination, Arc<dyn EventTransport>)>,
+        clock: SharedClock,
+        settings: PublisherSettings,
+        runtime_environment: impl Into<String>,
+    ) -> Self {
+        let mut seen = Vec::new();
+        destinations.retain(|(d, _)| {
+            let fresh = !seen.contains(d);
+            seen.push(*d);
+            fresh
+        });
         Self {
             db,
-            transport,
+            destinations,
             clock,
             settings,
             runtime_environment: runtime_environment.into(),
@@ -214,7 +284,7 @@ impl OutboxPublisher {
                 ORDER BY e.sequence LIMIT $4 FOR UPDATE SKIP LOCKED) \
              RETURNING o.id, o.sequence, o.event_type, o.schema_version, o.aggregate_type, o.aggregate_id, \
                        o.tenant_id, o.application_id, o.environment_id, o.correlation_id, o.causation_id, \
-                       o.payload, o.occurred_at, o.attempts",
+                       o.payload, o.occurred_at, o.attempts, o.calling_outcome, o.developer_platform_outcome",
             vec![
                 token.into(),
                 (now + self.settings.lease).into(),
@@ -228,56 +298,105 @@ impl OutboxPublisher {
         Ok(events)
     }
 
-    /// Delivers one claimed event and records the outcome under `token`.
+    /// Delivers one claimed event to every receiver that has not settled it yet and
+    /// records the outcomes under `token`.
     pub async fn deliver_claimed(
         &self,
         event: &OutboxEvent,
         token: Uuid,
         report: &mut PublishReport,
     ) -> Result<(), DbErr> {
-        let outcome = self
-            .transport
-            .deliver(&event.envelope(&self.runtime_environment))
-            .await;
+        let envelope = event.envelope(&self.runtime_environment);
+        let mut calling = event.calling_outcome.clone();
+        let mut developer_platform = event.developer_platform_outcome.clone();
+        let mut retry: Option<String> = None;
+        let mut refusal: Option<String> = None;
+        for (destination, transport) in &self.destinations {
+            let slot = match destination {
+                EventDestination::Calling => &mut calling,
+                EventDestination::DeveloperPlatform => &mut developer_platform,
+            };
+            if slot.is_some() {
+                continue;
+            }
+            let outcome = transport.deliver(&envelope).await;
+            let label = match &outcome {
+                Delivery::Delivered => "accepted",
+                Delivery::Rejected(_) => "rejected",
+                Delivery::Retryable(_) => "retry",
+            };
+            crate::metrics::inc(
+                "sms_outbox_destination_deliveries_total",
+                &[("destination", destination.as_str()), ("outcome", label)],
+            );
+            match outcome {
+                Delivery::Delivered => *slot = Some(OUTCOME_ACCEPTED.into()),
+                Delivery::Rejected(reason) => {
+                    *slot = Some(OUTCOME_REJECTED.into());
+                    refusal.get_or_insert(destination_error(*destination, &reason));
+                }
+                Delivery::Retryable(reason) => {
+                    retry.get_or_insert(destination_error(*destination, &reason));
+                }
+            }
+        }
+        let settled = |d: &EventDestination| match d {
+            EventDestination::Calling => calling.as_deref(),
+            EventDestination::DeveloperPlatform => developer_platform.as_deref(),
+        };
+        let all_settled = self.destinations.iter().all(|(d, _)| settled(d).is_some());
+        let any_refused = self
+            .destinations
+            .iter()
+            .any(|(d, _)| settled(d) == Some(OUTCOME_REJECTED));
         let now = self.clock.now();
         let attempts = event.attempts + 1;
-        let (sql, values, label): (&str, Vec<sea_orm::Value>, &'static str) = match &outcome {
-            Delivery::Delivered => (
-                "UPDATE sms_outbox_events SET status = 'PUBLISHED', published_at = $3, attempts = $4, \
-                   lease_token = NULL, lease_expires_at = NULL, last_error = NULL \
-                 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
-                vec![event.id.into(), token.into(), now.into(), attempts.into()],
-                "published",
-            ),
-            Delivery::Rejected(reason) => (
-                "UPDATE sms_outbox_events SET status = 'DEAD_LETTER', attempts = $3, last_error = $4, \
-                   lease_token = NULL, lease_expires_at = NULL \
-                 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
-                vec![event.id.into(), token.into(), attempts.into(), bounded_error(reason).into()],
-                "dead_letter",
-            ),
-            Delivery::Retryable(reason) if attempts >= self.settings.max_attempts => (
-                "UPDATE sms_outbox_events SET status = 'DEAD_LETTER', attempts = $3, last_error = $4, \
-                   lease_token = NULL, lease_expires_at = NULL \
-                 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
-                vec![event.id.into(), token.into(), attempts.into(), bounded_error(reason).into()],
-                "dead_letter",
-            ),
-            Delivery::Retryable(reason) => (
-                "UPDATE sms_outbox_events SET attempts = $3, last_error = $4, next_attempt_at = $5, \
+        // (status, last error, next attempt, published at, metric label)
+        let (status, error, next, published, label): Completion = if all_settled && !any_refused {
+            ("PUBLISHED", None, None, Some(now), "published")
+        } else if all_settled {
+            // A refusal recorded by an earlier pass is named by its receiver.
+            let refusal = refusal.or_else(|| {
+                self.destinations
+                    .iter()
+                    .find(|(d, _)| settled(d) == Some(OUTCOME_REJECTED))
+                    .map(|(d, _)| format!("REFUSED by {}", d.as_str()))
+            });
+            ("DEAD_LETTER", refusal, None, None, "dead_letter")
+        } else if attempts >= self.settings.max_attempts {
+            ("DEAD_LETTER", retry, None, None, "dead_letter")
+        } else {
+            (
+                "PENDING",
+                retry,
+                Some(now + self.settings.retry.delay(attempts)),
+                None,
+                "retry",
+            )
+        };
+        let updated = self
+            .db
+            .execute(stmt(
+                "UPDATE sms_outbox_events SET status = $3, attempts = $4, \
+                   last_error = CASE WHEN $3 = 'PUBLISHED' THEN NULL ELSE COALESCE($5, last_error) END, \
+                   next_attempt_at = COALESCE($6, next_attempt_at), published_at = $7, \
+                   calling_outcome = $8, developer_platform_outcome = $9, \
                    lease_token = NULL, lease_expires_at = NULL \
                  WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
                 vec![
                     event.id.into(),
                     token.into(),
+                    status.into(),
                     attempts.into(),
-                    bounded_error(reason).into(),
-                    (now + self.settings.retry.delay(attempts)).into(),
+                    error.as_deref().map(bounded_error).into(),
+                    next.into(),
+                    published.into(),
+                    calling.into(),
+                    developer_platform.into(),
                 ],
-                "retry",
-            ),
-        };
-        let updated = self.db.execute(stmt(sql, values)).await?.rows_affected();
+            ))
+            .await?
+            .rows_affected();
         if updated == 1 {
             match label {
                 "published" => report.published += 1,

@@ -1,0 +1,16 @@
+{
+  "id": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+  "organizationId": "3f0f4c1e-6a7b-4c2d-9e8f-0a1b2c3d4e5f",
+  "actorKind": "USER",
+  "actorRef": "user:5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b",
+  "action": "project.created",
+  "targetType": "PROJECT",
+  "targetId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "outcome": "SUCCEEDED",
+  "requestId": "req_0123456789abcdef0123456789abcdef",
+  "correlationId": "corr_0123456789abcdef0123456789abcdef",
+  "summary": {
+    "displayName": "Patient app"
+  },
+  "occurredAt": "2026-11-02T10:00:00Z"
+}

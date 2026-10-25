@@ -15,7 +15,9 @@ pub struct Model {
     pub id: Uuid,
     pub legacy_meeting_id: Option<Uuid>,
     pub organization_id: Option<Uuid>,
-    pub owner_user_id: Uuid,
+    /// The CF Meet account owning the space; `None` exactly when the space is owned by a
+    /// Platform Access application environment (`platform_*`).
+    pub owner_user_id: Option<Uuid>,
     pub meeting_code: String,
     pub title: String,
     pub description: Option<String>,
@@ -46,6 +48,14 @@ pub struct Model {
     /// Part H: sparse space-level profile policy overrides.
     pub profile_policy: Json,
     pub profile_policy_version: i32,
+    /// Part VI §51: owning Platform Access tenant (environment-owned spaces only).
+    pub platform_tenant_id: Option<Uuid>,
+    /// Owning Platform Access application.
+    pub platform_application_id: Option<Uuid>,
+    /// Owning Platform Access application environment.
+    pub platform_environment_id: Option<Uuid>,
+    /// The service account whose credential created the space.
+    pub created_by_service_account_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

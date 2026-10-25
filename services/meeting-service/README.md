@@ -39,6 +39,19 @@ Parts A–D (meeting core, admission, roles, participants) live under `/api/v2` 
 `FEATURE_MEETING_V2_ENABLED`. The legacy `/api/v1` meeting API is unchanged and keeps working.
 See [`docs/PHASE2_MEETING_DOMAIN.md`](docs/PHASE2_MEETING_DOMAIN.md).
 
+### Part VI — platform credentials and meeting webhooks
+
+With `MEETING_PLATFORM_ACCESS_ENABLED=true`, a customer's platform credential can call the
+machine-callable `/api/v2` operations through the public API Gateway (`meetings.read` /
+`meetings.write`; meeting spaces, instant meetings, conference lifecycle, participants and
+waiting room, invitations, attendance — `src/services/platform/operations.rs`). The gateway
+forwards without the credential; this service has Platform Access re-verify it live and
+acts as the application environment's machine caller, which sees and manages ONLY meetings
+owned by that environment (`meeting_spaces.platform_*`; anything else is 404). With
+`MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION=developer-platform`, lifecycle events of
+environment-owned meetings are published from the transactional outbox to the Developer
+Platform as platform envelopes (default `none`). See `src/services/platform/mod.rs`.
+
 ### Local development and tests (no Docker required)
 
 Use a normal local PostgreSQL (and optionally Redis) install:

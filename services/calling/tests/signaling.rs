@@ -179,8 +179,21 @@ async fn the_channel_authenticates_before_upgrading_and_delivers_committed_signa
         assert!(!incoming.to_string().contains(forbidden), "{forbidden}");
     }
 
-    // Closing the channel turns the presence hint off again.
+    // Closing the channel completes the closing handshake (a clean close, never a
+    // reset) and turns the presence hint off again.
     socket.close(None).await.unwrap();
+    let mut clean = false;
+    while let Some(m) = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .expect("the server answers the close")
+    {
+        match m {
+            Ok(Message::Close(_)) => clean = true,
+            Ok(_) => {}
+            Err(e) => panic!("closing handshake not completed: {e:?}"),
+        }
+    }
+    assert!(clean, "no close reply from the server");
     let mut presence = Value::Null;
     for _ in 0..100 {
         let r = a

@@ -1,0 +1,11 @@
+{
+  "id": "whe_0123456789abcdef0123456789abcdef",
+  "type": "meeting.started",
+  "apiVersion": "v1",
+  "occurredAt": "2026-11-04T10:00:00.000Z",
+  "correlationId": "corr_0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+  "data": {
+    "meetingId": "33333333-3333-4333-8333-333333333333",
+    "participantCount": 2
+  }
+}

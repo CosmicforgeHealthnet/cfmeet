@@ -111,7 +111,7 @@ impl MembershipService {
             if u == actor.user_id {
                 return Err(permission_denied("You cannot change your own membership"));
             }
-            if u == space.owner_user_id {
+            if Some(u) == space.owner_user_id {
                 return Err(validation(
                     "The owner is not a member; ownership already grants full authority",
                 ));

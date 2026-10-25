@@ -253,6 +253,14 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         Probe::HiddenPath,
     ),
     ("POST /internal/v1/platform/events", Probe::Body),
+    (
+        "POST /internal/v1/webhook-migration/rollback/subscriptions",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/webhook-migration/rollback/deliveries",
+        Probe::Body,
+    ),
     ("POST /v1/blocks", Probe::Body),
     ("DELETE /v1/blocks/{block_id}", Probe::HiddenPath),
     ("POST /v1/calls/{call_id}/abuse-reports", Probe::Body),
@@ -993,6 +1001,8 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                 let permission = op.requires[0].as_str();
                 let signer = if permission.starts_with("telephony-") {
                     peers.telephony.clone()
+                } else if permission.starts_with("webhook-migration.") {
+                    peers.developer_platform.clone()
                 } else {
                     peers.privacy_relay.clone()
                 };

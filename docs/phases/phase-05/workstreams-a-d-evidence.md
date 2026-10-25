@@ -134,7 +134,7 @@ G's "immutable when the first protected application message is committed".
 
 | Decision | Implementation candidate | Known limitation | Status |
 |---|---|---|---|
-| MLS / OpenMLS adoption | MLS 1.0 (RFC 9420) via OpenMLS `=0.9.1`, `openmls_rust_crypto =0.6.0` | Pre-1.0 library; every bump is a reviewed change | PENDING |
+| MLS / OpenMLS adoption | MLS 1.0 (RFC 9420) via OpenMLS `=0.9.1` with the CF Meet provider (`src/provider.rs`; replaced `openmls_rust_crypto =0.6.0` on 2026-10-24, ADR 0045 amendment) | Pre-1.0 library; every bump is a reviewed change | PENDING |
 | Cipher suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` only; others rejected at KeyPackage validation | Classical only | PENDING |
 | Signal / libsignal exclusion | Not used; no Signal-protocol or interoperability claim | — | PENDING |
 | Post-quantum policy | None implemented; no post-quantum claim | `libcrux-kem 0.0.9` is in the lockfile but in no build graph (RUSTSEC-2026-0330/0331, scoped ignore, CI-proven) | PENDING |
@@ -144,7 +144,7 @@ G's "immutable when the first protected application message is committed".
 | Encrypted attachments | Not implemented | — | PENDING |
 | SMS downgrade rules | No downgrade path exists; PRIVATE_E2EE cannot become MANAGED (API, CHECK, trigger) | Rules for later fallbacks undefined | PENDING |
 | Independent cryptographic assessment | Not performed | Registration proof-of-possession composition is unreviewed | PENDING (external) |
-| `hpke-rs` MPL-2.0 | Transitive via `openmls_rust_crypto`, unmodified | File-level copyleft obligations need legal confirmation | PENDING (legal) |
+| `hpke-rs` MPL-2.0 | `hpke-rs =0.8.0` via the CF Meet provider, unmodified | File-level copyleft obligations need legal confirmation | PENDING (legal) |
 | Mobile / browser runtime certification | Android / iOS / wasm compile-only | Not run on devices | PENDING |
 
 E2EE device operations stay disabled by default outside local / test

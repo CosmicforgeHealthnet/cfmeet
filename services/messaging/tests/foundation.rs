@@ -99,7 +99,23 @@ async fn customer_routes_fail_closed() {
         (r.status, r.code()),
         (StatusCode::UNAUTHORIZED, "CLIENT_TOKENS_NOT_ENABLED")
     );
-    // A service token never authenticates a customer route.
+    // A service token never accompanies a customer credential, and only the API
+    // Gateway's forwarding grant makes one acceptable on a customer route
+    // (tests/gateway_forwarding.rs): a trusted peer without it is refused.
+    let r = h
+        .call_internal(
+            &peers().meeting,
+            Method::GET,
+            &path,
+            None,
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", &alice.to_string())],
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED")
+    );
     let r = h
         .raw(
             Request::get(&path)

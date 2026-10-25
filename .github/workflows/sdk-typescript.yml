@@ -1,0 +1,123 @@
+name: SDK TypeScript
+
+# sdks/typescript — the CF Meet platform SDK for TypeScript (Part VI Section 52):
+# generated from the published contracts by sdks/generate.py, type-checked, built and
+# unit-tested against local mock HTTP / WebSocket servers; the built bundle is checked
+# for literal credentials, process.env reads and Node built-ins; the messaging crypto
+# adapter runs against a fresh wasm-bindgen build of packages/messaging-crypto/wasm.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "sdks/**"
+      - "packages/contracts/**"
+      - "infra/api-gateway/**"
+      - "packages/webhooks/**"
+      - "packages/messaging-crypto/**"
+      - ".github/workflows/sdk-typescript.yml"
+  pull_request:
+    paths:
+      - "sdks/**"
+      - "packages/contracts/**"
+      - "infra/api-gateway/**"
+      - "packages/webhooks/**"
+      - "packages/messaging-crypto/**"
+      - ".github/workflows/sdk-typescript.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sdk-typescript-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sdk:
+    name: generate check / typecheck / build / test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: generated SDK sources are current (public contracts only, no product names)
+        working-directory: .
+        run: python3 sdks/generate.py --check
+
+      - name: npm ci
+        run: npm ci
+
+      - name: typecheck (library + tests)
+        run: npm run typecheck
+
+      - name: build
+        run: npm run build
+
+      - name: bundle safety (no literal credentials / secrets, no process.env, no Node built-ins)
+        run: npm run check:bundle
+
+      - name: examples typecheck (server with Node types, browser without)
+        run: npm run typecheck:examples
+
+      # Unit tests (mock HTTP / RFC 6455 servers), the shared webhook signature vectors and
+      # the messaging crypto adapter over the committed browser artifact. The real-stack
+      # suite prints SKIPPED unless CFMEET_STACK_ENV is set.
+      - name: test
+        run: npm test
+
+  messaging-crypto:
+    name: messaging crypto adapter (fresh wasm-bindgen build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/messaging-crypto/wasm -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      # The CLI must match the wasm-bindgen crate version in Cargo.lock.
+      - name: install wasm-bindgen-cli (locked version)
+        working-directory: packages/messaging-crypto/wasm
+        run: |
+          set -euo pipefail
+          v=$(awk '/^name = "wasm-bindgen"$/{getline; print}' Cargo.lock | cut -d'"' -f2)
+          cargo install wasm-bindgen-cli --version "$v" --locked
+
+      - name: build the crypto core (--target nodejs and --target web)
+        run: npm run build:wasm-test-module
+
+      - name: npm ci
+        run: npm ci
+
+      - name: adapter types match the wasm-bindgen declarations
+        run: npx tsc -p wasm-shape
+
+      - name: adapter over the real crypto core (MLS group round trip, attachments, SRI)
+        env:
+          CFMEET_REQUIRE_MESSAGING_CRYPTO: "1"
+        run: |
+          set -euo pipefail
+          npx tsc -p tsconfig.test.json
+          node --test --test-reporter=spec build-test/test/messaging-crypto.test.js

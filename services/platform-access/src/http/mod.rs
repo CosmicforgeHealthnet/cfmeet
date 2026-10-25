@@ -6,6 +6,7 @@
 //!   authentication BY CONSTRUCTION, including unknown paths.
 
 pub mod admin;
+pub mod delegation;
 pub mod error;
 pub mod internal;
 pub mod middleware;
@@ -19,7 +20,6 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use platform_access_migration::MigratorTrait;
 use serde_json::json;
 
 use self::{
@@ -46,6 +46,7 @@ pub fn app(state: AppState) -> Router {
             INTERNAL_PREFIX,
             internal::routes()
                 .merge(admin::routes())
+                .merge(delegation::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
@@ -62,7 +63,7 @@ async fn health() -> impl IntoResponse {
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let db = state.platform.db();
-    let pending = platform_access_migration::Migrator::get_pending_migrations(db).await;
+    let pending = platform_access_migration::pending_migrations(db).await;
     let (status, database, migrations) = match pending {
         Ok(p) if p.is_empty() => (StatusCode::OK, "ok", "current"),
         Ok(_) => (StatusCode::SERVICE_UNAVAILABLE, "ok", "pending"),

@@ -25,6 +25,7 @@ pub mod membership;
 pub mod ops_metrics;
 pub mod organizations;
 pub mod outbox;
+pub mod platform;
 pub mod profiles;
 pub mod quality;
 pub mod realtime;
@@ -34,6 +35,7 @@ pub mod rtc_metrics;
 pub mod rtc_provider;
 pub mod rtc_webhooks;
 pub mod secrets;
+pub mod session_bridge;
 pub mod specialized;
 pub mod unified_messaging;
 

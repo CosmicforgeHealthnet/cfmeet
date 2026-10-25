@@ -176,7 +176,7 @@ impl MeetingAccessService {
         // Explicit grants.
         if let Some(r) = registered {
             crate::services::meeting_core::enforce_revocation_policy(space, r)?;
-            if space.owner_user_id == r.user_id {
+            if space.owner_user_id == Some(r.user_id) {
                 return Ok(AccessDecision {
                     is_owner: true,
                     ..base(AccessGrant::Owner)

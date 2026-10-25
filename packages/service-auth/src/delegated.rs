@@ -68,6 +68,7 @@ pub struct DelegatedPlatformContext {
     application_environment_kind: ApplicationEnvironmentKind,
     initiating_service_account_id: Uuid,
     initiating_principal: Option<InitiatingPrincipal>,
+    initiating_credential_id: Option<Uuid>,
 }
 
 /// Exact wire shape of the contract (closed object, principal id and kind together).
@@ -83,6 +84,8 @@ struct Wire {
     initiating_principal_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     initiating_principal_kind: Option<DelegatedPrincipalKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initiating_credential_id: Option<Uuid>,
 }
 
 impl TryFrom<Wire> for DelegatedPlatformContext {
@@ -106,6 +109,7 @@ impl TryFrom<Wire> for DelegatedPlatformContext {
             application_environment_kind: w.application_environment_kind,
             initiating_service_account_id: w.initiating_service_account_id,
             initiating_principal,
+            initiating_credential_id: w.initiating_credential_id,
         })
     }
 }
@@ -120,6 +124,7 @@ impl From<DelegatedPlatformContext> for Wire {
             initiating_service_account_id: c.initiating_service_account_id,
             initiating_principal_id: c.initiating_principal.map(|p| p.principal_id),
             initiating_principal_kind: c.initiating_principal.map(|p| p.principal_kind),
+            initiating_credential_id: c.initiating_credential_id,
         }
     }
 }
@@ -141,7 +146,21 @@ impl DelegatedPlatformContext {
             application_environment_kind,
             initiating_service_account_id,
             initiating_principal: None,
+            initiating_credential_id: None,
         }
+    }
+
+    /// The API credential (Platform Access id, never a secret) the API Gateway
+    /// authenticated for this request. Receivers re-verify it with Platform Access
+    /// (`POST /internal/v1/credentials/delegated-authority`) so revocation, expiry and
+    /// effective scopes are evaluated live by the identity authority.
+    pub fn with_initiating_credential(mut self, credential_id: Uuid) -> Self {
+        self.initiating_credential_id = Some(credential_id);
+        self
+    }
+
+    pub fn initiating_credential_id(&self) -> Option<Uuid> {
+        self.initiating_credential_id
     }
 
     pub fn with_initiating_principal(
@@ -216,6 +235,11 @@ mod tests {
         .unwrap();
         assert_eq!(with["initiating_principal_kind"], "NATIVE_CF_USER");
         assert!(with["initiating_principal_id"].is_string());
+        let credential = Uuid::new_v4();
+        let with = serde_json::to_value(ctx().with_initiating_credential(credential)).unwrap();
+        assert_eq!(with["initiating_credential_id"], credential.to_string());
+        let back: DelegatedPlatformContext = serde_json::from_value(with).unwrap();
+        assert_eq!(back.initiating_credential_id(), Some(credential));
     }
 
     #[test]

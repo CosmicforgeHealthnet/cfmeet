@@ -32,6 +32,7 @@ pub mod delegated;
 pub mod headers;
 pub mod identity;
 pub mod ids;
+pub mod jwt;
 pub mod keys;
 pub mod number_grant;
 pub mod permissions;

@@ -65,6 +65,8 @@ pub enum AuthFailureReason {
     CredentialNotYetValid,
     CredentialExpired,
     CredentialSuperseded,
+    /// Reversibly suspended (Part VI §54).
+    CredentialSuspended,
     ServiceAccountInactive,
     CorruptAuthorityChain,
 }
@@ -81,6 +83,7 @@ impl AuthFailureReason {
         Self::CredentialNotYetValid,
         Self::CredentialExpired,
         Self::CredentialSuperseded,
+        Self::CredentialSuspended,
         Self::ServiceAccountInactive,
         Self::CorruptAuthorityChain,
     ];
@@ -96,6 +99,7 @@ impl AuthFailureReason {
             Self::CredentialNotYetValid => "credential_not_yet_valid",
             Self::CredentialExpired => "credential_expired",
             Self::CredentialSuperseded => "credential_superseded",
+            Self::CredentialSuspended => "credential_suspended",
             Self::ServiceAccountInactive => "service_account_inactive",
             Self::CorruptAuthorityChain => "corrupt_authority_chain",
         }
@@ -173,6 +177,11 @@ impl AuthenticationError {
     }
 }
 
+/// [`AUTHORITY_CHAIN_SQL`] keyed by the credential id instead of its public id.
+static AUTHORITY_CHAIN_BY_ID_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    AUTHORITY_CHAIN_SQL.replace("WHERE c.public_id = $1", "WHERE c.id = $1")
+});
+
 const AUTHORITY_CHAIN_SQL: &str = r#"
 SELECT
     c.verifier                 AS verifier,
@@ -197,7 +206,9 @@ SELECT
     ), '[]'::jsonb)            AS grants,
     (SELECT array_agg(r.principal_id ORDER BY r.principal_id)
        FROM platform_credential_principal_restrictions r
-      WHERE r.credential_id = c.id) AS restricted_principals
+      WHERE r.credential_id = c.id) AS restricted_principals,
+    EXISTS (SELECT 1 FROM platform_credential_suspensions s
+             WHERE s.credential_id = c.id) AS suspended
 FROM platform_api_credentials c
 JOIN platform_service_accounts sa
   ON sa.id = c.service_account_id
@@ -228,6 +239,7 @@ struct AuthorityRow {
     tenant: Value,
     grants: Value,
     restricted_principals: Option<Vec<Uuid>>,
+    suspended: bool,
 }
 
 #[derive(Deserialize)]
@@ -432,6 +444,38 @@ impl CredentialAuthenticator {
             .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))
     }
 
+    /// The CURRENT authority chain of a credential identified by its Platform Access id,
+    /// for a receiver re-verifying the credential the API Gateway authenticated (Part VI
+    /// §51). No secret is involved: the caller proves only that a trusted gateway already
+    /// verified the secret; revocation, expiry, supersession, suspension and effective
+    /// scopes are evaluated here, now, exactly as at authentication.
+    pub async fn authority_of(
+        &self,
+        credential_id: uuid::Uuid,
+    ) -> Result<AuthorityChain, AuthenticationError> {
+        let row = AuthorityRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            AUTHORITY_CHAIN_BY_ID_SQL.as_str(),
+            [credential_id.into()],
+        ))
+        .one(&self.db)
+        .await
+        .map_err(|e| AuthenticationError::Unavailable {
+            summary: summarize_db_error(&e),
+        })?
+        .ok_or_else(|| AuthenticationError::rejected(AuthFailureReason::UnknownCredential, None))?;
+        let kind = row
+            .environment
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .and_then(EnvironmentKind::parse)
+            .ok_or_else(|| {
+                AuthenticationError::rejected(AuthFailureReason::CorruptAuthorityChain, None)
+            })?;
+        evaluate(row, kind, self.clock.now(), &self.registry)
+            .map_err(|reason| AuthenticationError::rejected(reason, None))
+    }
+
     async fn load(&self, public_id: &str) -> Result<Option<AuthorityRow>, DbErr> {
         AuthorityRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Postgres,
@@ -478,6 +522,11 @@ fn evaluate(
         CredentialEffectiveState::NotYetValid => return Err(R::CredentialNotYetValid),
         CredentialEffectiveState::Expired => return Err(R::CredentialExpired),
         CredentialEffectiveState::Superseded => return Err(R::CredentialSuperseded),
+        // `evaluate` never derives it from persisted status; suspension is below.
+        CredentialEffectiveState::Suspended => return Err(R::CredentialSuspended),
+    }
+    if row.suspended {
+        return Err(R::CredentialSuspended);
     }
     if service_account.status != ServiceAccountStatus::Active {
         return Err(R::ServiceAccountInactive);

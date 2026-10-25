@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "noEmit": true,
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": { "@cfmeet/platform-sdk": ["./src/index.ts"] }
+  },
+  "files": ["examples/browser-session.ts"]
+}

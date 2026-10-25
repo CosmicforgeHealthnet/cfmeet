@@ -8,7 +8,9 @@
 //! 4. Callbacks: a correctly signed receipt / inbound message authenticates and parses;
 //!    a tampered body, a missing signature or a stale timestamp is refused BEFORE
 //!    parsing; an unparseable body is MALFORMED.
-//! 5. No plaintext (numbers, content) in the debug form of requests or callbacks.
+//! 5. No plaintext (numbers, content) in the debug form of requests or callbacks. The
+//!    content markers use letters outside the hex alphabet, so a random id or key in the
+//!    debug output can never match them by chance.
 
 use axum::http::HeaderMap;
 use chrono::{DateTime, Duration, Utc};
@@ -42,7 +44,7 @@ fn request(key: &str) -> SubmitRequest {
     SubmitRequest {
         from: Zeroizing::new("+15550100001".into()),
         to: Zeroizing::new("+15550100002".into()),
-        body: Zeroizing::new("contract check 7731".into()),
+        body: Zeroizing::new("contract check qzxw".into()),
         encoding: Encoding::Gsm7,
         segments: 1,
         idempotency_key: key.to_string(),
@@ -63,7 +65,7 @@ pub async fn run<P: ContractFixture>(provider: &P, now: DateTime<Utc>) -> Result
     let key = format!("contract-{}", uuid::Uuid::new_v4().simple());
     let req = request(&key);
     let debug = format!("{req:?}");
-    if debug.contains("15550100001") || debug.contains("7731") {
+    if debug.contains("15550100001") || debug.contains("qzxw") {
         return Err("5: a submission's debug form shows plaintext".into());
     }
     let reference = match provider.submit(req).await {
@@ -115,13 +117,13 @@ pub async fn run<P: ContractFixture>(provider: &P, now: DateTime<Utc>) -> Result
             if r.provider_message_ref == reference && r.status == ReceiptStatus::Delivered => {}
         other => return Err(format!("4: the receipt did not parse: {other:?}")),
     }
-    let (headers, body) = provider.signed_inbound("+15550100002", "+15550100001", "hi 9182", now);
+    let (headers, body) = provider.signed_inbound("+15550100002", "+15550100001", "hi wqzv", now);
     provider
         .authenticate_callback(&headers, &body, now.timestamp())
         .map_err(|e| format!("4: a signed inbound message was refused: {e}"))?;
     match provider.parse_callback(&body) {
         Ok(cb @ Callback::Inbound(_)) => {
-            if format!("{cb:?}").contains("9182") || format!("{cb:?}").contains("15550100002") {
+            if format!("{cb:?}").contains("wqzv") || format!("{cb:?}").contains("15550100002") {
                 return Err("5: a callback's debug form shows plaintext".into());
             }
         }
