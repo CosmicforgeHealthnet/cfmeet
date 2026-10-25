@@ -184,7 +184,7 @@ promotion.
 Certified code: **`672f4edfaec652e0c03698f787c587ae9b761aa0`** (the commit after it only
 records this section). GitHub Actions on that SHA (push to `staging`): **17 of 17
 triggered workflows green** (contracts and SDK workflows are path-filtered and were not
-triggered: no contract or SDK change after `d75e4b8`, where they passed) — Part VI cross-service certification, Developer Platform service, API
+triggered: no contract or SDK change after `1b16fc1`, where Contracts, SDK TypeScript and SDK (Dart) last ran green) — Part VI cross-service certification, Developer Platform service, API
 Gateway service, Calling service, Calling RTC certification, Enterprise calling
 certification, Messaging, Unified Messaging integration journeys, Communications
 end-to-end journeys, Numbering service, SMS Gateway service, Privacy Relay service,
