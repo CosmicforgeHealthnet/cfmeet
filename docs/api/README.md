@@ -1,5 +1,35 @@
 # API documentation
 
+## Swagger release status
+
+**Status: CLOSED. Released and verified in production on 2026-10-25.**
+
+| Item | Value |
+|---|---|
+| Released `main` commit | `6c39351` (merge of #31) |
+| Private catalog | **Provision Private Swagger on VPS** run `40163268551`. 12 specifications; each returns 401 without credentials and 200 with identical bytes with credentials; listener `127.0.0.1:18099` only |
+| Public deployment | **Deploy Backend** (`production`) run `40163625275`. Pre-deploy tests, image build, migrations, health and Swagger smoke checks all passed; the rollback guard stayed armed until the container was verified |
+| Security gate | **Dependency and image security** run `40158337085` (attempt 2) on `bc709ae`, every lockfile clean; the same gate ran on #31's head |
+| Live verification | Chromium against `https://api.cfmeet.com/swagger-ui/`: the selector offers exactly Meetings, Calling, Numbering / DCNs, Privacy Relay, SMS Gateway and Messaging |
+
+Live public inventory: **478 operations in 107 sections, 0 under `default`**.
+
+| Service | Operations | Sections |
+|---|---|---|
+| Meetings | 193 | 36 |
+| Calling | 127 | 29 |
+| Numbering / DCNs | 52 | 11 |
+| Privacy Relay | 20 | 5 |
+| SMS Gateway | 6 | 3 |
+| Messaging | 80 | 23 |
+
+Every live operation:
+- renders, with a summary and a description;
+- has its `$ref`s resolved;
+- has Try-it-out disabled (`supportedSubmitMethods: []`).
+
+Internal specification URLs (`platform-access`, `privacy-relay-internal`, `telephony`, `messaging-internal`, `sms-gateway-internal`) return 404, and no public document contains internal, provider or admin paths.
+
 ## Labeled Swagger operations (all non-Meeting services)
 
 Non-Meeting service API operations are grouped by named OpenAPI `tags`, not
