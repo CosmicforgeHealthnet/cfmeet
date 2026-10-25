@@ -81,6 +81,10 @@ jobs:
         working-directory: .
         run: python3 scripts/contracts/bundle_openapi.py --check
 
+      - name: every service operation has meaningful Swagger labels
+        working-directory: .
+        run: python3 scripts/contracts/check_swagger_labels.py
+
       # Part VI §51: the public route manifest of the API Gateway and the public OpenAPI
       # documents are derived from the contracts plus the explicit allow-list; drift, an
       # unclassified operation or an internal / operator / callback leak fails.

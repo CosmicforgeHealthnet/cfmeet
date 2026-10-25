@@ -27,10 +27,24 @@
       }
     }
   },
+  "tags": [
+    {
+      "name": "Internal — SMS Bridge Bindings",
+      "description": "Internal — SMS Bridge Bindings operations in the SMS Gateway internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Internal — SMS Bridge Messages",
+      "description": "Internal — SMS Bridge Messages operations in the SMS Gateway internal API. Review the operation description for behavior, required permissions and schemas."
+    }
+  ],
   "paths": {
     "/internal/v1/sms-bridge/bindings": {
       "post": {
         "operationId": "createBridgeBinding",
+        "tags": [
+          "Internal — SMS Bridge Bindings"
+        ],
+        "summary": "create Bridge Binding",
         "security": [
           {
             "serviceToken": []
@@ -98,6 +112,10 @@
     "/internal/v1/sms-bridge/bindings/{bridgeRef}/close": {
       "post": {
         "operationId": "closeBridgeBinding",
+        "tags": [
+          "Internal — SMS Bridge Bindings"
+        ],
+        "summary": "close Bridge Binding",
         "security": [
           {
             "serviceToken": []
@@ -155,6 +173,10 @@
     "/internal/v1/sms-bridge/messages": {
       "post": {
         "operationId": "submitBridgeMessage",
+        "tags": [
+          "Internal — SMS Bridge Messages"
+        ],
+        "summary": "submit Bridge Message",
         "security": [
           {
             "serviceToken": []
@@ -222,6 +244,10 @@
     "/internal/v1/sms-bridge/messages/{smsMessageId}": {
       "get": {
         "operationId": "getBridgeTransport",
+        "tags": [
+          "Internal — SMS Bridge Messages"
+        ],
+        "summary": "get Bridge Transport",
         "security": [
           {
             "serviceToken": []

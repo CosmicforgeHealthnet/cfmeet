@@ -56,6 +56,12 @@ fn canonical(conference_id: Uuid) -> String {
 }
 
 /// Mint a one-shot realtime subscription ticket.
+///
+/// Browser WebSockets cannot send auth headers, so clients call this with their bearer or
+/// participant token and pass the returned `ticket` as a query parameter when opening the realtime
+/// WebSocket. The ticket is bound to this conference and expires after 60 seconds. The response
+/// also gives the current event `cursor` and the caller's `scope`: FULL, or SELF_ONLY for a
+/// participant still in the waiting room.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/realtime/ticket", tag = "Realtime (v2)", operation_id = "v2_realtime_ticket",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -86,6 +92,12 @@ pub async fn create_ticket(
 }
 
 /// Replay committed conference events after a cursor (recovery without WebSocket).
+///
+/// Returns the committed conference events after sequence `after` (default 0) that the caller may
+/// see, plus the cursor to resume from. When the cursor cannot be served (more than 500 events
+/// behind, out of range, or events no longer available) `resyncRequired` is true and the client
+/// must refetch the conference from `GET /api/v2/conferences/{id}`. Same authorization as the
+/// WebSocket.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/events", tag = "Realtime (v2)", operation_id = "v2_replay_events",
     params(("id" = Uuid, Path, description = "Conference id"), ("after" = Option<i64>, Query, description = "Last processed sequence")),
@@ -134,6 +146,12 @@ pub struct WsQuery {
 }
 
 /// WebSocket conference event stream.
+///
+/// Upgrades to a WebSocket that streams conference events as JSON frames (`subscribed`, `event`,
+/// `degraded`, `resync_required`, `revoked`, `closed`, `pong`). Authenticate with a `ticket` from
+/// the ticket endpoint or with the usual bearer / participant-token headers, and pass `cursor` to
+/// replay missed events first. Access is re-checked during the connection, which closes when access
+/// is revoked or the conference ends; send the text `ping` to receive a `pong`.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/realtime", tag = "Realtime (v2)", operation_id = "v2_realtime_subscribe",
     params(("id" = Uuid, Path, description = "Conference id"), ("ticket" = Option<String>, Query, description = "One-shot ticket"), ("cursor" = Option<i64>, Query, description = "Resume after this sequence")),

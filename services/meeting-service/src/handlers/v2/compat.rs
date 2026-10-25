@@ -12,6 +12,9 @@ use crate::{
 };
 
 /// Compare legacy and v2 state for one legacy meeting (no mutation).
+///
+/// Reports the v2 meeting space the legacy meeting maps to, whether both representations are
+/// consistent, and every difference found. Read-only; requires a platform administrator.
 #[utoipa::path(
     get, path = "/api/v2/admin/compat/legacy-meetings/{id}/shadow", tag = "Compatibility (v2)", operation_id = "v2_shadow_compare",
     params(("id" = Uuid, Path, description = "Legacy meeting id")),
@@ -34,6 +37,10 @@ pub async fn shadow_compare(
 }
 
 /// Run the idempotent legacy → v2 backfill and return migration evidence.
+///
+/// Maps legacy meetings, sessions and participants into the v2 domain, inserting only what is
+/// missing, and returns row counts, inserted records and any unmapped ids. Safe to repeat;
+/// requires a platform administrator.
 #[utoipa::path(
     post, path = "/api/v2/admin/compat/backfill", tag = "Compatibility (v2)", operation_id = "v2_run_backfill",
     responses((status = 200, description = "Backfill report", body = BackfillReportResponse), (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope)),

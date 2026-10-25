@@ -934,6 +934,21 @@ fn public_doc(service: &str, raw: &str) -> String {
             )
         })
     });
+    // A section whose operations were all filtered out (e.g. "Admin") would still render
+    // as an empty Swagger heading; publish only the sections that still hold operations.
+    let used: std::collections::BTreeSet<String> = doc["paths"]
+        .as_object()
+        .into_iter()
+        .flat_map(|paths| paths.values())
+        .filter_map(serde_json::Value::as_object)
+        .flat_map(|item| item.values())
+        .filter_map(|operation| operation["tags"].as_array())
+        .flatten()
+        .filter_map(|tag| tag.as_str().map(str::to_owned))
+        .collect();
+    if let Some(tags) = doc["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"].as_str().is_some_and(|name| used.contains(name)));
+    }
     serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
 }
 
@@ -1199,6 +1214,132 @@ mod tests {
                 .filter(|(name, _, _)| !name.ends_with("(internal)"))
                 .count()
                 + 1
+        );
+    }
+
+    /// The Swagger selector offers exactly the six public services, and every operation of
+    /// every document it serves sits in a named, declared section (never Swagger's
+    /// `default`) with a summary, a description and a unique operationId. Checked on the
+    /// bytes the router serves, after public filtering, so neither the contracts nor the
+    /// Meeting Service handlers can regress to undocumented or `default`-grouped operations.
+    #[tokio::test]
+    async fn every_served_public_operation_is_labeled_and_documented() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{uri}: {e}"))
+        }
+
+        let router = swagger_router("127.0.0.1:18081");
+        let config = get_json(&router, "/api-docs/swagger-config.json").await;
+        let urls = config["urls"].as_array().expect("selector urls");
+        let names: Vec<&str> = urls.iter().map(|u| u["name"].as_str().unwrap()).collect();
+        assert_eq!(
+            names,
+            [
+                "Meetings",
+                "Calling",
+                "Numbering / DCNs",
+                "Privacy Relay",
+                "SMS Gateway",
+                "Messaging"
+            ],
+            "public Swagger selector"
+        );
+
+        let mut problems = Vec::new();
+        for entry in urls {
+            let name = entry["name"].as_str().unwrap();
+            let doc = get_json(&router, entry["url"].as_str().unwrap()).await;
+            let declared: std::collections::BTreeSet<&str> = doc["tags"]
+                .as_array()
+                .map(|tags| tags.iter().filter_map(|t| t["name"].as_str()).collect())
+                .unwrap_or_default();
+            let mut used = std::collections::BTreeSet::new();
+            let mut operation_ids = std::collections::BTreeSet::new();
+            let mut operations = 0;
+            for (path, item) in doc["paths"].as_object().expect("paths") {
+                for (method, op) in item.as_object().expect("path item") {
+                    if !matches!(
+                        method.as_str(),
+                        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+                    ) {
+                        continue;
+                    }
+                    operations += 1;
+                    let at = format!("{name}: {} {path}", method.to_uppercase());
+                    let tags: Vec<&str> = op["tags"]
+                        .as_array()
+                        .map(|t| t.iter().filter_map(|t| t.as_str()).collect())
+                        .unwrap_or_default();
+                    if tags.is_empty() {
+                        problems.push(format!("{at}: no section (renders under `default`)"));
+                    }
+                    for tag in &tags {
+                        if tag.trim().is_empty() || tag.eq_ignore_ascii_case("default") {
+                            problems.push(format!("{at}: section `{tag}`"));
+                        } else if !declared.contains(tag) {
+                            problems.push(format!("{at}: undeclared section `{tag}`"));
+                        }
+                        used.insert(*tag);
+                    }
+                    for field in ["summary", "description", "operationId"] {
+                        if !op[field].as_str().is_some_and(|v| !v.trim().is_empty()) {
+                            problems.push(format!("{at}: no {field}"));
+                        }
+                    }
+                    // A doc-comment summary wrapped onto a second `///` line is cut off
+                    // mid-sentence (utoipa takes the first line only): unbalanced brackets or
+                    // quotes, a trailing separator, or no final period after a connective.
+                    if let Some(summary) = op["summary"].as_str() {
+                        let summary = summary.trim_end();
+                        let last = summary
+                            .rsplit(' ')
+                            .next()
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if summary.matches('(').count() != summary.matches(')').count()
+                            || summary.matches('`').count() % 2 == 1
+                            || summary.ends_with([',', ';', ':', '(', '-', '+'])
+                            || (!summary.ends_with('.')
+                                && [
+                                    "a", "an", "and", "as", "at", "by", "every", "for", "from",
+                                    "in", "into", "of", "on", "or", "the", "to", "with",
+                                ]
+                                .contains(&last.as_str()))
+                        {
+                            problems.push(format!("{at}: truncated summary `{summary}`"));
+                        }
+                    }
+                    if let Some(id) = op["operationId"].as_str() {
+                        if !operation_ids.insert(id.to_owned()) {
+                            problems.push(format!("{at}: duplicate operationId {id}"));
+                        }
+                    }
+                }
+            }
+            if operations == 0 {
+                problems.push(format!("{name}: no operations"));
+            }
+            for tag in declared.difference(&used) {
+                problems.push(format!("{name}: empty section `{tag}`"));
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "{} Swagger documentation problems:\n{}",
+            problems.len(),
+            problems.join("\n")
         );
     }
 

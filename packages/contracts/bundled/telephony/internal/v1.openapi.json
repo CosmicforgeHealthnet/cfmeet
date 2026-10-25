@@ -1072,10 +1072,40 @@
       "cfServiceAuth": []
     }
   ],
+  "tags": [
+    {
+      "name": "Internal — Media Capture",
+      "description": "Internal — Media Capture operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Internal — Routes & Readiness",
+      "description": "Internal — Routes & Readiness operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Internal — Telephony Bridges",
+      "description": "Internal — Telephony Bridges operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Internal — Telephony Call Legs",
+      "description": "Internal — Telephony Call Legs operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Provider Telephony Callbacks",
+      "description": "Provider Telephony Callbacks operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Service Health",
+      "description": "Service Health operations in the Telephony internal API. Review the operation description for behavior, required permissions and schemas."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "operationId": "health",
+        "tags": [
+          "Service Health"
+        ],
+        "summary": "Check service health",
         "security": [],
         "description": "Liveness and database reachability.",
         "responses": {
@@ -1105,6 +1135,10 @@
     "/provider-callbacks/{provider_id}": {
       "post": {
         "operationId": "providerCallback",
+        "tags": [
+          "Provider Telephony Callbacks"
+        ],
+        "summary": "provider Callback",
         "security": [],
         "description": "Provider event callback. Authenticated by the adapter (signature / token / peer) BEFORE parsing; bodies over 16 KiB are refused unread; a strict parser; dedupe by (provider, provider event id). The body is provider-specific (adapter-internal, not a CF Meet contract).",
         "parameters": [
@@ -1157,6 +1191,10 @@
     "/provider-callbacks/{provider_id}/{token}": {
       "post": {
         "operationId": "providerCallbackWithToken",
+        "tags": [
+          "Provider Telephony Callbacks"
+        ],
+        "summary": "provider Callback With Token",
         "security": [],
         "description": "Provider callback for adapters that authenticate with a path token (compared in constant time).",
         "parameters": [
@@ -1219,6 +1257,10 @@
     "/internal/v1/legs/originate": {
       "post": {
         "operationId": "originateLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "originate Leg",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1286,6 +1328,10 @@
     "/internal/v1/legs/{leg_id}": {
       "get": {
         "operationId": "getLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "get Leg",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1329,6 +1375,10 @@
     "/internal/v1/legs/{leg_id}/terminate": {
       "post": {
         "operationId": "terminateLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "terminate Leg",
         "description": "Idempotent termination (an unresolved one is reconciled until the provider confirms). Permission telephony-leg.terminate.",
         "parameters": [
           {
@@ -1404,6 +1454,10 @@
     "/internal/v1/legs/{leg_id}/hold": {
       "post": {
         "operationId": "holdLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "hold Leg",
         "description": "Hold (media anchored at the edge). Permission telephony-leg.hold.",
         "parameters": [
           {
@@ -1479,6 +1533,10 @@
     "/internal/v1/legs/{leg_id}/resume": {
       "post": {
         "operationId": "resumeLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "resume Leg",
         "description": "Resume. Permission telephony-leg.resume.",
         "parameters": [
           {
@@ -1554,6 +1612,10 @@
     "/internal/v1/bridges": {
       "post": {
         "operationId": "createBridge",
+        "tags": [
+          "Internal — Telephony Bridges"
+        ],
+        "summary": "create Bridge",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1615,6 +1677,10 @@
     "/internal/v1/bridges/{bridge_id}": {
       "get": {
         "operationId": "getBridge",
+        "tags": [
+          "Internal — Telephony Bridges"
+        ],
+        "summary": "get Bridge",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1656,6 +1722,10 @@
       },
       "delete": {
         "operationId": "endBridge",
+        "tags": [
+          "Internal — Telephony Bridges"
+        ],
+        "summary": "end Bridge",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1699,6 +1769,10 @@
     "/internal/v1/routes/availability": {
       "get": {
         "operationId": "routeAvailability",
+        "tags": [
+          "Internal — Routes & Readiness"
+        ],
+        "summary": "route Availability",
         "description": "Normalized route availability (permission telephony-status.read).",
         "parameters": [
           {
@@ -1753,6 +1827,10 @@
     "/internal/v1/readiness": {
       "get": {
         "operationId": "readiness",
+        "tags": [
+          "Internal — Routes & Readiness"
+        ],
+        "summary": "readiness",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
@@ -1785,6 +1863,10 @@
     "/internal/v1/legs/{leg_id}/answer": {
       "post": {
         "operationId": "answerLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "answer Leg",
         "description": "Part F: answer an internal enterprise SIP leg (an IVR / voicemail needs media). Permission telephony-leg.media; refused (LEG_NOT_ACTIVE) for any public-network leg and while ENTERPRISE_SIP_ENABLED is off.",
         "parameters": [
           {
@@ -1860,6 +1942,10 @@
     "/internal/v1/legs/{leg_id}/prompt": {
       "post": {
         "operationId": "promptLeg",
+        "tags": [
+          "Internal — Telephony Call Legs"
+        ],
+        "summary": "prompt Leg",
         "description": "Part F: play one BUILT-IN prompt (body `prompt`) on an internal enterprise SIP leg; playbacks of a leg run in order. Permission telephony-leg.media.",
         "parameters": [
           {
@@ -1935,6 +2021,10 @@
     "/internal/v1/legs/{leg_id}/capture": {
       "post": {
         "operationId": "captureLeg",
+        "tags": [
+          "Internal — Media Capture"
+        ],
+        "summary": "capture Leg",
         "description": "Part F: capture the caller audio of an internal enterprise SIP leg (body `capture`: Calling's capture id, purpose, maximum length, beep) into the edge's transient spool; on completion Telephony delivers it to Calling (cfmeet.telephony.capture) and then deletes the spool copy. Permission telephony-leg.media; refused (LEG_NOT_ACTIVE) for public-network legs and while ENTERPRISE_SIP_ENABLED is off.",
         "parameters": [
           {
@@ -2010,6 +2100,10 @@
     "/internal/v1/legs/{leg_id}/capture-stop": {
       "post": {
         "operationId": "stopCaptureLeg",
+        "tags": [
+          "Internal — Media Capture"
+        ],
+        "summary": "stop Capture Leg",
         "description": "Part F: stop a running capture of an internal enterprise SIP leg early (body `capture`: the capture to stop) — a call recording's explicit / policy stop. The edge then delivers it like any finished capture. Never blocked by a kill switch; a capture that already finished makes it a no-op. Permission telephony-leg.media.",
         "parameters": [
           {

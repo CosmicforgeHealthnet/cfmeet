@@ -7,6 +7,13 @@ use super::{views, V2OptionalJson, V2Path};
 use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::AppState};
 
 /// Create an invitation. The raw token is returned once and never stored.
+///
+/// Issues a bearer invitation for an active meeting space, optionally limited to one conference
+/// (`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`
+/// (1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants
+/// `role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user
+/// token with invite authority in the space (a role allowed to admit participants); store the token
+/// from the response, it cannot be retrieved again.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/invitations", tag = "Invitations (v2)", operation_id = "v2_create_invitation",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -34,6 +41,10 @@ pub async fn create_invitation(
 }
 
 /// List invitations of a space (no tokens or hashes).
+///
+/// Returns all invitations of the meeting space, newest first, including revoked and expired ones,
+/// with their status and usage count. Requires a bearer user token with invite authority in the
+/// space (a role allowed to admit participants).
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/invitations", tag = "Invitations (v2)", operation_id = "v2_list_invitations",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -50,6 +61,10 @@ pub async fn list_invitations(
 }
 
 /// Revoke an invitation.
+///
+/// Marks the invitation REVOKED so it can no longer be resolved or used to join. Requires a bearer
+/// user token with invite authority in the space (a role allowed to admit participants). Revoking
+/// an already revoked invitation is a no-op that returns it unchanged.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke", tag = "Invitations (v2)", operation_id = "v2_revoke_invitation",
     params(("id" = Uuid, Path, description = "Meeting space id"), ("invitationId" = Uuid, Path, description = "Invitation id")),
@@ -70,6 +85,11 @@ pub async fn revoke_invitation(
 }
 
 /// Resolve an invitation token (read-only; does not consume a use).
+///
+/// Public endpoint, no authentication required. Returns the meeting space the token belongs to, the
+/// conference it is limited to (if any), the role it grants, its expiry and remaining uses.
+/// Unknown, revoked or used-up tokens return INVITATION_INVALID and expired ones
+/// INVITATION_EXPIRED; a use is consumed only when the token is used to join a conference.
 #[utoipa::path(
     post, path = "/api/v2/invitations/{token}/resolve", tag = "Invitations (v2)", operation_id = "v2_resolve_invitation",
     params(("token" = String, Path, description = "Raw invitation token")),
