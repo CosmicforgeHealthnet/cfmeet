@@ -11,7 +11,7 @@ links are in [`backend-final-closure.md`](backend-final-closure.md).
 | Developer Platform (memberships / invitations, roles and scopes, project / environment mapping, Platform Access delegation, credentials, production approval / suspension, plans and entitlement precedence, webhooks signing / retry / replay / SSRF, usage immutability / ingestion / reconciliation, migration tooling) | `make developer-platform-test`, `make developer-platform-lint` | 120 passed; fmt + clippy clean |
 | API Gateway (route allow-list, internal-route refusal, authentication context, signed context, header stripping, RPM / daily quotas, Redis degradation, limits, readiness, WebSockets) | `make api-gateway-test`, lint | 43 passed (incl. `--check-config` and SIGTERM startup tests) + `make api-gateway-integration` 1 passed; clean |
 | Calling (incl. webhook migration export / rollback, legacy usage paths and retirement) | `make calling-test`, lint | all passed (one count assertion updated for the two new public paths); clean |
-| Runtime-role startup change in Messaging, Numbering, Platform Access, Privacy Relay, SMS Gateway, Telephony | fmt + clippy `-D warnings` for each; startup suites (Messaging 3, Numbering 2, SMS Gateway 3); Platform Access, Privacy Relay, Telephony full suites; every service the certification stack starts (all of these except Telephony) runs under its runtime role | clean; passed |
+| Runtime-role startup change in Calling, Messaging, Numbering, Platform Access, Privacy Relay, SMS Gateway, Telephony | fmt + clippy `-D warnings` for each; full suites Calling 720, Messaging 250, Numbering 215, SMS Gateway 87, Platform Access 124, Privacy Relay 180, Telephony 165 (all passed); every service the certification stack starts (all of these except Telephony) runs under its runtime role | clean; 0 failed |
 | Contracts | `make contracts-validate`, `make contracts-test`, `public_api.py --check`, `bundle_openapi.py --check`, `test_public_api.py` | 82 contracts / 269 examples / 343 counter-examples OK; 19 mutation tests; 499 public routes; bundles current |
 | SDKs | `sdks/generate.py --check`; TypeScript `npm run typecheck && npm test`; Dart `dart analyze --fatal-infos`, `dart format` | 499 operations in parity; TS 143 passed; Dart analyze / format clean (Dart test: see §B SDK parity) |
 | Boundaries, registry, secrets | `make service-boundaries`, `make secret-scan` | OK (62 responsibilities); clean |
@@ -74,23 +74,27 @@ release binaries. These are floors for this shared host, **not capacity claims**
 
 | Profile | Volume | Measured | Result |
 |---|---|---|---|
-| Mixed REST, 6 families, 16 tenants | 2,160 req at 72 req/s (90 % of the aggregate TEST quota), 64 in flight | 0 errors; p50 10.4 ms, p95 14.9 ms, p99 18.4 ms | PASS |
-| Concurrent first authentication | 48 credentials cold, 96 warm | 0 errors; cold p95 353 ms, warm p95 154 ms; revoked under load → 401 next request | PASS |
+| Mixed REST, 6 families, 16 tenants | 2,160 req at 72 req/s (90 % of the aggregate TEST quota), 64 in flight | 0 errors; p50 7.2 ms, p95 9.8 ms, p99 12.0 ms | PASS |
+| Concurrent first authentication | 48 credentials cold, 96 warm | 0 errors; cold p95 209 ms, warm p95 115 ms; revoked under load → 401 next request | PASS |
 | Quota race | 4 tenants × 150 attempts, 48-way concurrent, limit 40/min | admitted exactly 40 each; 440 × 429; bystander unaffected | PASS |
-| WebSocket connect / reconnect / close | 20 concurrent × 3 rounds | 60/60 cycles; upgrade→welcome p95 ≈ 56 ms | PASS |
-| Redis outage (proxy cut, 8 s) | 80 requests | all 200/429, each bounded ≈ 257 ms; admitted 40 of 80 (never unlimited); mode `degraded`; shared again 1.2 s after restore | PASS (after fix) |
+| WebSocket connect / reconnect / close | 20 concurrent × 3 rounds | 60/60 cycles; connect p95 44 ms | PASS |
+| Redis outage (proxy cut, 8 s) | 80 requests | all 200/429, each bounded 256–262 ms; admitted 40 of 80 (never unlimited); mode `degraded`; shared again 1.23 s after restore | PASS (after fix) |
 | Domain outage (Calling stopped 5 s) | 24 + 24 + 24 | Calling and Privacy Relay (same process) 502 `UPSTREAM_UNAVAILABLE`; four independent families 24/24 200; recovery 0.02 s | PASS |
 | Platform Access outage (5 s) | 25 | 25 × 503 (fail closed), gateway `/ready` 503; recovery 0.02 s | PASS (after fix) |
-| Webhook fan-out + retry backlog | 5 subs × 40 events, 25 % of one endpoint failing | 200/200 delivered once, max queue 176, drained 27 s (30 s-class retry backoff) | PASS |
-| Replay volume | 30 concurrent replays | 30 × 201, new delivery id / same event id, delivered 0.4 s | PASS |
-| Usage ingestion + full replay | 20,000 facts, 500/batch, 4 concurrent | 4,620 facts/s; replay 6,765 facts/s, 0 recorded / 20,000 duplicates; exactly 20,000 in the ledger | PASS (after fix) |
+| Webhook fan-out + retry backlog | 5 subs × 40 events, 25 % of one endpoint failing | 200/200 delivered exactly once, max queue 196, drained 27.7 s (30 s-class retry backoff) | PASS |
+| Replay volume | 30 concurrent replays | 30 × 201, new delivery id / same event id, delivered 0.41 s | PASS |
+| Usage ingestion + full replay | 20,000 facts, 500/batch, 4 concurrent | 4,355 facts/s; replay 7,061 facts/s, 0 recorded / 20,000 duplicates; exactly 20,000 in the ledger | PASS (after fix) |
 | Rollup rebuild under ingestion | 10,000 concurrent facts, 3 rebuilds | all 200; 0 mismatching rollup rows | PASS |
-| Developer Platform DB outage (10 s) | 100 deliveries in flight + 4,000 facts | `/ready` 503 during; ready 0 s after; 74 retried batches → exactly 4,000 facts; wave delivered on recovery; 0 duplicate deliveries | PASS (after fix) |
-| Worker graceful stop (SIGTERM, as a container stop / rolling deploy) | backlog of 100, slow endpoint (sends in flight) | exits within its grace period; 0 deliveries left held; nothing sent while down; backlog completed after restart; 0 duplicates | PASS (after fix) |
-| Worker crash (SIGKILL) | backlog of 100 | nothing lost; the one send interrupted mid-flight re-sent as the SAME delivery id (at-least-once, deduplicable by receivers) | PASS |
+| Developer Platform DB outage (10 s) | 99 deliveries in flight + 4,000 facts | `/ready` 503 during; ready 0 s after; 74 retried batches → exactly 4,000 facts; wave delivered on recovery; 0 duplicate deliveries | PASS (after fix) |
+| Worker graceful stop (SIGTERM, as a container stop / rolling deploy) | backlog of 100, slow endpoint (sends in flight) | exits within its grace period; 0 deliveries left held; nothing sent while down; backlog completed 39.9 s after restart; 0 duplicates | PASS (after fix) |
+| Worker crash (SIGKILL) | backlog of 100 | nothing lost (completed 72 s after restart); the one send interrupted mid-flight re-sent as the SAME delivery id (at-least-once, deduplicable by receivers) | PASS |
 
-Debug-build run (as CI runs it): same correctness criteria, relaxed latency bound — see
-[`backend-final-closure.md`](backend-final-closure.md) §5.
+Final run: the code of this closure (every provisioned service under its runtime role),
+release binaries, `CFMEET_LOAD_REPORT_DIR` → [`evidence/`](evidence/) (0 failed criteria).
+`rollout_rehearsal.rs` passed in the same run.
+
+Debug-build run (as CI runs it, `make certification`): same correctness criteria with a
+relaxed latency bound — passed in the full local certification run (26 tests, 0 failed).
 
 ### Defects found by these tests and fixed
 
@@ -126,7 +130,8 @@ Debug-build run (as CI runs it): same correctness criteria, relaxed latency boun
    `provision-service-database.sh` creates: startup failed and `/ready` stayed
    `unknown`. CI never started a service under that role (it only checked SQL
    privileges). Fixed: a read-only `pending_migrations` in each service's migration crate
-   (startup and readiness). Regression: DP `startup.rs`
+   (startup and readiness), keeping the old fail-closed rules (pending → refuse; a
+   migration applied but unknown to the binary → error). Regression: DP `startup.rs`
    `the_server_starts_and_is_ready_under_the_runtime_role_without_ddl`, and the
    certification stack now runs **every provisioned service under its own runtime role**
    (granted exactly as in production), so every journey and load profile exercises

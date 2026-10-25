@@ -1,6 +1,6 @@
 {
   "failures": [],
-  "generatedAt": "2026-10-24T21:07:33.910294348+00:00",
+  "generatedAt": "2026-10-24T23:45:34.442864167+00:00",
   "hardware": {
     "binaries": "/home/user/cfmeet/target/release",
     "build": "unoptimized debug binaries unless CFMEET_BIN_DIR points at a release build",
@@ -38,58 +38,58 @@
           "concurrency": 48,
           "errorRate": 0.0,
           "latencyMs": {
-            "max": 353.2,
-            "p50": 349.7,
-            "p95": 352.9,
-            "p99": 353.2
+            "max": 209.1,
+            "p50": 206.6,
+            "p95": 209.0,
+            "p99": 209.1
           },
           "requests": 48,
           "success2xx": 48,
-          "throughputPerSecond": 135.7,
+          "throughputPerSecond": 229.4,
           "transportErrors": 0,
-          "wallSeconds": 0.35
+          "wallSeconds": 0.21
         },
         "credentials": 48,
         "resources": {
           "api-gateway": {
-            "cpuSeconds": 0.17,
-            "rssMiB": 18.8
+            "cpuSeconds": 0.11,
+            "rssMiB": 19.6
           },
           "calling": {
-            "cpuSeconds": 0.32,
-            "rssMiB": 39.5
+            "cpuSeconds": 0.19,
+            "rssMiB": 39.7
           },
           "developer-platform": {
-            "cpuSeconds": 0.14,
-            "rssMiB": 24.5
+            "cpuSeconds": 0.09,
+            "rssMiB": 23.6
           },
           "developer-platform-worker": {
             "cpuSeconds": 0.0,
-            "rssMiB": 9.9
+            "rssMiB": 8.5
           },
           "meeting-service": {
             "cpuSeconds": 0.0,
-            "rssMiB": 44.1
+            "rssMiB": 43.7
           },
           "messaging": {
-            "cpuSeconds": 0.02,
-            "rssMiB": 26.6
+            "cpuSeconds": 0.0,
+            "rssMiB": 25.6
           },
           "numbering": {
             "cpuSeconds": 0.0,
-            "rssMiB": 18.7
+            "rssMiB": 18.3
           },
           "platform-access": {
-            "cpuSeconds": 0.21,
-            "rssMiB": 25.0
+            "cpuSeconds": 0.13,
+            "rssMiB": 24.6
           },
           "privacy-relay": {
             "cpuSeconds": 0.0,
-            "rssMiB": 14.1
+            "rssMiB": 14.0
           },
           "sms-gateway": {
             "cpuSeconds": 0.0,
-            "rssMiB": 13.7
+            "rssMiB": 12.7
           }
         },
         "revokedNextRequestStatus": 401,
@@ -100,16 +100,16 @@
           "concurrency": 48,
           "errorRate": 0.0,
           "latencyMs": {
-            "max": 188.0,
-            "p50": 134.9,
-            "p95": 154.0,
-            "p99": 154.4
+            "max": 115.1,
+            "p50": 61.1,
+            "p95": 114.8,
+            "p99": 115.0
           },
           "requests": 96,
           "success2xx": 96,
-          "throughputPerSecond": 337.6,
+          "throughputPerSecond": 559.0,
           "transportErrors": 0,
-          "wallSeconds": 0.28
+          "wallSeconds": 0.17
         }
       },
       "profile": "concurrent-authentication"
@@ -145,44 +145,44 @@
         "optimizedBinaries": true,
         "resources": {
           "api-gateway": {
-            "cpuSeconds": 2.63,
-            "rssMiB": 18.9
+            "cpuSeconds": 1.85,
+            "rssMiB": 19.7
           },
           "calling": {
-            "cpuSeconds": 1.75,
-            "rssMiB": 39.5
+            "cpuSeconds": 1.12,
+            "rssMiB": 39.8
           },
           "developer-platform": {
-            "cpuSeconds": 1.96,
-            "rssMiB": 24.7
+            "cpuSeconds": 1.23,
+            "rssMiB": 24.0
           },
           "developer-platform-worker": {
-            "cpuSeconds": 0.07,
-            "rssMiB": 9.9
+            "cpuSeconds": 0.05,
+            "rssMiB": 8.5
           },
           "meeting-service": {
             "cpuSeconds": 0.02,
-            "rssMiB": 44.1
+            "rssMiB": 43.7
           },
           "messaging": {
-            "cpuSeconds": 0.9,
-            "rssMiB": 27.2
+            "cpuSeconds": 0.63,
+            "rssMiB": 26.3
           },
           "numbering": {
-            "cpuSeconds": 0.72,
-            "rssMiB": 19.9
+            "cpuSeconds": 0.49,
+            "rssMiB": 19.6
           },
           "platform-access": {
-            "cpuSeconds": 4.61,
-            "rssMiB": 25.5
+            "cpuSeconds": 3.19,
+            "rssMiB": 25.0
           },
           "privacy-relay": {
-            "cpuSeconds": 0.48,
+            "cpuSeconds": 0.33,
             "rssMiB": 14.8
           },
           "sms-gateway": {
-            "cpuSeconds": 0.91,
-            "rssMiB": 14.9
+            "cpuSeconds": 0.61,
+            "rssMiB": 13.8
           }
         },
         "result": {
@@ -192,16 +192,16 @@
           "concurrency": 64,
           "errorRate": 0.0,
           "latencyMs": {
-            "max": 51.2,
-            "p50": 10.4,
-            "p95": 14.9,
-            "p99": 18.4
+            "max": 23.2,
+            "p50": 7.2,
+            "p95": 9.8,
+            "p99": 12.0
           },
           "requests": 2160,
           "success2xx": 2160,
           "throughputPerSecond": 72.0,
           "transportErrors": 0,
-          "wallSeconds": 30.0
+          "wallSeconds": 29.99
         },
         "targetRatePerSecond": 72.0,
         "tenants": 16
@@ -240,16 +240,16 @@
           "concurrency": 48,
           "errorRate": 0.7333,
           "latencyMs": {
-            "max": 264.2,
-            "p50": 25.2,
-            "p95": 182.8,
-            "p99": 260.0
+            "max": 198.5,
+            "p50": 23.6,
+            "p95": 126.7,
+            "p99": 181.0
           },
           "requests": 600,
           "success2xx": 160,
-          "throughputPerSecond": 1019.9,
+          "throughputPerSecond": 1149.0,
           "transportErrors": 0,
-          "wallSeconds": 0.59
+          "wallSeconds": 0.52
         }
       },
       "profile": "multi-tenant-quota-race"
@@ -268,9 +268,9 @@
       "measured": {
         "concurrentConnections": 20,
         "connectMs": {
-          "max": 54.817972,
-          "p50": 31.825046000000004,
-          "p95": 52.203272000000005
+          "max": 56.49505,
+          "p50": 28.948831000000002,
+          "p95": 44.372794999999996
         },
         "cycle": {
           "byStatus": {
@@ -279,59 +279,59 @@
           "concurrency": 20,
           "errorRate": 1.0,
           "latencyMs": {
-            "max": 128.0,
-            "p50": 69.3,
-            "p95": 101.1,
-            "p99": 101.2
+            "max": 111.8,
+            "p50": 64.5,
+            "p95": 86.1,
+            "p99": 100.0
           },
           "requests": 60,
           "success2xx": 0,
-          "throughputPerSecond": 269.3,
+          "throughputPerSecond": 307.4,
           "transportErrors": 0,
-          "wallSeconds": 0.22
+          "wallSeconds": 0.2
         },
         "cycles": 60,
         "reconnectRounds": 3,
         "resources": {
           "api-gateway": {
             "cpuSeconds": 0.04,
-            "rssMiB": 22.6
+            "rssMiB": 23.1
           },
           "calling": {
             "cpuSeconds": 0.0,
-            "rssMiB": 32.2
+            "rssMiB": 39.5
           },
           "developer-platform": {
-            "cpuSeconds": 0.0,
-            "rssMiB": 29.0
+            "cpuSeconds": 0.01,
+            "rssMiB": 27.0
           },
           "developer-platform-worker": {
             "cpuSeconds": 0.0,
-            "rssMiB": 9.9
+            "rssMiB": 8.5
           },
           "meeting-service": {
             "cpuSeconds": 0.0,
-            "rssMiB": 47.3
+            "rssMiB": 46.9
           },
           "messaging": {
-            "cpuSeconds": 0.25,
-            "rssMiB": 49.8
+            "cpuSeconds": 0.22,
+            "rssMiB": 49.2
           },
           "numbering": {
             "cpuSeconds": 0.0,
-            "rssMiB": 25.1
+            "rssMiB": 23.8
           },
           "platform-access": {
-            "cpuSeconds": 0.07,
-            "rssMiB": 28.0
+            "cpuSeconds": 0.08,
+            "rssMiB": 26.5
           },
           "privacy-relay": {
             "cpuSeconds": 0.0,
-            "rssMiB": 14.9
+            "rssMiB": 15.1
           },
           "sms-gateway": {
             "cpuSeconds": 0.0,
-            "rssMiB": 15.9
+            "rssMiB": 14.6
           }
         },
         "successfulCycles": 60
@@ -376,10 +376,10 @@
           "concurrency": 1,
           "errorRate": 0.5,
           "latencyMs": {
-            "max": 265.0,
-            "p50": 256.7,
-            "p95": 262.9,
-            "p99": 264.6
+            "max": 262.0,
+            "p50": 256.0,
+            "p95": 260.9,
+            "p99": 261.9
           },
           "requests": 80,
           "success2xx": 40,
@@ -423,16 +423,16 @@
           "concurrency": 1,
           "errorRate": 1.0,
           "latencyMs": {
-            "max": 6.7,
-            "p50": 4.5,
-            "p95": 6.5,
-            "p99": 6.7
+            "max": 6.6,
+            "p50": 4.2,
+            "p95": 5.5,
+            "p99": 6.6
           },
           "requests": 24,
           "success2xx": 0,
-          "throughputPerSecond": 4.6,
+          "throughputPerSecond": 4.7,
           "transportErrors": 0,
-          "wallSeconds": 5.18
+          "wallSeconds": 5.15
         },
         "errorCodes": [
           "UPSTREAM_UNAVAILABLE"
@@ -444,16 +444,16 @@
           "concurrency": 1,
           "errorRate": 0.0,
           "latencyMs": {
-            "max": 9.6,
-            "p50": 6.2,
-            "p95": 9.3,
-            "p99": 9.6
+            "max": 10.2,
+            "p50": 5.5,
+            "p95": 9.5,
+            "p99": 10.2
           },
           "requests": 24,
           "success2xx": 24,
-          "throughputPerSecond": 4.6,
+          "throughputPerSecond": 4.7,
           "transportErrors": 0,
-          "wallSeconds": 5.18
+          "wallSeconds": 5.15
         },
         "outageSeconds": 5.2,
         "privacyRelayDuringOutage": {
@@ -463,16 +463,16 @@
           "concurrency": 1,
           "errorRate": 1.0,
           "latencyMs": {
-            "max": 4.1,
-            "p50": 3.2,
-            "p95": 4.0,
-            "p99": 4.1
+            "max": 6.1,
+            "p50": 3.0,
+            "p95": 4.3,
+            "p99": 6.1
           },
           "requests": 24,
           "success2xx": 0,
-          "throughputPerSecond": 4.6,
+          "throughputPerSecond": 4.7,
           "transportErrors": 0,
-          "wallSeconds": 5.18
+          "wallSeconds": 5.15
         },
         "recoverySecondsAfterRestart": 0.02,
         "restartToReadySeconds": 0.0
@@ -507,7 +507,7 @@
           "errorRate": 1.0,
           "latencyMs": {
             "max": 1.9,
-            "p50": 1.7,
+            "p50": 1.5,
             "p95": 1.8,
             "p99": 1.9
           },
@@ -515,7 +515,7 @@
           "success2xx": 0,
           "throughputPerSecond": 4.7,
           "transportErrors": 0,
-          "wallSeconds": 5.36
+          "wallSeconds": 5.35
         },
         "outageSeconds": 5,
         "readyDuringOutage": 503,

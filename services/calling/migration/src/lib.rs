@@ -119,8 +119,8 @@ impl MigratorTrait for Migrator {
 
 /// The migrations of [`Migrator`] not yet recorded in [`MIGRATION_TABLE`] — READ-ONLY.
 ///
-/// `MigratorTrait::get_pending_migrations` first runs `CREATE TABLE IF NOT EXISTS` on the
-/// migration table, which the least-privilege runtime role
+/// `MigratorTrait::get_pending_migrations` first (re)creates the migration table with DDL,
+/// which the least-privilege runtime role
 /// (`infra/deployment/postgres/provision-service-database.sh`: no DDL) is refused
 /// (sqlstate 42501) even when the table exists — the service could neither start nor
 /// report ready under its own role. This only `SELECT`s.

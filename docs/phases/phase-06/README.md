@@ -67,6 +67,23 @@ ingestion, plus Developer Console API readiness (UI deferred):
 [`chapters-14-18-backend.md`](chapters-14-18-backend.md),
 [`developer-console-api-handoff.md`](developer-console-api-handoff.md).
 
+## 4b. Chapters 19–24 (backend closure)
+
+Migration / compatibility, certification with measured load and recovery, deployment
+readiness and rollout controls, the A–Z workstream audit, the acceptance matrix and the
+closure register. **Decision: BACKEND_CERTIFIED_RELEASE_PENDING** (nothing deployed; the
+Chapter 18 Console UI is excluded, so the complete original Part VI is not delivered).
+
+| Chapter | Record |
+|---|---|
+| Stage 0 baseline | [`baseline-and-branch-reconciliation.md`](baseline-and-branch-reconciliation.md) |
+| 19 | [`chapter-19-migration.md`](chapter-19-migration.md) |
+| 20 | [`chapter-20-certification.md`](chapter-20-certification.md), [`evidence/`](evidence/) |
+| 21 | [`chapter-21-deployment.md`](chapter-21-deployment.md), [`infra/deployment/part-vi/`](../../../infra/deployment/part-vi/README.md) |
+| 22 | [`chapter-22-workstreams.md`](chapter-22-workstreams.md) |
+| 23 | [`chapter-23-acceptance.md`](chapter-23-acceptance.md) |
+| 24 | [`backend-final-closure.md`](backend-final-closure.md) |
+
 ## 5. Validation evidence
 
 See [`validation.md`](validation.md).
