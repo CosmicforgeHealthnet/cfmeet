@@ -751,8 +751,9 @@ const MESSAGING_API: &str =
     include_str!("../../../../packages/contracts/bundled/messaging/http/v1.openapi.json");
 // Part VI: already audience-filtered, bundled OpenAPI from the gateway route catalogue.
 // This documentation host never proxies these APIs or exposes their internal variants.
-const DEVELOPER_PLATFORM_PUBLIC_API: &str =
-    include_str!("../../../../packages/contracts/bundled/public/developer-platform/v1.openapi.json");
+const DEVELOPER_PLATFORM_PUBLIC_API: &str = include_str!(
+    "../../../../packages/contracts/bundled/public/developer-platform/v1.openapi.json"
+);
 const API_GATEWAY_PUBLIC_API: &str =
     include_str!("../../../../packages/contracts/bundled/public/gateway/v1.openapi.json");
 
@@ -792,7 +793,11 @@ const PEER_DOCS: [(&str, &str, &str); 10] = [
         "/api-docs/developer-platform.json",
         DEVELOPER_PLATFORM_PUBLIC_API,
     ),
-    ("API Gateway", "/api-docs/api-gateway.json", API_GATEWAY_PUBLIC_API),
+    (
+        "API Gateway",
+        "/api-docs/api-gateway.json",
+        API_GATEWAY_PUBLIC_API,
+    ),
 ];
 
 /// swagger-ui-dist, pinned by version AND by Subresource Integrity (sha384 of the exact
@@ -955,8 +960,12 @@ fn public_doc(service: &str, raw: &str) -> String {
         let context = doc["paths"]["/v1/developer-platform/context"]["get"]
             .as_object_mut()
             .expect("gateway context operation must be present");
-        context.entry("tags".to_string()).or_insert_with(|| serde_json::json!(["API Gateway"]));
-        context.entry("summary".to_string()).or_insert_with(|| serde_json::json!("Read the delegated Developer Platform context."));
+        context
+            .entry("tags".to_string())
+            .or_insert_with(|| serde_json::json!(["API Gateway"]));
+        context
+            .entry("summary".to_string())
+            .or_insert_with(|| serde_json::json!("Read the delegated Developer Platform context."));
     }
     // A section whose operations were all filtered out (e.g. "Admin") would still render
     // as an empty Swagger heading; publish only the sections that still hold operations.
