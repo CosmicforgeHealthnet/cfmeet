@@ -17,6 +17,7 @@ on:
       - "packages/service-auth/**"
       - "scripts/contracts/**"
       - "infra/api-gateway/**"
+      - "scripts/swagger/**"
       - "services/meeting-service/src/swagger/**"
       - ".github/workflows/contracts.yml"
   pull_request:
@@ -25,6 +26,8 @@ on:
       - "packages/service-auth/**"
       - "scripts/contracts/**"
       - "infra/api-gateway/**"
+      - "scripts/swagger/**"
+      - "services/meeting-service/src/swagger/**"
       - ".github/workflows/contracts.yml"
   workflow_dispatch:
 
@@ -90,6 +93,10 @@ jobs:
       - name: route catalogue generator checks
         working-directory: .
         run: python3 -m unittest scripts/contracts/test_public_api.py
+
+      - name: complete private engineering catalog is buildable off-repository
+        working-directory: .
+        run: python3 scripts/swagger/test_private_docs.py
 
   # The bundles rendered the way a reader meets them: Swagger UI (the version and SRI the
   # Meeting Service serves) in Chromium, the schema host blocked, the whole document
