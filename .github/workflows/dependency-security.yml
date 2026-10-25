@@ -33,6 +33,8 @@ on:
       - "scripts/secret-scan/**"
       - "scripts/security/**"
       - ".github/workflows/dependency-security.yml"
+      - ".github/workflows/backend.yml"
+      - ".github/workflows/deploy-backend.yml"
   pull_request:
     paths:
       - "services/calling/**"
@@ -51,6 +53,8 @@ on:
       - "scripts/secret-scan/**"
       - "scripts/security/**"
       - ".github/workflows/dependency-security.yml"
+      - ".github/workflows/backend.yml"
+      - ".github/workflows/deploy-backend.yml"
   schedule:
     # Weekly, so new advisories against unchanged lockfiles are noticed.
     - cron: "17 5 * * 1"
