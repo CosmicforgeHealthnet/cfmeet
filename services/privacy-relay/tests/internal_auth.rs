@@ -26,7 +26,7 @@ fn forge(h: &Harness, claims: &Value) -> String {
         jsonwebtoken::EncodingKey::from_ed_der(signing.to_pkcs8_der().unwrap().as_bytes());
     let header = json!({ "alg": "EdDSA", "typ": "cf-service+jwt", "kid": "calling-test-1" });
     let message = format!("{}.{}", b64(&header), b64(claims));
-    let signature = jsonwebtoken::crypto::sign(
+    let signature = cf_service_auth::jwt::sign(
         message.as_bytes(),
         &encoding,
         jsonwebtoken::Algorithm::EdDSA,

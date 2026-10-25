@@ -43,6 +43,11 @@ pub struct CallingConfig {
     /// (`CALLING_IDENTITY_SYNC_INTERVAL_MS`, 100–60000, default 1000).
     pub identity_sync_interval: std::time::Duration,
     pub log_format: LogFormat,
+    /// Part VI §21.2 `CALLING_LEGACY_USAGE_AUTHORITY` (`active` default / `retired`):
+    /// retired, Calling's customer usage / limit views answer 503 `SERVICE_UNAVAILABLE`
+    /// with `CF-Usage-Migration: moved` — the legacy compatibility, independently
+    /// disableable after the central-usage cutover.
+    pub legacy_usage_retired: bool,
 }
 
 impl fmt::Debug for CallingConfig {
@@ -54,6 +59,7 @@ impl fmt::Debug for CallingConfig {
             .field("identity_sync_interval", &self.identity_sync_interval)
             .field("limit_defaults", &self.limit_defaults)
             .field("log_format", &self.log_format)
+            .field("legacy_usage_retired", &self.legacy_usage_retired)
             .finish()
     }
 }
@@ -147,6 +153,16 @@ impl CallingConfig {
 
         let database_max_connections =
             positive(&non_empty, "CALLING_DATABASE_MAX_CONNECTIONS", 10)?;
+        let legacy_usage_retired = match non_empty("CALLING_LEGACY_USAGE_AUTHORITY").as_deref() {
+            None | Some("active") => false,
+            Some("retired") => true,
+            Some(_) => {
+                return Err(ConfigError::invalid(
+                    "CALLING_LEGACY_USAGE_AUTHORITY",
+                    "must be `active` or `retired`".to_string(),
+                ))
+            }
+        };
 
         Ok(Self {
             database_url,
@@ -160,6 +176,7 @@ impl CallingConfig {
             limit_defaults,
             identity_sync_interval,
             log_format,
+            legacy_usage_retired,
         })
     }
 
@@ -236,6 +253,21 @@ mod tests {
             cfg.identity_sync_interval,
             std::time::Duration::from_secs(1)
         );
+        assert!(
+            !cfg.legacy_usage_retired,
+            "legacy usage views active by default"
+        );
+        let retired = CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("CALLING_LEGACY_USAGE_AUTHORITY", "retired"),
+        ]))
+        .unwrap();
+        assert!(retired.legacy_usage_retired);
+        assert!(CallingConfig::from_lookup(lookup(&[
+            ("DATABASE_URL", "postgres://x/y"),
+            ("CALLING_LEGACY_USAGE_AUTHORITY", "maybe"),
+        ]))
+        .is_err());
     }
 
     #[test]

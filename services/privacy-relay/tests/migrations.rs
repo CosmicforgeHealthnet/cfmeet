@@ -67,8 +67,9 @@ async fn up_down_up_creates_exactly_the_privacy_relay_tables() {
         // retention holds / audit and contact erasure (000013); §81 / §86 add incidents,
         // operator audit and the enforcement dead letter (000014); Part IV Part P adds
         // the Numbering relay-number lease ledger (000015); Part V H adds the Messaging
-        // context-authority jobs (000016).
-        16
+        // context-authority jobs (000016); Part VI §53 adds per-receiver publication
+        // outcomes on the outbox (000017).
+        17
     );
     Migrator::down(&db.conn, None).await.unwrap();
     assert_eq!(tables(&db.conn).await, ["privacy_relay_seaql_migrations"]);

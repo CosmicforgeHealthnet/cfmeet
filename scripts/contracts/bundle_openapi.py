@@ -90,7 +90,10 @@ class Bundler:
         return self.files[path]
 
     def bundle(self, source: str):
-        doc = json.loads((CONTRACTS / source).read_text())
+        return self.bundle_doc(json.loads((CONTRACTS / source).read_text()), source)
+
+    def bundle_doc(self, doc, source: str):
+        """Bundles an in-memory OpenAPI document (`source` names it in errors)."""
         self.components = doc.setdefault("components", {}).setdefault("schemas", {})
         self.added = {}
         self.pending = []

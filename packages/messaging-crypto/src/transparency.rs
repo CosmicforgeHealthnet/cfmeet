@@ -14,7 +14,7 @@
 //! * Signed tree heads (Part V G.5): the log operator signs
 //!   [`tree_head_signing_input`] — a length-prefixed encoding of the log id, tree size,
 //!   root hash and timestamp — with an Ed25519 key that is a SERVER secret (§142), and
-//!   clients verify it with [`verify_tree_head_signature`] (OpenMLS's RustCrypto
+//!   clients verify it with [`verify_tree_head_signature`] (the CF Meet provider's
 //!   `verify_strict`; no primitive is implemented here). Ed25519 is deterministic, so two
 //!   valid signatures over different roots for the same log and size are portable
 //!   evidence of equivocation.
@@ -33,8 +33,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::provider::CfMlsCrypto;
 use openmls::prelude::{OpenMlsCrypto, SignatureScheme};
-use openmls_rust_crypto::RustCrypto;
 use sha2::{Digest, Sha256};
 
 pub type Hash = [u8; 32];
@@ -72,7 +72,7 @@ pub fn tree_head_signing_input(
 /// (32 bytes). Strict verification; any malformed key or signature is `false`.
 pub fn verify_tree_head_signature(public_key: &[u8], input: &[u8], signature: &[u8]) -> bool {
     signature.len() == TREE_HEAD_SIGNATURE_LEN
-        && RustCrypto::default()
+        && CfMlsCrypto
             .verify_signature(SignatureScheme::ED25519, input, public_key, signature)
             .is_ok()
 }
@@ -720,13 +720,13 @@ mod tests {
     }
 
     fn keypair() -> (Vec<u8>, [u8; 32]) {
-        let c = RustCrypto::default();
+        let c = CfMlsCrypto;
         let (sk, pk) = c.signature_key_gen(SignatureScheme::ED25519).unwrap();
         (sk, pk.try_into().unwrap())
     }
 
     fn sign(sk: &[u8], data: &[u8]) -> Vec<u8> {
-        RustCrypto::default()
+        CfMlsCrypto
             .sign(SignatureScheme::ED25519, data, sk)
             .unwrap()
     }

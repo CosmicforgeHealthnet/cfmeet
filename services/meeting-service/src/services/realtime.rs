@@ -308,6 +308,9 @@ struct TicketClaims {
     typ: String,
     exp: i64,
     iat: i64,
+    /// Unique ticket id: consumed on first use (one-shot).
+    #[serde(default)]
+    jti: Option<String>,
 }
 
 pub struct RealtimeService {
@@ -315,6 +318,9 @@ pub struct RealtimeService {
     redis: Option<Arc<RedisService>>,
     ticket_key: Vec<u8>,
     require_email_verification: bool,
+    /// Consumed ticket ids (with expiry) when no Redis is configured: one-shot per
+    /// instance. With Redis the consumption is shared by every instance.
+    consumed: Arc<std::sync::Mutex<std::collections::HashMap<String, i64>>>,
 }
 
 /// Lifetime of a one-shot WebSocket subscription ticket.
@@ -334,6 +340,7 @@ impl RealtimeService {
             redis,
             ticket_key,
             require_email_verification,
+            consumed: Arc::default(),
         }
     }
 
@@ -485,6 +492,7 @@ impl RealtimeService {
                 typ: "rt".into(),
                 exp: exp.timestamp(),
                 iat: now.timestamp(),
+                jti: Some(Uuid::new_v4().simple().to_string()),
             },
             &EncodingKey::from_secret(&self.ticket_key),
         )
@@ -492,8 +500,14 @@ impl RealtimeService {
         Ok((token, exp))
     }
 
-    /// Verify a ticket for `conference_id` and return its principal's subject.
-    pub fn verify_ticket(&self, ticket: &str, conference_id: Uuid) -> ApiResult<TicketSubject> {
+    /// Verify a ticket for `conference_id`, CONSUME it (a ticket opens one subscription:
+    /// a replay is refused like an invalid ticket) and return its principal's subject.
+    /// The consumption store failing refuses the ticket (fail closed).
+    pub async fn verify_ticket(
+        &self,
+        ticket: &str,
+        conference_id: Uuid,
+    ) -> ApiResult<TicketSubject> {
         let invalid = || {
             ApiError::domain(
                 ErrorCode::AuthenticationRequired,
@@ -510,12 +524,61 @@ impl RealtimeService {
         if claims.typ != "rt" || claims.conf != conference_id {
             return Err(invalid());
         }
+        let jti = claims
+            .jti
+            .as_deref()
+            .filter(|j| j.len() == 32 && j.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(invalid)?;
+        if !self.consume_ticket(jti, claims.exp).await? {
+            tracing::warn!(conference_id = %conference_id, "realtime ticket replay refused");
+            return Err(invalid());
+        }
         let parse = |s: &str| Uuid::parse_str(s).map_err(|_| invalid());
         match claims.sub.split_once(':') {
             Some(("user", id)) => Ok(TicketSubject::User(parse(id)?)),
             Some(("participant", id)) => Ok(TicketSubject::Participant(parse(id)?)),
             _ => Err(invalid()),
         }
+    }
+
+    /// `true` when `jti` was not consumed before (and is now). Shared through Redis;
+    /// while Redis is unavailable realtime degrades (as the event fan-out does) to the
+    /// per-instance store, so a ticket stays single-use on the instance that took it.
+    async fn consume_ticket(&self, jti: &str, exp: i64) -> ApiResult<bool> {
+        let ttl = (exp - Utc::now().timestamp()).clamp(1, TICKET_TTL_SECS + 60) as u64;
+        if let Some(redis) = &self.redis {
+            let shared = async {
+                let mut conn = redis.get_conn().await.ok()?;
+                redis::cmd("SET")
+                    .arg(format!("rt:ticket:{jti}"))
+                    .arg("1")
+                    .arg("NX")
+                    .arg("EX")
+                    .arg(ttl)
+                    .query_async::<_, Option<String>>(&mut *conn)
+                    .await
+                    .ok()
+            };
+            match tokio::time::timeout(std::time::Duration::from_secs(2), shared).await {
+                Ok(Some(set)) => {
+                    // Also remember it locally: a later degraded check on this instance
+                    // must not accept it again.
+                    self.consume_locally(jti, exp);
+                    return Ok(set.is_some());
+                }
+                _ => tracing::warn!(
+                    "realtime ticket store (Redis) unavailable: per-instance one-shot check"
+                ),
+            }
+        }
+        Ok(self.consume_locally(jti, exp))
+    }
+
+    fn consume_locally(&self, jti: &str, exp: i64) -> bool {
+        let now = Utc::now().timestamp();
+        let mut consumed = self.consumed.lock().unwrap_or_else(|p| p.into_inner());
+        consumed.retain(|_, e| *e >= now);
+        consumed.insert(jti.to_string(), exp).is_none()
     }
 
     pub async fn current_sequence(&self, conference_id: Uuid) -> ApiResult<i64> {

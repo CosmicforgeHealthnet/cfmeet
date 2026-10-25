@@ -161,8 +161,9 @@ jobs:
           test "$(q "SELECT count(*) FROM platform_access_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # The identity hierarchy (8), the change feed, the operator audit, failed-
           # authentication windows, Part III import receipts and credential principal
-          # restrictions — and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "13"
+          # restrictions, Part VI §54/§55 credential suspensions and production
+          # activations — and nothing of any other service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "15"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations' AND tablename NOT LIKE 'platform\_%'")" = "0"
           # Verifier material lives only in the credential table (never in the change feed).
           # The one exception is the Part III import receipt's integrity checksum

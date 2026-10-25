@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "TENANT_FORBIDDEN",
+    "message": "x",
+    "requestId": null
+  }
+}

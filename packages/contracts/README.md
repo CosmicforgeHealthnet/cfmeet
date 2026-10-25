@@ -47,6 +47,10 @@ This package is the permanent home for shared, externally visible contracts acro
 | `cfmeet.telephony.routes` | 1.0.0 (beta) | JSON Schema 2020-12 | [`telephony/routes/v1.schema.json`](telephony/routes/v1.schema.json) | contract-first; normalized route availability (opaque route refs, health, KNOWN / UNKNOWN evidence) |
 | `cfmeet.telephony.usage` | 1.0.0 (beta) | JSON Schema 2020-12 | [`telephony/usage/v1.schema.json`](telephony/usage/v1.schema.json) | contract-first; Telephony's restricted per-leg usage record (cost known only when reported) |
 | `cfmeet.telephony.internal-http-api` | 1.0.0 (beta) | OpenAPI 3.1 | [`telephony/internal/v1.openapi.json`](telephony/internal/v1.openapi.json) | contract-first; exactly the implemented Telephony routes: health, provider callback ingress, the service-authenticated /internal/v1 API for Calling |
+| `cfmeet.developer-platform.common` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`platform-developer/common/v1.schema.json`](platform-developer/common/v1.schema.json) | contract-first; Part VI foundation: error envelope, probes, gateway-forwarded canonical context (Platform Access ids only) |
+| `cfmeet.developer-platform.internal-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`platform-developer/internal/v1.openapi.json`](platform-developer/internal/v1.openapi.json) | contract-first, served at `GET /openapi.json`; probes and `GET /internal/v1/gateway/context` (`developer-request.forward`) |
+| `cfmeet.api-gateway.common` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`platform-developer/gateway/common/v1.schema.json`](platform-developer/gateway/common/v1.schema.json) | contract-first; public error envelope and probes of the gateway |
+| `cfmeet.api-gateway.http-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`platform-developer/gateway/http/v1.openapi.json`](platform-developer/gateway/http/v1.openapi.json) | contract-first; default-deny customer ingress: probes and the flag-gated foundation route (Section 51 catalogue not included) |
 
 Schemas have `examples/` (must validate) and `counter-examples/` (must be rejected).
 Implementations are checked against these contracts in both directions by

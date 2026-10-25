@@ -44,5 +44,6 @@ pub mod sms_bridge;
 pub mod state;
 pub mod transparency;
 pub mod usage;
+pub mod usage_export;
 pub mod webhook_relay;
 pub mod workers;

@@ -2,6 +2,7 @@
 # Everything is excluded except the directories the image is built from.
 *
 !packages/service-auth
+!packages/usage-facts
 !packages/object-storage
 !packages/webhooks
 !packages/contracts

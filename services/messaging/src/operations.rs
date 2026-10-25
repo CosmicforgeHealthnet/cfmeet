@@ -474,7 +474,11 @@ impl DeadLetterKind {
                 "messaging_webhook_relay",
                 "event_id",
                 "DEAD_LETTER",
-                "status = 'PENDING', attempts = 0, next_attempt_at = $1",
+                // A receiver's refusal is forgotten (re-sent); acceptances are kept
+                // (never re-sent to a receiver that accepted, Part VI §53).
+                "status = 'PENDING', attempts = 0, next_attempt_at = $1, \
+                 calling_outcome = NULLIF(calling_outcome, 'REJECTED'), \
+                 developer_platform_outcome = NULLIF(developer_platform_outcome, 'REJECTED')",
             ),
             DeadLetterKind::ObjectDeletion => (
                 "messaging_object_deletions",

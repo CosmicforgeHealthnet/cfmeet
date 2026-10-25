@@ -1,0 +1,21 @@
+{
+  "environmentId": "9b2e3c4d-5f60-4718-8a9b-0c1d2e3f4a5b",
+  "organizationId": "3f0f4c1e-6a7b-4c2d-9e8f-0a1b2c3d4e5f",
+  "projectId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "environmentKind": "SANDBOX",
+  "organizationState": "ACTIVE",
+  "apiRequestsPerMinute": 120,
+  "apiRequestsPerDay": 10000,
+  "limitingLevel": {
+    "apiRequestsPerMinute": "ENVIRONMENT",
+    "apiRequestsPerDay": "ENVIRONMENT"
+  },
+  "plan": {
+    "code": "starter",
+    "version": 2
+  },
+  "projectPlan": null,
+  "domainEntitlements": {
+    "concurrentCalls": 5
+  }
+}

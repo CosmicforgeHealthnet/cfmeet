@@ -46,7 +46,9 @@ impl Sandbox {
         let contracts = repo.join("packages/contracts");
         copy_dir(&real_contracts(), &contracts);
         for service in [
+            "api-gateway",
             "calling",
+            "developer-platform",
             "meeting-service",
             "messaging",
             "numbering",
@@ -283,6 +285,20 @@ fn messaging_contracts_require_the_messaging_service() {
         &s.run(),
         "owner `messaging` is not an existing deployable service",
     );
+}
+
+#[test]
+fn part_vi_contracts_require_their_services() {
+    // Part VI: the Developer Platform and API Gateway contracts exist only with their
+    // implemented services.
+    for service in ["developer-platform", "api-gateway"] {
+        let s = Sandbox::new();
+        fs::remove_dir_all(s.repo.join("services").join(service)).unwrap();
+        assert_rejected(
+            &s.run(),
+            &format!("owner `{service}` is not an existing deployable service"),
+        );
+    }
 }
 
 #[test]

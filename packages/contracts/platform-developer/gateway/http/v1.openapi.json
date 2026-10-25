@@ -1,0 +1,212 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet public API Gateway",
+    "version": "1.1.0",
+    "description": "Customer ingress of services/api-gateway (Part VI §51): probes, public documentation and discovery, and the generated public route catalogue (infra/api-gateway/route-manifest.json, documented per domain in cfmeet.*.public-api and in aggregate in cfmeet.api-gateway.public-api). Default deny; internal, provider-callback, operator, Platform Access and Telephony surfaces are never routable. The foundation diagnostic route GET /v1/developer-platform/context is kept."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "description": "Liveness.",
+        "responses": {
+          "200": {
+            "description": "Alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "security": [],
+        "description": "Readiness: route catalogue loaded (counts only).",
+        "responses": {
+          "200": {
+            "description": "Ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/ReadinessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/developer-platform/context": {
+      "get": {
+        "operationId": "getDeveloperPlatformContext",
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "description": "Foundation route (catalogue id developer-platform.context): authenticates the credential through Platform Access and forwards to the Developer Platform (GET /internal/v1/gateway/context) with the signed delegated context. Served only when API_GATEWAY_PUBLIC_ROUTING_ENABLED is true.",
+        "responses": {
+          "200": {
+            "description": "Canonical context of the credential's application environment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/common/v1.schema.json#/$defs/GatewayContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getPublicOpenApi",
+        "security": [],
+        "description": "The aggregate customer-facing OpenAPI (public operations only, references resolved).",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/openapi/{file}": {
+      "get": {
+        "operationId": "getPublicDomainOpenApi",
+        "security": [],
+        "description": "The per-domain customer-facing OpenAPI (`{domain}.json`: meetings, calling, privacy-relay, messaging, numbering, sms, developer-platform).",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z-]{1,40}\\.json$"
+            }
+          }
+        ]
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "getApiReference",
+        "security": [],
+        "description": "Read-only public API reference (Swagger UI over the public documents only; pinned, integrity-checked assets).",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/discovery": {
+      "get": {
+        "operationId": "getDiscovery",
+        "security": [],
+        "description": "API catalogue and service discovery: families, source contract and version, routable operations, WebSocket channels and enablement.",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "platformCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A CF Meet API credential issued by Platform Access (Authorization: Bearer). X-CF-* headers supplied by a client are stripped; a client X-CF-Service-Authorization is refused."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform-developer/gateway/common/v1.schema.json#/$defs/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

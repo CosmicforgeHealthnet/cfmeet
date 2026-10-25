@@ -16,6 +16,7 @@ on:
       - "packages/contracts/**"
       - "packages/service-auth/**"
       - "scripts/contracts/**"
+      - "infra/api-gateway/**"
       - "scripts/swagger/**"
       - "services/meeting-service/src/swagger/**"
       - ".github/workflows/contracts.yml"
@@ -24,6 +25,7 @@ on:
       - "packages/contracts/**"
       - "packages/service-auth/**"
       - "scripts/contracts/**"
+      - "infra/api-gateway/**"
       - "scripts/swagger/**"
       - "services/meeting-service/src/swagger/**"
       - ".github/workflows/contracts.yml"
@@ -78,6 +80,19 @@ jobs:
       - name: bundled OpenAPI documents are current and self-contained
         working-directory: .
         run: python3 scripts/contracts/bundle_openapi.py --check
+
+      # Part VI §51: the public route manifest of the API Gateway and the public OpenAPI
+      # documents are derived from the contracts plus the explicit allow-list; drift, an
+      # unclassified operation or an internal / operator / callback leak fails.
+      - name: gateway route manifest and public OpenAPI are current
+        working-directory: .
+        run: python3 scripts/contracts/public_api.py --check
+
+      # Part VI §16: the generator's own checks (unique route ids, deprecation /
+      # replacement metadata) are mutation-tested.
+      - name: route catalogue generator checks
+        working-directory: .
+        run: python3 -m unittest scripts/contracts/test_public_api.py
 
       - name: complete private engineering catalog is buildable off-repository
         working-directory: .

@@ -691,6 +691,44 @@ class RealRepository(unittest.TestCase):
             lambda r: append(r, "services/numbering/src/main.rs", "\nfn local() { let _ = verifier_message; }\n"),
         )
 
+    # Part VI §§1–6: the Developer Platform and the API Gateway.
+    def test_gateway_owning_data(self):
+        self.assertMutationFails(
+            "GATEWAY_OWNS_DATA",
+            lambda r: write(r, "services/api-gateway/migration/src/m1.rs", 'const SQL: &str = "CREATE TABLE gateway_requests (id uuid)";\n'),
+        )
+        self.assertMutationFails(
+            "GATEWAY_OWNS_DATA",
+            lambda r: append(r, "services/api-gateway/Cargo.toml", '\n[dependencies.sqlx]\nversion = "0.8"\n'),
+        )
+
+    def test_part_vi_duplicating_the_identity_hierarchy(self):
+        for table in ("devplat_tenants", "devplat_api_keys", "devplat_application_environments", "devplat_scopes"):
+            self.assertMutationFails(
+                "IDENTITY_HIERARCHY_DUPLICATED",
+                lambda r, t=table: write(r, "services/developer-platform/migration/src/m9.rs", f'const SQL: &str = "CREATE TABLE {t} (id uuid)";\n'),
+            )
+
+    def test_part_vi_product_specific_endpoints(self):
+        self.assertMutationFails(
+            "PRODUCT_ENDPOINT_IN_PLATFORM",
+            lambda r: append(r, "services/api-gateway/src/routing.rs", '\nconst P: &str = "/v1/karryam/rides";\n'),
+        )
+        self.assertMutationFails(
+            "PRODUCT_ENDPOINT_IN_PLATFORM",
+            lambda r: append(r, "services/developer-platform/src/lib.rs", '\npub fn healthnet_patients() {}\n'),
+        )
+
+    def test_part_vi_credential_verification(self):
+        self.assertMutationFails(
+            "IDENTITY_AUTHORITY_ELSEWHERE",
+            lambda r: append(r, "services/api-gateway/src/identity.rs", "\nfn local(k: &VerifierKeyring) {}\n"),
+        )
+        self.assertMutationFails(
+            "CARGO_CROSS_SERVICE_DEPENDENCY",
+            lambda r: append(r, "services/api-gateway/Cargo.toml", '\n[dependencies.developer-platform]\npath = "../developer-platform"\n'),
+        )
+
     def test_calling_reading_the_credential_pepper(self):
         self.assertMutationFails(
             "FOREIGN_SECRET_REFERENCE",

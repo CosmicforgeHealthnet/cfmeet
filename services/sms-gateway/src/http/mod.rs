@@ -25,7 +25,6 @@ use axum::{
 };
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::json;
-use sms_gateway_migration::MigratorTrait;
 
 use self::{
     error::{error_response, ApiError, ErrorCode},
@@ -101,7 +100,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    let pending = sms_gateway_migration::Migrator::get_pending_migrations(&state.db).await;
+    let pending = sms_gateway_migration::pending_migrations(&state.db).await;
     let (ok, database, migrations) = match pending {
         Ok(p) if p.is_empty() => (true, "ok", "current"),
         Ok(_) => (false, "ok", "pending"),

@@ -270,10 +270,13 @@ text_enum!(OutboxStatus {
 });
 
 text_enum!(
-    /// Client realtime events vs internal provider-control commands (never sent to clients).
+    /// Client realtime events vs internal provider-control commands (never sent to
+    /// clients) vs Part VI §53 platform envelopes of environment-scoped meeting events
+    /// for the Developer Platform (`PUBLIC_EVENT`, never delivered to realtime clients).
     OutboxChannel {
         Realtime = "REALTIME",
         ProviderCommand = "PROVIDER_COMMAND",
+        PublicEvent = "PUBLIC_EVENT",
     }
 );
 

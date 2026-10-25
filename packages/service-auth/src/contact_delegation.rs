@@ -258,7 +258,7 @@ impl ContactDelegationSigner {
         let mut header = Header::new(Algorithm::EdDSA);
         header.typ = Some(CONTACT_TOKEN_TYPE.to_string());
         header.kid = Some(self.key.kid().as_str().to_string());
-        let token = jsonwebtoken::encode(&header, &claims, self.key.encoding_key())
+        let token = crate::jwt::encode(&header, &claims, self.key.encoding_key())
             .map_err(|_| ContactSignError::Signing)?;
         Ok(ContactAccessToken {
             token: SecretString::from(token),
@@ -644,12 +644,12 @@ impl ContactDelegationVerifier {
         validation.validate_nbf = false;
         validation.validate_aud = false;
         validation.leeway = 0;
-        let decoded = jsonwebtoken::decode::<serde_json::Value>(token, &trusted.key, &validation)
+        let decoded = crate::jwt::decode::<serde_json::Value>(token, &trusted.key, &validation)
             .map_err(|e| match e.kind() {
-            ErrorKind::InvalidSignature => F::BadSignature,
-            ErrorKind::InvalidAlgorithm => F::UnsupportedAlgorithm,
-            _ => F::MalformedToken,
-        })?;
+                ErrorKind::InvalidSignature => F::BadSignature,
+                ErrorKind::InvalidAlgorithm => F::UnsupportedAlgorithm,
+                _ => F::MalformedToken,
+            })?;
         let claims: ContactDelegationClaims =
             serde_json::from_value(decoded.claims).map_err(|_| F::MalformedClaims)?;
         if claims.ver != CONTACT_CLAIMS_VERSION {

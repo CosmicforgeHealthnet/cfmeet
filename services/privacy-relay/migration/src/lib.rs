@@ -24,6 +24,7 @@ mod m20261010_000013_retention_and_contact_erasure;
 mod m20261015_000014_incidents_and_enforcement_dead_letter;
 mod m20261024_000015_numbering_relay_leases;
 mod m20261026_000016_messaging_authority_jobs;
+mod m20261101_000017_public_event_destinations;
 
 /// Name of the table recording which Privacy Relay migrations have been applied.
 pub const MIGRATION_TABLE: &str = "privacy_relay_seaql_migrations";
@@ -50,10 +51,65 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000014_incidents_and_enforcement_dead_letter::Migration),
             Box::new(m20261024_000015_numbering_relay_leases::Migration),
             Box::new(m20261026_000016_messaging_authority_jobs::Migration),
+            Box::new(m20261101_000017_public_event_destinations::Migration),
         ]
     }
 
     fn migration_table_name() -> DynIden {
         Alias::new(MIGRATION_TABLE).into_iden()
     }
+}
+
+/// The migrations of [`Migrator`] not yet recorded in [`MIGRATION_TABLE`] — READ-ONLY.
+///
+/// `MigratorTrait::get_pending_migrations` first (re)creates the migration table with DDL,
+/// which the least-privilege runtime role
+/// (`infra/deployment/postgres/provision-service-database.sh`: no DDL) is refused
+/// (sqlstate 42501) even when the table exists — the service could neither start nor
+/// report ready under its own role. This only `SELECT`s.
+pub async fn pending_migrations<C>(db: &C) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = Migrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!("SELECT to_regclass('{MIGRATION_TABLE}') IS NOT NULL AS present"),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    // Same fail-closed rule as `get_pending_migrations`: a migration applied to the
+    // database but unknown to this binary (an older binary on a newer schema) is an error.
+    let mut unknown: Vec<&String> = applied.iter().filter(|v| !known.contains(v)).collect();
+    if !unknown.is_empty() {
+        unknown.sort();
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            unknown
+                .iter()
+                .map(|v| format!("Migration file of version '{v}' is missing, this migration has been applied but its file is missing"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
 }

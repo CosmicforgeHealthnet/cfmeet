@@ -19,16 +19,34 @@
 //! `Retry-After` while a key id is throttled (§109), 503 when the authority is
 //! unreachable (fail closed). Suspension, revocation and rotation take effect on the next
 //! request (Platform Access keeps no cache).
+//!
+//! A second path serves requests forwarded by the public API Gateway (Part VI §51,
+//! [`CredentialAuthenticator::authenticate_delegated`]). The gateway verified the bearer
+//! credential itself and forwards the request without it, naming the credential (id
+//! only, never a secret) in the delegated context of its signed service token. Calling
+//! asks Platform Access (`POST /internal/v1/credentials/delegated-authority`, the
+//! delegated context attached to Calling's own outbound token) for that credential's
+//! LIVE authority chain, so a credential revoked or suspended after the gateway's check
+//! is refused here too:
+//!
+//! ```text
+//! delegated context ─▶ Platform Access ─▶ AUTHENTICATED { same chain as above }
+//!  (credential id)                     ─▶ REJECTED { reason }   (no throttle: no secret)
+//! ```
+//!
+//! Both paths share one chain handler (projection, authority mode, scopes), so a
+//! forwarded request is scoped exactly like a directly authenticated one.
 
 use std::sync::Arc;
 
+use cf_service_auth::DelegatedPlatformContext;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
 use super::{
     access::{
-        AuthenticationOutcome, AuthorityError, IdentityAuthority, WireAuthorityMode,
-        WireSuspendedLink,
+        AuthenticationOutcome, AuthorityChain, AuthorityError, IdentityAuthority,
+        WireAuthorityMode, WireSuspendedLink,
     },
     context::{AuthorityMode, PlatformAuthContext, SuspendedLink, TrustedAuthority},
     projection::IdentityProjection,
@@ -43,8 +61,14 @@ use crate::domain::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthFailureReason {
     MissingCredential,
-    /// An internal service token was presented to a customer route.
+    /// An internal service token was presented together with a customer credential.
     ServiceCredentialPresented,
+    /// A service token on a customer route did not verify against Calling's trust bundle.
+    ServiceTokenInvalid,
+    /// A verified service token whose issuer is not granted `calling-request.forward`.
+    ForwardNotPermitted,
+    /// A gateway-forwarded request without a delegated context naming the credential.
+    DelegatedCredentialMissing,
     MalformedCredential,
     UnknownCredential,
     SecretMismatch,
@@ -65,6 +89,9 @@ impl AuthFailureReason {
         match self {
             Self::MissingCredential => "missing_credential",
             Self::ServiceCredentialPresented => "service_credential_presented",
+            Self::ServiceTokenInvalid => "service_token_invalid",
+            Self::ForwardNotPermitted => "forward_not_permitted",
+            Self::DelegatedCredentialMissing => "delegated_credential_missing",
             Self::MalformedCredential => "malformed_credential",
             Self::UnknownCredential => "unknown_credential",
             Self::SecretMismatch => "secret_mismatch",
@@ -117,6 +144,16 @@ pub enum AuthenticationError {
     Unavailable { summary: String },
 }
 
+/// Every failure to reach the authority (or a refused authority call) fails closed.
+fn unavailable(error: AuthorityError) -> AuthenticationError {
+    AuthenticationError::Unavailable {
+        summary: match error {
+            AuthorityError::Unavailable(s) | AuthorityError::Refused(s) => s,
+            AuthorityError::NotFound => "not found".to_string(),
+        },
+    }
+}
+
 /// The failure bucket of every presented key id that names no credential.
 const UNKNOWN_KEY_BUCKET: &str = "unknown";
 
@@ -153,12 +190,7 @@ impl CredentialAuthenticator {
             .authority
             .authenticate(presented, &request.correlation_id)
             .await
-            .map_err(|e| AuthenticationError::Unavailable {
-                summary: match e {
-                    AuthorityError::Unavailable(s) | AuthorityError::Refused(s) => s,
-                    AuthorityError::NotFound => "not found".to_string(),
-                },
-            })?;
+            .map_err(unavailable)?;
         let chain = match outcome {
             AuthenticationOutcome::Authenticated(chain) => chain,
             AuthenticationOutcome::Rejected {
@@ -182,13 +214,76 @@ impl CredentialAuthenticator {
                 });
             }
         };
+        self.trusted_context(&chain, request).await
+    }
+
+    /// Authenticates a request the API Gateway forwarded (§51): the gateway already
+    /// verified the customer's bearer credential and named it in its signed delegated
+    /// context (`initiating_credential_id`). The caller has verified that service token
+    /// (issuer granted `calling-request.forward`). Nothing from the delegated context is
+    /// trusted as authority: Platform Access re-fetches the credential's LIVE authority
+    /// chain (so revocation, expiry and suspension apply on the very next request) and the
+    /// chain is handled exactly like a directly presented credential's. No secret is
+    /// presented here, so no failed-authentication throttle applies: a REJECTED answer is
+    /// the normalized 401, an unreachable authority 503.
+    pub async fn authenticate_delegated(
+        &self,
+        delegated: &DelegatedPlatformContext,
+        request: RequestContext,
+    ) -> Result<PlatformAuthContext, AuthenticationError> {
+        let Some(credential_id) = delegated.initiating_credential_id() else {
+            return Err(AuthenticationError::Rejected {
+                reason: AuthFailureReason::DelegatedCredentialMissing,
+                public_id: None,
+            });
+        };
+        let outcome = self
+            .authority
+            .delegated_authority(delegated, &request.correlation_id)
+            .await
+            .map_err(unavailable)?;
+        let chain = match outcome {
+            AuthenticationOutcome::Authenticated(chain) => chain,
+            AuthenticationOutcome::Rejected {
+                reason, public_id, ..
+            } => {
+                return Err(AuthenticationError::Rejected {
+                    reason: AuthFailureReason::from_authority(&reason),
+                    public_id,
+                })
+            }
+        };
+        // Platform Access already refuses a chain outside the delegated scope; an answer
+        // naming another credential or scope is corrupt and can only refuse.
+        let same_authority = chain.credential.id == credential_id
+            && chain.tenant.id == delegated.tenant_id()
+            && chain.application.id == delegated.application_id()
+            && chain.environment.id == delegated.application_environment_id()
+            && chain.service_account.id == delegated.initiating_service_account_id();
+        if !same_authority {
+            return Err(AuthenticationError::Rejected {
+                reason: AuthFailureReason::CorruptAuthorityChain,
+                public_id: Some(chain.credential.public_id.clone()),
+            });
+        }
+        self.trusted_context(&chain, request).await
+    }
+
+    /// The single path from an authority chain to a [`PlatformAuthContext`]: projection,
+    /// authority mode, scope set — shared by every authentication path.
+    async fn trusted_context(
+        &self,
+        chain: &AuthorityChain,
+        request: RequestContext,
+    ) -> Result<PlatformAuthContext, AuthenticationError> {
         // The rows every Calling foreign key references must exist (and carry current
         // statuses) before the request can act.
-        self.projection.apply_chain(&chain).await.map_err(|e| {
-            AuthenticationError::Unavailable {
+        self.projection
+            .apply_chain(chain)
+            .await
+            .map_err(|e| AuthenticationError::Unavailable {
                 summary: e.to_string(),
-            }
-        })?;
+            })?;
         let authority_mode = match (chain.authority_mode, chain.suspended_link) {
             (WireAuthorityMode::Full, None) => AuthorityMode::Full,
             (_, Some(WireSuspendedLink::Tenant)) => {

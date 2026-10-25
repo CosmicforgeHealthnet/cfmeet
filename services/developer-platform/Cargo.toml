@@ -1,0 +1,61 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "developer-platform"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "developer-platform"
+description = "CF Meet Developer Platform (Part VI): the developer / enterprise control plane foundation. References Platform Access's canonical tenant, application and environment ids; owns no identity, credential, communications or E2EE data"
+
+[lib]
+name = "developer_platform"
+path = "src/lib.rs"
+
+[[bin]]
+name = "developer-platform"
+path = "src/main.rs"
+
+[[bin]]
+name = "developer-platform-worker"
+path = "src/bin/developer-platform-worker.rs"
+
+[dependencies]
+developer-platform-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Shared customer-webhook primitives (signing, sealed secrets at rest, SSRF-safe endpoint
+# policy, retry classification): Section 53 central webhooks reuse them; the Developer
+# Platform implements no webhook cryptography of its own.
+cf-webhooks = { path = "../../packages/webhooks" }
+# Part VI §55 unified usage facts: the catalogue, canonical digest and validation shared
+# with every producer (one fact model platform-wide).
+cf-usage-facts = { path = "../../packages/usage-facts" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+secrecy = "0.10"
+async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+sha2 = "0.10"
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.42", features = ["process"] }
+bytes = "1"

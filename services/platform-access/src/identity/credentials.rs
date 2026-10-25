@@ -50,6 +50,8 @@ pub enum CredentialEffectiveState {
     /// Superseded by rotation; overlap window ended.
     Superseded,
     Revoked,
+    /// Reversibly suspended (Part VI §54); never derived from the persisted status.
+    Suspended,
 }
 
 impl CredentialEffectiveState {
@@ -79,6 +81,16 @@ impl CredentialEffectiveState {
     pub fn authenticates(&self) -> bool {
         matches!(self, Self::Active | Self::RotationOverlap)
     }
+
+    /// The state with a suspension applied: a suspension masks an authenticating state
+    /// (revoked / expired / superseded stay what they are).
+    pub fn with_suspension(self, suspended: bool) -> Self {
+        if suspended && self.authenticates() {
+            Self::Suspended
+        } else {
+            self
+        }
+    }
 }
 
 /// Safe representation of a credential: no secret, no verifier.
@@ -104,6 +116,8 @@ pub struct CredentialView {
     pub superseded_by_credential_id: Option<CredentialId>,
     pub superseded_at: Option<DateTime<Utc>>,
     pub supersession_valid_until: Option<DateTime<Utc>>,
+    /// When the credential was suspended (Part VI §54; `None`: not suspended).
+    pub suspended_at: Option<DateTime<Utc>>,
     pub verifier_algorithm: String,
     pub verifier_key_version: i32,
     pub revision: i64,
@@ -433,6 +447,7 @@ impl PlatformService {
             old.supersession_valid_until,
             now,
         );
+        let state = state.with_suspension(!suspensions_of(&txn, &[old.id]).await?.is_empty());
         if state != CredentialEffectiveState::Active {
             return Err(PlatformError::InvalidState(format!(
                 "only an ACTIVE credential can be rotated (current state: {state:?})"
@@ -536,6 +551,100 @@ impl PlatformService {
         Ok(view)
     }
 
+    /// Suspends a credential (reversible; Part VI §54): it stops authenticating at once.
+    /// Only a credential that still authenticates can be suspended; suspending a
+    /// suspended credential returns it unchanged. The credential row is touched so the
+    /// identity change feed signals the change.
+    pub(crate) async fn suspend_credential_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        credential_id: CredentialId,
+        by: &str,
+        reason_code: &str,
+    ) -> PlatformResult<(CredentialView, bool)> {
+        let view = self.credential_in(db, credential_id).await?;
+        if view.effective_state == CredentialEffectiveState::Suspended {
+            return Ok((view, false));
+        }
+        if !view.effective_state.authenticates() {
+            return Err(PlatformError::InvalidState(format!(
+                "only an authenticating credential can be suspended (current state: {:?})",
+                view.effective_state
+            )));
+        }
+        let valid_reason = (2..=64).contains(&reason_code.len())
+            && reason_code.as_bytes()[0].is_ascii_uppercase()
+            && reason_code
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+        if !valid_reason {
+            return Err(PlatformError::Validation(
+                "reason_code must be an UPPER_SNAKE code".to_string(),
+            ));
+        }
+        let now = self.clock.now();
+        db.execute(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "INSERT INTO platform_credential_suspensions \
+               (credential_id, tenant_id, suspended_at, suspended_by, reason_code) \
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (credential_id) DO NOTHING",
+            [
+                credential_id.as_uuid().into(),
+                view.tenant_id.as_uuid().into(),
+                now.into(),
+                by.chars().take(100).collect::<String>().into(),
+                reason_code.into(),
+            ],
+        ))
+        .await?;
+        self.touch_credential(db, credential_id, now).await?;
+        tracing::info!(credential_id = %credential_id, "API credential suspended");
+        Ok((self.credential_in(db, credential_id).await?, true))
+    }
+
+    /// Lifts a suspension (idempotent: an unsuspended credential is returned unchanged).
+    pub(crate) async fn resume_credential_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        credential_id: CredentialId,
+    ) -> PlatformResult<(CredentialView, bool)> {
+        self.credential_in(db, credential_id).await?;
+        let removed = db
+            .execute(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "DELETE FROM platform_credential_suspensions WHERE credential_id = $1",
+                [credential_id.as_uuid().into()],
+            ))
+            .await?
+            .rows_affected()
+            > 0;
+        if removed {
+            self.touch_credential(db, credential_id, self.clock.now())
+                .await?;
+            tracing::info!(credential_id = %credential_id, "API credential resumed");
+        }
+        Ok((self.credential_in(db, credential_id).await?, removed))
+    }
+
+    async fn touch_credential<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        credential_id: CredentialId,
+        now: DateTime<Utc>,
+    ) -> PlatformResult<()> {
+        api_credentials::Entity::update_many()
+            .col_expr(api_credentials::Column::UpdatedAt, Expr::value(now))
+            .filter(api_credentials::Column::Id.eq(credential_id.as_uuid()))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether `id` is currently suspended.
+    pub async fn credential_suspended(&self, id: CredentialId) -> PlatformResult<bool> {
+        Ok(!suspensions_of(&self.db, &[id.as_uuid()]).await?.is_empty())
+    }
+
     pub async fn credential(&self, id: CredentialId) -> PlatformResult<CredentialView> {
         self.credential_in(&self.db, id).await
     }
@@ -610,6 +719,7 @@ impl PlatformService {
             .into_iter()
             .map(|e| (e.id, e.kind))
             .collect();
+        let suspensions = suspensions_of(db, &ids).await?;
         let mut scopes: HashMap<_, Vec<String>> = HashMap::new();
         for row in scopes_of(db, ids).await? {
             scopes.entry(row.credential_id).or_default().push(row.scope);
@@ -638,7 +748,9 @@ impl PlatformService {
                         m.expires_at,
                         m.supersession_valid_until,
                         now,
-                    ),
+                    )
+                    .with_suspension(suspensions.contains_key(&m.id)),
+                    suspended_at: suspensions.get(&m.id).copied(),
                     not_before: m.not_before,
                     expires_at: m.expires_at,
                     revoked_at: m.revoked_at,
@@ -659,6 +771,32 @@ impl PlatformService {
             })
             .collect()
     }
+}
+
+/// `credential id -> suspended_at` of the suspended credentials among `ids`.
+pub(crate) async fn suspensions_of<C: ConnectionTrait>(
+    db: &C,
+    ids: &[uuid::Uuid],
+) -> PlatformResult<HashMap<uuid::Uuid, DateTime<Utc>>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = db
+        .query_all(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "SELECT credential_id, suspended_at FROM platform_credential_suspensions \
+             WHERE credential_id = ANY($1)",
+            [ids.to_vec().into()],
+        ))
+        .await?;
+    let mut out = HashMap::new();
+    for r in rows {
+        out.insert(
+            r.try_get::<uuid::Uuid>("", "credential_id")?,
+            r.try_get::<DateTime<Utc>>("", "suspended_at")?,
+        );
+    }
+    Ok(out)
 }
 
 async fn scopes_of<C: ConnectionTrait>(

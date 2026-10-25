@@ -20,7 +20,8 @@ use crate::{
     services::{
         actor::ActorContext,
         meeting_core::{
-            find_space, lock_space, permission_denied, space_role, state_conflict, validation, Core,
+            actor_space_role, find_space, lock_space, permission_denied, state_conflict,
+            validation, Core,
         },
         meeting_events::{action, audit, AuditActor, AuditRecord},
         meeting_permissions::{check_grant, space_allows, PermissionContext, SpacePermission},
@@ -70,8 +71,10 @@ impl InvitationService {
         ctx: &ActorContext,
         space: &meeting_spaces::Model,
     ) -> ApiResult<Role> {
-        let actor = ctx.require_registered()?;
-        let role = space_role(conn, space, actor).await?.map(|(r, _)| r);
+        if ctx.platform().is_none() {
+            ctx.require_registered()?;
+        }
+        let role = actor_space_role(conn, space, ctx).await?.map(|(r, _)| r);
         let pctx = PermissionContext::for_space(space);
         match role {
             Some(r) if space_allows(r, SpacePermission::Invite, &pctx) => Ok(r),
@@ -88,8 +91,7 @@ impl InvitationService {
         space_id: Uuid,
         req: CreateInvitationRequest,
     ) -> ApiResult<(meeting_invitations::Model, String)> {
-        let actor = ctx.require_registered()?;
-        self.core.require_v2_write(actor)?;
+        let writer = self.core.require_v2_writer(ctx)?;
         let hours = req.expires_in_hours.unwrap_or(168);
         if hours < 1 || hours > self.core.config.invitation_max_ttl_hours {
             return Err(validation(format!(
@@ -146,7 +148,7 @@ impl InvitationService {
             id: Set(Uuid::new_v4()),
             meeting_space_id: Set(space_id),
             conference_id: Set(req.conference_id),
-            inviter_user_id: Set(actor.user_id),
+            inviter_user_id: Set(writer.user_id()),
             invitee_email: Set(invitee_email),
             requested_role: Set(requested_role),
             token_hash: Set(secrets::hash_secret(&token)),
@@ -265,7 +267,6 @@ impl InvitationService {
         space_id: Uuid,
         invitation_id: Uuid,
     ) -> ApiResult<meeting_invitations::Model> {
-        let actor = ctx.require_registered()?;
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, space_id).await?;
         self.inviter_role(&txn, ctx, &space).await?;
@@ -282,7 +283,7 @@ impl InvitationService {
         let mut am: meeting_invitations::ActiveModel = inv.into();
         am.status = Set(InvitationStatus::Revoked);
         am.revoked_at = Set(Some(now));
-        am.revoked_by = Set(Some(actor.user_id));
+        am.revoked_by = Set(ctx.user_id());
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
         audit(
@@ -335,7 +336,7 @@ mod tests {
             id: Uuid::new_v4(),
             meeting_space_id: Uuid::new_v4(),
             conference_id: None,
-            inviter_user_id: Uuid::new_v4(),
+            inviter_user_id: Some(Uuid::new_v4()),
             invitee_email: None,
             requested_role: Role::Participant,
             token_hash: "h".into(),

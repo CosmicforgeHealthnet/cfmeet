@@ -1,0 +1,145 @@
+name: SDK release (manual)
+
+# Part VI §21.1 / §21.2 — `SDK_PUBLICATION_ENABLED` (release pipeline only).
+#
+# Manual only (never on push). Every run builds and verifies the release ARTIFACTS of
+# both SDKs from the repository (generation current, typecheck / analyze, tests, the npm
+# tarball and the pub archive dry run) and uploads them to the run. Publication to a
+# registry is a separate job that runs only when ALL of these hold:
+#
+#   * the repository / environment variable SDK_PUBLICATION_ENABLED is exactly "true";
+#   * the run was started with `publish: true`;
+#   * the `sdk-release` environment's protection rules (reviewers) approve it;
+#   * the package manifests are publishable (TypeScript `private` removed, Dart
+#     `publish_to: none` removed) — both are set today, so publication fails closed.
+#
+# Registry credentials (NPM_TOKEN; pub.dev uses GitHub OIDC) are release-time
+# configuration of the `sdk-release` environment, never needed for local generation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to the registries after the artifacts verify (also requires SDK_PUBLICATION_ENABLED=true and environment approval)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release
+  cancel-in-progress: false
+
+jobs:
+  artifacts:
+    name: build and verify release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SDK generation is current
+        run: python3 sdks/generate.py --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - name: TypeScript — install, typecheck, test, build, bundle check
+        working-directory: sdks/typescript
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npm run check:bundle
+
+      - name: TypeScript — npm tarball
+        working-directory: sdks/typescript
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sdk"
+          npm pack --pack-destination "$RUNNER_TEMP/sdk"
+          ls -l "$RUNNER_TEMP/sdk"
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Dart — pub get, analyze, archive dry run
+        working-directory: sdks/dart
+        run: |
+          set -euo pipefail
+          dart pub get
+          dart analyze --fatal-infos
+          # `publish_to: none` makes `dart pub publish` refuse; the archive is built and
+          # validated without it in a scratch copy.
+          rm -rf "$RUNNER_TEMP/dart-release" && cp -r . "$RUNNER_TEMP/dart-release"
+          sed -i '/^publish_to: none$/d' "$RUNNER_TEMP/dart-release/pubspec.yaml"
+          # A failed dry run (today: no LICENSE — a licensing decision pending for
+          # publication) is reported, not hidden; the publish job fails closed anyway.
+          if ! (cd "$RUNNER_TEMP/dart-release" && dart pub publish --dry-run) > "$RUNNER_TEMP/sdk/dart-publish-dry-run.txt" 2>&1; then
+            echo "::warning::cfmeet_platform_sdk is not publishable yet (see dart-publish-dry-run.txt)"
+          fi
+          cat "$RUNNER_TEMP/sdk/dart-publish-dry-run.txt"
+          tar -czf "$RUNNER_TEMP/sdk/cfmeet_platform_sdk-$(grep '^version:' pubspec.yaml | awk '{print $2}').tar.gz" \
+            --exclude=.dart_tool --exclude=build .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-sdk-release-artifacts
+          path: ${{ runner.temp }}/sdk
+
+  publish:
+    name: publish (SDK_PUBLICATION_ENABLED)
+    needs: artifacts
+    if: ${{ inputs.publish && vars.SDK_PUBLICATION_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: sdk-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: manifests must be publishable (fail closed)
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./sdks/typescript/package.json").private ? 0 : 1)'; then
+            echo "::error::sdks/typescript/package.json is private: publication is not enabled for this release"
+            exit 1
+          fi
+          if grep -q '^publish_to: none$' sdks/dart/pubspec.yaml; then
+            echo "::error::sdks/dart/pubspec.yaml has publish_to: none: publication is not enabled for this release"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: publish @cfmeet/platform-sdk
+        working-directory: sdks/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN" || { echo "::error::NPM_TOKEN is not configured for the sdk-release environment"; exit 1; }
+          npm ci
+          npm run build
+          npm publish --provenance --access public
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: publish cfmeet_platform_sdk
+        working-directory: sdks/dart
+        run: |
+          set -euo pipefail
+          dart pub get
+          dart pub publish --force

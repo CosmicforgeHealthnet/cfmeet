@@ -34,6 +34,22 @@ async fn numbering_and_sms_scopes_are_grantable_and_effective() {
 }
 
 #[tokio::test]
+async fn meeting_scopes_are_grantable_and_effective() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let all = ["meetings.read", "meetings.write"];
+    let c = h.consumer("meet", "EXTERNAL", &all).await;
+    let (_, secret) = h.issue(c.sa("SANDBOX"), &all).await;
+    let r = h.authenticate(&secret).await;
+    assert_eq!(r.body["authority"]["scopes"], json!(all));
+    // Least privilege: a write-only credential holds exactly meetings.write.
+    let (_, write_only) = h.issue(c.sa("SANDBOX"), &["meetings.write"]).await;
+    let r = h.authenticate(&write_only).await;
+    assert_eq!(r.body["authority"]["scopes"], json!(["meetings.write"]));
+}
+
+#[tokio::test]
 async fn credentials_cannot_hold_scopes_the_application_does_not_allow() {
     let Some(h) = Harness::new().await else {
         return;

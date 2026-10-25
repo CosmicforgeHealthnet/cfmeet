@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.2.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration)."
+    "version": "1.5.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments."
   },
   "components": {
     "securitySchemes": {
@@ -39,6 +39,16 @@
         "schema": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+        }
+      },
+      "CfDelegatedActor": {
+        "name": "X-CF-Delegated-Actor",
+        "in": "header",
+        "required": true,
+        "description": "The acting party: `u-<32 lowercase hex>` (a human member the Developer Platform authorized) `s-<32 lowercase hex>` (the service account of a scoped machine credential) or `o-<32 lowercase hex>` (a Developer Platform operator command); recorded as operator `devplat.<actor>` in the append-only audit.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[uso]-[0-9a-f]{32}$"
         }
       }
     },
@@ -206,6 +216,7 @@
           "credential_not_yet_valid",
           "credential_expired",
           "credential_superseded",
+          "credential_suspended",
           "service_account_inactive",
           "corrupt_authority_chain"
         ]
@@ -401,7 +412,7 @@
         }
       },
       "platform-access.identity.v1.CredentialEffectiveState": {
-        "description": "Derived from the persisted lifecycle fields at evaluation time. Only ACTIVE and ROTATION_OVERLAP authenticate.",
+        "description": "Derived from the persisted lifecycle fields at evaluation time (SUSPENDED: a reversible Part VI §54 suspension). Only ACTIVE and ROTATION_OVERLAP authenticate.",
         "type": "string",
         "enum": [
           "ACTIVE",
@@ -409,7 +420,8 @@
           "NOT_YET_VALID",
           "EXPIRED",
           "SUPERSEDED",
-          "REVOKED"
+          "REVOKED",
+          "SUSPENDED"
         ]
       },
       "platform-access.identity.v1.CredentialScopeSnapshot": {
@@ -3797,6 +3809,1852 @@
                 "type": "object"
               }
             }
+          }
+        }
+      }
+    },
+    "/internal/v1/credentials/delegated-authority": {
+      "post": {
+        "operationId": "delegatedCredentialAuthority",
+        "description": "Part VI §51: the CURRENT authority chain of the API credential the API Gateway authenticated, for a receiving domain service. The credential id is taken only from the signed delegated context (`initiating_credential_id`) and must belong exactly to the delegated tenant / application / environment / service account; revocation, expiry, supersession, suspension and effective scopes are evaluated now. No secret is presented. Permission: `platform-credential.authenticate`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-access.identity.v1.AuthenticateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/tenants": {
+      "post": {
+        "operationId": "delegateCreateTenant",
+        "description": "Create the canonical EXTERNAL tenant of a new developer organization (classification is never caller-selected). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}": {
+      "get": {
+        "operationId": "delegateGetTenant",
+        "description": "Read a tenant. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}/status": {
+      "post": {
+        "operationId": "delegateSetTenantStatus",
+        "description": "Suspend / reactivate the tenant of an organization (organization suspension / closure). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}/applications": {
+      "post": {
+        "operationId": "delegateCreateApplication",
+        "description": "Create the canonical application of a new developer project. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}": {
+      "get": {
+        "operationId": "delegateGetApplication",
+        "description": "Read an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/status": {
+      "post": {
+        "operationId": "delegateSetApplicationStatus",
+        "description": "Suspend / reactivate the application of a project (project suspension / archive). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/environments": {
+      "post": {
+        "operationId": "delegateCreateEnvironment",
+        "description": "Create a SANDBOX or TEST environment (PRODUCTION is refused: production-access approval workflow). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "delegateListEnvironments",
+        "description": "List the environments of an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/scopes": {
+      "get": {
+        "operationId": "delegateListApplicationScopes",
+        "description": "List the application's scope grants (read only). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "delegateGrantApplicationScope",
+        "description": "Allow a STANDARD scope for `environmentKinds` (FIRST_PARTY_ONLY only as an operator command `o-…` for a FIRST_PARTY tenant; PRIVILEGED never; PRODUCTION only once the application has an activated PRODUCTION environment). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}": {
+      "get": {
+        "operationId": "delegateGetEnvironment",
+        "description": "Read an environment. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/status": {
+      "post": {
+        "operationId": "delegateSetEnvironmentStatus",
+        "description": "Suspend / reactivate a non-production environment (PRODUCTION is refused). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts": {
+      "post": {
+        "operationId": "delegateCreateServiceAccount",
+        "description": "Create a service account (`name` slug, optional `description`) in a non-production environment (PRODUCTION is refused: production-access approval workflow); tenant and application are taken from the persisted environment. API credentials are never issued here. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "delegateListServiceAccounts",
+        "description": "List the service accounts of an environment (`serviceAccounts`; an unknown environment is NOT_FOUND). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}": {
+      "get": {
+        "operationId": "delegateGetServiceAccount",
+        "description": "Read one service account of the environment (a service account of another environment or tenant is NOT_FOUND). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/status": {
+      "post": {
+        "operationId": "delegateSetServiceAccountStatus",
+        "description": "Suspend / reactivate a service account of a non-production environment (`status`: ACTIVE or SUSPENDED; REVOKED is refused, revocation stays an operator decision; a suspended service account's credentials stop authenticating; nothing is deleted). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials": {
+      "get": {
+        "operationId": "delegateListCredentials",
+        "description": "List the credentials of a service account of the environment (metadata only; never a secret or verifier). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "delegateIssueCredential",
+        "description": "Issue a credential (scopes validated against the application grants and environment kind; the raw credential is in the response exactly once, `Cache-Control: no-store`). SANDBOX / TEST, or a PRODUCTION environment activated by an approved production-access request. Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}": {
+      "get": {
+        "operationId": "delegateGetCredential",
+        "description": "Read a credential of exactly this environment (another environment's: NOT_FOUND). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/rotate": {
+      "post": {
+        "operationId": "delegateRotateCredential",
+        "description": "Rotate: an independent successor (secret once) and the predecessor limited to the bounded overlap; a suspended credential is not rotated. Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "delegateRevokeCredential",
+        "description": "Revoke immediately (idempotent). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/suspend": {
+      "post": {
+        "operationId": "delegateSuspendCredential",
+        "description": "Suspend (reversible; `reasonCode`): authentication and delegated-authority re-verification refuse it at once (`credential_suspended`). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/resume": {
+      "post": {
+        "operationId": "delegateResumeCredential",
+        "description": "Lift a suspension (idempotent). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/scopes/{scope}": {
+      "delete": {
+        "operationId": "delegateWithdrawApplicationScope",
+        "description": "Withdraw a scope from the application and every credential of it (privileged scopes: operators only). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/production-environment": {
+      "post": {
+        "operationId": "delegateActivateProductionEnvironment",
+        "description": "Activate the PRODUCTION environment of an approved production-access request (`approvalReference` recorded; idempotent on it, another reference is a CONFLICT). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/live-telecom": {
+      "post": {
+        "operationId": "delegateSetLiveTelecom",
+        "description": "Enable / disable live telecom of an ACTIVATED PRODUCTION environment (operator-created or SANDBOX / TEST environments: POLICY_VIOLATION). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/suspend": {
+      "post": {
+        "operationId": "suspendCredential",
+        "description": "Suspend a credential (reversible, audited; `reasonCode`). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/resume": {
+      "post": {
+        "operationId": "resumeCredential",
+        "description": "Lift a credential suspension (audited). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

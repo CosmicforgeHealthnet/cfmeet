@@ -1,0 +1,19 @@
+# Build-context filter for services/api-gateway/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!services/api-gateway
+# Embedded at compile time (generated, checked by CI): the route manifest and the
+# public OpenAPI documents.
+!infra/api-gateway/route-manifest.json
+!infra/api-gateway/sdk-discovery.json
+!packages/contracts/bundled/public
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/api-gateway/Dockerfile
+services/api-gateway/Dockerfile.dockerignore

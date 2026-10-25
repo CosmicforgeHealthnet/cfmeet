@@ -15,13 +15,13 @@ use openmls::prelude::{
     MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn,
     ProcessedMessageContent, ProtocolMessage, StagedWelcome,
 };
-use openmls_rust_crypto::OpenMlsRustCrypto;
 use uuid::Uuid;
 
 use crate::{
     binding,
     device::Device,
     profile::{MANDATORY_CIPHERSUITE, PROTOCOL_VERSION},
+    provider::CfMlsProvider,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -67,7 +67,7 @@ pub struct CommitOutput {
     pub epoch: u64,
 }
 
-fn key_package(provider: &OpenMlsRustCrypto, encoded: &[u8]) -> Result<KeyPackage, GroupError> {
+fn key_package(provider: &CfMlsProvider, encoded: &[u8]) -> Result<KeyPackage, GroupError> {
     let message =
         MlsMessageIn::tls_deserialize_exact(encoded).map_err(|_| GroupError::Malformed)?;
     let kp: KeyPackageIn = match message.extract() {

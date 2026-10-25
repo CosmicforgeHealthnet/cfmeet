@@ -12,6 +12,7 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
 //! | `CF_SMS_GATEWAY_BASE_URL` | no | SMS Gateway (SMS Bridge transport); unset: bridges are refused |
 //! | `CF_CALLING_BASE_URL` | no | Calling's platform-event ingress (customer webhooks); unset: relayed events wait PENDING |
+//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `MESSAGING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
 //! own trust bundle grants the route's permission. The internal operations (Part V H) are
@@ -110,6 +111,12 @@ const TARGETS: &[(&str, &str)] = &[
     // Part V I: customer webhooks through Calling's platform-event ingress
     // (platform-event.publish).
     ("CF_CALLING_BASE_URL", services::CALLING),
+    // Part VI §53: the Developer Platform's central event ingestion
+    // (developer-event.publish).
+    (
+        "CF_DEVELOPER_PLATFORM_BASE_URL",
+        services::DEVELOPER_PLATFORM,
+    ),
 ];
 
 #[derive(Debug, Clone)]
