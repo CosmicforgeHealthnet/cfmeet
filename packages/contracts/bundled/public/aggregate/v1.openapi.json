@@ -52,6 +52,7 @@
           "meetings"
         ],
         "summary": "Read a conference. Callers without authority get the SUMMARY view.",
+        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with only the id, meeting space id and status.",
         "operationId": "v2_get_conference",
         "parameters": [
           {
@@ -117,6 +118,7 @@
           "meetings"
         ],
         "summary": "Artefacts of a conference (historical access still requires authorization).",
+        "description": "Lists the conference's artifacts (recordings, transcripts, reports and other outputs), newest\nfirst, at most 200. Requires the artifact-list permission; transcripts and caption tracks are\nomitted unless the caller may also read transcripts. Filter by type with `artifactType`.",
         "operationId": "v2_list_artifacts",
         "parameters": [
           {
@@ -194,6 +196,7 @@
           "meetings"
         ],
         "summary": "Generate an attendance report, poll report or chat export (policy-gated).",
+        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported.",
         "operationId": "v2_generate_report",
         "parameters": [
           {
@@ -271,6 +274,7 @@
           "meetings"
         ],
         "summary": "One artefact (conference id + artefact id; knowing an id is not authorization).",
+        "description": "Returns the metadata and status of one artifact belonging to the conference (no download link;\nuse the `access` endpoint for that). Requires the artifact-list or artifact-read permission,\nplus transcript-read for transcripts and caption tracks.",
         "operationId": "v2_get_artifact",
         "parameters": [
           {
@@ -346,6 +350,7 @@
           "meetings"
         ],
         "summary": "Delete an artefact (DELETED only after the object's absence is confirmed).",
+        "description": "Requests deletion of an artifact and attempts it immediately; if the stored object cannot be\nconfirmed removed yet, deletion stays pending and is retried automatically. Requires the\nartifact-delete permission. A recording must be stopped first, and the meeting policy may forbid\nmanual deletion of recordings. Repeating the call is safe.",
         "operationId": "v2_delete_artifact",
         "parameters": [
           {
@@ -423,6 +428,7 @@
           "meetings"
         ],
         "summary": "Mint a short-lived, read-only, single-object signed URL (never stored).",
+        "description": "Returns a time-limited, read-only download URL for this one artifact. Requires the artifact-read\npermission (plus transcript-read for transcripts and caption tracks), and the artifact must be\nREADY and not deleted or pending deletion. Each grant is audited; request a new URL once\n`expiresAt` has passed.",
         "operationId": "v2_artifact_access",
         "parameters": [
           {
@@ -529,8 +535,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Conference attendance (Part J). Thin read over the same aggregation as the",
-        "description": "`ATTENDANCE_REPORT` export; nothing is stored and no artefact is created.",
+        "summary": "Conference attendance (Part J).",
+        "description": "A thin read over the same aggregation as the `ATTENDANCE_REPORT` export; nothing is stored\nand no artefact is created.",
         "operationId": "v2_conference_attendance",
         "parameters": [
           {
@@ -615,6 +621,7 @@
           "meetings"
         ],
         "summary": "Move the caller into the backstage media room (presenters / hosts only).",
+        "description": "Moves the caller's own admitted participant into the conference's backstage room, separate from\nthe main stage, creating that room if needed. Requires the backstage permission (owner, host,\nco-host, moderator or presenter by default), a meeting profile with backstage enabled, webinar\nmode and a LIVE conference. When `credentialRefreshRequired` is true, request a new media\ncredential (`POST /api/v2/conferences/{id}/media-credential`) to switch rooms; calling it while\nalready backstage changes nothing. Accepts a bearer user token or a participant token.",
         "operationId": "v2_enter_backstage",
         "parameters": [
           {
@@ -680,6 +687,7 @@
           "meetings"
         ],
         "summary": "Leave backstage (return to the main stage room).",
+        "description": "Moves the caller's own admitted participant out of the backstage and back to the main stage room\nwhile the conference is LIVE. When `credentialRefreshRequired` is true, request a new media\ncredential (`POST /api/v2/conferences/{id}/media-credential`); calling it when not backstage\nchanges nothing. Accepts a bearer user token or a participant token.",
         "operationId": "v2_leave_backstage",
         "parameters": [
           {
@@ -737,6 +745,7 @@
           "meetings"
         ],
         "summary": "Breakout rooms of a conference (members listed for breakout managers only).",
+        "description": "Returns the conference's breakout rooms in display order with status and participant count.\nPer-room participant ids are included only for callers who may assign participants or enter any\nroom. `myContext` describes the caller's current media context (main room or a breakout) when\nthe caller is an admitted participant.",
         "operationId": "v2_list_breakouts",
         "parameters": [
           {
@@ -802,6 +811,7 @@
           "meetings"
         ],
         "summary": "Create named or numbered breakout rooms.",
+        "description": "Creates rooms from either a list of unique `names` or a `count` of automatically numbered rooms\n(\"Room N\"), optionally with a per-room `capacity` (1–1000) and recording policy. Rooms start in\nCREATED state; open them with the `open` endpoint. Requires the breakout-create permission\n(owner, host or co-host by default) and a conference that has not finished; the meeting policy\ncaps the number of active rooms.",
         "operationId": "v2_create_breakouts",
         "parameters": [
           {
@@ -889,6 +899,7 @@
           "meetings"
         ],
         "summary": "Announcement to every open breakout room.",
+        "description": "Sends a host announcement (1–1000 characters) to participants of every open or closing breakout\nroom and returns how many rooms received it. Requires the breakout-announce permission and a\nlive conference, and is rate limited per sender. Fails with `BREAKOUT_CLOSED` when no room is\nopen.",
         "operationId": "v2_breakout_announcement_all",
         "parameters": [
           {
@@ -976,6 +987,7 @@
           "meetings"
         ],
         "summary": "Assign participants (MANUAL, RANDOM or BALANCED).",
+        "description": "MANUAL (the default when `assignments` is sent) applies an explicit participant-to-room list;\nRANDOM and BALANCED (the default otherwise) distribute admitted participants over the target\nrooms, by default skipping hosts and anyone already assigned, and return those who could not be\nplaced. Requires the breakout-assign permission. Closing or closed rooms cannot receive\nassignments.",
         "operationId": "v2_assign_breakouts",
         "parameters": [
           {
@@ -1063,6 +1075,7 @@
           "meetings"
         ],
         "summary": "Close every breakout of the conference.",
+        "description": "Closes every breakout room that is not already closed, with the same countdown rules as closing\na single room (`countdownSeconds`, default 60, max 600; 0 = immediate). Participants return to\nthe main room as each room closes. Requires the breakout-close permission.",
         "operationId": "v2_close_all_breakouts",
         "parameters": [
           {
@@ -1130,6 +1143,7 @@
           "meetings"
         ],
         "summary": "Leave a breakout visit.",
+        "description": "Ends the caller's visit to a breakout room and returns them to their own open breakout\nassignment, or to the main room if they have none. Requires the enter-any-room permission and a\nlive conference. Calling it when not visiting returns the current media context unchanged.",
         "operationId": "v2_leave_breakout_visit",
         "parameters": [
           {
@@ -1187,6 +1201,7 @@
           "meetings"
         ],
         "summary": "Move a participant: main → breakout, breakout → breakout, breakout → main.",
+        "description": "Moves one admitted participant into a breakout room, between rooms, or back to the main room\n(`toBreakoutId` null). Requires the breakout-move permission and a live conference; the target\nroom must not be closing, closed or full. Moving a participant to where they already are is a\nno-op (`changed` is false).",
         "operationId": "v2_move_participant",
         "parameters": [
           {
@@ -1274,6 +1289,7 @@
           "meetings"
         ],
         "summary": "Announcement to one open breakout room.",
+        "description": "Sends a host announcement (1–1000 characters) to the participants of this breakout room, which\nmust be open or closing. Requires the breakout-announce permission and a live conference, and is\nrate limited per sender.",
         "operationId": "v2_breakout_announcement",
         "parameters": [
           {
@@ -1371,6 +1387,7 @@
           "meetings"
         ],
         "summary": "Add / remove participants of one breakout room.",
+        "description": "Assigns the participants in `add` to this room and returns those in `remove` (if assigned here)\nto the main room. Only admitted participants can be added, and adding requires the room to be\nneither closing nor closed and to have capacity. Requires the breakout-assign permission.\nReturns the updated room.",
         "operationId": "v2_patch_breakout_assignments",
         "parameters": [
           {
@@ -1468,6 +1485,7 @@
           "meetings"
         ],
         "summary": "Close one breakout (countdown persisted; 0 = immediate).",
+        "description": "An open room enters CLOSING for `countdownSeconds` (default 60, max 600), after which its\nparticipants return to the main room; 0 closes it immediately, and a room that was never opened\ncloses at once. Requires the breakout-close permission. Repeating the call does not restart a\nrunning countdown.",
         "operationId": "v2_close_breakout",
         "parameters": [
           {
@@ -1555,6 +1573,7 @@
           "meetings"
         ],
         "summary": "Host / co-host enters a breakout room (privileged visit, not an assignment).",
+        "description": "Moves the caller, who must be an admitted participant with the enter-any-room permission, into\nan open breakout room as a visitor. A visit changes no assignments and does not count toward\ncapacity or balancing. Requires a live conference; end the visit with the `leave` endpoint.",
         "operationId": "v2_enter_breakout",
         "parameters": [
           {
@@ -1642,6 +1661,7 @@
           "meetings"
         ],
         "summary": "Open a breakout room (provider room created, assigned participants rerouted).",
+        "description": "Opens a CREATED room so its assigned participants are moved into it. Requires the\nbreakout-create permission and a live conference. Opening a room that is already open returns it\nwith `changed` false; a closed room cannot be reopened.",
         "operationId": "v2_open_breakout",
         "parameters": [
           {
@@ -1729,6 +1749,7 @@
           "meetings"
         ],
         "summary": "Cancel an unstarted conference (single-occurrence exception for recurring series).",
+        "description": "Moves a CREATED, PREPARING or WAITING conference to CANCELLED and releases any media room\nalready prepared. Requires `conference.start`. For an occurrence of a recurring series only that\noccurrence is cancelled. Cancelling an already cancelled conference is a no-op\n(`changed: false`); live or finished conferences return CONFERENCE_STATE_CONFLICT.",
         "operationId": "v2_cancel_conference",
         "parameters": [
           {
@@ -1803,6 +1824,7 @@
           "meetings"
         ],
         "summary": "Update the chat subset of the collaboration policy.",
+        "description": "Updates any of `chatEnabled`, `chatSendMode`, `privateChatMode`, `breakoutChatEnabled` and\n`mainChatVisibleInBreakouts`; omitted fields are left unchanged. Send the `collaborationVersion`\nyou last read; a stale version returns MEETING_VERSION_CONFLICT. Requires\n`conference.configure_live` on a conference that has not ended; returns the full effective\ncollaboration policy and its new version.",
         "operationId": "v2_update_chat_policy",
         "parameters": [
           {
@@ -1879,8 +1901,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Canonical collaboration state (REST recovery source for media restrictions,",
-        "description": "spotlight, hand raise, active screen shares and the caller's media context).",
+        "summary": "Canonical collaboration state.",
+        "description": "The REST recovery source for media restrictions, spotlight, hand raise, active screen shares\nand the caller's media context.",
         "operationId": "v2_collaboration_state",
         "parameters": [
           {
@@ -1947,8 +1969,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Update the conference collaboration policy (media locks, screen-share policy, chat,",
-        "description": "reactions, hand raise, Q&A, polls, breakouts, consents).",
+        "summary": "Update the conference collaboration policy.",
+        "description": "Covers media locks, screen-share policy, chat, reactions, hand raise, Q&A, polls, breakouts\nand consents.",
         "operationId": "v2_update_collaboration_policy",
         "parameters": [
           {
@@ -2036,6 +2058,7 @@
           "meetings"
         ],
         "summary": "Record the caller's OWN consent decisions (no participant field exists).",
+        "description": "Records ACCEPTED or DECLINED decisions for one or more consent types for the caller, who must be\nan admitted participant; nobody can decide for another participant. `consentVersion` must match\nthe current version from the requirements endpoint, otherwise `CONSENT_POLICY_CONFLICT` is\nreturned. Use the withdraw endpoint to withdraw consent. Returns the updated requirements.",
         "operationId": "v2_record_consents",
         "parameters": [
           {
@@ -2113,6 +2136,7 @@
           "meetings"
         ],
         "summary": "The caller's consent requirements (independent types) and current decisions.",
+        "description": "For each consent type (RECORDING, TRANSCRIPTION, AI_PROCESSING, DATA_SHARING) returns the\nmeeting policy's consent mode, whether explicit consent is required, whether that processing is\ncurrently active, the current consent version and the caller's own latest decision.\n`recordingNotice` is true while a recording is active.",
         "operationId": "v2_consent_requirements",
         "parameters": [
           {
@@ -2170,6 +2194,7 @@
           "meetings"
         ],
         "summary": "Withdraw one consent type (effect follows the profile's withdrawal mode).",
+        "description": "Withdraws the caller's consent for one type; the caller must be an admitted participant. The\nresponse reports the effect under the meeting's withdrawal mode: recorded only, the active\nrecording or transcription stopped, or the caller returned to the waiting room. Previously\nretained artifacts are not deleted.",
         "operationId": "v2_withdraw_consent",
         "parameters": [
           {
@@ -2236,6 +2261,7 @@
           "meetings"
         ],
         "summary": "LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).",
+        "description": "Ends a LIVE conference for everyone: active recordings are stopped and the media room is\nterminated with the RTC provider. Requires `conference.end`; a conference that never went live\nreturns CONFERENCE_NOT_LIVE (cancel it instead). Repeating the call while ENDING or ENDED is a\nno-op (`changed: false`); while ENDING it retries provider termination. `providerEnforcement`\nis ENFORCED once the conference is ENDED.",
         "operationId": "v2_end_conference",
         "parameters": [
           {
@@ -2310,6 +2336,7 @@
           "meetings"
         ],
         "summary": "Replay committed conference events after a cursor (recovery without WebSocket).",
+        "description": "Returns the committed conference events after sequence `after` (default 0) that the caller may\nsee, plus the cursor to resume from. When the cursor cannot be served (more than 500 events\nbehind, out of range, or events no longer available) `resyncRequired` is true and the client\nmust refetch the conference from `GET /api/v2/conferences/{id}`. Same authorization as the\nWebSocket.",
         "operationId": "v2_replay_events",
         "parameters": [
           {
@@ -2390,6 +2417,7 @@
           "meetings"
         ],
         "summary": "Raised hands, oldest first.",
+        "description": "Returns the admitted participants whose hand is currently raised, ordered by when they raised\nit. Available to admitted participants and to the space owner and members.",
         "operationId": "v2_raised_hands",
         "parameters": [
           {
@@ -2445,6 +2473,7 @@
           "meetings"
         ],
         "summary": "Raise the caller's own hand.",
+        "description": "Adds the caller to the raised-hands queue and notifies the conference in realtime. Requires an\nadmitted participant with `hand.raise` in a LIVE conference with hand raise enabled; rate\nlimited. Raising an already raised hand returns `changed: false`.",
         "operationId": "v2_raise_hand",
         "parameters": [
           {
@@ -2510,6 +2539,7 @@
           "meetings"
         ],
         "summary": "Lower the caller's own hand.",
+        "description": "Removes the caller from the raised-hands queue. Requires the caller to be an admitted\nparticipant, and also works after hand raise has been disabled; rate limited. Lowering a hand\nthat is not raised returns `changed: false`.",
         "operationId": "v2_lower_hand",
         "parameters": [
           {
@@ -2577,6 +2607,7 @@
           "meetings"
         ],
         "summary": "Request an intelligence output (disabled by default; policy / consent gated).",
+        "description": "Generates a summary or action items from a READY transcript of this conference and stores the\nresult as a MEETING_SUMMARY artifact. Requires the feature to be enabled, the\nintelligence-request and transcript-read permissions, a meeting policy that permits the\nprovider's location, and AI-processing consent where policy requires it.",
         "operationId": "v2_request_intelligence",
         "parameters": [
           {
@@ -2663,8 +2694,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Join (or reconnect to) a conference. Identity, role and admission are resolved",
-        "description": "server-side. A WAITING participant never receives an RTC credential.",
+        "summary": "Join (or reconnect to) a conference.",
+        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.",
         "operationId": "v2_join_conference",
         "parameters": [
           {
@@ -2773,6 +2804,7 @@
           "meetings"
         ],
         "summary": "Leave: close the caller's own session(s). Admission is unchanged.",
+        "description": "Disconnects all of the caller's active sessions in the conference, or only the one given in\n`participantSessionId`, and returns how many were closed. The caller keeps their admission state\nand can join again. Returns PARTICIPANT_NOT_FOUND if the caller has not joined this conference.",
         "operationId": "v2_leave_conference",
         "parameters": [
           {
@@ -2840,6 +2872,7 @@
           "meetings"
         ],
         "summary": "Lock a live conference: no new non-exempt entrants.",
+        "description": "While locked, new entrants whose role lacks `participant.admit` are refused with\nCONFERENCE_LOCKED; admitted participants can still reconnect and those already waiting keep\nwaiting. Requires `conference.lock` and a LIVE conference (CONFERENCE_NOT_LIVE otherwise).\nLocking an already locked conference is a no-op (`changed: false`).",
         "operationId": "v2_lock_conference",
         "parameters": [
           {
@@ -2906,8 +2939,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Fresh media credential for the caller's own session in its current context (main",
-        "description": "or breakout) with current effective grants — used after moves and for refresh.",
+        "summary": "Fresh media credential for the caller's own session.",
+        "description": "Issued for the session's current context (main room or breakout) with the current effective\ngrants; used after moves and for refresh.",
         "operationId": "v2_media_credential",
         "parameters": [
           {
@@ -2995,6 +3028,7 @@
           "meetings"
         ],
         "summary": "Meeting chat history (database cursor pagination, newest first).",
+        "description": "Returns one page of messages for `scope`: MAIN (default), BREAKOUT with `breakoutId`, or PRIVATE\nwith `peerId` (the caller's conversation with that participant). `limit` defaults to 50 (max\n100); pass the returned `nextCursor` as `before` to load older messages. Requires `chat.read`;\nfor non-moderators main chat can be disabled or hidden inside breakouts, and breakout chat is\nlimited to the caller's own room unless they may enter any breakout.",
         "operationId": "v2_list_messages",
         "parameters": [
           {
@@ -3124,6 +3158,7 @@
           "meetings"
         ],
         "summary": "Send a message (sender is always the caller's own participant).",
+        "description": "Posts a message (1–4000 characters) to the main room, to a breakout room (`breakoutId`, normally\nthe caller's own) or privately to one admitted participant (`recipientParticipantId`). The\ncaller must be an admitted participant with `chat.send` (private messages also need\n`chat.private`) in a LIVE conference, subject to the chat policy, per-participant restrictions\nand rate limits. Moderators (`chat.moderate`) are not blocked by disabled chat and may post\n`announcement`s.",
         "operationId": "v2_send_message",
         "parameters": [
           {
@@ -3231,6 +3266,7 @@
           "meetings"
         ],
         "summary": "Delete / hide a message (moderators, or the sender).",
+        "description": "Senders can delete their own messages; moderators with `chat.moderate` can hide main-room and\nbreakout messages of less privileged participants. Private messages can only be deleted by their\nsender and are reported as MESSAGE_NOT_FOUND to anyone outside the conversation. The message\nstays in history marked as deleted; repeating the call returns `changed: false`.",
         "operationId": "v2_delete_message",
         "parameters": [
           {
@@ -3308,6 +3344,7 @@
           "meetings"
         ],
         "summary": "Admitted participants (roster).",
+        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED.",
         "operationId": "v2_list_participants",
         "parameters": [
           {
@@ -3375,6 +3412,7 @@
           "meetings"
         ],
         "summary": "The caller's own participant state (registered user or participant token).",
+        "description": "Returns the caller's participant record in this conference in whatever admission state it is\n(e.g. WAITING, ADMITTED, DENIED), identified by the bearer user token or the participant token\nissued at join. Returns PARTICIPANT_NOT_FOUND if the caller has not joined this conference.",
         "operationId": "v2_get_me",
         "parameters": [
           {
@@ -3431,6 +3469,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Lock the participant's microphone (persistent, provider-enforced).",
+        "description": "Stops an admitted participant from publishing their microphone until the lock is removed; the lock is stored on the participant and enforced by the media provider (see `providerEnforcement`). The caller needs the matching media-control permission and may only target a less privileged participant, never themselves. Repeating the call is a no-op that returns `changed: false`.",
         "operationId": "v2_audio_lock",
         "parameters": [
           {
@@ -3525,6 +3565,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Unlock the participant's microphone (grants recomputed from role + policy).",
+        "description": "Removes the lock; the participant's effective publication rights are then recomputed from their role and the conference policy and returned in `permissions`. Same permission and target rules as locking; repeating the call returns `changed: false`.",
         "operationId": "v2_audio_unlock",
         "parameters": [
           {
@@ -3602,6 +3644,7 @@
           "meetings"
         ],
         "summary": "Ban a participant (conference or space scope).",
+        "description": "Sets the participant to BANNED, disconnects their active sessions and records a ban on their\nidentity for this conference (default) or the whole meeting space (`scope: SPACE`, also blocks\nfuture occurrences), with optional `reasonCode`, `reason` and future `expiresAt`. Requires\n`participant.ban`, and the target must be less privileged than the caller (never yourself).\nIdempotent for an already banned participant (no new `banId` is returned).",
         "operationId": "v2_ban",
         "parameters": [
           {
@@ -3679,6 +3722,7 @@
           "meetings"
         ],
         "summary": "Disable chat for a participant.",
+        "description": "Prevents the participant from sending chat messages until chat is re-enabled for them. Requires\n`chat.moderate`, a target less privileged than the caller (never yourself) and a conference that\nhas not ended. Idempotent: `changed` is false if chat was already disabled for them.",
         "operationId": "v2_restrict_chat",
         "parameters": [
           {
@@ -3754,6 +3798,7 @@
           "meetings"
         ],
         "summary": "Re-enable chat for a participant.",
+        "description": "Lifts a per-participant chat restriction so they can send messages again. Requires\n`chat.moderate`, a target less privileged than the caller (never yourself) and a conference that\nhas not ended. Idempotent: `changed` is false if the participant was not restricted.",
         "operationId": "v2_unrestrict_chat",
         "parameters": [
           {
@@ -3831,6 +3876,7 @@
           "meetings"
         ],
         "summary": "Host lowers another participant's hand.",
+        "description": "Requires `hand.lower_other` and a target less privileged than the caller; targeting yourself\nlowers your own hand. Idempotent: `changed` is false if the hand was not raised.",
         "operationId": "v2_lower_other_hand",
         "parameters": [
           {
@@ -3907,8 +3953,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Server-side mute of a participant's published tracks (provider-enforced primitive).",
-        "description": "Authorization and conference scoping are checked before any provider call.",
+        "summary": "Server-side mute of a participant's published tracks.",
+        "description": "A provider-enforced primitive. Authorization and conference scoping are checked before any\nprovider call.",
         "operationId": "v2_mute_participant",
         "parameters": [
           {
@@ -4016,6 +4062,7 @@
           "meetings"
         ],
         "summary": "Remove a participant (business authority; media disconnect enforced by the RTC provider).",
+        "description": "Sets the participant to REMOVED and disconnects their active media sessions; an optional\n`reason` is recorded in the audit log. Requires `participant.remove`, and the target must be\nless privileged than the caller (never yourself). Idempotent for participants already removed or\nbanned; `providerEnforcement` tells whether the RTC provider has confirmed the disconnect.",
         "operationId": "v2_remove",
         "parameters": [
           {
@@ -4100,6 +4147,7 @@
           "meetings"
         ],
         "summary": "Return an admitted participant to the waiting room.",
+        "description": "Moves an ADMITTED participant back to WAITING and disconnects their active media sessions; they\nmust be admitted again to return. Requires `participant.return_to_waiting`, and the target must\nbe less privileged than the caller (never yourself). Idempotent if the participant is already\nwaiting; `providerEnforcement` tells whether the RTC provider has confirmed the disconnect.",
         "operationId": "v2_return_to_waiting",
         "parameters": [
           {
@@ -4167,6 +4215,7 @@
           "meetings"
         ],
         "summary": "Change a participant's role (grant authority enforced).",
+        "description": "Assigns a new conference role to an ADMITTED or WAITING participant. Requires\n`participant.role_change`; the target must be less privileged than the caller, you cannot change\nyour own or the owner's role, and the new role must be below your own (co-host also requires\n`cohost.assign`; OWNER is never granted). Optionally send the participant's `version` for\noptimistic concurrency; media permissions of connected sessions follow the new role.",
         "operationId": "v2_change_role",
         "parameters": [
           {
@@ -4263,6 +4312,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Lock the participant's future screen sharing (persistent, provider-enforced).",
+        "description": "Stops an admitted participant from starting a screen share until the lock is removed (to end a share already in progress, use the stop-screen-share operation); the lock is stored on the participant and enforced by the media provider (see `providerEnforcement`). The caller needs the matching media-control permission and may only target a less privileged participant, never themselves. Repeating the call is a no-op that returns `changed: false`.",
         "operationId": "v2_screen_share_lock",
         "parameters": [
           {
@@ -4357,6 +4408,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Unlock the participant's future screen sharing (grants recomputed from role + policy).",
+        "description": "Removes the lock so the participant may share again; the participant's effective publication rights are then recomputed from their role and the conference policy and returned in `permissions`. Same permission and target rules as locking; repeating the call returns `changed: false`.",
         "operationId": "v2_screen_share_unlock",
         "parameters": [
           {
@@ -4433,6 +4486,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Lock the participant's camera (persistent, provider-enforced).",
+        "description": "Stops an admitted participant from publishing their camera until the lock is removed; the lock is stored on the participant and enforced by the media provider (see `providerEnforcement`). The caller needs the matching media-control permission and may only target a less privileged participant, never themselves. Repeating the call is a no-op that returns `changed: false`.",
         "operationId": "v2_video_lock",
         "parameters": [
           {
@@ -4527,6 +4582,8 @@
         "tags": [
           "meetings"
         ],
+        "summary": "Unlock the participant's camera (grants recomputed from role + policy).",
+        "description": "Removes the lock; the participant's effective publication rights are then recomputed from their role and the conference policy and returned in `permissions`. Same permission and target rules as locking; repeating the call returns `changed: false`.",
         "operationId": "v2_video_unlock",
         "parameters": [
           {
@@ -4604,6 +4661,7 @@
           "meetings"
         ],
         "summary": "Polls of a conference (drafts for poll managers only; quiz answers protected).",
+        "description": "Returns up to 200 polls of the conference, oldest first, each with its response count and\nwhether the caller has responded. DRAFT polls are included only for callers who can create or\nmanage polls, and quiz correct answers are hidden from attendees until the results state allows\nthem. The caller must be a participant or member of the conference (bearer user token or\nparticipant token).",
         "operationId": "v2_list_polls",
         "parameters": [
           {
@@ -4659,6 +4717,7 @@
           "meetings"
         ],
         "summary": "Create a poll or quiz (DRAFT).",
+        "description": "Creates a poll (or a scored quiz when `quizMode` is true) in DRAFT state; open it with\n`POST .../open`. Requires the poll-create permission (host, co-host or moderator by default),\npolls enabled for the meeting and a conference that is not ended or cancelled. Title is 1–300\ncharacters; `resultsVisibility` defaults to AFTER_CLOSE. Accepts a bearer user token or a\nparticipant token.",
         "operationId": "v2_create_poll",
         "parameters": [
           {
@@ -4736,6 +4795,7 @@
           "meetings"
         ],
         "summary": "One poll.",
+        "description": "Returns a single poll of the conference with its questions, status, response count and whether\nthe caller has responded. A DRAFT poll is reported as POLL_NOT_FOUND to callers who cannot\ncreate or manage polls, and quiz correct answers are hidden until the results state allows them.\nAccepts a bearer user token or a participant token.",
         "operationId": "v2_get_poll",
         "parameters": [
           {
@@ -4802,7 +4862,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "CLOSED → ARCHIVED (or cancel a DRAFT).",
+        "summary": "Archive a closed poll or cancel a draft (CLOSED or DRAFT → ARCHIVED).",
+        "description": "Removes the poll from active use. Requires the poll-close permission. Repeating the call on an archived poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_archive_poll",
         "parameters": [
           {
@@ -4889,7 +4950,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "OPEN → CLOSED (never reopened).",
+        "summary": "Close an open poll (OPEN → CLOSED; never reopened).",
+        "description": "Stops accepting responses. A closed poll is never reopened. Requires the poll-close permission. Repeating the call on a closed poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_close_poll",
         "parameters": [
           {
@@ -4976,7 +5038,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "DRAFT → OPEN.",
+        "summary": "Open a draft poll for responses (DRAFT → OPEN).",
+        "description": "Starts collecting responses. Allowed only from DRAFT, on a LIVE conference with polls enabled, for a caller with the poll-open permission. Repeating the call on an open poll returns `changed: false`; any other transition returns 409.",
         "operationId": "v2_open_poll",
         "parameters": [
           {
@@ -5064,6 +5127,7 @@
           "meetings"
         ],
         "summary": "Submit the caller's own response (one ballot per participant).",
+        "description": "Records the caller's answers to an OPEN poll while the conference is LIVE. The caller must be an\nadmitted participant with permission to answer polls; each participant gets exactly one ballot\nand a second ballot fails with POLL_ALREADY_RESPONDED. Retrying with the same `idempotencyKey`\nreturns 200 with `idempotentReplay: true` instead; a new ballot returns 201. Quizzes are scored\nserver-side, and the score is returned only for non-anonymous AFTER_VOTE quizzes; anonymous\nballots are stored without the participant's identity. Rate-limited per participant.",
         "operationId": "v2_submit_poll_response",
         "parameters": [
           {
@@ -5171,6 +5235,7 @@
           "meetings"
         ],
         "summary": "Aggregate results, subject to the poll's visibility mode.",
+        "description": "Returns aggregated results of a poll. Poll managers can read them at any time; other callers\nonly as the visibility mode allows (HOST_ONLY: never; AFTER_VOTE: once they have voted or the\npoll is closed; AFTER_CLOSE: once closed), otherwise POLL_RESULTS_NOT_VISIBLE. Results of\nanonymous polls are available to everyone, managers included, only once the poll is closed.\nAccepts a bearer user token or a participant token.",
         "operationId": "v2_poll_results",
         "parameters": [
           {
@@ -5248,6 +5313,7 @@
           "meetings"
         ],
         "summary": "Pre-join contract: everything a pre-join screen needs before the media join.",
+        "description": "Returns the conference status and whether it can be joined now, this caller's access\nrequirements (sign-in, invitation, passcode, external authorization, expected waiting room),\nrecording/transcription/AI notices, consents to grant when joining, the role and media\npermissions the caller would get, and display-name rules. Works without authentication; for\nsensitive meetings the title and organization are hidden until the caller is authorized.",
         "operationId": "v2_pre_join",
         "parameters": [
           {
@@ -5306,6 +5372,7 @@
           "meetings"
         ],
         "summary": "CREATED → PREPARING → (provider room confirmed) → WAITING.",
+        "description": "Prepares a CREATED conference: it moves to PREPARING, the media room is requested from the RTC\nprovider, and it becomes WAITING once the provider confirms the room. Requires\n`conference.start`. Calling it on a PREPARING or WAITING conference is a no-op that may retry\nprovider confirmation; `providerEnforcement` is PENDING_PROVIDER_CONTROL while the room is not\nyet confirmed.",
         "operationId": "v2_prepare_conference",
         "parameters": [
           {
@@ -5372,8 +5439,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Conference quality summary for holders of `quality.view` (no infrastructure",
-        "description": "identifiers).",
+        "summary": "Conference quality summary for holders of `quality.view`.",
+        "description": "The summary contains no infrastructure identifiers.",
         "operationId": "v2_conference_quality",
         "parameters": [
           {
@@ -5431,7 +5498,7 @@
           "meetings"
         ],
         "summary": "Submit a batch of technical quality samples for the caller's own session.",
-        "description": "Identity, conference and session are server-derived; bodies are size- and\nrate-limited and contain no free text.",
+        "description": "Identity, conference and session are server-derived; bodies are size- and rate-limited and\ncontain no free text.",
         "operationId": "v2_submit_quality_samples",
         "parameters": [
           {
@@ -5539,6 +5606,7 @@
           "meetings"
         ],
         "summary": "Questions (pinned first, then by upvotes).",
+        "description": "Returns up to 1000 questions of the conference, ordered pinned first, then by upvote count, then\noldest first, with `votedByMe` and `isMine` for the caller. Attendees see OPEN and ANSWERED\nquestions; Q&A moderators also see DISMISSED and ARCHIVED ones. Anonymous questions never\ninclude the author. Accepts a bearer user token or a participant token.",
         "operationId": "v2_list_questions",
         "parameters": [
           {
@@ -5594,6 +5662,7 @@
           "meetings"
         ],
         "summary": "Ask a question (optionally anonymous).",
+        "description": "Submits a new OPEN question to the conference Q&A. The caller must be an admitted participant\nallowed to ask questions, the conference must be LIVE and Q&A enabled; the body is 1–1000\ncharacters. `anonymous: true` is accepted only when the meeting allows anonymous questions, and\nthe author's identity is then never returned to hosts or other participants. Rate-limited per\nparticipant.",
         "operationId": "v2_submit_question",
         "parameters": [
           {
@@ -5671,6 +5740,7 @@
           "meetings"
         ],
         "summary": "Answer a question (first committed answer wins).",
+        "description": "Marks an OPEN question as ANSWERED, with an optional written `answer` (omit it when answered\nlive). Requires the Q&A answer permission (host, co-host or moderator by default) and a\nconference that is not ended or cancelled. Answering an already-answered question keeps the\nfirst answer and returns `changed: false`; dismissed or archived questions return\nCONFERENCE_STATE_CONFLICT.",
         "operationId": "v2_answer_question",
         "parameters": [
           {
@@ -5768,6 +5838,7 @@
           "meetings"
         ],
         "summary": "Archive a question.",
+        "description": "Moves a question in any state to ARCHIVED and unpins it, hiding it from attendees. Requires the\nQ&A dismiss permission (host, co-host or moderator by default) and a conference that is not\nended or cancelled. Archiving an already-archived question returns `changed: false`.",
         "operationId": "v2_archive_question",
         "parameters": [
           {
@@ -5845,6 +5916,7 @@
           "meetings"
         ],
         "summary": "Dismiss a question.",
+        "description": "Moves an OPEN or ANSWERED question to DISMISSED and unpins it, hiding it from attendees.\nRequires the Q&A dismiss permission (host, co-host or moderator by default) and a conference\nthat is not ended or cancelled. Dismissing an already-dismissed question returns\n`changed: false`; an archived question returns CONFERENCE_STATE_CONFLICT.",
         "operationId": "v2_dismiss_question",
         "parameters": [
           {
@@ -5922,6 +5994,7 @@
           "meetings"
         ],
         "summary": "Pin a question.",
+        "description": "Pins an OPEN or ANSWERED question so it is listed first. Requires the Q&A pin permission (host,\nco-host or moderator by default) and a conference that is not ended or cancelled. Pinning an\nalready-pinned question returns `changed: false`; dismissed or archived questions cannot be\npinned (CONFERENCE_STATE_CONFLICT).",
         "operationId": "v2_pin_question",
         "parameters": [
           {
@@ -5997,6 +6070,7 @@
           "meetings"
         ],
         "summary": "Unpin a question.",
+        "description": "Removes the pin from a question. Requires the Q&A pin permission (host, co-host or moderator by\ndefault) and a conference that is not ended or cancelled. Unpinning a question that is not\npinned returns `changed: false`.",
         "operationId": "v2_unpin_question",
         "parameters": [
           {
@@ -6064,6 +6138,7 @@
           "meetings"
         ],
         "summary": "Upvote a question (idempotent).",
+        "description": "Adds the caller's upvote to an OPEN or ANSWERED question while the conference is LIVE and Q&A is\nenabled; the caller must be an admitted participant and cannot upvote their own question. Voting\nagain is a no-op that returns `changed: false`. The upvote count is recalculated from the stored\nvotes. Rate-limited per participant.",
         "operationId": "v2_vote_question",
         "parameters": [
           {
@@ -6139,6 +6214,7 @@
           "meetings"
         ],
         "summary": "Remove the caller's upvote (idempotent).",
+        "description": "Removes the caller's upvote from a question while the conference is LIVE and Q&A is enabled; the\ncaller must be an admitted participant. Returns `changed: false` when the caller had not voted.\nRate-limited per participant.",
         "operationId": "v2_unvote_question",
         "parameters": [
           {
@@ -6206,6 +6282,7 @@
           "meetings"
         ],
         "summary": "Send a transient reaction (no stored row).",
+        "description": "Broadcasts a reaction key (e.g. `thumbs_up`, `clap`) from the caller to everyone in the same\nroom (main room or the caller's breakout). Requires an admitted participant with `reaction.send`\nin a LIVE conference, with reactions enabled and the key allowed by the meeting policy; rate\nlimited. Nothing is stored; `delivered` is false when the realtime channel was unavailable.",
         "operationId": "v2_send_reaction",
         "parameters": [
           {
@@ -6283,6 +6360,7 @@
           "meetings"
         ],
         "summary": "WebSocket conference event stream.",
+        "description": "Upgrades to a WebSocket that streams conference events as JSON frames (`subscribed`, `event`,\n`degraded`, `resync_required`, `revoked`, `closed`, `pong`). Authenticate with a `ticket` from\nthe ticket endpoint or with the usual bearer / participant-token headers, and pass `cursor` to\nreplay missed events first. Access is re-checked during the connection, which closes when access\nis revoked or the conference ends; send the text `ping` to receive a `pong`.",
         "operationId": "v2_realtime_subscribe",
         "parameters": [
           {
@@ -6390,6 +6468,7 @@
           "meetings"
         ],
         "summary": "Mint a one-shot realtime subscription ticket.",
+        "description": "Browser WebSockets cannot send auth headers, so clients call this with their bearer or\nparticipant token and pass the returned `ticket` as a query parameter when opening the realtime\nWebSocket. The ticket is bound to this conference and expires after 60 seconds. The response\nalso gives the current event `cursor` and the caller's `scope`: FULL, or SELF_ONLY for a\nparticipant still in the waiting room.",
         "operationId": "v2_realtime_ticket",
         "parameters": [
           {
@@ -6467,6 +6546,7 @@
           "meetings"
         ],
         "summary": "Recordings of a conference.",
+        "description": "Lists the conference's recordings with their lifecycle status, newest first (at most 100).\nRequires authority in the conference plus the artifact-list permission or permission to start or\nstop recording.",
         "operationId": "v2_list_recordings",
         "parameters": [
           {
@@ -6522,6 +6602,7 @@
           "meetings"
         ],
         "summary": "Start the composite recording (provider called only after REQUESTED commits).",
+        "description": "Starts the conference's single composite recording. The conference must be LIVE, the caller\nneeds the recording-start permission, the meeting policy must allow recording, and where policy\nrequires explicit consent every affected participant must have consented. Returns 202 with the\nrecording in REQUESTED state (it becomes RECORDING only once the provider confirms capture);\nrepeating a request with the same `idempotencyKey` returns the existing recording with 200.",
         "operationId": "v2_start_recording",
         "parameters": [
           {
@@ -6629,6 +6710,7 @@
           "meetings"
         ],
         "summary": "One recording (scoped to the conference).",
+        "description": "Returns one recording with its current lifecycle status; the recording must belong to the given\nconference. The same permissions as listing recordings apply. Use the artifact `access` endpoint\nto obtain a download link.",
         "operationId": "v2_get_recording",
         "parameters": [
           {
@@ -6695,8 +6777,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Stop a recording (idempotent; READY only after provider finalization + storage",
-        "description": "verification).",
+        "summary": "Stop a recording (idempotent).",
+        "description": "Stops an active recording; repeating the call is safe. The recording becomes `READY` only\nafter the media provider has finalized it and its stored file has been verified.",
         "operationId": "v2_stop_recording",
         "parameters": [
           {
@@ -6784,6 +6866,7 @@
           "meetings"
         ],
         "summary": "Reschedule one unstarted occurrence (series untouched).",
+        "description": "Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the\nstart) for a conference still in state CREATED; any other state returns\nCONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For\nan occurrence of a recurring series only that occurrence moves.",
         "operationId": "v2_reschedule_conference",
         "parameters": [
           {
@@ -6847,6 +6930,7 @@
           "meetings"
         ],
         "summary": "STOP SHARE NOW: terminate a participant's active screen share (not a lock).",
+        "description": "Ends the participant's current screen share through the RTC provider without blocking future\nshares (use the screen-share lock for that). You may stop your own share; stopping someone\nelse's requires `participant.screen_share_stop` and a target less privileged than you. The\nconference must be LIVE and the participant sharing; success is returned only after the provider\nconfirms.",
         "operationId": "v2_stop_screen_share",
         "parameters": [
           {
@@ -6944,6 +7028,7 @@
           "meetings"
         ],
         "summary": "Spotlight a participant (shared presentation metadata; personal pins stay client-side).",
+        "description": "Adds an ADMITTED participant to the spotlight shown to everyone; media permissions are not\nchanged. Requires `participant.spotlight` and a LIVE conference. If the meeting allows a single\nspotlight the new one replaces the previous one; otherwise going over the policy's maximum\nreturns VALIDATION_ERROR. Returns the current spotlights (`changed: false` if already\nspotlighted).",
         "operationId": "v2_spotlight",
         "parameters": [
           {
@@ -7021,6 +7106,7 @@
           "meetings"
         ],
         "summary": "Remove a spotlight.",
+        "description": "Removes the participant from the shared spotlight. Requires `participant.spotlight` and a LIVE\nconference. Returns the remaining spotlights; `changed` is false if the participant was not\nspotlighted.",
         "operationId": "v2_remove_spotlight",
         "parameters": [
           {
@@ -7098,6 +7184,7 @@
           "meetings"
         ],
         "summary": "Start a conference. Concurrent starts yield exactly one LIVE authority.",
+        "description": "Moves a CREATED, PREPARING or WAITING conference to LIVE (a CREATED one is prepared first).\nRequires `conference.start`, an active meeting space, and the current time within the start\nwindow (from the space's early-start allowance before the scheduled start until its grace period\nafter the scheduled end). Starting a LIVE conference is a no-op (`changed: false`), and only one\nconference per meeting space can be LIVE at a time.",
         "operationId": "v2_start_conference",
         "parameters": [
           {
@@ -7172,6 +7259,7 @@
           "meetings"
         ],
         "summary": "Start LIVE or POST_MEETING transcription (policy, location and consent gated).",
+        "description": "Creates a transcription job whose output becomes a transcript artifact. LIVE (the default)\nrequires a live conference; POST_MEETING transcribes the READY recording given in\n`sourceRecordingId`. Requires the transcription-start permission, a meeting policy and provider\nlocation that allow it, and participant consent where policy requires it. `language` defaults to\n`en`.",
         "operationId": "v2_start_transcription",
         "parameters": [
           {
@@ -7259,6 +7347,7 @@
           "meetings"
         ],
         "summary": "Stop a transcription job.",
+        "description": "Requests that an active transcription job stop and returns the job. Requires the\ntranscription-stop permission. Calling it on a job that is no longer active returns the job\nunchanged.",
         "operationId": "v2_stop_transcription",
         "parameters": [
           {
@@ -7326,6 +7415,7 @@
           "meetings"
         ],
         "summary": "Transcription jobs / transcripts of a conference.",
+        "description": "Lists the conference's transcription jobs, newest first (at most 100), with their mode, status,\nlanguage, segment count and transcript artifact id. Requires the transcript-read permission.",
         "operationId": "v2_list_transcripts",
         "parameters": [
           {
@@ -7383,6 +7473,7 @@
           "meetings"
         ],
         "summary": "Transcript FINAL segments (cursor paginated).",
+        "description": "Returns the transcript artifact, its job and a page of FINAL segments in sequence order.\nRequires the transcript-read permission. Page with `after` (last sequence seen) and `limit`\n(default 200, max 1000); `nextAfter` is set while more segments remain.",
         "operationId": "v2_get_transcript",
         "parameters": [
           {
@@ -7477,6 +7568,7 @@
           "meetings"
         ],
         "summary": "Translate a READY transcript (downstream; the original is never overwritten).",
+        "description": "Translates every segment of a READY transcript into `targetLanguage` and stores the translations\nalongside the original. Requires both the transcript-read and transcription-start permissions,\nand the translation provider must be permitted by the meeting's location policy. Segments\nalready translated into that language are not duplicated.",
         "operationId": "v2_translate_transcript",
         "parameters": [
           {
@@ -7554,6 +7646,7 @@
           "meetings"
         ],
         "summary": "Unlock a live conference.",
+        "description": "Lifts the lock so new entrants can join again under the normal access and waiting-room rules.\nRequires `conference.lock` and a LIVE conference (CONFERENCE_NOT_LIVE otherwise). Unlocking a\nconference that is not locked is a no-op (`changed: false`).",
         "operationId": "v2_unlock_conference",
         "parameters": [
           {
@@ -7621,6 +7714,7 @@
           "meetings"
         ],
         "summary": "Waiting queue (requires `participant.admit`).",
+        "description": "Returns the participants currently WAITING for admission, oldest request first. The caller's\nconference role (from an admitted participant or a space membership) must hold\n`participant.admit`. Returns FEATURE_DISABLED when the waiting room is not enabled.",
         "operationId": "v2_get_waiting_room",
         "parameters": [
           {
@@ -7685,6 +7779,7 @@
           "meetings"
         ],
         "summary": "Admit one, selected or all waiting participants (transactional, idempotent).",
+        "description": "Moves WAITING participants to ADMITTED: pass `participantIds` (up to 500) or `all: true` for\neveryone currently waiting. Requires `participant.admit` and a LIVE conference, and respects the\nmeeting's capacity. Any id outside this conference fails the whole request; already admitted ids\nare reported as `unchanged`, and banned or otherwise ineligible ones as `skipped`.",
         "operationId": "v2_admit",
         "parameters": [
           {
@@ -7779,6 +7874,7 @@
           "meetings"
         ],
         "summary": "Deny one, selected or all waiting participants.",
+        "description": "Moves WAITING participants to DENIED: pass `participantIds` (up to 500) or `all: true`. Optional\n`reasonCode` (max 64 chars) and `message` (max 500 chars, shown to the denied participant), plus\nan `internalNote` that is never shown to them. Requires `participant.deny`; any id outside this\nconference fails the whole request, already denied ids are `unchanged` and others `skipped`.",
         "operationId": "v2_deny",
         "parameters": [
           {
@@ -7853,6 +7949,7 @@
           "meetings"
         ],
         "summary": "Instant meeting: creates a meeting space and a LIVE conference atomically.",
+        "description": "Creates a meeting space owned by the caller and a conference that is LIVE immediately, in one\nstep, and returns both. The body is optional: the title defaults to \"Instant meeting\" and the\naccess policy to PUBLIC; timezone, waiting-room policy and passcode may be set. Requires a\nsigned-in user with v2 meetings enabled for the account. The conference's media room is prepared\nright away on a best-effort basis.",
         "operationId": "v2_create_instant_meeting",
         "requestBody": {
           "content": {
@@ -7911,6 +8008,7 @@
           "meetings"
         ],
         "summary": "Resolve an invitation token (read-only; does not consume a use).",
+        "description": "Public endpoint, no authentication required. Returns the meeting space the token belongs to, the\nconference it is limited to (if any), the role it grants, its expiry and remaining uses.\nUnknown, revoked or used-up tokens return INVITATION_INVALID and expired ones\nINVITATION_EXPIRED; a use is consumed only when the token is used to join a conference.",
         "operationId": "v2_resolve_invitation",
         "parameters": [
           {
@@ -7961,6 +8059,7 @@
           "meetings"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -8005,6 +8104,7 @@
           "meetings"
         ],
         "summary": "List meeting spaces the caller owns or is a member of.",
+        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next upcoming one, else the latest). Owners, hosts\nand co-hosts get the full view, other members the summary view. Not paginated.",
         "operationId": "v2_list_meeting_spaces",
         "responses": {
           "200": {
@@ -8051,6 +8151,7 @@
           "meetings"
         ],
         "summary": "Create a meeting space. The owner is always the authenticated caller.",
+        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`.",
         "operationId": "v2_create_meeting_space",
         "requestBody": {
           "content": {
@@ -8129,7 +8230,7 @@
           "meetings"
         ],
         "summary": "Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.",
-        "description": "Callers without management rights receive the SUMMARY view; resolution never\nimplies authorization.",
+        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization.",
         "operationId": "v2_get_meeting_space",
         "parameters": [
           {
@@ -8188,6 +8289,7 @@
           "meetings"
         ],
         "summary": "Update a meeting space (optimistic concurrency via `version`).",
+        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.",
         "operationId": "v2_update_meeting_space",
         "parameters": [
           {
@@ -8268,6 +8370,7 @@
           "meetings"
         ],
         "summary": "Soft-archive a meeting space (owner only). History is preserved.",
+        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.",
         "operationId": "v2_archive_meeting_space",
         "parameters": [
           {
@@ -8339,6 +8442,7 @@
           "meetings"
         ],
         "summary": "List occurrences of a meeting space (members only).",
+        "description": "Returns the conferences of the meeting space (full view), ordered by scheduled start. Optional\n`from` (inclusive) and `to` (exclusive) RFC 3339 timestamps filter on the scheduled start time.\nRequires a bearer user token of the space owner or an active member.",
         "operationId": "v2_list_conferences",
         "parameters": [
           {
@@ -8421,6 +8525,7 @@
           "meetings"
         ],
         "summary": "Create a one-time scheduled conference occurrence.",
+        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later). Requires a bearer user token whose space role may start conferences\n(`conference.start`).",
         "operationId": "v2_create_conference",
         "parameters": [
           {
@@ -8491,6 +8596,7 @@
           "meetings"
         ],
         "summary": "Duplicate reusable configuration into a new space owned by the caller.",
+        "description": "Creates a new ACTIVE space with a new meeting code, owned by the caller, copying the source\nspace's settings and policies, including its passcode. Conferences, members, invitations,\nhistory and recordings are not copied. Requires the owner or a host of the source space and v2\nmeetings enabled for the account. The title defaults to \"Copy of \" plus the source title; the\norganization is dropped if the caller is not a verified member of it.",
         "operationId": "v2_duplicate_meeting_space",
         "parameters": [
           {
@@ -8554,6 +8660,7 @@
           "meetings"
         ],
         "summary": "List invitations of a space (no tokens or hashes).",
+        "description": "Returns all invitations of the meeting space, newest first, including revoked and expired ones,\nwith their status and usage count. Requires a bearer user token with invite authority in the\nspace (a role allowed to admit participants).",
         "operationId": "v2_list_invitations",
         "parameters": [
           {
@@ -8615,6 +8722,7 @@
           "meetings"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -8685,6 +8793,7 @@
           "meetings"
         ],
         "summary": "Revoke an invitation.",
+        "description": "Marks the invitation REVOKED so it can no longer be resolved or used to join. Requires a bearer\nuser token with invite authority in the space (a role allowed to admit participants). Revoking\nan already revoked invitation is a no-op that returns it unchanged.",
         "operationId": "v2_revoke_invitation",
         "parameters": [
           {
@@ -8755,6 +8864,7 @@
           "meetings"
         ],
         "summary": "List members (owner / host / co-host members).",
+        "description": "Returns every membership of the meeting space (active and revoked), oldest first. Requires a\nbearer user token; only the space owner, hosts and co-hosts may view members.",
         "operationId": "v2_list_members",
         "parameters": [
           {
@@ -8806,6 +8916,7 @@
           "meetings"
         ],
         "summary": "Add a member. The granted role is bounded by the caller's grant authority.",
+        "description": "Grants a persistent membership in an active meeting space to either a registered user (`userId`)\nor an email address (`email`); provide exactly one. Only the owner or a host may add members,\nand the role must be below the caller's own (assigning co-host also requires `cohost.assign`).\nYou cannot add yourself or the owner, and a principal can hold only one active membership.",
         "operationId": "v2_add_member",
         "parameters": [
           {
@@ -8869,6 +8980,7 @@
           "meetings"
         ],
         "summary": "Revoke a membership.",
+        "description": "Marks the membership REVOKED and returns it; the record is kept. Only the owner or a host may\nrevoke, and only members less privileged than themselves (or their own membership). Revoking an\nalready revoked membership is a no-op that returns it unchanged.",
         "operationId": "v2_revoke_member",
         "parameters": [
           {
@@ -8930,6 +9042,7 @@
           "meetings"
         ],
         "summary": "Change a member's role.",
+        "description": "Changes the role of an active membership. Send the member's current `version`; a stale version\nreturns MEETING_VERSION_CONFLICT. Only the owner or a host may change roles, only for members\nless privileged than themselves and never their own, and the new role must be below the caller's\nown (co-host also requires `cohost.assign`).",
         "operationId": "v2_update_member",
         "parameters": [
           {
@@ -9003,6 +9116,7 @@
           "meetings"
         ],
         "summary": "Transfer ownership (dedicated, protected operation).",
+        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.",
         "operationId": "v2_transfer_owner",
         "parameters": [
           {
@@ -9076,6 +9190,7 @@
           "meetings"
         ],
         "summary": "Stored space override plus the effective (resolved, clamped) meeting profile.",
+        "description": "Returns the space's sparse profile override as stored, its `profilePolicyVersion` (send it back\nwhen updating) and the effective meeting profile after organization and security limits are\napplied, including which fields were clamped. Requires a signed-in owner, host or co-host of the\nspace.",
         "operationId": "v2_get_profile_policy",
         "parameters": [
           {
@@ -9137,6 +9252,7 @@
           "meetings"
         ],
         "summary": "Update the space's sparse profile override (cannot exceed org / security ceilings).",
+        "description": "Merges `changes` into the space's stored profile override and returns the new override and\neffective profile. Requires a signed-in owner or host, and `profilePolicyVersion` must match the\ncurrent version (MEETING_VERSION_CONFLICT otherwise). Unknown keys are rejected, and a change\nthat would disallow public access while the space's access policy is public is refused with\nPROFILE_POLICY_DENIED. Live conferences of the space are notified, and recording or\ntranscription that the new policy no longer allows is stopped (nothing is deleted).",
         "operationId": "v2_update_profile_policy",
         "parameters": [
           {
@@ -9220,6 +9336,7 @@
           "meetings"
         ],
         "summary": "Read the active recurrence rule.",
+        "description": "Returns the space's active recurrence rule (RRULE, timezone, start and duration), or 404 if the\nspace has no active recurrence. The caller must be a signed-in owner or member of the space.",
         "operationId": "v2_get_recurrence",
         "parameters": [
           {
@@ -9271,6 +9388,7 @@
           "meetings"
         ],
         "summary": "Create or replace the space's recurrence (RFC 5545 RRULE in the space timezone).",
+        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone) and a duration of 1–1440 minutes. An existing active rule is ended and\nits unstarted future occurrences are removed or cancelled before the new rule takes effect;\noccurrences within the scheduling horizon are created right away. Requires permission to\nschedule conferences (owner and host; co-host by default) and v2 meetings enabled for the\naccount. Archived spaces cannot recur.",
         "operationId": "v2_set_recurrence",
         "parameters": [
           {
@@ -9342,6 +9460,7 @@
           "meetings"
         ],
         "summary": "End the recurring series (past and exception occurrences are preserved).",
+        "description": "Ends the space's active recurrence: future unstarted occurrences of the series are removed or\ncancelled, while started or past occurrences and recorded exceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
         "operationId": "v2_end_recurrence",
         "parameters": [
           {
@@ -9388,6 +9507,7 @@
           "meetings"
         ],
         "summary": "List exceptions of the active series.",
+        "description": "Returns the cancelled or rescheduled occurrences recorded for the space's active recurrence,\nordered by original start time, each with the series timezone. Returns an empty list when there\nis no active recurrence. The caller must be a signed-in owner or member of the space.",
         "operationId": "v2_list_recurrence_exceptions",
         "parameters": [
           {
@@ -9441,8 +9561,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Cancel or reschedule ONE future occurrence of the series — whether or not it has",
-        "description": "been materialized yet. Idempotent; applied by the scheduler when the occurrence is\ngenerated (or immediately if it already exists).",
+        "summary": "Cancel or reschedule ONE future occurrence of the series.",
+        "description": "Works whether or not the occurrence has been materialized yet. Idempotent; applied by the\nscheduler when the occurrence is generated (or immediately if it already exists).",
         "operationId": "v2_set_recurrence_exception",
         "parameters": [
           {
@@ -9526,6 +9646,7 @@
           "meetings"
         ],
         "summary": "Registrations of a meeting space (organizer view).",
+        "description": "Returns up to 500 registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
         "operationId": "v2_list_registrations",
         "parameters": [
           {
@@ -9577,6 +9698,7 @@
           "meetings"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per\nmeeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -9681,6 +9803,7 @@
           "meetings"
         ],
         "summary": "One registration (organizer view).",
+        "description": "Returns one registration of the space with the attendee details collected at registration; the\nadmission token is never returned. Requires a signed-in owner, host or co-host of the space and\nwebinar mode enabled.",
         "operationId": "v2_get_registration",
         "parameters": [
           {
@@ -9752,6 +9875,7 @@
           "meetings"
         ],
         "summary": "Cancel a registration (revokes its admission token).",
+        "description": "Marks the registration CANCELLED and revokes its admission token so it can no longer be used to\njoin. Requires a signed-in owner, host or co-host of the space and webinar mode enabled.\nCancelling an already-cancelled registration returns it unchanged.",
         "operationId": "v2_cancel_registration",
         "parameters": [
           {
@@ -9825,6 +9949,7 @@
           "meetings"
         ],
         "summary": "Resolve any supported meeting identifier to the canonical space and conference.",
+        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND.",
         "operationId": "v2_resolve_identifier",
         "parameters": [
           {

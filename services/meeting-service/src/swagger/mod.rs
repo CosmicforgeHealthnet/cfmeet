@@ -1299,22 +1299,24 @@ mod tests {
                         }
                     }
                     // A doc-comment summary wrapped onto a second `///` line is cut off
-                    // mid-sentence (utoipa takes the first line only).
+                    // mid-sentence (utoipa takes the first line only): unbalanced brackets or
+                    // quotes, a trailing separator, or no final period after a connective.
                     if let Some(summary) = op["summary"].as_str() {
+                        let summary = summary.trim_end();
                         let last = summary
-                            .trim_end_matches('.')
                             .rsplit(' ')
                             .next()
                             .unwrap_or("")
                             .to_ascii_lowercase();
                         if summary.matches('(').count() != summary.matches(')').count()
                             || summary.matches('`').count() % 2 == 1
-                            || summary.trim_end().ends_with([',', ';', ':', '(', '-', '+'])
-                            || [
-                                "a", "an", "and", "as", "at", "by", "every", "for", "from", "in",
-                                "into", "of", "on", "or", "the", "to", "with",
-                            ]
-                            .contains(&last.as_str())
+                            || summary.ends_with([',', ';', ':', '(', '-', '+'])
+                            || (!summary.ends_with('.')
+                                && [
+                                    "a", "an", "and", "as", "at", "by", "every", "for", "from",
+                                    "in", "into", "of", "on", "or", "the", "to", "with",
+                                ]
+                                .contains(&last.as_str()))
                         {
                             problems.push(format!("{at}: truncated summary `{summary}`"));
                         }
