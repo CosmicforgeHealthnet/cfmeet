@@ -388,6 +388,32 @@ async fn usage_is_metered_as_facts_without_prices_and_scoped_to_the_environment(
             u.text
         );
     }
+    // §129 (G-18): a MANAGED search query is metered as one QUERIES fact.
+    let s = h
+        .get(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/search?q=metered"),
+        )
+        .await;
+    assert_eq!(s.status, StatusCode::OK, "{}", s.text);
+    let u = h
+        .get(&c, None, &format!("/v1/messaging/usage?{range}"))
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/UsageSummary",
+        &u.json,
+    );
+    let search = u.json["totals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["usageType"] == "SEARCH_QUERY")
+        .unwrap_or_else(|| panic!("{}", u.text));
+    assert_eq!(
+        (search["quantity"].as_i64(), search["unit"].as_str()),
+        (Some(1), Some("QUERIES"))
+    );
     // Empty window; bad windows refused.
     let empty = h
         .get(&c, None, &format!("/v1/messaging/usage?{window}"))
@@ -417,4 +443,1046 @@ async fn usage_is_metered_as_facts_without_prices_and_scoped_to_the_environment(
         .sql("UPDATE messaging_usage_records SET quantity = 0")
         .await
         .is_err());
+}
+
+/// §28 / §47 / §49: the effective policy governs threads, reactions and pins. With threads
+/// off, replies are still recorded but carry no thread root; with reactions or pins off,
+/// new ones are refused (existing reactions can still be removed).
+#[tokio::test]
+async fn the_policy_snapshot_governs_threads_reactions_and_pins() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, member) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let root = h.send_managed(&c, &conv, owner, "agenda?").await;
+    let root_id = root.json["messageId"].as_str().unwrap().to_string();
+    let rpath = format!("/v1/conversations/{cid}/messages/{root_id}/reactions/:thumbsup:");
+    assert_eq!(
+        h.put(&c, Some(member), &rpath, json!({})).await.status,
+        StatusCode::OK
+    );
+
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["messages"],
+        json!({ "replies": true, "threads": true, "reactions": true, "pins": true }),
+        "{}",
+        effective.text
+    );
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+                "messages": { "threads": false, "reactions": false, "pins": false } }),
+    )
+    .await;
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["messages"],
+        json!({ "replies": true, "threads": false, "reactions": false, "pins": false })
+    );
+
+    let reply = h
+        .post(&c, Some(member), &format!("/v1/conversations/{cid}/messages"),
+              json!({ "clientMessageId": Uuid::new_v4(), "text": "item 1", "replyToMessageId": root_id }))
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.text);
+    assert_eq!(
+        reply.json["replyToMessageId"].as_str(),
+        Some(root_id.as_str())
+    );
+    assert_eq!(
+        reply.json["threadRootId"],
+        Value::Null,
+        "threads off: a reply, not a thread"
+    );
+
+    let refused = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/messages/{root_id}/reactions/:tada:"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(refused.reason(), "REACTIONS_DISABLED", "{}", refused.text);
+    let removed = h.delete(&c, Some(member), &rpath).await;
+    assert_eq!(removed.status, StatusCode::OK, "{}", removed.text);
+    let pin = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/pins/{root_id}"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(pin.reason(), "PINS_DISABLED", "{}", pin.text);
+}
+
+/// §30: a large group's members page through `GET …/members` (complete, in join order,
+/// without duplicates) and the conversation view embeds a bounded first page and the count.
+#[tokio::test]
+async fn large_group_membership_is_paginated_and_the_view_is_bounded() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 1).await;
+    let owner = people[0];
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let mut all = std::collections::BTreeSet::from([owner]);
+    for _ in 0..150 {
+        let p = h.principal(&c);
+        let r = h
+            .post(
+                &c,
+                Some(owner),
+                &format!("/v1/conversations/{cid}/members"),
+                json!({ "principalId": p }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        all.insert(p);
+    }
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let path = match &cursor {
+            Some(c) => format!("/v1/conversations/{cid}/members?limit=60&cursor={c}"),
+            None => format!("/v1/conversations/{cid}/members?limit=60"),
+        };
+        let page = h.get(&c, Some(owner), &path).await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.text);
+        conforms(
+            "messaging/common/v1.schema.json#/$defs/MemberPage",
+            &page.json,
+        );
+        pages += 1;
+        for m in page.json["members"].as_array().unwrap() {
+            seen.push(Uuid::parse_str(m["principalId"].as_str().unwrap()).unwrap());
+        }
+        match page.json["nextCursor"].as_str() {
+            Some(next) => cursor = Some(next.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 3);
+    assert_eq!(seen.len(), 151, "complete");
+    assert_eq!(
+        seen.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        151,
+        "no duplicates"
+    );
+    assert_eq!(
+        seen.iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        all
+    );
+    // (joined_at, principal_id) order; under the fixed test clock every join time ties,
+    // so the keyset must order (and resume) by principal id alone.
+    let mut sorted = seen.clone();
+    sorted.sort();
+    assert_eq!(seen, sorted, "keyset order across equal join times");
+    let bad = h
+        .get(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members?limit=501"),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let bad = h
+        .get(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members?cursor=bm90LWEtY3Vyc29y"),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let view = h
+        .get(&c, Some(owner), &format!("/v1/conversations/{cid}"))
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &view.json,
+    );
+    assert_eq!(view.json["members"].as_array().unwrap().len(), 100);
+    assert_eq!(view.json["memberCount"], 151);
+    assert_eq!(view.json["membersTruncated"], true);
+    assert_eq!(view.json["members"][0]["role"], "OWNER");
+}
+
+/// §90 / Appendix K (G-14): a conversation-specific retention is only ever stricter than
+/// the context's policy, only ever tightens (the database refuses loosening too), is
+/// audited, and the retention worker expires that conversation's messages while a sibling
+/// conversation under the same policy keeps its own.
+#[tokio::test]
+async fn a_conversation_retention_only_tightens_and_expires_its_own_messages() {
+    use sea_orm::ConnectionTrait;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (sibling, _) = {
+        let r = h
+            .create_conversation(
+                &c,
+                people[0],
+                json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        (r.json, ())
+    };
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED", "retentionDays": 1 } } }),
+    )
+    .await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}");
+    let version = |v: &Value| v["version"].as_i64().unwrap();
+    let current = h.get(&c, None, &path).await;
+    assert_eq!(current.json["retentionSeconds"], Value::Null);
+    let looser = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 2 * 86_400 }),
+        )
+        .await;
+    assert_eq!(
+        looser.reason(),
+        "RETENTION_LOOSER_THAN_POLICY",
+        "{}",
+        looser.text
+    );
+    let too_short = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 59 }),
+        )
+        .await;
+    assert_eq!(too_short.code(), "VALIDATION_ERROR", "{}", too_short.text);
+    let set = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&current.json), "retentionSeconds": 3600 }),
+        )
+        .await;
+    assert_eq!(set.status, StatusCode::OK, "{}", set.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &set.json,
+    );
+    assert_eq!(set.json["retentionSeconds"], 3600);
+    let loosen = h
+        .patch(
+            &c,
+            None,
+            &path,
+            json!({ "expectedVersion": version(&set.json), "retentionSeconds": 7200 }),
+        )
+        .await;
+    assert_eq!(
+        loosen.reason(),
+        "RETENTION_ONLY_TIGHTENS",
+        "{}",
+        loosen.text
+    );
+    let refused = h
+        .state
+        .db
+        .execute_unprepared(&format!(
+            "UPDATE messaging_conversations SET retention_seconds = NULL WHERE id = '{cid}'"
+        ))
+        .await;
+    assert!(
+        refused.is_err(),
+        "the database refuses removing a retention"
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_audit WHERE action = 'CONVERSATION_RETENTION_SET' AND target_id = '{cid}'")).await,
+        1
+    );
+
+    let mine = h.send_managed(&c, &conv, people[0], "disappears").await;
+    let theirs = h.send_managed(&c, &sibling, people[0], "stays a day").await;
+    assert_eq!(
+        (mine.status, theirs.status),
+        (StatusCode::CREATED, StatusCode::CREATED)
+    );
+    h.clock.advance(chrono::Duration::hours(2));
+    let mut report = messaging::compliance::retention::RetentionReport::default();
+    messaging::compliance::retention::expire_due(&h.state, 100, &mut report)
+        .await
+        .unwrap();
+    assert_eq!(report.expired, 1, "{report:?}");
+    let lifecycle = |id: &Value| {
+        format!(
+            "SELECT count(*) FROM messaging_messages WHERE id = '{}' AND lifecycle = 'ACTIVE'",
+            id.as_str().unwrap()
+        )
+    };
+    assert_eq!(h.scalar(&lifecycle(&mine.json["messageId"])).await, 0);
+    assert_eq!(h.scalar(&lifecycle(&theirs.json["messageId"])).await, 1);
+    // A second pass finds nothing more (idempotent).
+    let mut again = messaging::compliance::retention::RetentionReport::default();
+    messaging::compliance::retention::expire_due(&h.state, 100, &mut again)
+        .await
+        .unwrap();
+    assert_eq!(again.expired, 0);
+    // Creation may set a (stricter) retention directly; a looser one is refused.
+    let r = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "retentionSeconds": 600 }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["retentionSeconds"], 600);
+    let r = h
+        .create_conversation(
+            &c,
+            people[0],
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "retentionSeconds": 3 * 86_400 }),
+        )
+        .await;
+    assert_eq!(r.reason(), "RETENTION_LOOSER_THAN_POLICY", "{}", r.text);
+}
+
+/// §49 (G-08): pins may expire; an expired pin is neither listed nor counted, and pinning
+/// the message again renews it.
+#[tokio::test]
+async fn pins_can_expire_and_be_renewed() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let owner = people[0];
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let m = h.send_managed(&c, &conv, owner, "pin me").await;
+    let mid = m.json["messageId"].as_str().unwrap().to_string();
+    let pin = format!("/v1/conversations/{cid}/pins/{mid}");
+    let list = format!("/v1/conversations/{cid}/pins");
+    let past = h
+        .put(
+            &c,
+            Some(owner),
+            &pin,
+            json!({ "expiresAt": (h.now() - chrono::Duration::minutes(1)).to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(past.code(), "VALIDATION_ERROR", "{}", past.text);
+    let unknown = h.put(&c, Some(owner), &pin, json!({ "until": "x" })).await;
+    assert_eq!(unknown.code(), "VALIDATION_ERROR", "{}", unknown.text);
+    let at = h.now() + chrono::Duration::hours(1);
+    let r = h
+        .put(
+            &c,
+            Some(owner),
+            &pin,
+            json!({ "expiresAt": at.to_rfc3339() }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms("messaging/common/v1.schema.json#/$defs/PinChange", &r.json);
+    assert_eq!(r.json["changed"], true);
+    let l = h.get(&c, Some(people[1]), &list).await;
+    conforms("messaging/common/v1.schema.json#/$defs/PinList", &l.json);
+    assert_eq!(l.json["pins"].as_array().unwrap().len(), 1);
+    assert!(l.json["pins"][0]["expiresAt"].is_string());
+    h.clock.advance(chrono::Duration::hours(2));
+    assert_eq!(
+        h.get(&c, Some(people[1]), &list).await.json["pins"],
+        json!([]),
+        "an expired pin is not listed"
+    );
+    let renewed = h.put(&c, Some(owner), &pin, json!({})).await;
+    assert_eq!(renewed.status, StatusCode::OK, "{}", renewed.text);
+    assert_eq!(renewed.json["changed"], true);
+    assert_eq!(renewed.json["expiresAt"], Value::Null);
+    let l = h.get(&c, Some(people[1]), &list).await;
+    assert_eq!(l.json["pins"].as_array().unwrap().len(), 1);
+    assert_eq!(l.json["pins"][0]["expiresAt"], Value::Null);
+    // Re-pinning an unexpiring pin is a no-op.
+    assert_eq!(
+        h.put(&c, Some(owner), &pin, json!({})).await.json["changed"],
+        false
+    );
+}
+
+/// §47 (G-07): a thread summary — reply count, last reply and the caller's unread replies
+/// (from their read cursor) — inside the caller's history window only.
+#[tokio::test]
+async fn thread_summaries_count_replies_and_unread_replies() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, member) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let root = h.send_managed(&c, &conv, owner, "agenda?").await;
+    let root_id = root.json["messageId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}/messages");
+    let summary = format!("{path}/{root_id}/thread");
+    let empty = h.get(&c, Some(owner), &summary).await;
+    assert_eq!(empty.status, StatusCode::OK, "{}", empty.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ThreadSummary",
+        &empty.json,
+    );
+    assert_eq!(
+        (
+            empty.json["replyCount"].as_i64(),
+            empty.json["lastReplySequence"].clone()
+        ),
+        (Some(0), Value::Null)
+    );
+    let mut last = 0;
+    for (who, text) in [(member, "one"), (member, "two"), (owner, "three")] {
+        let r = h
+            .post(&c, Some(who), &path, json!({ "clientMessageId": Uuid::new_v4(), "text": text, "replyToMessageId": root_id }))
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        last = r.json["sequence"].as_i64().unwrap();
+    }
+    // A message outside the thread does not count.
+    h.send_managed(&c, &conv, member, "unrelated").await;
+    let s = h.get(&c, Some(owner), &summary).await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ThreadSummary",
+        &s.json,
+    );
+    assert_eq!(s.json["replyCount"], 3, "{}", s.text);
+    assert_eq!(s.json["lastReplySequence"], last);
+    assert_eq!(s.json["unreadReplyCount"], 2, "the member's two replies");
+    let r = h
+        .put(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/read-cursor"),
+            json!({ "sequence": last }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        h.get(&c, Some(owner), &summary).await.json["unreadReplyCount"],
+        0
+    );
+    // Non-members and unknown roots see nothing.
+    let outsider = h.principal(&c);
+    assert_eq!(
+        h.get(&c, Some(outsider), &summary).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let unknown = format!("{path}/{}/thread", Uuid::new_v4());
+    assert_eq!(
+        h.get(&c, Some(owner), &unknown).await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+/// §30 / §113 (G-01): MODERATOR moderates members without administering roles or
+/// outranking administrators; READ_ONLY reads but sends nothing; BOT_SERVICE is for bot
+/// principals only and bots never administer.
+#[tokio::test]
+async fn moderator_read_only_and_bot_service_roles_are_enforced() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 5).await;
+    let (owner, moderator, reader, plain, admin) =
+        (people[0], people[1], people[2], people[3], people[4]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let member = |p: Uuid| format!("/v1/conversations/{cid}/members/{p}");
+    for (p, role) in [
+        (moderator, "MODERATOR"),
+        (reader, "READ_ONLY"),
+        (admin, "ADMIN"),
+    ] {
+        let r = h
+            .patch(&c, Some(owner), &member(p), json!({ "role": role }))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{role}: {}", r.text);
+        conforms("messaging/common/v1.schema.json#/$defs/RoleChange", &r.json);
+    }
+    let list = h
+        .get(&c, Some(owner), &format!("/v1/conversations/{cid}/members"))
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/MemberPage",
+        &list.json,
+    );
+    let view = h.get(&c, None, &format!("/v1/conversations/{cid}")).await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Conversation",
+        &view.json,
+    );
+
+    // READ_ONLY: reads its window, sends nothing (messages, attachments), still reacts.
+    let m = h.send_managed(&c, &conv, owner, "announcement").await;
+    let r = h.send_managed(&c, &conv, reader, "may I?").await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("PRINCIPAL_NOT_AUTHORIZED", "READ_ONLY_MEMBER"),
+        "{}",
+        r.text
+    );
+    let read = h
+        .get(
+            &c,
+            Some(reader),
+            &format!("/v1/conversations/{cid}/messages"),
+        )
+        .await;
+    assert!(read.text.contains("announcement"), "{}", read.text);
+    let mid = m.json["messageId"].as_str().unwrap();
+    let r = h
+        .put(
+            &c,
+            Some(reader),
+            &format!("/v1/conversations/{cid}/messages/{mid}/reactions/:thumbsup:"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+
+    // MODERATOR: removes and bans plain members, never administrators or moderators, and
+    // administers no roles or members.
+    let r = h
+        .patch(
+            &c,
+            Some(moderator),
+            &member(plain),
+            json!({ "role": "ADMIN" }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(moderator),
+            &format!("/v1/conversations/{cid}/members"),
+            json!({ "principalId": h.principal(&c) }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+    let r = h.delete(&c, Some(moderator), &member(admin)).await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(moderator),
+            &format!("/v1/conversations/{cid}/bans"),
+            json!({ "principalId": owner }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(moderator),
+            &format!("/v1/conversations/{cid}/bans"),
+            json!({ "principalId": plain }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = h
+        .get(
+            &c,
+            Some(moderator),
+            &format!("/v1/conversations/{cid}/bans"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .delete(
+            &c,
+            Some(moderator),
+            &format!("/v1/conversations/{cid}/bans/{plain}"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h.delete(&c, Some(moderator), &member(reader)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+
+    // BOT_SERVICE: only for bot principals; bots never administer.
+    let bot = h.principal_of_kind(&c, "BOT_OR_SERVICE");
+    let human = h.principal(&c);
+    let add = format!("/v1/conversations/{cid}/members");
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &add,
+            json!({ "principalId": human, "role": "BOT_SERVICE" }),
+        )
+        .await;
+    assert_eq!(
+        r.reason(),
+        "BOT_SERVICE_REQUIRES_BOT_PRINCIPAL",
+        "{}",
+        r.text
+    );
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &add,
+            json!({ "principalId": bot, "role": "ADMIN" }),
+        )
+        .await;
+    assert_eq!(r.reason(), "BOT_CANNOT_ADMINISTER", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &add,
+            json!({ "principalId": bot, "role": "BOT_SERVICE" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    conforms("messaging/common/v1.schema.json#/$defs/Member", &r.json);
+    assert_eq!(
+        (r.json["role"].as_str(), r.json["authoritySource"].as_str()),
+        (Some("BOT_SERVICE"), Some("API"))
+    );
+    let r = h.send_managed(&c, &conv, bot, "build passed").await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = h
+        .patch(
+            &c,
+            Some(owner),
+            &member(bot),
+            json!({ "role": "MODERATOR" }),
+        )
+        .await;
+    assert_eq!(r.reason(), "BOT_CANNOT_ADMINISTER", "{}", r.text);
+    let r = h
+        .patch(&c, Some(owner), &member(admin), json!({ "role": "OWNER" }))
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+}
+
+/// §35 (G-01): an invited principal is not a member until it accepts (no history before,
+/// none of its invitation's window); invitations can be declined, revoked or expire.
+#[tokio::test]
+async fn invitations_are_accepted_declined_revoked_or_expire() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, plain) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let add = format!("/v1/conversations/{cid}/members");
+    let (guest, other, late) = (h.principal(&c), h.principal(&c), h.principal(&c));
+    h.send_managed(&c, &conv, owner, "before the invitation")
+        .await;
+
+    let r = h
+        .post(
+            &c,
+            Some(plain),
+            &add,
+            json!({ "principalId": guest, "invite": true }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &add,
+            json!({ "principalId": guest, "invite": true, "role": "READ_ONLY" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    conforms("messaging/common/v1.schema.json#/$defs/Member", &r.json);
+    assert_eq!(r.json["state"], "INVITED");
+    assert!(r.json["invitationExpiresAt"].is_string());
+    // Invited is not a member: nothing to read, nothing to send.
+    let msgs = format!("/v1/conversations/{cid}/messages");
+    assert_eq!(
+        h.get(&c, Some(guest), &msgs).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.send_managed(&c, &conv, guest, "hi").await.status,
+        StatusCode::NOT_FOUND
+    );
+    let list = h.get(&c, Some(guest), "/v1/messaging/invitations").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/InvitationList",
+        &list.json,
+    );
+    assert_eq!(
+        list.json["invitations"][0]["conversationId"].as_str(),
+        Some(cid.as_str())
+    );
+    assert_eq!(list.json["invitations"][0]["role"], "READ_ONLY");
+    // Only the invitee answers.
+    let accept = format!("/v1/conversations/{cid}/invitation/accept");
+    assert_eq!(
+        h.post(&c, Some(other), &accept, json!({})).await.status,
+        StatusCode::NOT_FOUND
+    );
+    h.send_managed(&c, &conv, owner, "while invited").await;
+    let a = h.post(&c, Some(guest), &accept, json!({})).await;
+    assert_eq!(a.status, StatusCode::OK, "{}", a.text);
+    conforms("messaging/common/v1.schema.json#/$defs/Member", &a.json);
+    assert_eq!(
+        (
+            a.json["state"].as_str(),
+            a.json["role"].as_str(),
+            a.json["authoritySource"].as_str()
+        ),
+        (Some("ACTIVE"), Some("READ_ONLY"), Some("INVITATION"))
+    );
+    h.send_managed(&c, &conv, owner, "after joining").await;
+    let read = h.get(&c, Some(guest), &msgs).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text);
+    assert!(read.text.contains("after joining"));
+    assert!(!read.text.contains("before the invitation") && !read.text.contains("while invited"));
+    assert_eq!(
+        h.post(&c, Some(guest), &accept, json!({})).await.status,
+        StatusCode::NOT_FOUND,
+        "answered once"
+    );
+
+    // Declined by the invitee; revoked by an administrator.
+    h.post(
+        &c,
+        Some(owner),
+        &add,
+        json!({ "principalId": other, "invite": true }),
+    )
+    .await;
+    let d = h
+        .post(
+            &c,
+            Some(other),
+            &format!("/v1/conversations/{cid}/invitation/decline"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (d.status, d.json["state"].as_str()),
+        (StatusCode::OK, Some("LEFT")),
+        "{}",
+        d.text
+    );
+    h.post(
+        &c,
+        Some(owner),
+        &add,
+        json!({ "principalId": other, "invite": true }),
+    )
+    .await;
+    let r = h
+        .delete(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members/{other}"),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.json["state"].as_str()),
+        (StatusCode::OK, Some("REMOVED")),
+        "{}",
+        r.text
+    );
+    assert_eq!(
+        h.post(&c, Some(other), &accept, json!({})).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    // Expiry: an invitation answered too late is closed and refused.
+    h.post(
+        &c,
+        Some(owner),
+        &add,
+        json!({ "principalId": late, "invite": true }),
+    )
+    .await;
+    h.clock.advance(chrono::Duration::days(8));
+    assert_eq!(
+        h.get(&c, Some(late), "/v1/messaging/invitations")
+            .await
+            .json["invitations"],
+        json!([])
+    );
+    let r = h.post(&c, Some(late), &accept, json!({})).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("CONFLICT", "INVITATION_EXPIRED"),
+        "{}",
+        r.text
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_conversation_members WHERE principal_id = '{late}' AND state = 'REMOVED' AND removed_reason = 'INVITATION_EXPIRED'")).await,
+        1
+    );
+    let types = h.conforming_event_types().await;
+    assert!(
+        types.contains("messaging.member.invited")
+            && types.contains("messaging.member.invitation-closed"),
+        "{types:?}"
+    );
+}
+
+/// Appendix K (G-31): read receipts are shared only when the environment, the
+/// conversation AND the reader allow it; the reader's own sessions always follow.
+#[tokio::test]
+async fn read_receipts_are_configurable_per_user_and_conversation() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, reader) = (people[0], people[1]);
+    let receipts = |kind: &'static str| {
+        let sql = format!("SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.read-cursor.{kind}'");
+        let h = &h;
+        async move { h.scalar(&sql).await }
+    };
+    let read = |conv: Value, who: Uuid| {
+        let h = &h;
+        let c = &c;
+        async move {
+            let cid = conv["conversationId"].as_str().unwrap().to_string();
+            let m = h.send_managed(c, &conv, owner, "read me").await;
+            let r = h
+                .put(
+                    c,
+                    Some(who),
+                    &format!("/v1/conversations/{cid}/read-cursor"),
+                    json!({ "sequence": m.json["sequence"] }),
+                )
+                .await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+    };
+    read(conv.clone(), reader).await;
+    assert_eq!(
+        (receipts("updated").await, receipts("synced").await),
+        (1, 1)
+    );
+    // The reader stops sharing: its sessions still sync, nobody else learns it.
+    let s = h
+        .put(
+            &c,
+            Some(reader),
+            "/v1/messaging/presence/settings",
+            json!({ "visibility": "CONVERSATION_MEMBERS", "shareReadReceipts": false }),
+        )
+        .await;
+    assert_eq!(s.status, StatusCode::OK, "{}", s.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/PresenceSettings",
+        &s.json,
+    );
+    assert_eq!(s.json["shareReadReceipts"], false);
+    read(conv.clone(), reader).await;
+    assert_eq!(
+        (receipts("updated").await, receipts("synced").await),
+        (1, 2)
+    );
+    // A conversation created without receipts shares none, whoever reads.
+    let quiet = h
+        .create_conversation(
+            &c,
+            owner,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "readReceipts": false }),
+        )
+        .await;
+    assert_eq!(quiet.status, StatusCode::CREATED, "{}", quiet.text);
+    assert_eq!(quiet.json["readReceipts"], false);
+    let qid = quiet.json["conversationId"].as_str().unwrap();
+    let third = h.principal(&c);
+    h.post(
+        &c,
+        Some(owner),
+        &format!("/v1/conversations/{qid}/members"),
+        json!({ "principalId": third }),
+    )
+    .await;
+    read(quiet.json.clone(), third).await;
+    assert_eq!(receipts("updated").await, 1);
+}
+
+/// Appendix K (G-31): with message requests on, a DIRECT conversation reaches the
+/// counterpart only after it accepts (it then sees the request); a declined request
+/// delivers nothing more; no KeyPackage of a pending counterpart is handed out; a block
+/// hides each side's device keys from the other.
+#[tokio::test]
+async fn direct_message_requests_and_block_aware_key_lookup() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let r = h
+        .put(
+            &c,
+            None,
+            "/v1/messaging/policy",
+            json!({ "expectedVersion": 0, "policy": { "contexts": {
+            "GROUP": { "requestsRequireAcceptance": true } } } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "DIRECT only: {}", r.text);
+    h.set_policy(
+        &c,
+        json!({ "contexts": { "DIRECT": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"],
+        "defaultProfile": "MANAGED", "requestsRequireAcceptance": true } } }),
+    )
+    .await;
+    let effective = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        effective.json["effective"]["contexts"]["DIRECT"]["requestsRequireAcceptance"],
+        true
+    );
+    let (alice, bob, dave) = (h.principal(&c), h.principal(&c), h.principal(&c));
+    let req = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob }),
+        )
+        .await;
+    assert_eq!(req.status, StatusCode::CREATED, "{}", req.text);
+    let cid = req.json["conversationId"].as_str().unwrap().to_string();
+    let msgs = format!("/v1/conversations/{cid}/messages");
+    let hello = h
+        .send_managed(&c, &req.json, alice, "hello, may I ask something?")
+        .await;
+    assert_eq!(hello.status, StatusCode::CREATED, "{}", hello.text);
+    // Nothing reaches bob before he accepts.
+    assert_eq!(
+        h.get(&c, Some(bob), &msgs).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(bob), &format!("/v1/conversations/{cid}"))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    let inv = h.get(&c, Some(bob), "/v1/messaging/invitations").await;
+    assert_eq!(
+        inv.json["invitations"][0]["conversationId"].as_str(),
+        Some(cid.as_str()),
+        "{}",
+        inv.text
+    );
+    let a = h
+        .post(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{cid}/invitation/accept"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (a.status, a.json["state"].as_str()),
+        (StatusCode::OK, Some("ACTIVE")),
+        "{}",
+        a.text
+    );
+    let seen = h.get(&c, Some(bob), &msgs).await;
+    assert!(
+        seen.text.contains("hello, may I ask something?"),
+        "the request is visible: {}",
+        seen.text
+    );
+    assert_eq!(
+        h.send_managed(&c, &req.json, bob, "sure").await.status,
+        StatusCode::CREATED
+    );
+
+    // Declined: nothing more is delivered.
+    let other = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": dave }),
+        )
+        .await;
+    let oid = other.json["conversationId"].as_str().unwrap().to_string();
+    let d = h
+        .post(
+            &c,
+            Some(dave),
+            &format!("/v1/conversations/{oid}/invitation/decline"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(d.status, StatusCode::OK, "{}", d.text);
+    let r = h.send_managed(&c, &other.json, alice, "please?").await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("DELIVERY_REFUSED", "REQUEST_DECLINED"),
+        "{}",
+        r.text
+    );
+
+    // E2EE request: the pending counterpart's KeyPackages are not handed out.
+    let x = h.member(&c, 2).await;
+    let y = h.member(&c, 2).await;
+    let e2ee = h
+        .create_conversation(&c, x.principal, json!({ "contextClass": "DIRECT", "counterpartPrincipalId": y.principal, "securityProfile": "PRIVATE_E2EE" }))
+        .await;
+    assert_eq!(e2ee.status, StatusCode::CREATED, "{}", e2ee.text);
+    let eid = e2ee.json["conversationId"].as_str().unwrap();
+    let r = h
+        .post(
+            &c,
+            Some(x.principal),
+            &format!("/v1/conversations/{eid}/mls/key-package-claims"),
+            json!({ "principalIds": [y.principal] }),
+        )
+        .await;
+    assert_eq!(r.reason(), "NOT_A_MEMBER", "{}", r.text);
+
+    // Block-aware key lookup: neither side sees the other's devices; others still do.
+    let z = h.member(&c, 0).await;
+    let b = h
+        .post(
+            &c,
+            Some(x.principal),
+            "/v1/messaging/blocks",
+            json!({ "principalId": z.principal }),
+        )
+        .await;
+    assert!(b.status.is_success(), "{}", b.text);
+    let dir = |of: Uuid| format!("/v1/messaging/principals/{of}/devices");
+    assert_eq!(
+        h.get(&c, Some(x.principal), &dir(z.principal)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(z.principal), &dir(x.principal)).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        h.get(&c, Some(y.principal), &dir(z.principal)).await.status,
+        StatusCode::OK
+    );
 }

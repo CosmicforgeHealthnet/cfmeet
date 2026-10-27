@@ -1,0 +1,7 @@
+{
+  "status": "ready",
+  "service": "developer-platform",
+  "database": "ok",
+  "migrations": "current",
+  "gatewayApi": "disabled"
+}

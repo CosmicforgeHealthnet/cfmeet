@@ -61,16 +61,15 @@ AD is recorded as approved, so every one is treated as **not yet approved**.
      `js`).
    No primitive is implemented here; there is no custom cipher or signature scheme.
 5. **Library, versions and licence (pinned exactly).** `openmls =0.9.1` (MIT, released
-   2026-10-07, a patch of 0.9.0 released 2026-08-25; MSRV 1.91), `openmls_rust_crypto
-   =0.6.0`, `openmls_basic_credential =0.6.0` (MIT). Transitive licences are permissive
-   (MIT / Apache-2.0 / BSD / ISC / Unicode) except `hpke-rs*` 0.7 (**MPL-2.0**, file-level
-   copyleft; acceptable for unmodified linking, recorded for legal review). Every bump is
-   a reviewed change. RustSec advisories are gated for this lockfile in
-   `dependency-security.yml`. `hpke-rs 0.7.0` pins its optional libcrux backend to
-   `libcrux-kem 0.0.9` (RUSTSEC-2026-0330 / -0331): the crate is in the lockfile but in no
-   build graph (the RustCrypto backend is used; CI proves `cargo tree -i libcrux-kem`
-   is empty for all features and targets), so those two advisories are ignored for this
-   lockfile only, until upstream releases a fixed pin.
+   2026-10-07, a patch of 0.9.0 released 2026-08-25; MSRV 1.91) with `openmls_traits
+   =0.6.0` and `openmls_memory_storage =0.6.0` (MIT). The OpenMLS crypto provider is CF
+   Meet's own, `src/provider.rs` (amended 2026-10-24, below): RustCrypto `sha2`, `hkdf`,
+   `hmac`, `aes-gcm`, `ed25519-dalek`, and `hpke-rs` / `hpke-rs-crypto` /
+   `hpke-rs-rust-crypto =0.8.0` (**MPL-2.0**, file-level copyleft; acceptable for
+   unmodified linking, recorded for legal review). Other transitive licences are
+   permissive (MIT / Apache-2.0 / BSD / ISC / Unicode). Every bump is a reviewed change.
+   RustSec advisories are gated for this lockfile in `dependency-security.yml`, with no
+   ignore entry.
 6. **Validation rules the backend applies** (`validate_key_package`): exactly one
    `MLSMessage` of wire format `mls_key_package` (≤ 16 KiB, exact TLS decoding);
    OpenMLS `KeyPackageIn::validate` (MLS 1.0, leaf-node signature, KeyPackage signature,
@@ -111,13 +110,41 @@ Upstream OpenMLS tests only x86_64 / aarch64 Linux, Windows and macOS on CI and 
 
 ## Open decisions (owner approval required)
 
-* Final approval of OpenMLS 0.9.x / the RustCrypto provider and the single cipher suite
+* Final approval of OpenMLS 0.9.x / the CF Meet RustCrypto-based provider and the single cipher suite
   (the specification's proposal; no post-quantum confidentiality is claimed — MLS 1.0
   provides none — and no Signal Protocol interoperability is claimed).
 * The anti-equivocation architecture for key transparency (independent witnesses /
   auditors, signed tree heads, gossip).
-* Legal review of the MPL-2.0 `hpke-rs` dependency; tracking the upstream `hpke-rs` release
-  that lifts the `libcrux-kem 0.0.9` pin.
+* Legal review of the MPL-2.0 `hpke-rs` dependency.
+
+## Amendment 2026-10-24 — CF Meet OpenMLS provider (RUSTSEC-2026-0387)
+
+`openmls_rust_crypto` / `openmls_basic_credential` 0.6.0 (the latest releases) link
+`p256` / `p384` 0.13 → `elliptic-curve 0.13` → `crypto-bigint 0.5.5` (RUSTSEC-2026-0387)
+for ECDSA suites CF Meet never accepts; their upstream fix is unreleased and part of a
+broad dependency change. They are replaced by `src/provider.rs`:
+
+* `CfMlsCrypto` (`OpenMlsCrypto` + `OpenMlsRand`) implements exactly the accepted suite
+  `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` — SHA-256, HKDF / HMAC-SHA256,
+  AES-128-GCM, Ed25519 (strict verification), base-mode HPKE DHKEM(X25519) / HKDF-SHA256
+  with AES-128-GCM, plus ChaCha20-Poly1305 for history transfer — and refuses every other
+  algorithm. Randomness is the OS RNG (`getrandom`; Web Crypto in browsers). The bodies
+  follow `openmls_rust_crypto` 0.6.0 on the same RustCrypto crates; HPKE moves from
+  `hpke-rs` 0.7 to the 0.8 release (`crypto-bigint 0.7`, patched `libcrux-kem 0.0.10`).
+* `CfMlsProvider` (feature `client`) pairs it with `openmls_memory_storage`, the store the
+  former provider embedded; `SignatureKeys` (feature `client`) keeps the TLS layout of
+  `SignatureKeyPair`.
+* No wire format, cipher suite, group state or persisted format changes. Evidence:
+  `tests/provider_compatibility.rs` with `tests/vectors/provider_compat_v1.json`, produced
+  by the former provider — identical primitive outputs, old HPKE ciphertexts open, old
+  device states import and re-export byte for byte, queued old messages decrypt, and the
+  group continues through joins (an old KeyPackage), updates, removals and epoch
+  changes. The reverse direction (old code importing new states) was checked when the
+  change was made, so a rollback keeps existing groups.
+* Messaging's push adapters move from `p256 0.13` to `0.14` (ES256 outputs pinned by a
+  golden token; RFC 8291 vector unchanged).
+* RUSTSEC-2026-0330 / -0331 no longer apply (`libcrux-kem 0.0.10`); their ignore entries
+  were removed.
 * External cryptographic review of the registration-binding composition (decision 7).
 
 Until approved, device registration and KeyPackage publication are disabled by default

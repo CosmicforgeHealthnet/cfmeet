@@ -14,6 +14,7 @@
 //! | `MESSAGING_MAX_ACTIVE_DEVICES` | no | active devices per principal (1–100, default 10) |
 //! | `MESSAGING_MAX_KEY_PACKAGES_PER_DEVICE` | no | AVAILABLE KeyPackages per device (1–1000, default 100) |
 //! | `MESSAGING_KEY_PACKAGE_MAX_LIFETIME_DAYS` | no | longest accepted KeyPackage lifetime (1–90, default 90) |
+//! | `MESSAGING_KEY_PACKAGE_LOW_WATERMARK` | no | usable KeyPackages below which a device gets one low-stock alert (0–1000, default 10; 0 = off) |
 //! | `MESSAGING_DIRECTORY_LOOKUPS_PER_MINUTE` | no | device-directory / proof lookups per credential per minute (1–100000, default 600) |
 //! | `MESSAGING_AUTH_CACHE_TTL_SECONDS` | no | positive authentication cache for READ routes (0–60, default 10; 0 disables). Mutations always re-authenticate |
 //! | `MESSAGING_IDENTITY_FEED_INTERVAL_MS` | no | Platform Access change-feed poll (250–60000, default 2000); any change flushes the cache, a failed poll disables it |
@@ -49,6 +50,7 @@
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
 //! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
 //! | `MESSAGING_UNLINKED_ATTACHMENT_HOURS` | no | READY uploads never referenced by a message are deleted after (default 24) |
+//! | `MESSAGING_PUBLIC_EVENTS_DESTINATION` | no | receivers of relayed public events (Part VI §53): `calling` (default — Calling's platform-event ingress, today's customer webhook delivery, unchanged), `developer-platform` (the central event ingestion only; `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the relay row, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`].
@@ -93,6 +95,8 @@ pub struct DeviceSettings {
     pub max_active_devices: i64,
     pub max_key_packages_per_device: i64,
     pub key_package_max_lifetime_days: u64,
+    /// Below this many usable KeyPackages a device gets one low-stock alert (0 = off).
+    pub key_package_low_watermark: i64,
     pub directory_lookups_per_minute: i64,
     /// Largest sealed history a device-to-device transfer may carry.
     pub history_transfer_max_bytes: usize,
@@ -107,6 +111,7 @@ impl Default for DeviceSettings {
             max_active_devices: 10,
             max_key_packages_per_device: 100,
             key_package_max_lifetime_days: 90,
+            key_package_low_watermark: 10,
             directory_lookups_per_minute: 600,
             history_transfer_max_bytes: 8 * 1024 * 1024,
         }
@@ -326,6 +331,8 @@ pub struct MessagingConfig {
     pub attachments: AttachmentSettings,
     pub attachment_store: Option<cf_object_storage::S3Config>,
     pub clamav_address: Option<String>,
+    /// `MESSAGING_PUBLIC_EVENTS_DESTINATION` (Part VI §53).
+    pub public_events: crate::webhook_relay::PublicEventsDestination,
     pub log_format: LogFormat,
 }
 
@@ -376,6 +383,7 @@ impl fmt::Debug for MessagingConfig {
             .field("auth_cache", &self.auth_cache)
             .field("workers", &self.workers)
             .field("transparency", &self.transparency)
+            .field("public_events", &self.public_events)
             .finish_non_exhaustive()
     }
 }
@@ -494,6 +502,13 @@ impl MessagingConfig {
                 1,
                 90,
             )? as u64,
+            key_package_low_watermark: bounded(
+                &get,
+                "MESSAGING_KEY_PACKAGE_LOW_WATERMARK",
+                10,
+                0,
+                1_000,
+            )?,
             directory_lookups_per_minute: bounded(
                 &get,
                 "MESSAGING_DIRECTORY_LOOKUPS_PER_MINUTE",
@@ -920,6 +935,16 @@ impl MessagingConfig {
                 ));
             }
         }
+        use crate::webhook_relay::PublicEventsDestination;
+        let public_events = match get(PublicEventsDestination::VARIABLE) {
+            None => PublicEventsDestination::default(),
+            Some(v) => PublicEventsDestination::parse(&v).ok_or_else(|| {
+                ConfigError::invalid(
+                    PublicEventsDestination::VARIABLE,
+                    "must be `calling`, `developer-platform` or `both`",
+                )
+            })?,
+        };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -957,6 +982,7 @@ impl MessagingConfig {
             attachments,
             attachment_store,
             clamav_address,
+            public_events,
             log_format,
         })
     }

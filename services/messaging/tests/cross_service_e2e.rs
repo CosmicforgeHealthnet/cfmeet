@@ -123,8 +123,12 @@ async fn wait_ready(
             return false;
         }
         if let Ok(r) = http.get(format!("{url}{ready}")).send().await {
+            // Only if the answer came from THIS child (not another test's process that
+            // took the probed port first).
             if r.status().is_success() {
-                return true;
+                return child
+                    .id()
+                    .is_some_and(|pid| common::process_owns_listener(pid, common::url_port(url)));
             }
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1092,6 +1096,315 @@ async fn scenario_4_privacy_relay_authority_reaches_real_messaging() {
     );
     assert!(!authorities.contains(&bob.to_string()), "{authorities}");
     assert!(!authorities.contains(&alice.to_string()), "{authorities}");
+    drop(relay);
+}
+
+/// Scenario 4b — Privacy Relay outage and restart (real processes). Messaging keeps
+/// serving what was authorized while Privacy Relay is down and never grants an unknown
+/// context; a revocation committed while Messaging is down survives a Privacy Relay
+/// restart (its persisted job) and is applied on recovery: sends are denied, realtime
+/// subscriptions are revoked (§37) and cannot be re-opened, history stays readable; a
+/// re-delivered or older authority version changes nothing.
+#[tokio::test]
+async fn scenario_4b_privacy_relay_outage_and_restart_neither_grant_nor_lose_authority() {
+    let Some(b) = bins(&["PRIVACY_RELAY_BIN", "PRIVACY_RELAY_MIGRATION_BIN"]) else {
+        return;
+    };
+    let Some(mut st) = Stack::new(&[]).await else {
+        return;
+    };
+    use cf_service_auth::services as s;
+    use reqwest::Method as M;
+    let relay_key = key(&st.dir, "relay-key.pem", "privacy-relay-xs-1");
+    let calling_key = key(&st.dir, "calling-key.pem", "calling-xs-1");
+    let rjwk = relay_key.public_jwk();
+    let cjwk = calling_key.public_jwk();
+    st.messaging_trust(&[(
+        s::PRIVACY_RELAY,
+        &rjwk,
+        &["messaging-context-authority.apply"],
+    )]);
+    st.start_messaging(&[]).await;
+    std::fs::write(
+        st.dir.join("relay-trust.json"),
+        trust_bundle(
+            s::PRIVACY_RELAY,
+            &[(
+                s::CALLING,
+                &cjwk,
+                &[
+                    "communication.authorize",
+                    "communication-context.read",
+                    "communication-context.write",
+                    "relay-session.read",
+                    "relay-session.write",
+                ],
+            )],
+        ),
+    )
+    .unwrap();
+    let relay_db_url = create_db(&st.admin, "xs_relay_b").await;
+    migrate(&b[1], &relay_db_url);
+    let relay_db = Database::connect(&relay_db_url).await.unwrap();
+    let relay_env: Vec<(String, String)> = [
+        ("DATABASE_URL", relay_db_url.clone()),
+        ("PRIVACY_RELAY_DATABASE_MAX_CONNECTIONS", "4".into()),
+        (
+            "PRIVACY_RELAY_METRICS_ADDRESS",
+            format!("127.0.0.1:{}", free_port()),
+        ),
+        ("PRIVACY_RELAY_ENABLED", "true".into()),
+        ("PRIVACY_RELAY_WORKER_INTERVAL_MS", "200".into()),
+        ("CF_RUNTIME_ENVIRONMENT", env_name()),
+        ("CF_SERVICE_AUTH_KEY_ID", "privacy-relay-xs-1".into()),
+        ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", st.path("relay-key.pem")),
+        ("CF_SERVICE_TRUST_BUNDLE_FILE", st.path("relay-trust.json")),
+        ("MESSAGING_INTERNAL_BASE_URL", st.m_url()),
+        ("RUST_LOG", "privacy_relay=warn".into()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let relay_http = st.http.clone();
+    let relay_bin = b[0].clone();
+    let start_relay = || {
+        spawn(
+            &relay_http,
+            &relay_bin,
+            "/health",
+            "PRIVACY_RELAY_BIND_ADDRESS",
+            &relay_env,
+            None,
+        )
+    };
+    let mut relay = start_relay().await;
+    let calling = signer(ServiceId::calling(), calling_key);
+    let as_relay = signer(ServiceId::privacy_relay(), relay_key);
+
+    let t = st.tenant("EXTERNAL", &MESSAGING_SCOPES).await;
+    let token = st.credential(&t, &MESSAGING_SCOPES).await;
+    let alice = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    let bob = st.principal(&t, "EXTERNAL_APPLICATION_PRINCIPAL").await;
+    st.allow_managed(&token, "GROUP").await;
+    let http = st.http.clone();
+    let relay_call = |url: String, path: String, body: Value| {
+        signed(
+            &http,
+            &calling,
+            ServiceId::privacy_relay(),
+            Some(t.delegated()),
+            M::POST,
+            format!("{url}{path}"),
+        )
+        .json(&body)
+    };
+    let create_context = |url: String| {
+        let r = relay_call(
+            url,
+            "/internal/v1/contexts".into(),
+            json!({ "idempotencyKey": Uuid::new_v4(), "request": {
+                "externalContextReference": format!("ref-{}", Uuid::new_v4().simple()),
+                "participants": [{ "principalId": alice }, { "principalId": bob }],
+                "allowedChannels": ["VOICE", "MESSAGING"], "directionPolicy": "BIDIRECTIONAL",
+                "startsAt": now_plus(-1), "expiresAt": now_plus(60) } }),
+        );
+        async move {
+            let r = send(r).await;
+            assert_eq!(r.status, 201, "{}", r.text);
+            r.json["context"]["contextId"].as_str().unwrap().to_string()
+        }
+    };
+    let conv_body = |reference: &str| {
+        json!({ "contextClass": "GROUP", "securityProfile": "MANAGED",
+                "context": { "namespace": "privacy-relay", "reference": reference } })
+    };
+    let mdb = st.mdb().clone();
+    let state_of = |cid: String| {
+        let db = mdb.clone();
+        async move {
+            text(
+                &db,
+                &format!("SELECT lifecycle_state FROM messaging_conversations WHERE id = '{cid}'"),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // An ACTIVE context and its conversation.
+    let ctx = create_context(relay.url.clone()).await;
+    let conv = eventually(20, "ACTIVE authority applied", || async {
+        let r = st
+            .customer(
+                &token,
+                Some(alice),
+                M::POST,
+                "/v1/conversations",
+                Some(conv_body(&ctx)),
+            )
+            .await;
+        (r.status == 201).then_some(r)
+    })
+    .await;
+    let cid = conv.json["conversationId"].as_str().unwrap().to_string();
+    st.add_member(&token, alice, &cid, bob).await;
+
+    // 1. Privacy Relay is DOWN: what was authorized keeps working; nothing new is granted.
+    relay.stop().await;
+    let r = st.send_text(&token, alice, &cid, "relay is down").await;
+    assert_eq!(r.status, 201, "{}", r.text);
+    let r = st
+        .customer(
+            &token,
+            Some(alice),
+            M::POST,
+            "/v1/conversations",
+            Some(conv_body(&Uuid::new_v4().to_string())),
+        )
+        .await;
+    assert_eq!(r.reason(), "CONTEXT_AUTHORITY_UNKNOWN", "{}", r.text);
+
+    // 2. A revocation committed while Messaging is down, then Privacy Relay restarts.
+    relay = start_relay().await;
+    st.stop_messaging().await;
+    let revoke = send(relay_call(
+        relay.url.clone(),
+        format!("/internal/v1/contexts/{ctx}/revoke"),
+        json!({ "idempotencyKey": Uuid::new_v4(), "request": { "expectedVersion": 1 } }),
+    ))
+    .await;
+    assert_eq!(revoke.status, 200, "{}", revoke.text);
+    eventually(20, "the push failed and is pending", || async {
+        (scalar(&relay_db, &format!(
+            "SELECT count(*) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx}' \
+             AND authority_state = 'REVOKED' AND status = 'PENDING' AND attempt_count >= 1"
+        ))
+        .await
+            == 1)
+            .then_some(())
+    })
+    .await;
+    relay.stop().await;
+    st.start_messaging(&[]).await;
+    // Not applied yet (Privacy Relay is down): not lost either — the job is persisted.
+    assert_eq!(state_of(cid.clone()).await, "ACTIVE");
+    // Bob is connected and subscribed when the revocation finally arrives.
+    let bob_device = st.device(&token, bob).await;
+    let ct = st
+        .customer(
+            &token,
+            Some(bob),
+            M::POST,
+            "/v1/messaging/client-tokens",
+            Some(json!({ "deviceId": bob_device.device_id() })),
+        )
+        .await;
+    assert_eq!(ct.status, 201, "{}", ct.text);
+    let tk = send(
+        st.http
+            .post(format!("{}/v1/realtime/tickets", st.m_url()))
+            .header(
+                "authorization",
+                format!("CF-Client-Token {}", ct.json["token"].as_str().unwrap()),
+            ),
+    )
+    .await;
+    assert_eq!(tk.status, 201, "{}", tk.text);
+    let addr: std::net::SocketAddr = st.m_url().trim_start_matches("http://").parse().unwrap();
+    let mut ws = common::realtime::open_ws(addr, tk.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("authenticated WebSocket");
+    let sub = ws.subscribe(&json!({ "conversationId": cid }), None).await;
+    assert_eq!(sub["type"], "subscribed", "{sub}");
+    let started = std::time::Instant::now();
+    relay = start_relay().await;
+    eventually(
+        60,
+        "the persisted revocation applied after the restart",
+        || async { (state_of(cid.clone()).await == "CLOSED").then_some(()) },
+    )
+    .await;
+    println!(
+        "EVIDENCE scenario4b restart_to_revocation_ms={}",
+        started.elapsed().as_millis()
+    );
+    let revoked = ws.next_of("subscription.revoked").await;
+    assert_eq!(revoked["reason"], "CONTEXT_REVOKED", "{revoked}");
+    ws.send(json!({ "type": "subscribe", "conversationId": cid, "requestId": "again" }))
+        .await;
+    let refused = ws.next_of("error").await;
+    assert_eq!(refused["code"], "CONVERSATION_NOT_ACTIVE", "{refused}");
+    let r = st
+        .send_text(&token, bob, &cid, "after the revocation")
+        .await;
+    assert!(r.status >= 400 && r.status < 500, "{}", r.text);
+    let history = st
+        .customer(
+            &token,
+            Some(bob),
+            M::GET,
+            &format!("/v1/conversations/{cid}/messages"),
+            None,
+        )
+        .await;
+    assert_eq!(history.status, 200, "history is retained: {}", history.text);
+    assert!(history.text.contains("relay is down"));
+    eventually(20, "Privacy Relay records the job as applied", || async {
+        (scalar(&relay_db, &format!(
+            "SELECT count(*) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx}' AND status <> 'APPLIED'"
+        ))
+        .await
+            == 0)
+            .then_some(())
+    })
+    .await;
+
+    // 3. Re-delivery of the applied version, and an older ACTIVE version: no change.
+    let version = scalar(&relay_db, &format!(
+        "SELECT max(context_version) FROM privacy_relay_messaging_authority_jobs WHERE context_id = '{ctx}'"
+    ))
+    .await;
+    let conv_version = |db: DatabaseConnection, cid: String| async move {
+        scalar(
+            &db,
+            &format!("SELECT version FROM messaging_conversations WHERE id = '{cid}'"),
+        )
+        .await
+    };
+    let before = conv_version(st.mdb().clone(), cid.clone()).await;
+    let events = || {
+        let db = st.mdb().clone();
+        let cid = cid.clone();
+        async move {
+            scalar(&db, &format!(
+                "SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}' AND event_type = 'messaging.conversation.lifecycle-changed'"
+            ))
+            .await
+        }
+    };
+    let events_before = events().await;
+    for (state, v) in [("REVOKED", version), ("ACTIVE", 1)] {
+        let r = send(
+            signed(&st.http, &as_relay, ServiceId::messaging(), Some(t.delegated()), M::POST,
+                   format!("{}/internal/v1/context-authorities", st.m_url()))
+            .json(&json!({ "namespace": "privacy-relay", "reference": ctx, "state": state, "sourceVersion": v })),
+        )
+        .await;
+        assert_eq!(r.status, 200, "{state} v{v}: {}", r.text);
+        assert_eq!(
+            (r.json["applied"].as_bool(), r.json["reason"].as_str()),
+            (Some(false), Some("STALE_VERSION")),
+            "{}",
+            r.text
+        );
+    }
+    assert_eq!(state_of(cid.clone()).await, "CLOSED");
+    assert_eq!(conv_version(st.mdb().clone(), cid.clone()).await, before);
+    assert_eq!(
+        events().await,
+        events_before,
+        "no duplicate lifecycle event"
+    );
     drop(relay);
 }
 

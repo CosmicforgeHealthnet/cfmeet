@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "DELEGATED_CONTEXT_REQUIRED",
+    "message": "The operation requires a signed delegated platform context.",
+    "requestId": "req_0123456789abcdef0123456789abcdef"
+  }
+}

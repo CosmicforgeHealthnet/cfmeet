@@ -7,8 +7,9 @@ use super::{V2Json, V2Path};
 use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::AppState};
 
 /// Submit a batch of technical quality samples for the caller's own session.
-/// Identity, conference and session are server-derived; bodies are size- and
-/// rate-limited and contain no free text.
+///
+/// Identity, conference and session are server-derived; bodies are size- and rate-limited and
+/// contain no free text.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/quality/samples", tag = "Quality (v2)", operation_id = "v2_submit_quality_samples",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -33,8 +34,9 @@ pub async fn submit_samples(
     Ok((StatusCode::ACCEPTED, Json(r)))
 }
 
-/// Conference quality summary for holders of `quality.view` (no infrastructure
-/// identifiers).
+/// Conference quality summary for holders of `quality.view`.
+///
+/// The summary contains no infrastructure identifiers.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/quality", tag = "Quality (v2)", operation_id = "v2_conference_quality",
     params(("id" = Uuid, Path, description = "Conference id")),

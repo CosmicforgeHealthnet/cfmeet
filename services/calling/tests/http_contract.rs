@@ -218,6 +218,7 @@ fn contract_paths_equal_the_registered_routes() {
         let prefix = if path.ends_with("src/privacy_relay/enforcement.rs")
             || path.ends_with("src/telephony/http.rs")
             || path.ends_with("src/webhooks/ingest.rs")
+            || path.ends_with("src/webhooks/ownership_migration.rs")
         {
             "/internal/v1"
         } else {
@@ -577,6 +578,12 @@ fn every_operation_declares_its_authentication() {
                     | "/internal/v1/telephony/enterprise-keypad" => "telephony-enterprise.offer",
                     "/internal/v1/telephony/captures" => "telephony-capture.deliver",
                     "/internal/v1/platform/events" => "platform-event.publish",
+                    p if p.starts_with("/internal/v1/webhook-migration/rollback/") => {
+                        "webhook-migration.import"
+                    }
+                    p if p.starts_with("/internal/v1/webhook-migration/") => {
+                        "webhook-migration.export"
+                    }
                     _ => "communication-authority.enforce",
                 };
                 assert_eq!(
@@ -739,7 +746,10 @@ fn enterprise_scope(path: &str, method: &str) -> Option<&'static str> {
             names::WEBHOOKS_MANAGE
         });
     }
-    if path == "/v1/usage" || path == "/v1/limits" {
+    if matches!(
+        path,
+        "/v1/usage" | "/v1/limits" | "/v1/calling/usage" | "/v1/calling/limits"
+    ) {
         return Some(names::USAGE_READ);
     }
     if !path.starts_with("/v1/enterprise/") {

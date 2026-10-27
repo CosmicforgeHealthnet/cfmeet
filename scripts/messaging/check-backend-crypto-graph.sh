@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Asserts, from Cargo's resolved dependency graph, whether a crate links the CLIENT half of
-# packages/messaging-crypto (MLS private-key generation: the `client` / `web` features and
-# the openmls_basic_credential crate). The Messaging backend must never link it (ADR 0045).
+# packages/messaging-crypto (MLS private-key generation: the `client` / `web` features, which
+# hold `provider::SignatureKeys` / `CfMlsProvider`, and the former openmls_basic_credential
+# crate, still refused). The Messaging backend must never link it (ADR 0045).
 #
 #   check-backend-crypto-graph.sh <expect-absent|expect-present> <manifest-dir> [cargo tree args...]
 #

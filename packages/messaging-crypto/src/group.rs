@@ -15,13 +15,13 @@ use openmls::prelude::{
     MlsGroupCreateConfig, MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn,
     ProcessedMessageContent, ProtocolMessage, StagedWelcome,
 };
-use openmls_rust_crypto::OpenMlsRustCrypto;
 use uuid::Uuid;
 
 use crate::{
     binding,
     device::Device,
     profile::{MANDATORY_CIPHERSUITE, PROTOCOL_VERSION},
+    provider::CfMlsProvider,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -67,7 +67,7 @@ pub struct CommitOutput {
     pub epoch: u64,
 }
 
-fn key_package(provider: &OpenMlsRustCrypto, encoded: &[u8]) -> Result<KeyPackage, GroupError> {
+fn key_package(provider: &CfMlsProvider, encoded: &[u8]) -> Result<KeyPackage, GroupError> {
     let message =
         MlsMessageIn::tls_deserialize_exact(encoded).map_err(|_| GroupError::Malformed)?;
     let kp: KeyPackageIn = match message.extract() {
@@ -161,6 +161,33 @@ impl Device {
             .map_err(|_| GroupError::Refused)?;
         Ok(CommitOutput {
             commit: commit
+                .tls_serialize_detached()
+                .map_err(|_| GroupError::Refused)?,
+            welcome: None,
+            epoch,
+        })
+    }
+
+    /// Commits a fresh leaf for this device (new HPKE and path secrets; same signature
+    /// key) and merges it locally: post-compromise security — after this commit, state
+    /// copied from the device earlier cannot follow the group.
+    pub fn update_keys(&self, group: &mut ClientGroup) -> Result<CommitOutput, GroupError> {
+        let epoch = group.epoch();
+        let bundle = group
+            .group
+            .self_update(
+                self.provider(),
+                self.signer(),
+                openmls::treesync::LeafNodeParameters::default(),
+            )
+            .map_err(|_| GroupError::Refused)?;
+        group
+            .group
+            .merge_pending_commit(self.provider())
+            .map_err(|_| GroupError::Refused)?;
+        Ok(CommitOutput {
+            commit: bundle
+                .commit()
                 .tls_serialize_detached()
                 .map_err(|_| GroupError::Refused)?,
             welcome: None,

@@ -152,6 +152,12 @@ async fn ticket(State(state): State<AppState>, headers: HeaderMap) -> Result<Res
     if !session.has_scope(MESSAGES_READ) {
         return Err(ApiError::code(ErrorCode::InsufficientScope));
     }
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::RealtimeConnect,
+        session.environment_id,
+    )
+    .await?;
     let mut response = (
         StatusCode::CREATED,
         Json(sessions::issue_ticket(&state, &session).await?),
@@ -242,6 +248,15 @@ async fn connect(
     };
     if !session.has_scope(MESSAGES_READ) {
         return ApiError::code(ErrorCode::InsufficientScope).into_response();
+    }
+    if let Err(e) = crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::RealtimeConnect,
+        session.environment_id,
+    )
+    .await
+    {
+        return e.into_response();
     }
     let admission = Admission {
         tenant_id: session.tenant_id,

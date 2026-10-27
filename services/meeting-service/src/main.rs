@@ -70,13 +70,61 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("✅ Redis connected successfully");
 
     // Create application state
-    let state = AppState::new(
+    let mut state = AppState::new(
         db.clone(),
         redis_service,
         &app_config,
         &email_config,
         &livekit_config,
     );
+
+    // Part VI §51 / §53: platform credential access (MEETING_PLATFORM_ACCESS_ENABLED) and
+    // environment-scoped public events (MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION).
+    // Enabled but misconfigured stops startup (fail closed).
+    let platform = backend::services::platform::PlatformConfig::from_env()
+        .unwrap_or_else(|e| panic!("platform access configuration error: {e}"));
+    let mut _public_event_publisher = None;
+    if let Some(config) = platform {
+        let client = config
+            .client()
+            .unwrap_or_else(|e| panic!("platform access configuration error: {e}"));
+        if let Some(receiver) = config
+            .receiver(client.clone())
+            .unwrap_or_else(|e| panic!("platform access configuration error: {e}"))
+        {
+            state = state.with_platform(receiver);
+            tracing::info!("Part VI: platform credential access to /api/v2 enabled");
+        }
+        // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
+        if let Some(s) = config.usage_export.clone() {
+            use backend::services::platform::usage_export;
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                std::sync::Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    client.clone(),
+                )),
+                s,
+            )
+            .with_events(std::sync::Arc::new(usage_export::MeetingFacts::new(
+                db.clone(),
+            )))
+            .with_intervals(std::sync::Arc::new(usage_export::ArtifactStorage::new(
+                db.clone(),
+            )));
+            tokio::spawn(std::sync::Arc::new(exporter).run());
+            tracing::info!("Part VI: meeting usage facts -> Developer Platform");
+        }
+        if config.destination
+            == backend::services::platform::PublicEventsDestination::DeveloperPlatform
+        {
+            use backend::services::platform::events;
+            events::set_staging(true);
+            _public_event_publisher = Some(events::spawn_public_event_publisher(
+                events::PublicEventPublisher::new(db.clone(), client, config.runtime),
+                config.publish_interval,
+            ));
+            tracing::info!("Part VI: environment-scoped meeting events -> Developer Platform");
+        }
+    }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
     // Start email worker (only if SMTP is configured)
@@ -188,12 +236,25 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = app_config.server_addr();
 
+    // Part VI §50: Developer Console session bridge (DEVELOPER_SESSION_BRIDGE_ENABLED).
+    let session_bridge = backend::services::session_bridge::SessionBridgeConfig::from_env()
+        .and_then(|c| c.map(|c| c.verifier()).transpose())
+        .unwrap_or_else(|e| panic!("session bridge configuration error: {e}"));
+    let bridge_router = session_bridge
+        .map(|verifier| backend::services::session_bridge::router(state.clone(), verifier));
+    if bridge_router.is_some() {
+        tracing::info!("Part VI: Developer Console session bridge enabled");
+    }
+
     // Build application with routes
-    let app = Router::new()
+    let mut app = Router::new()
         .merge(routes::create_routes(state))
         .merge(swagger::swagger_router(&addr))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
+    if let Some(bridge) = bridge_router {
+        app = app.merge(bridge);
+    }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("🚀 Server running on http://{}", addr);

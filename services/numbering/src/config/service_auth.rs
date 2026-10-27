@@ -10,6 +10,7 @@
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority |
+//! | `CF_DEVELOPER_PLATFORM_BASE_URL` | no | the Developer Platform's event ingestion (`developer-event.publish`, Part VI §53); unset: public lifecycle events stay PENDING in the outbox |
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Numbering's
 //! own trust bundle grants the route's permission. Outbound, Numbering calls Platform
@@ -97,7 +98,14 @@ impl ServiceAuthRuntime {
 }
 
 /// Base-URL variables of the services Numbering calls.
-const TARGETS: &[(&str, &str)] = &[("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS)];
+const TARGETS: &[(&str, &str)] = &[
+    ("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS),
+    // Part VI §53: public number lifecycle events (developer-event.publish).
+    (
+        "CF_DEVELOPER_PLATFORM_BASE_URL",
+        services::DEVELOPER_PLATFORM,
+    ),
+];
 
 #[derive(Debug, Clone)]
 pub struct ServiceAuthSettings {

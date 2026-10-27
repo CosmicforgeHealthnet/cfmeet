@@ -434,6 +434,16 @@ async fn managed_attachment_lifecycle_and_authorized_downloads() {
         .to_str()
         .unwrap()
         .starts_with("attachment; filename=\"Holiday.png\""));
+    // §129 (G-18): the grant and the proxied read are metered as egress bytes (facts).
+    assert_eq!(
+        e.h.scalar(&format!(
+            "SELECT COALESCE(sum(quantity), 0)::bigint FROM messaging_usage_records WHERE usage_type = 'ATTACHMENT_EGRESS' \
+               AND unit = 'BYTES' AND subject_id = '{}'",
+            aid.as_str().unwrap()
+        ))
+        .await,
+        2 * bytes.len() as i64
+    );
 
     // A non-member, another tenant, a missing scope: no access, no existence oracle.
     let outsider = e.h.principal(&c);
@@ -922,6 +932,16 @@ async fn scanning_fails_closed_and_quarantines() {
     assert_eq!(f.json["state"], "READY");
     assert_eq!(f.json["scan"]["status"], "NOT_REQUIRED");
     assert_eq!(e.scanner.calls(), calls);
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = e.h.conforming_event_types().await;
+    for t in [
+        "messaging.attachment.quarantined",
+        "messaging.attachment.rejected",
+        "messaging.attachment.ready",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 #[tokio::test]
@@ -1867,6 +1887,15 @@ async fn managed_images_get_safe_thumbnails_and_e2ee_attachments_never_do() {
         "the thumbnail object is gone"
     );
     println!("EVIDENCE derivatives thumbnails=2 refused=2 e2ee_processed=0");
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = e.h.conforming_event_types().await;
+    for t in [
+        "messaging.attachment.ready",
+        "messaging.attachment.derivative-ready",
+    ] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 fn test_wav(ms_len: u32) -> Vec<u8> {
@@ -2559,6 +2588,12 @@ async fn retention_purge_releases_derivative_storage() {
     assert!(e.store.is_empty(), "{:?}", e.store.keys());
     assert_eq!(e.usage(&c).await, (0, 0));
     assert_no_drift(&e).await;
+    // §118 / Appendix D: the transitions above recorded their domain events, and every
+    // event conforms to the published event contract.
+    let types = e.h.conforming_event_types().await;
+    for t in ["messaging.attachment.deleted", "messaging.message.purged"] {
+        assert!(types.contains(t), "{t} not recorded: {types:?}");
+    }
 }
 
 /// A regenerated (replaced) thumbnail: the old object stays charged until deleted, the new
@@ -2659,7 +2694,17 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
     assert_eq!(e.usage(&c).await, (s + ta + tb, 0));
     use messaging_migration::MigratorTrait;
     let conn = &e.h.db.conn;
-    messaging_migration::Migrator::down(conn, Some(2))
+    // How many migrations, counted from the newest, reach back to (and include) `n`.
+    let since = |n: &str| {
+        let all = messaging_migration::Migrator::migrations();
+        let at = all
+            .iter()
+            .position(|m| m.name().contains(n))
+            .expect("migration exists");
+        (all.len() - at) as u32
+    };
+    // Back to before migration 18.
+    messaging_migration::Migrator::down(conn, Some(since("_000018_")))
         .await
         .unwrap();
     assert_eq!(
@@ -2685,7 +2730,9 @@ async fn existing_thumbnails_are_backfilled_once_by_the_upgrade() {
         .await
         .unwrap()
         .is_empty());
-    messaging_migration::Migrator::down(conn, Some(1))
+    // 19 and everything after it down / up (later migrations do not touch storage
+    // accounting).
+    messaging_migration::Migrator::down(conn, Some(since("_000019_")))
         .await
         .unwrap();
     messaging_migration::Migrator::up(conn, None).await.unwrap();

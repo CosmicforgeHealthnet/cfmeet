@@ -39,6 +39,10 @@ pub enum HubEvent {
         reference_id: Uuid,
         conversation_id: Option<Uuid>,
     },
+    ReadCursor {
+        conversation_id: Uuid,
+        read_sequence: i64,
+    },
     Typing {
         conversation_id: Uuid,
         principal_id: Uuid,
@@ -389,6 +393,27 @@ impl Hub {
                                 event_type: Arc::from(event_type.as_str()),
                                 reference_id: *reference_id,
                                 conversation_id: *conversation_id,
+                            },
+                        );
+                    }
+                }
+            }
+            BrokerMessage::ReadCursor {
+                conversation_id,
+                principal_id,
+                read_sequence,
+            } => {
+                let s = self.state.read().unwrap();
+                for id in s.by_conversation.get(conversation_id).into_iter().flatten() {
+                    if let Some(e) = s.conns.get(id) {
+                        if e.principal_key.1 != *principal_id {
+                            continue;
+                        }
+                        self.offer(
+                            e,
+                            HubEvent::ReadCursor {
+                                conversation_id: *conversation_id,
+                                read_sequence: *read_sequence,
                             },
                         );
                     }

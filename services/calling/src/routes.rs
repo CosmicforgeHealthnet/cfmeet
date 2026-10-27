@@ -62,6 +62,7 @@ pub fn internal_api() -> Router<AppState> {
     crate::privacy_relay::enforcement::internal_routes()
         .merge(crate::telephony::http::internal_routes())
         .merge(crate::webhooks::ingest::internal_routes())
+        .merge(crate::webhooks::ownership_migration::internal_routes())
 }
 
 /// Builds the service router.

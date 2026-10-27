@@ -31,6 +31,11 @@ use crate::{
 // ============================================================================
 
 /// List all participants in a meeting
+///
+/// Returns the participants of a meeting with their role, join and leave times, and audio, video
+/// and screen-share state. People still in the waiting room and those kicked or denied are
+/// excluded. Callable by the meeting host or any user who has a participant record in the meeting;
+/// other users get 403. Not paginated.
 #[utoipa::path(
     get,
     path = "/api/v1/meetings/{meeting_id}/participants",
@@ -112,6 +117,10 @@ pub async fn list_participants(
 }
 
 /// Kick a participant from the meeting (host only)
+///
+/// Marks a participant as kicked, records their leave time and logs the event; they no longer
+/// appear in the participant list. Only the host of the participant's meeting may call this, and
+/// the host cannot be kicked (409).
 #[utoipa::path(
     post,
     path = "/api/v1/participants/{participant_id}/kick",
@@ -195,6 +204,9 @@ pub async fn kick_participant(
 // ============================================================================
 
 /// List participants in the waiting room
+///
+/// Returns the participants waiting to be admitted to a meeting, with their display name and when
+/// they joined the waiting room. Only the meeting host may call this. Not paginated.
 #[utoipa::path(
     get,
     path = "/api/v1/meetings/{meeting_id}/waiting",
@@ -256,6 +268,10 @@ pub async fn list_waiting_participants(
 }
 
 /// Admit a participant from the waiting room (host only)
+///
+/// Admits a participant from the waiting room, changing their status to joined, and logs the event.
+/// Only the meeting host may call this. The participant must belong to this meeting (404 otherwise)
+/// and must currently be waiting (409 otherwise).
 #[utoipa::path(
     post,
     path = "/api/v1/meetings/{meeting_id}/waiting/{participant_id}/admit",
@@ -337,6 +353,10 @@ pub async fn admit_participant(
 }
 
 /// Deny a participant from the waiting room (host only)
+///
+/// Rejects a participant in the waiting room: they are marked as kicked with a leave time, and the
+/// event is logged. Only the meeting host may call this. The participant must belong to this
+/// meeting (404 otherwise) and must currently be waiting (409 otherwise).
 #[utoipa::path(
     post,
     path = "/api/v1/meetings/{meeting_id}/waiting/{participant_id}/deny",
@@ -423,6 +443,11 @@ pub async fn deny_participant(
 // ============================================================================
 
 /// Update participant audio state (mute/unmute)
+///
+/// Sets a participant's recorded mute state from `is_muted` and logs the change; it updates the
+/// meeting's stored state and does not itself mute the media track. Users may update their own
+/// participant record and the meeting host may update anyone's; a guest token may update only its
+/// own participant. Returns the participant's current audio, video and screen-share state.
 #[utoipa::path(
     patch,
     path = "/api/v1/participants/{participant_id}/audio",
@@ -513,6 +538,11 @@ pub async fn update_audio(
 }
 
 /// Update participant video state (enable/disable)
+///
+/// Sets a participant's recorded camera state from `is_video_on` and logs the change; it updates
+/// the meeting's stored state and does not itself turn the camera on or off. Users may update their
+/// own participant record and the meeting host may update anyone's; a guest token may update only
+/// its own participant. Returns the participant's current audio, video and screen-share state.
 #[utoipa::path(
     patch,
     path = "/api/v1/participants/{participant_id}/video",
@@ -603,6 +633,10 @@ pub async fn update_video(
 }
 
 /// Start screen sharing
+///
+/// Marks the caller as screen sharing in the meeting and logs the event. The caller must be a
+/// registered user who has joined the meeting (404 otherwise). Only one participant can share at a
+/// time: returns 409 if the caller or another participant is already sharing.
 #[utoipa::path(
     post,
     path = "/api/v1/meetings/{meeting_id}/screen-share/start",
@@ -694,6 +728,10 @@ pub async fn start_screen_share(
 }
 
 /// Stop screen sharing
+///
+/// Clears the caller's screen-sharing flag in the meeting and logs the event. The caller must be a
+/// registered user who has joined the meeting (404 otherwise); returns 409 if they are not
+/// currently sharing. It only stops the caller's own share.
 #[utoipa::path(
     post,
     path = "/api/v1/meetings/{meeting_id}/screen-share/stop",

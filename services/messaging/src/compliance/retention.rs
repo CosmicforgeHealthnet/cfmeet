@@ -57,6 +57,30 @@ pub async fn purge_message<C: ConnectionTrait>(
         vec![row.id.into(), now.into()],
     )
     .await?;
+    // Appendix D purge_completed: ids only, never content.
+    crate::events::outbox::record(
+        db,
+        "messaging.message.purged",
+        "MESSAGE",
+        row.id,
+        crate::events::outbox::EventScope {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        serde_json::json!({ "message_id": row.id, "conversation_id": row.conversation_id,
+                            "security_profile": row.security_profile, "sequence": row.sequence }),
+        now,
+    )
+    .await?;
+    // Kept MANAGED revisions go with the message (the database allows this only once
+    // the message is PURGED).
+    db::exec(
+        db,
+        "DELETE FROM messaging_message_revisions WHERE message_id = $1",
+        vec![row.id.into()],
+    )
+    .await?;
     let attachments: Vec<AttachmentRow> = db::all(
         db,
         &format!("SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE message_id = $1 AND state <> 'DELETED'"),
@@ -147,7 +171,41 @@ pub async fn expire_due(state: &AppState, batch: i64, report: &mut RetentionRepo
             report.expired += expire_class(state, env.environment_id, class, days, batch).await?;
         }
     }
+    report.expired += expire_conversation_overrides(state, batch).await?;
     Ok(())
+}
+
+/// §90: a conversation-specific retention (always stricter than its context's policy,
+/// which the per-class pass above keeps applying) expires its own older messages.
+async fn expire_conversation_overrides(state: &AppState, batch: i64) -> Result<usize> {
+    let st = state.clone();
+    state
+        .db
+        .transaction::<_, usize, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let due: Vec<MessageRow> = db::all(
+                    txn,
+                    &format!(
+                        "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
+                          WHERE c.retention_seconds IS NOT NULL AND m.lifecycle = 'ACTIVE' \
+                            AND m.created_at < $1 - make_interval(secs => c.retention_seconds) \
+                            AND m.message_kind <> 'MLS_COMMIT' \
+                          ORDER BY m.created_at LIMIT $2 FOR UPDATE OF m SKIP LOCKED"
+                    ),
+                    vec![now.into(), batch.into()],
+                )
+                .await?;
+                let rctx = request_context();
+                for m in &due {
+                    let scope = EventScope { tenant_id: m.tenant_id, application_id: m.application_id, environment_id: m.environment_id };
+                    messages::tombstone(txn, &scope, m, "EXPIRED", "RETENTION_EXPIRED", now, &rctx, now).await?;
+                }
+                Ok(due.len())
+            })
+        })
+        .await
+        .map_err(Error::from)
 }
 
 async fn expire_class(
@@ -187,9 +245,43 @@ async fn expire_class(
         .map_err(Error::from)
 }
 
+/// Due purges older than this raise a RETENTION_BACKLOG incident (§141).
+pub const RETENTION_BACKLOG_THRESHOLD: chrono::Duration = chrono::Duration::hours(1);
+
 pub async fn run_once(state: &AppState) -> Result<RetentionReport> {
     let mut r = RetentionReport::default();
     expire_due(state, 500, &mut r).await?;
     purge_due(state, 500, &mut r).await?;
+    check_backlog(state).await?;
     Ok(r)
+}
+
+/// How long the oldest due (not held) purge has waited; raises RETENTION_BACKLOG past
+/// [`RETENTION_BACKLOG_THRESHOLD`]. Held purges are rescheduled, so never count.
+pub async fn check_backlog(state: &AppState) -> Result<chrono::Duration> {
+    #[derive(FromQueryResult)]
+    struct Oldest {
+        oldest: Option<DateTime<Utc>>,
+    }
+    let now = state.now();
+    let oldest = db::one::<Oldest, _>(
+        &state.db,
+        "SELECT min(purge_after) AS oldest FROM messaging_messages WHERE purge_after <= $1 AND lifecycle NOT IN ('ACTIVE', 'PURGED')",
+        vec![now.into()],
+    )
+    .await?
+    .and_then(|o| o.oldest);
+    let waited = oldest
+        .map(|t| now - t)
+        .unwrap_or_else(chrono::Duration::zero);
+    if waited > RETENTION_BACKLOG_THRESHOLD {
+        crate::operations::raise(
+            &state.db,
+            crate::operations::IncidentCategory::RetentionBacklog,
+            "purge",
+            now,
+        )
+        .await;
+    }
+    Ok(waited)
 }

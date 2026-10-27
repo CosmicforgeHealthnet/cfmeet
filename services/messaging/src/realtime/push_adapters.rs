@@ -39,7 +39,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine};
 use hmac::{Hmac, Mac};
 use p256::{
     ecdsa::{signature::Signer, Signature, SigningKey},
-    elliptic_curve::sec1::ToEncodedPoint,
+    elliptic_curve::{sec1::ToSec1Point, Generate},
     pkcs8::DecodePrivateKey,
     PublicKey, SecretKey,
 };
@@ -550,8 +550,8 @@ pub fn encrypt_aes128gcm(
     as_secret: &SecretKey,
     salt: &[u8; 16],
 ) -> Vec<u8> {
-    let ua_bytes = ua_public.to_encoded_point(false);
-    let as_bytes = as_secret.public_key().to_encoded_point(false);
+    let ua_bytes = ua_public.to_sec1_point(false);
+    let as_bytes = as_secret.public_key().to_sec1_point(false);
     let shared = p256::ecdh::diffie_hellman(as_secret.to_nonzero_scalar(), ua_public.as_affine());
     // PRK_key = HMAC(auth, ecdh); IKM = HMAC(PRK_key, "WebPush: info\0" || ua || as || 0x01)
     let prk_key = hmac_sha256(auth, &[&shared.raw_secret_bytes()[..]]);
@@ -613,7 +613,7 @@ impl WebPush {
         if s.allowed_hosts.is_empty() {
             return Err("the Web Push host allowlist is empty".into());
         }
-        let vapid_public = B64URL.encode(secret.public_key().to_encoded_point(false).as_bytes());
+        let vapid_public = B64URL.encode(secret.public_key().to_sec1_point(false).as_bytes());
         Ok(Self {
             vapid: SigningKey::from(secret),
             vapid_public,
@@ -644,7 +644,9 @@ impl WebPush {
             &json!({ "typ": "JWT", "alg": "ES256" }),
             &json!({ "aud": audience, "exp": now_unix() + 12 * 3600, "sub": self.subject }),
         );
-        let as_secret = SecretKey::random(&mut rand::rngs::OsRng);
+        let Ok(as_secret) = SecretKey::try_generate() else {
+            return PushOutcome::Retryable("web push: no system randomness".into());
+        };
         let salt: [u8; 16] = rand::random();
         let body = encrypt_aes128gcm(
             &serde_json::to_vec(meta).expect("serializes"),
@@ -922,10 +924,33 @@ mod tests {
         );
     }
 
+    /// ES256 (RFC 6979 deterministic ECDSA) and the VAPID key encoding, pinned by values
+    /// produced before the p256 0.13 -> 0.14 upgrade (RUSTSEC-2026-0387): a key loaded
+    /// from the same PKCS#8 PEM signs the same token bytes.
+    #[test]
+    fn es256_tokens_and_vapid_keys_are_unchanged_across_the_p256_upgrade() {
+        use p256::pkcs8::{EncodePrivateKey, LineEnding};
+        // A fixed test scalar (no key material is committed), through PKCS#8 PEM as the
+        // adapters load their keys.
+        let pem = SecretKey::from_slice(&[0x5c; 32])
+            .unwrap()
+            .to_pkcs8_pem(LineEnding::LF)
+            .unwrap();
+        let secret = SecretKey::from_pkcs8_pem(&pem).unwrap();
+        let token = es256_jwt(
+            &SigningKey::from(secret.clone()),
+            &json!({ "typ": "JWT", "alg": "ES256" }),
+            &json!({ "aud": "https://push.example", "exp": 1_800_000_000u64, "sub": "mailto:push@cfmeet.example" }),
+        );
+        let vapid = B64URL.encode(secret.public_key().to_sec1_point(false).as_bytes());
+        assert_eq!(token, "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwczovL3B1c2guZXhhbXBsZSIsImV4cCI6MTgwMDAwMDAwMCwic3ViIjoibWFpbHRvOnB1c2hAY2ZtZWV0LmV4YW1wbGUifQ.GAz80Y2Zp4wfOdscvNwjkW5SxzAtBwMTP_tqGv_DckQRkZfQfeapQmZ-S8LlJFvV5En3DjNSIvOkM2rEyeQS5A");
+        assert_eq!(vapid, "BK924BslSJy3FVC6ADzKuoqIC5JtFvpbp9vZpuTnY7JBHSlfA4a2-DfIY9MtuFZ-OkgsmuUKMeKyt98ijOKRVoQ");
+    }
+
     #[test]
     fn es256_tokens_verify_with_the_public_key() {
         use p256::ecdsa::{signature::Verifier, VerifyingKey};
-        let key = SigningKey::random(&mut rand::rngs::OsRng);
+        let key = SigningKey::generate();
         let t = es256_jwt(&key, &json!({ "alg": "ES256" }), &json!({ "iss": "x" }));
         let (input, sig) = t.rsplit_once('.').unwrap();
         let sig = Signature::from_slice(&B64URL.decode(sig).unwrap()).unwrap();

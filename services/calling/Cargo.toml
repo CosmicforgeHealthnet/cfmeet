@@ -25,6 +25,8 @@ path = "src/bin/platform_admin.rs"
 calling-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Part VI §55: unified usage facts (call minutes, recordings, artifact storage).
+cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 cf-object-storage = { path = "../../packages/object-storage" }
 cf-webhooks = { path = "../../packages/webhooks" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
@@ -49,10 +51,10 @@ sha2 = "0.10"
 hex = "0.4"
 secrecy = "0.10"
 zeroize = "1.8"
-# Media provider boundary and signaling credentials: HS256 JWS (RustCrypto backend, same
-# audited implementation the service-auth package uses), provider HTTPS API (rustls, no
-# redirects), async provider trait.
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+# Media provider boundary and signaling credentials: HS256 JWS signed and verified through
+# cf_service_auth::jwt (no bundled crypto provider: only EdDSA / HMAC-SHA2 are linked),
+# provider HTTPS API (rustls, no redirects), async provider trait.
+jsonwebtoken = { version = "11", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 async-trait = "0.1"

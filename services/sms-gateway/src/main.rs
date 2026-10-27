@@ -15,7 +15,7 @@ use sms_gateway::{
     identity::{PlatformAccessAuthority, PlatformAccessPrincipals},
     infra::{
         outbox::{OutboxPublisher, PublisherSettings},
-        platform_events::PlatformEventTransport,
+        platform_events::{EventDestination, PlatformEventTransport},
     },
     metrics,
     numbering::{HttpNumbering, NumberingPort, UnconfiguredNumbering},
@@ -23,7 +23,6 @@ use sms_gateway::{
     sms::protection::Protection,
     state::AppState,
 };
-use sms_gateway_migration::MigratorTrait;
 use tracing_subscriber::EnvFilter;
 
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
@@ -100,12 +99,31 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_NUMBERING_BASE_URL is not set: every SMS operation fails closed");
         Arc::new(UnconfiguredNumbering)
     };
-    let publish_events = has_target(cf_service_auth::services::CALLING);
+    // Part VI §53: committed events go to Calling, the Developer Platform or both.
+    let destination = config.public_events;
+    if destination
+        .destinations()
+        .contains(&EventDestination::DeveloperPlatform)
+        && !has_target(cf_service_auth::services::DEVELOPER_PLATFORM)
+    {
+        fatal(
+            "configuration error",
+            format!(
+                "SMS_GATEWAY_PUBLIC_EVENTS_DESTINATION={} requires CF_DEVELOPER_PLATFORM_BASE_URL",
+                destination.as_str()
+            ),
+        );
+    }
+    let publish_events = destination
+        .destinations()
+        .iter()
+        .all(|d| has_target(d.service().as_str()));
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime,
         provider = provider.as_ref().map(|p| p.id().to_string()).unwrap_or_else(|| "none".into()),
         publish_events,
+        public_events_destination = destination.as_str(),
         "sms gateway configuration loaded"
     );
 
@@ -124,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             summarize_db_error(&e)
         )
     })?;
-    let pending = sms_gateway_migration::Migrator::get_pending_migrations(&db)
+    let pending = sms_gateway_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {
@@ -153,11 +171,22 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_provider(p);
     }
 
-    // Event publication to the platform's customer webhook delivery (Calling).
+    // Event publication to the platform's customer webhook delivery (Calling and / or the
+    // Developer Platform).
     if publish_events {
-        let publisher = Arc::new(OutboxPublisher::new(
+        let publisher = Arc::new(OutboxPublisher::with_destinations(
             db.clone(),
-            Arc::new(PlatformEventTransport::new(service_auth.client())),
+            destination
+                .destinations()
+                .iter()
+                .map(|d| {
+                    (
+                        *d,
+                        Arc::new(PlatformEventTransport::to(service_auth.client(), *d))
+                            as Arc<dyn sms_gateway::infra::outbox::EventTransport>,
+                    )
+                })
+                .collect(),
             clock.clone(),
             PublisherSettings {
                 lease: config.workers.lease,
@@ -172,6 +201,27 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("CF_CALLING_BASE_URL is not set: events stay PENDING in the outbox");
     }
     tokio::spawn(sms_gateway::sms::workers::run(state.clone()));
+    // Part VI §55: SMS_SEGMENT usage facts to the Developer Platform's unified ledger.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    service_auth.client(),
+                )),
+                s,
+            )
+            .with_events(Arc::new(
+                sms_gateway::infra::usage_export::SmsSegments::new(db.clone()),
+            ));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("SMS usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => {
+            tracing::warn!("CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off")
+        }
+        Ok(_) => {}
+        Err(e) => fatal("configuration error", e),
+    }
     // Part V H: inbound SMS of bridged parties reach Messaging (durable, retried).
     {
         let inbound: Arc<dyn sms_gateway::sms::bridge::BridgeInbound> =

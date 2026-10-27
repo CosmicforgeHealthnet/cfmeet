@@ -52,6 +52,11 @@ fn format_status(status: &ApiKeyStatus) -> String {
 }
 
 /// Create a new API key
+///
+/// Generates a new API key owned by the authenticated user. The request body currently takes no
+/// fields: every key gets a usage limit of 100 requests and expires 20 days after creation. The
+/// full key value is returned only in this response (later reads show it masked), so store it now.
+/// Send it in the `Api-Key` header on endpoints that accept API-key authentication.
 #[utoipa::path(
     post,
     path = "/api/v1/api-keys",
@@ -121,6 +126,10 @@ pub async fn create_api_key(
 }
 
 /// List all API keys for the authenticated user
+///
+/// Returns every API key owned by the authenticated user, both active and revoked, newest first.
+/// Key values are masked to their last four characters; usage count, usage limit, expiry and status
+/// are included. Not paginated.
 #[utoipa::path(
     get,
     path = "/api/v1/api-keys",
@@ -167,6 +176,10 @@ pub async fn list_api_keys(
 }
 
 /// Get a specific API key by ID
+///
+/// Returns one API key owned by the authenticated user, with the key value masked to its last four
+/// characters, plus its usage count, usage limit, expiry and status. Returns 404 if the key does
+/// not exist or belongs to another user.
 #[utoipa::path(
     get,
     path = "/api/v1/api-keys/{id}",
@@ -215,6 +228,10 @@ pub async fn get_api_key(
 }
 
 /// Revoke an API key
+///
+/// Marks an API key owned by the authenticated user as revoked so it can no longer authenticate
+/// requests. The key is not deleted: it stays in the list with status `revoked`. Revoking a key
+/// that is already revoked returns 409.
 #[utoipa::path(
     delete,
     path = "/api/v1/api-keys/{id}",

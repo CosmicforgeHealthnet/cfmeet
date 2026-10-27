@@ -92,6 +92,11 @@ pub async fn resolve(
             counterpart_principal_id: None,
             context: Some(context),
             expires_at: None,
+            expiry_grace_seconds: None,
+            retention_seconds: None,
+            predecessor_conversation_id: None,
+            profile_change_disclosure_acknowledged: false,
+            read_receipts: None,
             expected_policy_version: None,
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
         },
@@ -204,6 +209,14 @@ pub async fn sync_member(
                                 &role,
                                 &rctx,
                                 now,
+                            )
+                            .await?;
+                            // The meeting is this membership's source of authority.
+                            crate::db::exec(
+                                txn,
+                                "UPDATE messaging_conversation_members SET authority_source = 'MEETING' \
+                                 WHERE conversation_id = $1 AND principal_id = $2",
+                                vec![conversation.id.into(), principal.into()],
                             )
                             .await?;
                         }
@@ -367,8 +380,18 @@ pub async fn sync_lifecycle(
                             "TRANSITION_NOT_ALLOWED",
                         ));
                     }
-                    service::transition(txn, &ctx, &row, next, Some(&reason), None, now, &rctx)
-                        .await?;
+                    service::transition(
+                        txn,
+                        &ctx,
+                        &row,
+                        next,
+                        Some(&reason),
+                        None,
+                        None,
+                        now,
+                        &rctx,
+                    )
+                    .await?;
                 }
                 Ok(json!({ "applied": true, "lifecycleState": next }))
             })
@@ -524,7 +547,16 @@ pub async fn import_legacy(
             ));
         }
     }
-    managed::require_ring(state)?;
+    managed::require_ring(state)?
+        .prepare(
+            &state.db,
+            &crate::messages::keys::KeyScope {
+                tenant_id: ctx.scope.tenant_id,
+                application_id: ctx.scope.application_id,
+                environment_id: ctx.scope.environment_id,
+            },
+        )
+        .await?;
     let st = state.clone();
     let ctx = ctx.clone();
     state
@@ -562,6 +594,7 @@ pub async fn import_legacy(
                     match managed::import_legacy(
                         txn,
                         ring,
+                        &st.db,
                         &ctx,
                         &conversation,
                         m.sender_principal_id,

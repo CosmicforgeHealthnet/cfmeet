@@ -34,7 +34,18 @@ It owns, in its own PostgreSQL database:
   (platform envelope, leased multi-instance publication, per-aggregate order, bounded
   backoff, dead-letter), a **leased job queue** (restart recovery by retry safety;
   provider-affecting work interrupted mid-flight is parked `UNKNOWN_OUTCOME`, never
-  blindly repeated) and **scoped idempotency keys**.
+  blindly repeated) and **scoped idempotency keys**;
+* **public lifecycle events** (Part VI §53): the Developer Platform consumes the outbox
+  (`developer-event.publish`, producer `cfmeet.numbering`). Only reservation, assignment,
+  suspension / restoration, release and port events of a customer scope (tenant,
+  application and application environment) are published — unchanged registered
+  envelopes, CF Meet ids and codes only; KYC, eligibility, provider, risk, usage, routing
+  and relay facts, and unscoped inventory events (resource lifecycle, quarantine), never
+  leave Numbering. `NUMBERING_PUBLIC_EVENTS_DESTINATION` = `developer-platform` (default:
+  the Developer Platform ingests in shadow mode until the webhook cutover, so nothing a
+  customer sees changes; without `CF_DEVELOPER_PLATFORM_BASE_URL` events stay PENDING as
+  before) or `none`. A 4xx refusal other than `RATE_LIMITED` dead-letters the event;
+  anything else is retried.
 
 It does NOT own logical calls, SIP / PSTN execution, relay sessions or SMS transport
 (Calling, Telephony, Privacy Relay, the SMS Gateway), and it never reads another service's
@@ -100,7 +111,16 @@ Voice resolutions, current-assignment views and valid grant verifications carry 
 
 Customer credentials are verified by **Platform Access** on every request; the tenant /
 application / environment come only from its authority chain (a request-supplied id is
-never authority). Platform Access unreachable → 503 (fail closed). Search and reservations are
+never authority). Platform Access unreachable → 503 (fail closed). The customer
+`/v1/numbers/**` family is also public through the **API Gateway** (Part VI §51): the gateway
+forwards the request WITHOUT `Authorization`, with its own service token
+(`numbering-request.forward`, granted to `cfmeet.api-gateway` by Numbering's trust bundle)
+whose delegated context names the authenticated credential; Numbering asks Platform Access
+to re-verify that credential live (`POST /internal/v1/credentials/delegated-authority`) and
+admits the request exactly like a presented credential (same scopes, SAFETY_ONLY refusal,
+throttling, 401 / 503). A token together with `Authorization`, a token without the
+permission or credential id, and any gateway token on `/v1/admin/**` or another surface are
+refused (401). Search and reservations are
 Workstream H ([ADR 0037](../../docs/decisions/0037-numbering-inventory-search-and-reservation.md)),
 provisioning and activation prerequisites Workstream I ([ADR 0038](../../docs/decisions/0038-numbering-provisioning-and-activation.md)),
 ownership and assignment Workstream J ([ADR 0039](../../docs/decisions/0039-numbering-ownership-and-assignment.md)),
@@ -140,10 +160,11 @@ start the real Platform Access binary with its own database.
 
 | Suite | Covers |
 |---|---|
-| `service` | probes, trusted / untrusted / unpermitted internal callers, customer auth through Platform Access, scope enforcement, tenant isolation, correlation / causation, failure handling, OpenAPI = routes |
+| `service` | probes, trusted / untrusted / unpermitted internal callers, customer auth through Platform Access (presented and API-Gateway-forwarded credentials; administration refuses the gateway), scope enforcement, tenant isolation, correlation / causation, failure handling, OpenAPI = routes |
 | `startup` | the real binary: fail-closed configuration, pending migrations refused, serving once migrated |
 | `migrations` | fresh / down / re-up, upgrade with data, exact table set, no cross-service FK, least-privilege runtime role |
 | `outbox` | atomicity, immutability, ordering, backoff, dead-letter, concurrent publishers, lease takeover, envelope conformance |
+| `public_events` | Part VI §53: public lifecycle events of customer scopes reach a token-verifying Developer Platform receiver exactly once (contract-conformant, no provider / KYC data), internal / unscoped events are not published, retries, refusals → dead letter, the default destination |
 | `workers` | lease exclusivity, retry / dead-letter, restart recovery, UNKNOWN_OUTCOME parking, idempotency keys |
 | `number_resources` | D10.1–D10.7: identity, E.164, lifecycle policy (Rust = SQL), version conflicts, bindings, capabilities, inventory |
 | `allocation` | D10.8–D10.17: reservation contention and expiry, ownership, exclusivity, isolation, history, routing revisions, premature activation, quarantine / uncertainty, rollback |

@@ -146,6 +146,60 @@ struct Due {
     attempts: i32,
 }
 
+/// Marks a derivative READY with `sql` and, in the same transaction, records
+/// `messaging.attachment.derivative-ready` (§80: derivative events never change the
+/// attachment's identity). Returns the rows updated.
+async fn mark_ready(
+    state: &AppState,
+    d: &Due,
+    sql: &'static str,
+    values: Vec<sea_orm::Value>,
+) -> Result<u64> {
+    let attachment_id = d.attachment_id;
+    let kind = d.kind.clone();
+    let now = state.now();
+    state
+        .db
+        .transaction::<_, u64, Error>(move |txn| {
+            Box::pin(async move {
+                let n = db::exec(txn, sql, values).await?;
+                if n == 1 {
+                    let a: AttachmentRow = db::one(
+                        txn,
+                        &format!(
+                            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE id = $1"
+                        ),
+                        vec![attachment_id.into()],
+                    )
+                    .await?
+                    .ok_or(Error::code(ErrorCode::InternalError))?;
+                    crate::events::outbox::record(
+                        txn,
+                        "messaging.attachment.derivative-ready",
+                        "ATTACHMENT",
+                        a.id,
+                        crate::events::outbox::EventScope {
+                            tenant_id: a.tenant_id,
+                            application_id: a.application_id,
+                            environment_id: a.environment_id,
+                        },
+                        json!({
+                            "attachment_id": a.id,
+                            "conversation_id": a.conversation_id,
+                            "derivative_kind": kind,
+                            "state": "READY",
+                        }),
+                        now,
+                    )
+                    .await?;
+                }
+                Ok(n)
+            })
+        })
+        .await
+        .map_err(Error::from)
+}
+
 /// One processing pass: enqueue READY MANAGED images without a thumbnail, then render
 /// due ones under a lease (safe on several instances).
 pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeReport> {
@@ -208,8 +262,9 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
         if d.kind == "INSPECTION" {
             match inspect_one(state, d.attachment_id).await {
                 Ok(metadata) => {
-                    let updated = db::exec(
-                        &state.db,
+                    let updated = mark_ready(
+                        state,
+                        &d,
                         "UPDATE messaging_attachment_derivatives SET status = 'READY', metadata = $3, error_code = NULL, \
                            attempts = attempts + 1, lease_token = NULL, lease_expires_at = NULL, completed_at = $4 \
                          WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
@@ -269,8 +324,9 @@ pub async fn process_due(state: &AppState, batch: i64) -> Result<DerivativeRepor
                     continue;
                 }
                 // The trigger turns this attempt's reservation into committed bytes.
-                let updated = db::exec(
-                    &state.db,
+                let updated = mark_ready(
+                    state,
+                    &d,
                     "UPDATE messaging_attachment_derivatives SET status = 'READY', object_key = pending_object_key, \
                        pending_object_key = NULL, reserved_bytes = 0, media_type = 'image/png', \
                        width = $4, height = $5, source_width = $6, source_height = $7, bytes = $8, sha256 = $9, error_code = NULL, \
@@ -824,6 +880,20 @@ pub async fn thumbnail_grant(
             },
         )
         .map_err(super::storage_error)?;
+    crate::usage::record_best_effort(
+        &state.db,
+        crate::usage::Owner {
+            tenant_id: row.tenant_id,
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+        },
+        crate::usage::ATTACHMENT_EGRESS,
+        d.bytes.unwrap_or(0),
+        row.id,
+        Some(&row.security_profile),
+        now,
+    )
+    .await;
     Ok(json!({
         "attachmentId": row.id,
         "kind": "THUMBNAIL",

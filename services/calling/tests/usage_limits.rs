@@ -143,6 +143,51 @@ async fn usage_api_lists_final_facts_of_the_caller_scope_only() {
             "VOICEMAIL_ARTIFACT"
         ]
     );
+    // Part VI §19.4: the preserved service-specific paths answer exactly the same views.
+    let legacy = get(&w, &reader, "/v1/calling/usage").await;
+    assert_eq!(legacy.status, StatusCode::OK, "{}", legacy.text);
+    assert_eq!(legacy.json, r.json, "/v1/calling/usage == /v1/usage");
+    let (limits, legacy_limits) = (
+        get(&w, &reader, "/v1/limits").await,
+        get(&w, &reader, "/v1/calling/limits").await,
+    );
+    assert_eq!(
+        legacy_limits.status,
+        StatusCode::OK,
+        "{}",
+        legacy_limits.text
+    );
+    common::contracts::check(
+        "platform/usage/v1.schema.json#/$defs/Limits",
+        &legacy_limits.json,
+    );
+    // Same limits, levels and ceilings; the request-rate counter counts both reads (the
+    // two paths share one rate limiter), so it is one higher on the second.
+    let stable = |v: &serde_json::Value| -> Vec<(String, String, i64)> {
+        v["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                (
+                    l["limit"].as_str().unwrap().to_string(),
+                    l["scope"].as_str().unwrap().to_string(),
+                    l["ceiling"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(stable(&legacy_limits.json), stable(&limits.json));
+    assert_eq!(
+        legacy_limits.json["limits"][0]["current"].as_i64().unwrap(),
+        limits.json["limits"][0]["current"].as_i64().unwrap() + 1,
+        "one shared request-rate counter"
+    );
+    assert_eq!(
+        get(&w, w.secret(), "/v1/calling/usage").await.status,
+        StatusCode::FORBIDDEN,
+        "the legacy path needs usage.read too"
+    );
     assert_eq!(records[1]["resourceClass"], "STORAGE");
     assert_eq!(records[1]["sizeBytes"], 4096);
     assert_eq!(records[0]["resourceClass"], "APP_MEDIA");
@@ -427,6 +472,7 @@ fn dev_settings() -> WebhookSettings {
         },
         request_timeout: std::time::Duration::from_secs(1),
         max_attempts: 3,
+        ..Default::default()
     }
 }
 
@@ -593,4 +639,50 @@ where
     }
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     read().await
+}
+
+/// Part VI §21.2: `CALLING_LEGACY_USAGE_AUTHORITY=retired` switches the legacy usage /
+/// limit views off independently (503 `CF-Usage-Migration: moved`, after the scope
+/// check); `active` restores them.
+#[tokio::test]
+async fn legacy_usage_views_can_be_retired_independently() {
+    let Some(mut w) = CallWorld::new().await else {
+        return;
+    };
+    grant(&w, &[names::USAGE_READ]).await;
+    let reader = w.h.issue(w.consumer.sa(w.kind), &[names::USAGE_READ]).await;
+    let reader = reader.secret.expose_once().to_string();
+    w.h.state.legacy_usage_retired = true;
+    for path in [
+        "/v1/usage",
+        "/v1/limits",
+        "/v1/calling/usage",
+        "/v1/calling/limits",
+    ] {
+        let r = get(&w, &reader, path).await;
+        assert_eq!(
+            r.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{path}: {}",
+            r.text
+        );
+        assert_eq!(
+            r.headers
+                .get("cf-usage-migration")
+                .and_then(|v| v.to_str().ok()),
+            Some("moved"),
+            "{path}"
+        );
+        // Without usage.read the caller learns nothing about the retirement.
+        assert_eq!(
+            get(&w, w.secret(), path).await.status,
+            StatusCode::FORBIDDEN,
+            "{path}"
+        );
+    }
+    w.h.state.legacy_usage_retired = false;
+    assert_eq!(
+        get(&w, &reader, "/v1/calling/usage").await.status,
+        StatusCode::OK
+    );
 }

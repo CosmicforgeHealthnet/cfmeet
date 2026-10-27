@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.2.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration)."
+    "version": "1.5.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments."
   },
   "components": {
     "securitySchemes": {
@@ -39,6 +39,16 @@
         "schema": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+        }
+      },
+      "CfDelegatedActor": {
+        "name": "X-CF-Delegated-Actor",
+        "in": "header",
+        "required": true,
+        "description": "The acting party: `u-<32 lowercase hex>` (a human member the Developer Platform authorized) `s-<32 lowercase hex>` (the service account of a scoped machine credential) or `o-<32 lowercase hex>` (a Developer Platform operator command); recorded as operator `devplat.<actor>` in the append-only audit.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[uso]-[0-9a-f]{32}$"
         }
       }
     },
@@ -117,10 +127,84 @@
       "cfServiceAuth": []
     }
   ],
+  "tags": [
+    {
+      "name": "Internal Admin — Applications",
+      "description": "Internal Admin — Applications operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Credentials",
+      "description": "Internal Admin — Credentials operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Environments",
+      "description": "Internal Admin — Environments operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Principals",
+      "description": "Internal Admin — Principals operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Service Accounts",
+      "description": "Internal Admin — Service Accounts operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Admin — Tenants",
+      "description": "Internal Admin — Tenants operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal Delegation — Applications",
+      "description": "Developer Platform delegation: applications, scope grants and production activation (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Credentials",
+      "description": "Developer Platform delegation: credential issue, rotation, suspension and revocation (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Environments",
+      "description": "Developer Platform delegation: sandbox, test and production environments and live telecom (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Service Accounts",
+      "description": "Developer Platform delegation: service accounts of non-production environments (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal Delegation — Tenants",
+      "description": "Developer Platform delegation: canonical tenants of developer organizations (Developer Platform only, audited)."
+    },
+    {
+      "name": "Internal — Authorization",
+      "description": "Internal — Authorization operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Credential Authentication",
+      "description": "Internal — Credential Authentication operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Identity Context",
+      "description": "Internal — Identity Context operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Principal Registry",
+      "description": "Internal — Principal Registry operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Scope Registry",
+      "description": "Internal — Scope Registry operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Service Health",
+      "description": "Service Health operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "operationId": "health",
+        "tags": [
+          "Service Health"
+        ],
+        "summary": "Check service health",
         "security": [],
         "description": "Liveness.",
         "responses": {
@@ -140,6 +224,10 @@
     "/ready": {
       "get": {
         "operationId": "ready",
+        "tags": [
+          "Service Health"
+        ],
+        "summary": "Check service readiness",
         "security": [],
         "description": "Readiness: database reachable and no migration pending (counts and versions only).",
         "responses": {
@@ -169,6 +257,10 @@
     "/internal/v1/credentials/authenticate": {
       "post": {
         "operationId": "authenticateCredential",
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "authenticate Credential",
         "description": "Validate a presented customer credential and return its trusted authority chain (or the rejection reason and any throttle). The presented value is never logged or stored. Permission: `platform-credential.authenticate`.",
         "parameters": [
           {
@@ -217,6 +309,10 @@
     "/internal/v1/credentials/{credentialId}": {
       "get": {
         "operationId": "getCredentialStatus",
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "get Credential Status",
         "description": "Status, expiry and revocation of a credential of the delegated scope (no secret, no verifier). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -266,6 +362,10 @@
     "/internal/v1/authorization/evaluate": {
       "post": {
         "operationId": "evaluateAuthorization",
+        "tags": [
+          "Internal — Authorization"
+        ],
+        "summary": "evaluate Authorization",
         "description": "Re-evaluate NOW whether the credential of the delegated scope may perform an operation needing the given scopes (optionally for a principal). Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -317,6 +417,10 @@
     "/internal/v1/identity/context": {
       "get": {
         "operationId": "getTrustedContext",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "get Trusted Context",
         "description": "The trusted context of the caller's delegated scope: tenant, application, environment, service account and authority mode. Permission: `platform-identity.read`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -358,6 +462,10 @@
     "/internal/v1/identity/changes": {
       "post": {
         "operationId": "readIdentityChanges",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "read Identity Changes",
         "description": "A page of the identity change feed after the cursor (consumer projections). POST because internal requests carry no query strings. Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -406,6 +514,10 @@
     "/internal/v1/identity/imports/{bundleDigest}": {
       "get": {
         "operationId": "getImportReceipt",
+        "tags": [
+          "Internal — Identity Context"
+        ],
+        "summary": "get Import Receipt",
         "description": "Receipt of an operator-imported identity bundle (hand-off verification by the previous authority). Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -456,6 +568,10 @@
     "/internal/v1/scopes": {
       "get": {
         "operationId": "getScopeRegistry",
+        "tags": [
+          "Internal — Scope Registry"
+        ],
+        "summary": "get Scope Registry",
         "description": "The server-authoritative scope registry (Calling, Numbering and SMS scopes; trust levels). Permission: `platform-identity.read`.",
         "parameters": [
           {
@@ -491,6 +607,10 @@
     "/internal/v1/principals/resolve": {
       "post": {
         "operationId": "resolvePrincipals",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "resolve Principals",
         "description": "Resolve principal references inside the delegated scope only. Permission: `platform-principal.resolve`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -542,6 +662,10 @@
     "/internal/v1/principals/telephone-endpoints": {
       "post": {
         "operationId": "ensureTelephoneEndpoint",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "ensure Telephone Endpoint",
         "description": "Get or create the TELEPHONE_ENDPOINT principal of a protected public party (by ContactReference, never a number). Idempotent. Permission: `platform-principal.register`. Requires the delegated platform context signed into the caller's service token (cfmeet.platform.delegated-platform-context); its tenant / application are re-validated here and never trusted on their own.",
         "parameters": [
           {
@@ -593,6 +717,10 @@
     "/internal/v1/principals/ensure": {
       "post": {
         "operationId": "ensurePrincipal",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "ensure Principal",
         "description": "Part V H §104: get or create the NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT principal of an account the first-party login authority (Meeting Service) authenticated itself. Idempotent. Permission: `platform-principal.ensure`. Requires the delegated platform context signed into the caller's service token; it must be a FIRST_PARTY tenant at FULL authority (EXTERNAL → POLICY_VIOLATION, suspended chain or principal → INVALID_STATE).",
         "parameters": [
           {
@@ -647,6 +775,10 @@
     "/internal/v1/principals/{principalId}/tombstone": {
       "post": {
         "operationId": "tombstonePrincipal",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "tombstone Principal",
         "description": "Tombstone a principal for good (audited with the named human operator). Idempotent. Permission: `platform-principal.register`.",
         "parameters": [
           {
@@ -706,6 +838,10 @@
     "/internal/v1/admin/tenants": {
       "post": {
         "operationId": "createTenant",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "create Tenant",
         "description": "Create a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -766,6 +902,10 @@
     "/internal/v1/admin/tenants/{tenantId}": {
       "get": {
         "operationId": "getTenant",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "get Tenant",
         "description": "Read a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -824,6 +964,10 @@
     "/internal/v1/admin/tenants/{tenantId}/status": {
       "post": {
         "operationId": "setTenantStatus",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "set Tenant Status",
         "description": "Suspend / reactivate a tenant. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -892,6 +1036,10 @@
     "/internal/v1/admin/tenants/{tenantId}/applications": {
       "post": {
         "operationId": "createApplication",
+        "tags": [
+          "Internal Admin — Tenants"
+        ],
+        "summary": "create Application",
         "description": "Create an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -960,6 +1108,10 @@
     "/internal/v1/admin/applications/{applicationId}": {
       "get": {
         "operationId": "getApplication",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "get Application",
         "description": "Read an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1018,6 +1170,10 @@
     "/internal/v1/admin/applications/{applicationId}/status": {
       "post": {
         "operationId": "setApplicationStatus",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "set Application Status",
         "description": "Suspend / reactivate an application. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1086,6 +1242,10 @@
     "/internal/v1/admin/applications/{applicationId}/environments": {
       "post": {
         "operationId": "createEnvironment",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "create Environment",
         "description": "Create an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1154,6 +1314,10 @@
     "/internal/v1/admin/applications/{applicationId}/scopes": {
       "post": {
         "operationId": "grantApplicationScope",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "grant Application Scope",
         "description": "Allow a scope for an application (privileged scopes need `privileged: true` and a FIRST_PARTY tenant). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1220,6 +1384,10 @@
       },
       "get": {
         "operationId": "listApplicationScopes",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "list Application Scopes",
         "description": "List the application's allowed scopes. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1278,6 +1446,10 @@
     "/internal/v1/admin/applications/{applicationId}/scopes/{scope}": {
       "delete": {
         "operationId": "revokeApplicationScope",
+        "tags": [
+          "Internal Admin — Applications"
+        ],
+        "summary": "revoke Application Scope",
         "description": "Withdraw a scope from the application and its credentials. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1345,6 +1517,10 @@
     "/internal/v1/admin/environments/{environmentId}/status": {
       "post": {
         "operationId": "setEnvironmentStatus",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "set Environment Status",
         "description": "Suspend / reactivate an environment. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1413,6 +1589,10 @@
     "/internal/v1/admin/environments/{environmentId}/live-telecom": {
       "post": {
         "operationId": "setLiveTelecom",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "set Live Telecom",
         "description": "Allow / forbid live telecom (PRODUCTION only). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1481,6 +1661,10 @@
     "/internal/v1/admin/environments/{environmentId}/service-accounts": {
       "post": {
         "operationId": "createServiceAccount",
+        "tags": [
+          "Internal Admin — Service Accounts"
+        ],
+        "summary": "create Service Account",
         "description": "Create a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1549,6 +1733,10 @@
     "/internal/v1/admin/environments/{environmentId}/principals": {
       "post": {
         "operationId": "registerPrincipal",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "register Principal",
         "description": "Register a principal (opaque reference). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1615,6 +1803,10 @@
       },
       "get": {
         "operationId": "listPrincipals",
+        "tags": [
+          "Internal Admin — Environments"
+        ],
+        "summary": "list Principals",
         "description": "List principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1673,6 +1865,10 @@
     "/internal/v1/admin/service-accounts/{serviceAccountId}/status": {
       "post": {
         "operationId": "setServiceAccountStatus",
+        "tags": [
+          "Internal Admin — Service Accounts"
+        ],
+        "summary": "set Service Account Status",
         "description": "Suspend / reactivate / revoke a service account. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1741,6 +1937,10 @@
     "/internal/v1/admin/service-accounts/{serviceAccountId}/credentials": {
       "post": {
         "operationId": "issueCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "issue Credential",
         "description": "Issue a credential; the raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1807,6 +2007,10 @@
       },
       "get": {
         "operationId": "listCredentials",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "list Credentials",
         "description": "List credentials (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1865,6 +2069,10 @@
     "/internal/v1/admin/credentials/{credentialId}": {
       "get": {
         "operationId": "getCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "get Credential",
         "description": "Read a credential (masked). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1923,6 +2131,10 @@
     "/internal/v1/admin/credentials/{credentialId}/rotate": {
       "post": {
         "operationId": "rotateCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "rotate Credential",
         "description": "Rotate; the successor's raw credential is in the response exactly once. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -1991,6 +2203,10 @@
     "/internal/v1/admin/credentials/{credentialId}/revoke": {
       "post": {
         "operationId": "revokeCredential",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "revoke Credential",
         "description": "Revoke immediately (idempotent). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2049,6 +2265,10 @@
     "/internal/v1/admin/credentials/{credentialId}/principal-restriction": {
       "put": {
         "operationId": "restrictCredentialPrincipals",
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "restrict Credential Principals",
         "description": "Restrict a credential to act only for given principals. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2117,6 +2337,10 @@
     "/internal/v1/admin/principals/{principalId}/status": {
       "post": {
         "operationId": "setPrincipalStatus",
+        "tags": [
+          "Internal Admin — Principals"
+        ],
+        "summary": "set Principal Status",
         "description": "Suspend / reactivate / deactivate a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2185,6 +2409,10 @@
     "/internal/v1/admin/principals/{principalId}/tombstone": {
       "post": {
         "operationId": "operatorTombstonePrincipal",
+        "tags": [
+          "Internal Admin — Principals"
+        ],
+        "summary": "operator Tombstone Principal",
         "description": "Tombstone a principal. Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
         "parameters": [
           {
@@ -2248,6 +2476,1968 @@
             }
           }
         }
+      }
+    },
+    "/internal/v1/credentials/delegated-authority": {
+      "post": {
+        "operationId": "delegatedCredentialAuthority",
+        "description": "Part VI §51: the CURRENT authority chain of the API credential the API Gateway authenticated, for a receiving domain service. The credential id is taken only from the signed delegated context (`initiating_credential_id`) and must belong exactly to the delegated tenant / application / environment / service account; revocation, expiry, supersession, suspension and effective scopes are evaluated now. No secret is presented. Permission: `platform-credential.authenticate`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/AuthenticateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal — Credential Authentication"
+        ],
+        "summary": "Resolve the current authority chain of a gateway-authenticated credential"
+      }
+    },
+    "/internal/v1/delegation/tenants": {
+      "post": {
+        "operationId": "delegateCreateTenant",
+        "description": "Create the canonical EXTERNAL tenant of a new developer organization (classification is never caller-selected). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Create the external tenant of a developer organization"
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}": {
+      "get": {
+        "operationId": "delegateGetTenant",
+        "description": "Read a tenant. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Get a tenant"
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}/status": {
+      "post": {
+        "operationId": "delegateSetTenantStatus",
+        "description": "Suspend / reactivate the tenant of an organization (organization suspension / closure). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Suspend or reactivate a tenant"
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}/applications": {
+      "post": {
+        "operationId": "delegateCreateApplication",
+        "description": "Create the canonical application of a new developer project. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Create the application of a developer project"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}": {
+      "get": {
+        "operationId": "delegateGetApplication",
+        "description": "Read an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Get an application"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/status": {
+      "post": {
+        "operationId": "delegateSetApplicationStatus",
+        "description": "Suspend / reactivate the application of a project (project suspension / archive). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Suspend or reactivate an application"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/environments": {
+      "post": {
+        "operationId": "delegateCreateEnvironment",
+        "description": "Create a SANDBOX or TEST environment (PRODUCTION is refused: production-access approval workflow). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Create a sandbox or test environment"
+      },
+      "get": {
+        "operationId": "delegateListEnvironments",
+        "description": "List the environments of an application. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "List an application's environments"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/scopes": {
+      "get": {
+        "operationId": "delegateListApplicationScopes",
+        "description": "List the application's scope grants (read only). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "List an application's scope grants"
+      },
+      "post": {
+        "operationId": "delegateGrantApplicationScope",
+        "description": "Allow a STANDARD scope for `environmentKinds` (FIRST_PARTY_ONLY only as an operator command `o-…` for a FIRST_PARTY tenant; PRIVILEGED never; PRODUCTION only once the application has an activated PRODUCTION environment). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Grant a standard scope to an application"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}": {
+      "get": {
+        "operationId": "delegateGetEnvironment",
+        "description": "Read an environment. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Get an environment"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/status": {
+      "post": {
+        "operationId": "delegateSetEnvironmentStatus",
+        "description": "Suspend / reactivate a non-production environment (PRODUCTION is refused). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Suspend or reactivate a non-production environment"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts": {
+      "post": {
+        "operationId": "delegateCreateServiceAccount",
+        "description": "Create a service account (`name` slug, optional `description`) in a non-production environment (PRODUCTION is refused: production-access approval workflow); tenant and application are taken from the persisted environment. API credentials are never issued here. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Create a service account in a non-production environment"
+      },
+      "get": {
+        "operationId": "delegateListServiceAccounts",
+        "description": "List the service accounts of an environment (`serviceAccounts`; an unknown environment is NOT_FOUND). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "List an environment's service accounts"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}": {
+      "get": {
+        "operationId": "delegateGetServiceAccount",
+        "description": "Read one service account of the environment (a service account of another environment or tenant is NOT_FOUND). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Get a service account"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/status": {
+      "post": {
+        "operationId": "delegateSetServiceAccountStatus",
+        "description": "Suspend / reactivate a service account of a non-production environment (`status`: ACTIVE or SUSPENDED; REVOKED is refused, revocation stays an operator decision; a suspended service account's credentials stop authenticating; nothing is deleted). Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting human member (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Service Accounts"
+        ],
+        "summary": "Suspend or reactivate a service account"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials": {
+      "get": {
+        "operationId": "delegateListCredentials",
+        "description": "List the credentials of a service account of the environment (metadata only; never a secret or verifier). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "List a service account's credentials (metadata only)"
+      },
+      "post": {
+        "operationId": "delegateIssueCredential",
+        "description": "Issue a credential (scopes validated against the application grants and environment kind; the raw credential is in the response exactly once, `Cache-Control: no-store`). SANDBOX / TEST, or a PRODUCTION environment activated by an approved production-access request. Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Issue a credential to a service account"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}": {
+      "get": {
+        "operationId": "delegateGetCredential",
+        "description": "Read a credential of exactly this environment (another environment's: NOT_FOUND). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Get a credential"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/rotate": {
+      "post": {
+        "operationId": "delegateRotateCredential",
+        "description": "Rotate: an independent successor (secret once) and the predecessor limited to the bounded overlap; a suspended credential is not rotated. Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Rotate a credential"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "delegateRevokeCredential",
+        "description": "Revoke immediately (idempotent). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Revoke a credential"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/suspend": {
+      "post": {
+        "operationId": "delegateSuspendCredential",
+        "description": "Suspend (reversible; `reasonCode`): authentication and delegated-authority re-verification refuse it at once (`credential_suspended`). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Suspend a credential"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/credentials/{credentialId}/resume": {
+      "post": {
+        "operationId": "delegateResumeCredential",
+        "description": "Lift a suspension (idempotent). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Credentials"
+        ],
+        "summary": "Resume a suspended credential"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/scopes/{scope}": {
+      "delete": {
+        "operationId": "delegateWithdrawApplicationScope",
+        "description": "Withdraw a scope from the application and every credential of it (privileged scopes: operators only). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Withdraw a scope from an application and its credentials"
+      }
+    },
+    "/internal/v1/delegation/applications/{applicationId}/production-environment": {
+      "post": {
+        "operationId": "delegateActivateProductionEnvironment",
+        "description": "Activate the PRODUCTION environment of an approved production-access request (`approvalReference` recorded; idempotent on it, another reference is a CONFLICT). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Applications"
+        ],
+        "summary": "Activate an approved production environment"
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/live-telecom": {
+      "post": {
+        "operationId": "delegateSetLiveTelecom",
+        "description": "Enable / disable live telecom of an ACTIVATED PRODUCTION environment (operator-created or SANDBOX / TEST environments: POLICY_VIOLATION). Developer Platform delegation (Part VI §54 / §55): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Enable or disable live telecom for a production environment"
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/suspend": {
+      "post": {
+        "operationId": "suspendCredential",
+        "description": "Suspend a credential (reversible, audited; `reasonCode`). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "Suspend a credential (operator)"
+      }
+    },
+    "/internal/v1/admin/credentials/{credentialId}/resume": {
+      "post": {
+        "operationId": "resumeCredential",
+        "description": "Lift a credential suspension (audited). Operator administration: permission `platform-identity.administer` (operator console only); every mutation names its human operator (`X-CF-Operator`) and writes one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Admin — Credentials"
+        ],
+        "summary": "Resume a suspended credential (operator)"
       }
     }
   }

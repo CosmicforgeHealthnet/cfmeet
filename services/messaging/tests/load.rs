@@ -748,3 +748,242 @@ async fn outbox_publisher_throughput() {
         }),
     );
 }
+
+/// Multi-device fan-out: every receiving principal has several connected devices; each
+/// device gets every message once, in order. Latency = send start → receipt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore]
+async fn realtime_multi_device_fanout_latency() {
+    let mut settings = test_settings();
+    settings.revalidate_interval = Duration::from_secs(30);
+    let Some(rt) = Rt::with(settings).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let principals = env_usize("LOAD_MULTI_DEVICE_PRINCIPALS", 10);
+    let devices = env_usize("LOAD_DEVICES_PER_PRINCIPAL", 4);
+    let messages = env_usize("LOAD_MULTI_DEVICE_MESSAGES", 50);
+    let (conv, people) = h.managed_group(&c, principals + 1).await;
+    h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "abuse": { "messagesPerMinute": 100000 } })).await;
+    let mut sockets = Vec::new();
+    for p in &people[1..] {
+        for _ in 0..devices {
+            let m = Member {
+                principal: *p,
+                device: h.active_device(&c, *p).await,
+                group: None,
+                cursor: 0,
+            };
+            let mut ws = rt.connect(&c, &m).await;
+            ws.subscribe(&conv, None).await;
+            sockets.push(ws);
+        }
+    }
+    let readers: Vec<_> = sockets
+        .into_iter()
+        .map(|mut ws| {
+            tokio::spawn(async move {
+                let mut out = Vec::new();
+                let mut last = 0i64;
+                while out.len() < messages {
+                    let f = ws.next_of("event").await;
+                    if f["event"]["data"]["message"].is_null() {
+                        continue;
+                    }
+                    let seq = f["event"]["data"]["message"]["sequence"].as_i64().unwrap();
+                    assert!(seq > last, "in order, no duplicates");
+                    last = seq;
+                    out.push((seq, Instant::now()));
+                }
+                out
+            })
+        })
+        .collect();
+    let started = Instant::now();
+    let mut sent_at = Vec::new();
+    for i in 0..messages {
+        sent_at.push(Instant::now());
+        let r = h
+            .send_managed(&c, &conv, people[0], &format!("multi-device {i}"))
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED);
+    }
+    let all: Vec<Vec<(i64, Instant)>> = futures_util::future::join_all(
+        readers.into_iter().map(|t| async move { t.await.unwrap() }),
+    )
+    .await;
+    let first_seq = all[0][0].0;
+    let mut lat = Vec::new();
+    for per in &all {
+        assert_eq!(per.len(), messages, "every device got every message");
+        for (seq, at) in per {
+            lat.push(at.saturating_duration_since(sent_at[(seq - first_seq) as usize]));
+        }
+    }
+    report(
+        "realtime_multi_device_fanout_latency",
+        json!({
+            "principals": principals, "devices_per_principal": devices, "connected_devices": principals * devices,
+            "messages": messages, "deliveries": lat.len(), "deliveries_expected": principals * devices * messages,
+            "seconds": started.elapsed().as_secs_f64(), "send_to_receive": percentiles(lat),
+        }),
+    );
+}
+
+/// The MANAGED attachment pipeline against a REAL S3-compatible store (MinIO:
+/// `OBJECT_STORAGE_TEST_*`) and a REAL clamd (`MESSAGING_TEST_CLAMAV_ADDRESS`): signed
+/// HTTP upload to the store, finalize (server-side read, size + SHA-256, content
+/// inspection, clamd INSTREAM scan), send, download grant and a signed HTTP download of
+/// the bytes. SKIPPED without both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore]
+async fn attachment_pipeline_real_storage_and_scanner() {
+    use cf_object_storage::{sha256_hex, ObjectStore};
+    use std::sync::Arc;
+    let (Ok(endpoint), Ok(clamd)) = (
+        std::env::var("OBJECT_STORAGE_TEST_ENDPOINT"),
+        std::env::var("MESSAGING_TEST_CLAMAV_ADDRESS"),
+    ) else {
+        eprintln!(
+            "SKIPPED: OBJECT_STORAGE_TEST_ENDPOINT and MESSAGING_TEST_CLAMAV_ADDRESS are required"
+        );
+        return;
+    };
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let store = Arc::new(
+        cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+            endpoint,
+            public_endpoint: None,
+            region: var("OBJECT_STORAGE_TEST_REGION", "us-east-1"),
+            bucket: format!(
+                "{}-load",
+                var("OBJECT_STORAGE_TEST_BUCKET", "cfmeet-object-storage-test")
+            ),
+            access_key: var("OBJECT_STORAGE_TEST_ACCESS_KEY", "testing"),
+            secret_key: var("OBJECT_STORAGE_TEST_SECRET_KEY", "testing"),
+            path_style: true,
+            server_side_encryption: Some(var("OBJECT_STORAGE_TEST_SSE", "AES256"))
+                .filter(|s| !s.is_empty()),
+        })
+        .unwrap(),
+    );
+    store.ensure_bucket().await.unwrap();
+    let s2: Arc<dyn ObjectStore> = store.clone();
+    let scanner = Arc::new(messaging::attachments::scanner::ClamAvScanner::new(
+        clamd,
+        Duration::from_secs(30),
+    ));
+    let Some(h) = Harness::build(move |s| {
+        s.storage = s2;
+        s.scanner = scanner;
+    })
+    .await
+    else {
+        return;
+    };
+    h.clock.set(chrono::Utc::now());
+    let http = reqwest::Client::new();
+    let c = h.customer(ALL_SCOPES);
+    let uploads = env_usize("LOAD_ATTACHMENTS", 100);
+    let size = env_usize("LOAD_ATTACHMENT_BYTES", 256 * 1024);
+    let concurrency = env_usize("LOAD_ATTACHMENT_CONCURRENCY", 8);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    h.set_policy(&c, json!({
+        "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "attachments": { "enabled": true, "maxConcurrentUploads": 1000 },
+        "abuse": { "messagesPerMinute": 100000, "uploadsPerHour": 100000 } })).await;
+    let id = conv["conversationId"].as_str().unwrap().to_string();
+    let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89";
+    let one = |i: usize| {
+        let (h, c, id, http) = (&h, &c, &id, &http);
+        let (uploader, reader) = (people[0], people[1]);
+        async move {
+            let mut body = png.to_vec();
+            body.extend((0..size).map(|j| ((i * 31 + j) % 251) as u8));
+            let t = Instant::now();
+            let r = h
+                .post(c, Some(uploader), &format!("/v1/conversations/{id}/attachments"),
+                    json!({ "kind": "IMAGE", "size": body.len(), "sha256": sha256_hex(&body), "mediaType": "image/png", "fileName": format!("{i}.png") }))
+                .await;
+            assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+            let up = &r.json["upload"];
+            let mut put = http.put(up["url"].as_str().unwrap()).body(body.clone());
+            for x in up["headers"].as_array().unwrap() {
+                put = put.header(x["name"].as_str().unwrap(), x["value"].as_str().unwrap());
+            }
+            let t_up = Instant::now();
+            let resp = put.send().await.unwrap();
+            assert!(resp.status().is_success(), "upload {}", resp.status());
+            let upload = t_up.elapsed();
+            let aid = r.json["attachmentId"].as_str().unwrap().to_string();
+            let t_fin = Instant::now();
+            let f = h
+                .post(
+                    c,
+                    Some(uploader),
+                    &format!("/v1/conversations/{id}/attachments/{aid}/finalize"),
+                    json!({}),
+                )
+                .await;
+            assert_eq!(f.json["state"], "READY", "{}", f.text);
+            let finalize = t_fin.elapsed();
+            let m = h
+                .post(c, Some(uploader), &format!("/v1/conversations/{id}/messages"),
+                    json!({ "clientMessageId": uuid::Uuid::new_v4(), "text": "file", "attachmentIds": [aid] }))
+                .await;
+            assert_eq!(m.status, StatusCode::CREATED, "{}", m.text);
+            let g = h
+                .post(
+                    c,
+                    Some(reader),
+                    &format!("/v1/conversations/{id}/attachments/{aid}/download-grants"),
+                    json!({}),
+                )
+                .await;
+            assert_eq!(g.status, StatusCode::OK, "{}", g.text);
+            let t_dl = Instant::now();
+            let got = http
+                .get(g.json["url"].as_str().unwrap())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(got.status().as_u16(), 200);
+            assert_eq!(
+                got.bytes().await.unwrap().to_vec(),
+                body,
+                "byte-identical download"
+            );
+            (upload, finalize, t_dl.elapsed(), t.elapsed())
+        }
+    };
+    let started = Instant::now();
+    let results: Vec<_> = futures_util::stream::iter((0..uploads).map(one))
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+    let elapsed = started.elapsed();
+    let (mut ups, mut fins, mut dls, mut totals) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (a, b, d, t) in results {
+        ups.push(a);
+        fins.push(b);
+        dls.push(d);
+        totals.push(t);
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_attachments WHERE state = 'READY' AND scan_status = 'CLEAN'").await,
+        uploads as i64,
+        "every file scanned CLEAN by clamd"
+    );
+    report(
+        "attachment_pipeline_real_storage_and_scanner",
+        json!({
+            "store": "S3-compatible (MinIO)", "scanner": "clamd INSTREAM (EICAR test signature only)",
+            "uploads": uploads, "bytes_each": size, "concurrency": concurrency,
+            "seconds": elapsed.as_secs_f64(), "uploads_per_second": uploads as f64 / elapsed.as_secs_f64(),
+            "signed_upload": percentiles(ups), "finalize_read_verify_scan": percentiles(fins),
+            "signed_download": percentiles(dls), "end_to_end": percentiles(totals),
+        }),
+    );
+}

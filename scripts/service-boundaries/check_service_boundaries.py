@@ -53,6 +53,16 @@ crosses another service's boundary:
   IDENTITY_AUTHORITY_ELSEWHERE    credential verifier machinery (keyring, pepper, verifier
                                   message) in production code outside Platform Access: it
                                   is the only credential authority (Part IV Workstream B)
+  GATEWAY_OWNS_DATA               services/api-gateway creates a table or depends on a
+                                  database driver: the gateway owns no data (Part VI)
+  IDENTITY_HIERARCHY_DUPLICATED   a Part VI service (developer-platform, api-gateway)
+                                  creates a tenant / application / environment / service
+                                  account / credential / scope / principal table: Platform
+                                  Access stays the only identity authority; Part VI
+                                  references its canonical ids
+  PRODUCT_ENDPOINT_IN_PLATFORM    production code of a Part VI service names a CosmicForge
+                                  product (Karryam, HealthNet, ...): first-party products
+                                  use the same published contracts as external customers
   FUTURE_SERVICE_IMPLEMENTED      services/contact-vault exists before its phase
                                   (Telephony is Part E; Platform Access and Numbering
                                   are Part IV services)
@@ -241,6 +251,14 @@ NUMBERING_RE = re.compile(
     re.I,
 )
 FUTURE_SERVICES = {"contact-vault"}
+# Part VI: the developer / enterprise platform and the public gateway.
+GATEWAY_OWNER = "api-gateway"
+PART_VI_SERVICES = {"developer-platform", "api-gateway"}
+DATABASE_CRATES = {"sea-orm", "sea-orm-migration", "sqlx", "diesel", "tokio-postgres", "postgres"}
+IDENTITY_HIERARCHY_TABLE_RE = re.compile(
+    r"(?:^|_)(?:tenants?|applications?|environments?|service_accounts?|credentials?|api_keys?|"
+    r"scopes?|principals?|verifiers?|memberships?)$"
+)
 # Part IV: the only credential authority (ADR 0032) and the only number authority.
 IDENTITY_AUTHORITY_OWNER = "platform-access"
 IDENTITY_AUTHORITY_MARKER_RE = re.compile(
@@ -396,6 +414,10 @@ def check_manifest(repo: Repository, manifest: Path, out: list[Violation]):
         out.append(Violation("CARGO_MANIFEST_INVALID", repo.rel(manifest), 1, str(e)))
         return
     text_lines = manifest.read_text(encoding="utf-8").splitlines()
+    if kind == "service" and name == GATEWAY_OWNER:
+        for crate in sorted(DATABASE_CRATES & set(data.get("dependencies", {}))):
+            line = next((i + 1 for i, l in enumerate(text_lines) if l.strip().startswith(crate)), 1)
+            out.append(Violation("GATEWAY_OWNS_DATA", repo.rel(manifest), line, f"`{crate}`: the API Gateway owns no database (Part VI); domain services own their data"))
     if name != CONTACT_VAULT_OWNER:
         for section in ("dependencies", "dev-dependencies", "build-dependencies"):
             for crate in CONTACT_VAULT_CRATES & set(data.get(section, {})):
@@ -537,6 +559,9 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
     if name == MESSAGING_OWNER:
         for m in PRODUCT_NAME_RE.finditer(remove_cfg_test_items(strip_rust(source, keep_strings=True))):
             out.append(Violation("PRODUCT_DOMAIN_IN_MESSAGING", rel, line_of(with_strings, m.start()), f"`{m.group(0)}`: Messaging never hard-codes a product; context references are opaque"))
+    if name in PART_VI_SERVICES:
+        for m in PRODUCT_NAME_RE.finditer(remove_cfg_test_items(strip_rust(source, keep_strings=True))):
+            out.append(Violation("PRODUCT_ENDPOINT_IN_PLATFORM", rel, line_of(with_strings, m.start()), f"`{m.group(0)}`: Part VI exposes the same published contracts to every product; no product-specific endpoint"))
     if name != IDENTITY_AUTHORITY_OWNER:
         for m in IDENTITY_AUTHORITY_MARKER_RE.finditer(identifiers_only):
             out.append(Violation("IDENTITY_AUTHORITY_ELSEWHERE", rel, line_of(identifiers_only, m.start()), f"`{m.group(0)}`: credential verification exists only in services/{IDENTITY_AUTHORITY_OWNER}; consume its authenticated contract"))
@@ -617,6 +642,11 @@ def check(root: Path) -> list[Violation]:
             continue
         for table in sorted(t for t in tables if t.startswith(MESSAGING_TABLE_PREFIXES)):
             out.append(Violation("MESSAGING_DOMAIN_ELSEWHERE", f"services/{service}", 1, f"table `{table}` belongs to services/{MESSAGING_OWNER} (conversations, Messaging devices); no other service stores it"))
+    for table in sorted(repo.tables.get(GATEWAY_OWNER, set())):
+        out.append(Violation("GATEWAY_OWNS_DATA", f"services/{GATEWAY_OWNER}", 1, f"table `{table}`: the API Gateway owns no data; it relays requests and responses only"))
+    for service in sorted(PART_VI_SERVICES):
+        for table in sorted(t for t in repo.tables.get(service, set()) if IDENTITY_HIERARCHY_TABLE_RE.search(t)):
+            out.append(Violation("IDENTITY_HIERARCHY_DUPLICATED", f"services/{service}", 1, f"table `{table}` duplicates the identity hierarchy; reference Platform Access's canonical ids instead"))
     check_messaging_schemas(repo, out)
     for top in ("services", "packages"):
         for path in repo.files(repo.root / top):

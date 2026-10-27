@@ -7,6 +7,7 @@
 //! | `GET /{id}/messages` | `messages.read` |
 //! | `GET /{id}/messages/{messageId}` (permalink resolution) | `messages.read` |
 //! | `PATCH /{id}/messages/{messageId}` (MANAGED edit) | `messages.send` |
+//! | `GET /{id}/messages/{messageId}/revisions` (MANAGED, when policy shows history) | `messages.read` |
 //! | `DELETE /{id}/messages/{messageId}?scope=EVERYONE\|ME` | `messages.send` |
 //! | `PUT /{id}/read-cursor` | `messages.read` |
 //! | `GET /{id}/events?after=` (durable event replay) | `messages.read` |
@@ -37,6 +38,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/:conversation_id/messages/:message_id",
             get(resolve).patch(edit).delete(delete),
+        )
+        .route(
+            "/:conversation_id/messages/:message_id/revisions",
+            get(revisions),
         )
         .route("/:conversation_id/read-cursor", put(read_cursor))
         .route("/:conversation_id/events", get(events))
@@ -102,6 +107,18 @@ async fn edit(
     let acting = acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
     Ok(Json(
         super::managed::edit(&state, caller.context(), &acting, id, message, body).await?,
+    ))
+}
+
+async fn revisions(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, message)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok(Json(
+        super::managed::list_revisions(&state, caller.context(), &acting, id, message).await?,
     ))
 }
 

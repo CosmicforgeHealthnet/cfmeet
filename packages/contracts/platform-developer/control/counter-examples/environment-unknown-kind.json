@@ -1,0 +1,14 @@
+{
+  "id": "9b2e3c4d-5f60-4718-8a9b-0c1d2e3f4a5b",
+  "projectId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "organizationId": "3f0f4c1e-6a7b-4c2d-9e8f-0a1b2c3d4e5f",
+  "kind": "STAGING",
+  "displayName": "Sandbox",
+  "status": "ACTIVE",
+  "productionAccessState": "NOT_APPLICABLE",
+  "createdAt": "2026-11-02T10:00:00Z",
+  "updatedAt": "2026-11-02T10:00:00Z",
+  "version": 1,
+  "authorityStatus": "ACTIVE",
+  "liveTelecomAllowed": false
+}

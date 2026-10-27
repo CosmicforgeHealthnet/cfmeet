@@ -1,0 +1,30 @@
+Part V backend closure — HTTP API inventory (contracts + route extraction, 2026-10-22)
+
+All source OpenAPI documents (12): 661 operations, 544 unique paths
+  peer-service documents (11): 456 operations / 378 paths; Meeting Service: 205 / 166
+  in the unified Swagger selector: 650 operations / 533 paths; not in the selector: 11
+  by audience: public infrastructure 16, customer 530, internal 109, provider callback 6
+  (in the selector: 16 / 530 / 98 / 6)
+  by document location: http 473, internal 188
+Bundles: every bundled document has exactly the operations of its source
+  (bundled messaging http 99, messaging internal 7).
+
+Messaging
+  public document (messaging/http/v1.openapi.json 1.13.0): 99 operations, 80 unique paths
+    infrastructure 3 (/health, /ready, /openapi.json)
+    customer credential 94; of those, client-token capable 58 (the server allow-list equals
+      the documented clientToken set — client_tokens_rest::the_contract_documents_exactly_the_client_token_routes)
+    device-direct realtime 2 (POST /v1/realtime/tickets — client token; GET /v1/realtime — ticket)
+  internal document (messaging/internal/v1.openapi.json): 7 operations
+  route parity (extracted from the router): 106 documented operations, 106 matched to
+    registered routes, 0 documented-but-not-routed; 94 delegated-mirror routes
+    (/internal/v1/delegated/...) equal exactly the 94 customer operations (prose-documented);
+    1 further route: OPTIONS /v1/realtime/tickets (CORS preflight, not an API operation)
+  added on this branch: revision history, 5 backup operations, thread summary,
+    invitation accept / decline, invitation list (the authorization matrix covers every
+    customer operation — authorization_matrix::every_operation_is_in_the_matrix)
+
+Documented operations are contract entries; they are not a claim of deployed endpoints.
+Known documentation nits (not defects of behaviour): the Messaging and SMS Gateway public
+documents declare a `cfServiceAuth` scheme no operation uses; operationIds repeat ACROSS
+documents (e.g. acceptInvitation in Calling and Messaging), never within one.

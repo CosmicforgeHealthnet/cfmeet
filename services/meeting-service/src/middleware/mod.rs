@@ -1,6 +1,7 @@
 pub mod api_key;
 pub mod auth;
 pub mod legacy_write;
+pub mod platform_auth;
 pub mod request_id;
 
 // Re-export for convenience

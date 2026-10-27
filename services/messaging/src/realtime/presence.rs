@@ -37,12 +37,13 @@ pub const MAX_ANNOUNCE_CONVERSATIONS: i64 = 500;
 struct Settings {
     visibility: String,
     share_last_seen: bool,
+    share_read_receipts: bool,
 }
 
 async fn settings(state: &AppState, env: Uuid, principal: Uuid) -> Settings {
     db::one::<Settings, _>(
         &state.db,
-        "SELECT visibility, share_last_seen FROM messaging_presence_settings WHERE environment_id = $1 AND principal_id = $2",
+        "SELECT visibility, share_last_seen, share_read_receipts FROM messaging_presence_settings WHERE environment_id = $1 AND principal_id = $2",
         vec![env.into(), principal.into()],
     )
     .await
@@ -51,6 +52,7 @@ async fn settings(state: &AppState, env: Uuid, principal: Uuid) -> Settings {
     .unwrap_or(Settings {
         visibility: "CONVERSATION_MEMBERS".into(),
         share_last_seen: false,
+        share_read_receipts: true,
     })
 }
 
@@ -177,6 +179,7 @@ pub async fn set_visibility(
         session.principal_id,
         visibility,
         share_last_seen,
+        None,
     )
     .await?;
     if policy.privacy.presence {
@@ -204,20 +207,23 @@ async fn store(
     principal: Uuid,
     visibility: &str,
     share: Option<bool>,
+    receipts: Option<bool>,
 ) -> Result<Value> {
     #[derive(FromQueryResult)]
     struct S {
         visibility: String,
         share_last_seen: bool,
+        share_read_receipts: bool,
     }
     let s: S = db::one(
         &state.db,
-        "INSERT INTO messaging_presence_settings (environment_id, principal_id, visibility, share_last_seen, updated_at) \
-         VALUES ($1, $2, $3, COALESCE($4, FALSE), $5) ON CONFLICT (environment_id, principal_id) DO UPDATE \
+        "INSERT INTO messaging_presence_settings (environment_id, principal_id, visibility, share_last_seen, share_read_receipts, updated_at) \
+         VALUES ($1, $2, $3, COALESCE($4, FALSE), COALESCE($6, TRUE), $5) ON CONFLICT (environment_id, principal_id) DO UPDATE \
            SET visibility = EXCLUDED.visibility, \
-               share_last_seen = COALESCE($4, messaging_presence_settings.share_last_seen), updated_at = EXCLUDED.updated_at \
-         RETURNING visibility, share_last_seen",
-        vec![env.into(), principal.into(), visibility.into(), share.into(), state.now().into()],
+               share_last_seen = COALESCE($4, messaging_presence_settings.share_last_seen), \
+               share_read_receipts = COALESCE($6, messaging_presence_settings.share_read_receipts), updated_at = EXCLUDED.updated_at \
+         RETURNING visibility, share_last_seen, share_read_receipts",
+        vec![env.into(), principal.into(), visibility.into(), share.into(), state.now().into(), receipts.into()],
     )
     .await?
     .ok_or(Error::code(ErrorCode::InternalError))?;
@@ -230,7 +236,9 @@ async fn store(
         )
         .await?;
     }
-    Ok(json!({ "visibility": s.visibility, "shareLastSeen": s.share_last_seen }))
+    Ok(
+        json!({ "visibility": s.visibility, "shareLastSeen": s.share_last_seen, "shareReadReceipts": s.share_read_receipts }),
+    )
 }
 
 /// The presence of a conversation's members as the (subscribed, member) viewer may see it.
@@ -306,6 +314,9 @@ pub struct SettingsRequest {
     pub visibility: String,
     #[serde(default)]
     pub share_last_seen: Option<bool>,
+    /// Appendix K: `false` stops sharing this principal's read receipts.
+    #[serde(default)]
+    pub share_read_receipts: Option<bool>,
 }
 
 /// `PUT /v1/messaging/presence/settings` (application backend for its principal).
@@ -329,6 +340,7 @@ pub async fn put_settings(
         acting.principal_id,
         &request.visibility,
         request.share_last_seen,
+        request.share_read_receipts,
     )
     .await?;
     if request.visibility == "HIDDEN" {
@@ -356,5 +368,7 @@ pub async fn get_settings(
     acting: &Acting,
 ) -> Result<Value> {
     let s = settings(state, ctx.scope.environment_id, acting.principal_id).await;
-    Ok(json!({ "visibility": s.visibility, "shareLastSeen": s.share_last_seen }))
+    Ok(
+        json!({ "visibility": s.visibility, "shareLastSeen": s.share_last_seen, "shareReadReceipts": s.share_read_receipts }),
+    )
 }

@@ -201,7 +201,7 @@ impl AppCallService {
                 request.initiator_contact,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
         let party_b = self
             .principals
             .ensure_public_party_principal(
@@ -212,7 +212,7 @@ impl AppCallService {
                 request.target_contact,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
 
         let cmd = CallCommandContext::customer(ctx);
         let txn = self.db().begin().await?;

@@ -420,3 +420,80 @@ impl Harness {
         .await
     }
 }
+
+/// A client-side encrypted backup of `principal` (the shared crypto core, client
+/// feature) and its root key.
+pub fn encrypted_backup(
+    principal: Uuid,
+    sections: &[(&str, &[u8])],
+) -> (cf_messaging_crypto::backup::BackupRootKey, Vec<u8>) {
+    use cf_messaging_crypto::backup as b;
+    let root = b::BackupRootKey::generate();
+    let header = b::BackupHeader {
+        key_id: root.key_id(),
+        backup_id: Uuid::new_v4(),
+        principal_id: principal,
+        created_at_unix: chrono::Utc::now().timestamp() as u64,
+    };
+    let payload = b::BackupPayload {
+        sections: sections
+            .iter()
+            .map(|(n, d)| (n.to_string(), d.to_vec()))
+            .collect(),
+    };
+    let bytes = b::encrypt_backup(&root, &header, &payload).unwrap();
+    (root, bytes)
+}
+
+/// The signed upload of an intent response (`upload` object).
+pub fn signed_write_of(upload: &Value) -> cf_object_storage::SignedWrite {
+    cf_object_storage::SignedWrite {
+        method: "PUT",
+        url: upload["url"].as_str().unwrap().to_string(),
+        headers: upload["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                (
+                    h["name"].as_str().unwrap().to_string(),
+                    h["value"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect(),
+        expires_at: chrono::DateTime::parse_from_rfc3339(upload["expiresAt"].as_str().unwrap())
+            .unwrap()
+            .into(),
+    }
+}
+
+impl Harness {
+    /// Backup intent + signed upload of `bytes` (not finalized). Returns the backup id.
+    pub async fn upload_backup(
+        &self,
+        c: &Customer,
+        store: &cf_object_storage::MemoryObjectStore,
+        principal: Uuid,
+        device_id: Uuid,
+        bytes: &[u8],
+    ) -> String {
+        let r = self
+            .post(
+                c,
+                Some(principal),
+                "/v1/messaging/backups",
+                json!({ "deviceId": device_id, "size": bytes.len(), "sha256": cf_object_storage::sha256_hex(bytes),
+                        "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        store
+            .upload_signed(
+                &signed_write_of(&r.json["upload"]),
+                self.now(),
+                bytes.to_vec(),
+            )
+            .unwrap();
+        r.json["backupId"].as_str().unwrap().to_string()
+    }
+}

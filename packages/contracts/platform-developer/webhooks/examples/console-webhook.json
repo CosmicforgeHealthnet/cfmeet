@@ -1,0 +1,23 @@
+{
+  "webhookId": "3c9e2b1a-5d4f-4a60-9b71-8c2d3e4f5a6b",
+  "url": "https://hooks.example.com/cfmeet",
+  "eventTypes": [
+    "call.ended",
+    "meeting.started"
+  ],
+  "description": "CRM sync",
+  "status": "ACTIVE",
+  "secretVersion": 1,
+  "version": 1,
+  "createdAt": "2026-11-04T10:00:00.000Z",
+  "updatedAt": "2026-11-04T10:00:00.000Z",
+  "environmentId": "9b2e3c4d-5f60-4718-8a9b-0c1d2e3f4a5b",
+  "environmentKind": "SANDBOX",
+  "origin": "NATIVE",
+  "health": {
+    "consecutiveFailures": 0,
+    "lastSuccessAt": "2026-11-04T10:05:00.000Z",
+    "lastFailureAt": null,
+    "disabledReason": null
+  }
+}

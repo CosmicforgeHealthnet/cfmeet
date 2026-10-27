@@ -1,0 +1,122 @@
+# Part VI deployment units (Chapter 21) — a STAGING-READY manifest, NOT wired into any
+# workflow. docker-compose.prod.yml and deploy-backend.yml are unchanged; a staging or
+# production rollout adopts this file only through an authorized change (see README.md).
+#
+#   docker compose -f infra/deployment/part-vi/compose.part-vi.yml --env-file <dir>/part-vi.env config
+#
+# Every rollout control is OFF here (the gateway is deny-all); enabling one is a reviewed
+# change of the env files, never of this manifest. Secrets are FILES mounted read-only
+# from the host's secret directory (${CFMEET_SECRETS_DIR}); no value is inline.
+name: cfmeet-part-vi
+
+x-dp-env: &dp-env
+  CF_RUNTIME_ENVIRONMENT: ${CF_RUNTIME_ENVIRONMENT:?staging or production}
+  CF_SERVICE_ID: cfmeet.developer-platform
+  CF_SERVICE_AUTH_KEY_ID: ${DEVELOPER_PLATFORM_KEY_ID:?}
+  CF_SERVICE_AUTH_PRIVATE_KEY_FILE: /run/secrets/developer-platform.pem
+  CF_SERVICE_TRUST_BUNDLE_FILE: /run/secrets/developer-platform.trust-bundle.json
+  CF_PLATFORM_ACCESS_BASE_URL: ${CF_PLATFORM_ACCESS_BASE_URL:?}
+  CF_CALLING_BASE_URL: ${CF_CALLING_BASE_URL:?}
+  CF_MEETING_SERVICE_BASE_URL: ${CF_MEETING_SERVICE_BASE_URL:?}
+  DEVELOPER_PLATFORM_BIND_ADDRESS: 0.0.0.0:8098
+  DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_FILE: /run/secrets/developer-platform.webhook-key
+  DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_ID: ${DEVELOPER_PLATFORM_WEBHOOK_KEY_ID:?}
+  # Rollout controls (Chapter 21.2) — all off.
+  DEVELOPER_PLATFORM_GATEWAY_API_ENABLED: "false"
+  DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED: "false"
+  DEVELOPER_PLATFORM_WEBHOOKS_ENABLED: "false"
+  DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE: shadow
+  LOG_FORMAT: json
+
+services:
+  # One-shot: migrations as the migrator role BEFORE the API / worker start (both refuse
+  # pending migrations). Re-running is a no-op.
+  developer-platform-migrate:
+    image: ${CFMEET_REGISTRY:?}/cfmeet-developer-platform:${CFMEET_TAG:?}
+    command: ["./developer-platform-migration", "up"]
+    # DATABASE_URL of the developer_platform_migrator role (owner), from a secret env file.
+    env_file: ${CFMEET_SECRETS_DIR:?}/developer-platform.migrator.env
+    networks: [internal]
+    restart: "no"
+
+  developer-platform:
+    image: ${CFMEET_REGISTRY:?}/cfmeet-developer-platform:${CFMEET_TAG:?}
+    command: ["./developer-platform"]
+    environment: *dp-env
+    # DATABASE_URL of the developer_platform runtime role (no DDL), from a secret env file.
+    env_file: ${CFMEET_SECRETS_DIR:?}/developer-platform.runtime.env
+    depends_on:
+      developer-platform-migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    volumes: &dp-secrets
+      - ${CFMEET_SECRETS_DIR:?}/developer-platform.pem:/run/secrets/developer-platform.pem:ro
+      - ${CFMEET_SECRETS_DIR:?}/developer-platform.trust-bundle.json:/run/secrets/developer-platform.trust-bundle.json:ro
+      - ${CFMEET_SECRETS_DIR:?}/developer-platform.webhook-key:/run/secrets/developer-platform.webhook-key:ro
+    healthcheck:
+      # 503 while the database is unreachable or migrations are pending.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8098 && printf 'GET /ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Webhook delivery, rollups and durable jobs; same service and data ownership.
+  developer-platform-worker:
+    image: ${CFMEET_REGISTRY:?}/cfmeet-developer-platform:${CFMEET_TAG:?}
+    command: ["./developer-platform-worker"]
+    environment: *dp-env
+    env_file: ${CFMEET_SECRETS_DIR:?}/developer-platform.runtime.env
+    depends_on:
+      developer-platform-migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    volumes: *dp-secrets
+
+  api-gateway:
+    image: ${CFMEET_REGISTRY:?}/cfmeet-api-gateway:${CFMEET_TAG:?}
+    environment:
+      CF_RUNTIME_ENVIRONMENT: ${CF_RUNTIME_ENVIRONMENT:?}
+      CF_SERVICE_ID: cfmeet.api-gateway
+      CF_SERVICE_AUTH_KEY_ID: ${API_GATEWAY_KEY_ID:?}
+      CF_SERVICE_AUTH_PRIVATE_KEY_FILE: /run/secrets/api-gateway.pem
+      CF_PLATFORM_ACCESS_BASE_URL: ${CF_PLATFORM_ACCESS_BASE_URL:?}
+      CF_DEVELOPER_PLATFORM_BASE_URL: http://developer-platform:8098
+      CF_MEETING_SERVICE_BASE_URL: ${CF_MEETING_SERVICE_BASE_URL:?}
+      CF_CALLING_BASE_URL: ${CF_CALLING_BASE_URL:?}
+      CF_MESSAGING_BASE_URL: ${CF_MESSAGING_BASE_URL:?}
+      CF_NUMBERING_BASE_URL: ${CF_NUMBERING_BASE_URL:?}
+      CF_SMS_GATEWAY_BASE_URL: ${CF_SMS_GATEWAY_BASE_URL:?}
+      API_GATEWAY_BIND_ADDRESS: 0.0.0.0:8099
+      # rediss:// is required in staging / production (startup refuses redis://).
+      API_GATEWAY_REDIS_URL: ${API_GATEWAY_REDIS_URL:?rediss://...}
+      API_GATEWAY_REDIS_TIMEOUT_MS: "250"
+      # Rollout controls (Chapter 21.2) — all off: every customer path is 404.
+      API_GATEWAY_PUBLIC_ROUTING_ENABLED: "false"
+      API_GATEWAY_WEBSOCKETS_ENABLED: "false"
+      API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED: "false"
+      API_GATEWAY_CENTRAL_USAGE_ENABLED: "false"
+      LOG_FORMAT: json
+    depends_on:
+      developer-platform:
+        condition: service_healthy
+    networks: [ingress, internal]
+    restart: unless-stopped
+    # The public edge (TLS, size limits) terminates in front of this port; /internal,
+    # provider callbacks and operator paths are never proxied to it.
+    ports:
+      - "127.0.0.1:8099:8099"
+    volumes:
+      - ${CFMEET_SECRETS_DIR:?}/api-gateway.pem:/run/secrets/api-gateway.pem:ro
+    healthcheck:
+      # 503 while Platform Access (needed by every customer request) is unreachable.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8099 && printf 'GET /ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  ingress: {}
+  internal:
+    internal: true

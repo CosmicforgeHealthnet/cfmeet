@@ -166,10 +166,25 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .is_empty());
     assert_eq!(digest(&db.conn, &shape).await, before, "data intact");
     let after_tables = tables(&db.conn).await;
-    // The newest migration (Part V H §103): durable context-authority jobs to Messaging.
-    let new = "privacy_relay_messaging_authority_jobs".to_string();
-    assert!(!before_tables.contains(&new));
-    assert!(after_tables.contains(&new), "{new}");
+    assert_eq!(
+        after_tables, before_tables,
+        "the newest migration adds no table"
+    );
+    // The newest migration (Part VI §53): per-receiver publication outcomes on the outbox,
+    // NULL (not settled) for every existing row.
+    let outcome_columns = "SELECT count(*) FROM information_schema.columns \
+        WHERE table_schema = 'public' AND table_name = 'privacy_relay_outbox' \
+          AND column_name IN ('calling_outcome', 'developer_platform_outcome')";
+    assert_eq!(scalar(&db.conn, outcome_columns).await, 2);
+    assert_eq!(
+        scalar(
+            &db.conn,
+            "SELECT count(*) FROM privacy_relay_outbox \
+              WHERE calling_outcome IS NOT NULL OR developer_platform_outcome IS NOT NULL"
+        )
+        .await,
+        0
+    );
     assert_eq!(
         scalar(
             &db.conn,
@@ -234,14 +249,7 @@ async fn upgrade_from_the_previous_head_keeps_data_adds_objects_and_reverts_clea
         .await,
         1
     );
-    assert_eq!(
-        scalar(
-            &db.conn,
-            "SELECT count(*) FROM pg_proc WHERE proname IN ('privacy_relay_guard_messaging_authority_job', 'privacy_relay_enqueue_messaging_authority')"
-        )
-        .await,
-        0
-    );
+    assert_eq!(scalar(&db.conn, outcome_columns).await, 0);
 
     // Re-up: clean, objects back, data still there.
     Migrator::up(&db.conn, None).await.unwrap();

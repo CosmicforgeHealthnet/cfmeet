@@ -52,7 +52,7 @@ pub fn space(view: &SpaceView) -> MeetingSpaceResponse {
         transcription_policy: full.then_some(s.transcription_policy),
         retention_policy_ref: full.then(|| s.retention_policy_ref.clone()).flatten(),
         organization_id: full.then_some(s.organization_id).flatten(),
-        owner_user_id: full.then_some(s.owner_user_id),
+        owner_user_id: s.owner_user_id.filter(|_| full),
         access_config: full.then(|| access_config(s)),
         role_policy: full.then(|| RolePolicy::from_json(&s.role_policy)),
         schedule_policy: full.then(|| schedule_policy(s)),

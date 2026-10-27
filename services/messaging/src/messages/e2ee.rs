@@ -278,6 +278,7 @@ pub async fn send(
     let acting = acting.clone();
     let conversation = conversation.clone();
     let edit_window = effective.editing.edit_window_seconds;
+    let threads = effective.messages.threads;
     let request_ctx = request_context();
     let attachments = request.attachment_ids.clone();
     let target = request.target_message_id;
@@ -286,7 +287,7 @@ pub async fn send(
         .transaction::<_, (u16, MessageRow), Error>(move |txn| {
             Box::pin(async move {
                 let now = st.now();
-                super::lock_sender(txn, &conversation, acting.principal_id, now).await?;
+                super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
                 let group = lock_group(txn, conversation.id).await?;
                 if let Some(existing) = load_by_client_id(
                     txn,
@@ -332,7 +333,8 @@ pub async fn send(
                     &attachments,
                 )
                 .await?;
-                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to).await?;
+                let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads)
+                    .await?;
                 super::record_created_notify(txn, &ctx, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })

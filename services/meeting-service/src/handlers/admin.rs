@@ -124,6 +124,9 @@ fn parse_status(status: &str) -> Result<UserStatus, ApiError> {
 // ============================================================================
 
 /// List all users (admin only)
+///
+/// Paged list of every user account, newest first (`page` from 1, `limit` 1–100, default 20),
+/// optionally filtered by `status` and `role`. Requires the admin role.
 #[utoipa::path(
     get,
     path = "/api/v1/admin/users",
@@ -197,6 +200,9 @@ pub async fn list_users(
 }
 
 /// Update a user (admin only)
+///
+/// Changes a user's `role` and/or `status`; omitted fields are left unchanged. An admin cannot
+/// change their own role. Requires the admin role.
 #[utoipa::path(
     patch,
     path = "/api/v1/admin/users/{id}",
@@ -280,6 +286,9 @@ pub async fn update_user(
 // ============================================================================
 
 /// List all meetings (admin only)
+///
+/// Paged list of every legacy meeting, newest first (`page` from 1, `limit` 1–100, default 20),
+/// optionally filtered by `status` and `host_id`. Requires the admin role.
 #[utoipa::path(
     get,
     path = "/api/v1/admin/meetings",
@@ -387,6 +396,9 @@ pub async fn list_meetings(
 // ============================================================================
 
 /// List session logs (admin only)
+///
+/// Paged meeting session event log, most recent event first (`page` from 1, `limit` 1–100,
+/// default 20), optionally filtered by `meeting_id` and `event_type`. Requires the admin role.
 #[utoipa::path(
     get,
     path = "/api/v1/admin/logs",

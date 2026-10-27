@@ -1,0 +1,34 @@
+[package]
+name = "cf-messaging-crypto-ffi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "The CF Meet Messaging client crypto core for native SDKs (Dart via dart:ffi): a C ABI over cf-messaging-crypto (feature `client`) mirroring the wasm-bindgen surface of ../wasm. Thin by design: argument conversion and fail-closed checks, no protocol logic."
+
+# Stand-alone workspace (like the crypto core it wraps and its wasm binding).
+[workspace]
+
+[lib]
+name = "cf_messaging_crypto_ffi"
+# cdylib: loaded by the Dart SDK (dart:ffi); staticlib: linked into mobile apps;
+# rlib: the crate's own tests call the C ABI directly.
+crate-type = ["cdylib", "staticlib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+cf-messaging-crypto = { path = "..", features = ["client"] }
+# Pinned to the versions in the crypto core's lockfile.
+uuid = "=1.28.0"
+zeroize = "=1.9.1"
+
+# Unwinding is required: every exported function catches panics (catch_unwind) so that
+# none crosses the C ABI. Never set panic = "abort" here.
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+debug = false
+codegen-units = 1
+lto = true

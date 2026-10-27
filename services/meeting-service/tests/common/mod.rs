@@ -11,7 +11,9 @@ pub mod artifacts;
 pub mod collab;
 pub mod contract;
 pub mod livekit_mock;
+pub mod platform;
 pub mod proxy;
+pub mod receiver;
 pub mod route_coverage;
 pub mod rtc;
 pub mod ws;
@@ -419,6 +421,8 @@ pub struct TestOptions {
     pub reuse_storage: Option<Arc<backend::services::artifacts::storage::MemoryArtifactStorage>>,
     /// Part V H: the signed gateway to real Platform Access / Messaging processes.
     pub unified_messaging: Option<backend::services::unified_messaging::SharedGateway>,
+    /// Part VI §51: the platform credential receiver (gateway-forwarded machine callers).
+    pub platform: Option<backend::services::platform::PlatformReceiver>,
 }
 
 impl Default for TestOptions {
@@ -441,6 +445,7 @@ impl Default for TestOptions {
             config: None,
             reuse_storage: None,
             unified_messaging: None,
+            platform: None,
         }
     }
 }
@@ -722,7 +727,7 @@ impl TestApp {
             }),
             unified_messaging: opts.unified_messaging.clone(),
         };
-        let state = AppState::with_meeting_deps(
+        let mut state = AppState::with_meeting_deps(
             db.conn.clone(),
             redis,
             &app_config,
@@ -730,6 +735,9 @@ impl TestApp {
             &livekit,
             deps,
         );
+        if let Some(platform) = opts.platform.clone() {
+            state = state.with_platform(platform);
+        }
         let router = routes::create_routes(state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));
         Self {
@@ -1047,4 +1055,46 @@ pub fn uuid(v: &Value) -> Uuid {
 
 pub fn code(v: &Value) -> &str {
     v["error"]["code"].as_str().unwrap_or("<none>")
+}
+
+/// Whether the TCP listener on `port` belongs to process `pid` (Linux `/proc`).
+///
+/// A probed free port can be taken by another test's process between the probe and the
+/// bind; the newly spawned process then fails to bind and exits, while `/ready` on that
+/// port is answered by the OTHER process. Readiness counts only for the process that
+/// actually owns the listening socket.
+#[allow(dead_code)]
+pub fn process_owns_listener(pid: u32, port: u16) -> bool {
+    let suffix = format!(":{port:04X}");
+    let mut inodes = Vec::new();
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        let Ok(text) = std::fs::read_to_string(table) else {
+            continue;
+        };
+        for line in text.lines().skip(1) {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            // local_address, state 0A = LISTEN, inode.
+            if cols.len() > 9 && cols[1].ends_with(&suffix) && cols[3] == "0A" {
+                inodes.push(format!("socket:[{}]", cols[9]));
+            }
+        }
+    }
+    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+        return false;
+    };
+    fds.flatten().any(|fd| {
+        std::fs::read_link(fd.path())
+            .map(|target| inodes.iter().any(|i| target.as_os_str() == i.as_str()))
+            .unwrap_or(false)
+    })
+}
+
+/// The port of a `http://host:port` URL.
+#[allow(dead_code)]
+pub fn url_port(url: &str) -> u16 {
+    url.rsplit(':')
+        .next()
+        .and_then(|p| p.split('/').next())
+        .and_then(|p| p.parse().ok())
+        .expect("url with a port")
 }

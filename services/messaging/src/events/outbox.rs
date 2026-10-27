@@ -130,6 +130,35 @@ pub async fn enqueue_conversation<C: ConnectionTrait>(
     Ok((id, cursor))
 }
 
+/// Records a domain event that is not part of a conversation's member-visible event
+/// stream (administration, compliance, attachment processing, transport state), in the
+/// caller's transaction. Request correlation follows the current request, or a fresh one
+/// for workers.
+#[allow(clippy::too_many_arguments)]
+pub async fn record<C: ConnectionTrait>(
+    db: &C,
+    event_type: &'static str,
+    aggregate_type: &'static str,
+    aggregate_id: Uuid,
+    scope: EventScope,
+    payload: Value,
+    now: DateTime<Utc>,
+) -> Result<Uuid, DbErr> {
+    enqueue(
+        db,
+        NewEvent {
+            event_type,
+            aggregate_type,
+            aggregate_id,
+            scope,
+            payload,
+        },
+        &crate::conversations::service::request_context(),
+        now,
+    )
+    .await
+}
+
 /// A claimed, committed event.
 #[derive(Debug, Clone, FromQueryResult)]
 pub struct OutboxEvent {

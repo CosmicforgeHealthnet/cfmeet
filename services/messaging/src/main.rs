@@ -15,7 +15,6 @@ use messaging::{
     metrics,
     state::AppState,
 };
-use messaging_migration::MigratorTrait;
 use sea_orm::{ConnectOptions, Database};
 use tracing_subscriber::EnvFilter;
 
@@ -89,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
             summarize_db_error(&e)
         )
     })?;
-    let pending = messaging_migration::Migrator::get_pending_migrations(&db)
+    let pending = messaging_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {
@@ -243,22 +242,78 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => tracing::warn!("MESSAGING_KT_CHECKPOINT_FILE is not set: key-transparency rollback detection relies on external auditors only"),
     }
-    // Part V I: customer webhooks through the existing platform webhook system (Calling).
-    let calling_configured = settings
-        .targets
+    // Part V I: customer webhooks through the existing platform webhook system (Calling);
+    // Part VI §53: and / or directly to the Developer Platform's central event ingestion.
+    let has_target = |service: &str| settings.targets.iter().any(|(s, _)| s.as_str() == service);
+    let destination = config.public_events;
+    if destination
+        .destinations()
+        .contains(&messaging::webhook_relay::EventDestination::DeveloperPlatform)
+        && !has_target(cf_service_auth::services::DEVELOPER_PLATFORM)
+    {
+        anyhow::bail!(
+            "MESSAGING_PUBLIC_EVENTS_DESTINATION={} requires CF_DEVELOPER_PLATFORM_BASE_URL",
+            destination.as_str()
+        );
+    }
+    let webhook_sinks: Vec<(
+        messaging::webhook_relay::EventDestination,
+        Arc<dyn messaging::webhook_relay::PlatformEventSink>,
+    )> = destination
+        .destinations()
         .iter()
-        .any(|(s, _)| s.as_str() == cf_service_auth::services::CALLING);
-    let webhook_sink: Arc<dyn messaging::webhook_relay::PlatformEventSink> = if calling_configured {
-        Arc::new(messaging::webhook_relay::CallingPlatformEvents::new(
-            state.service_auth.client(),
-        ))
-    } else {
-        tracing::warn!("CF_CALLING_BASE_URL is not set: webhook-relayed events wait PENDING");
-        Arc::new(messaging::webhook_relay::UnconfiguredSink)
-    };
+        .map(|d| {
+            let sink: Arc<dyn messaging::webhook_relay::PlatformEventSink> = match d {
+                messaging::webhook_relay::EventDestination::Calling
+                    if has_target(cf_service_auth::services::CALLING) =>
+                {
+                    Arc::new(messaging::webhook_relay::CallingPlatformEvents::new(
+                        state.service_auth.client(),
+                    ))
+                }
+                messaging::webhook_relay::EventDestination::Calling => {
+                    tracing::warn!(
+                        "CF_CALLING_BASE_URL is not set: webhook-relayed events wait PENDING"
+                    );
+                    Arc::new(messaging::webhook_relay::UnconfiguredSink)
+                }
+                messaging::webhook_relay::EventDestination::DeveloperPlatform => {
+                    Arc::new(messaging::webhook_relay::DeveloperPlatformEvents::new(
+                        state.service_auth.client(),
+                    ))
+                }
+            };
+            (*d, sink)
+        })
+        .collect();
+    tracing::info!(
+        public_events_destination = destination.as_str(),
+        "webhook relay receivers"
+    );
+    // Part VI §55: attachment STORAGE_BYTE_TIME usage facts to the Developer Platform.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    state.service_auth.client(),
+                )),
+                s,
+            )
+            .with_intervals(Arc::new(messaging::usage_export::AttachmentStorage::new(
+                state.db.clone(),
+            )));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("attachment storage usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => tracing::warn!(
+            "CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off"
+        ),
+        Ok(_) => {}
+        Err(e) => anyhow::bail!("usage export configuration: {e}"),
+    }
     tokio::spawn(messaging::webhook_relay::run(
         state.clone(),
-        webhook_sink,
+        webhook_sinks,
         config.workers.interval,
     ));
     tokio::spawn(messaging::conversations::service::run_expiry(

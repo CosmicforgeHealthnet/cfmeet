@@ -6,6 +6,16 @@
 //!   service account, effective scopes and the authorized-principal restriction ONLY from
 //!   the authority chain returned. A tenant / environment id in a request is never
 //!   authority. Platform Access unreachable = refused (fail closed).
+//! * Part VI §51 — a request the public API Gateway already authenticated arrives on the
+//!   SAME public route without `Authorization`, carrying instead a fresh gateway service
+//!   token (`messaging-request.forward`) whose signed delegated context names the
+//!   initiating credential id. Messaging still never trusts that context as authority: it
+//!   asks Platform Access for the LIVE chain of that credential
+//!   (`POST /internal/v1/credentials/delegated-authority`, the same permission and the
+//!   same response shape as `/credentials/authenticate`, the delegated context attached to
+//!   Messaging's own service token) and takes everything from the chain returned
+//!   ([`CustomerAuthority::authenticate_forwarded`]). Revocation and suspension therefore
+//!   apply at once; forwarded requests are never served from the cache.
 //! * The ACTING principal of a request is a claim of the authenticated application
 //!   backend (`CF-Acting-Principal`). It is honoured only when the credential's principal
 //!   restriction admits it AND Platform Access resolves it ACTIVE, of a messaging-capable
@@ -20,8 +30,8 @@ pub mod cache;
 use std::{collections::BTreeSet, sync::Arc};
 
 use cf_service_auth::{
-    client::{InternalCallError, InternalServiceClient},
-    services, OutboundServiceRequest, ServiceId,
+    client::{InternalCallError, InternalResponse, InternalServiceClient},
+    services, CorrelationId, OutboundServiceRequest, ServiceId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -107,6 +117,19 @@ impl TrustedContext {
         self.principal_restriction
             .as_ref()
             .is_none_or(|allowed| allowed.contains(&principal))
+    }
+
+    /// Whether this chain is the one of the credential and scope a signed delegated
+    /// context names (tenant, application, environment and its kind, service account and
+    /// initiating credential).
+    pub fn is_chain_of(&self, ctx: &cf_service_auth::DelegatedPlatformContext) -> bool {
+        let own = self.scope.delegated();
+        ctx.initiating_credential_id() == Some(self.credential_id)
+            && ctx.tenant_id() == own.tenant_id()
+            && ctx.application_id() == own.application_id()
+            && ctx.application_environment_id() == own.application_environment_id()
+            && ctx.application_environment_kind() == own.application_environment_kind()
+            && ctx.initiating_service_account_id() == own.initiating_service_account_id()
     }
 
     /// Parses Platform Access's `AuthorityChain` (contract `cfmeet.platform-access.identity`).
@@ -233,6 +256,21 @@ impl TrustedContext {
 pub trait CustomerAuthority: Send + Sync {
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable>;
 
+    /// Authenticates, LIVE, the credential an API Gateway forwarded request names in its
+    /// verified delegated context (`initiating_credential_id`): the same outcomes as
+    /// [`Self::authenticate`], the chain re-fetched by the identity authority and required
+    /// to match the delegated scope. `correlation_id` continues the gateway's operation.
+    /// Fail closed by default.
+    async fn authenticate_forwarded(
+        &self,
+        _ctx: &cf_service_auth::DelegatedPlatformContext,
+        _correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "forwarded authentication is not supported".into(),
+        ))
+    }
+
     /// Re-validates a delegated scope against Platform Access (fail closed by default).
     async fn validate_delegated(
         &self,
@@ -263,6 +301,47 @@ impl PlatformAccessAuthority {
     }
 }
 
+/// Platform Access's `AuthenticateResponse` (both `/credentials/authenticate` and
+/// `/credentials/delegated-authority` answer it): AUTHENTICATED with the chain, or
+/// REJECTED with a reason (logs only) and an optional throttle. Anything else is an
+/// unavailable authority (fail closed).
+fn authentication_outcome(
+    response: &InternalResponse,
+) -> Result<Authentication, AuthorityUnavailable> {
+    if response.status() != 200 {
+        return Err(AuthorityUnavailable(format!(
+            "HTTP {} {}",
+            response.status(),
+            response.error_code().unwrap_or_default()
+        )));
+    }
+    let body: Value = response
+        .json()
+        .map_err(|_| AuthorityUnavailable("malformed authentication response".into()))?;
+    match body.get("outcome").and_then(Value::as_str) {
+        Some("AUTHENTICATED") => body
+            .get("authority")
+            .and_then(TrustedContext::from_authority)
+            .map(|c| Authentication::Authenticated(Box::new(c)))
+            .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
+        Some("REJECTED") => Ok(Authentication::Rejected {
+            reason: body
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("rejected")
+                .chars()
+                .take(64)
+                .collect(),
+            throttle: body
+                .get("throttle")
+                .and_then(|t| serde_json::from_value(t.clone()).ok()),
+        }),
+        _ => Err(AuthorityUnavailable(
+            "unknown authentication outcome".into(),
+        )),
+    }
+}
+
 #[async_trait::async_trait]
 impl CustomerAuthority for PlatformAccessAuthority {
     async fn authenticate(&self, presented: &str) -> Result<Authentication, AuthorityUnavailable> {
@@ -276,37 +355,35 @@ impl CustomerAuthority for PlatformAccessAuthority {
             )
             .await
             .map_err(unavailable)?;
-        if response.status() != 200 {
-            return Err(AuthorityUnavailable(format!(
-                "HTTP {} {}",
-                response.status(),
-                response.error_code().unwrap_or_default()
-            )));
-        }
-        let body: Value = response
-            .json()
-            .map_err(|_| AuthorityUnavailable("malformed authentication response".into()))?;
-        match body.get("outcome").and_then(Value::as_str) {
-            Some("AUTHENTICATED") => body
-                .get("authority")
-                .and_then(TrustedContext::from_authority)
-                .map(|c| Authentication::Authenticated(Box::new(c)))
-                .ok_or_else(|| AuthorityUnavailable("malformed authority chain".into())),
-            Some("REJECTED") => Ok(Authentication::Rejected {
-                reason: body
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("rejected")
-                    .chars()
-                    .take(64)
-                    .collect(),
-                throttle: body
-                    .get("throttle")
-                    .and_then(|t| serde_json::from_value(t.clone()).ok()),
-            }),
-            _ => Err(AuthorityUnavailable(
-                "unknown authentication outcome".into(),
-            )),
+        authentication_outcome(&response)
+    }
+
+    /// `POST /internal/v1/credentials/delegated-authority` (`platform-credential.authenticate`):
+    /// no body; Platform Access reads the credential id from the delegated context signed
+    /// into Messaging's own service token.
+    async fn authenticate_forwarded(
+        &self,
+        ctx: &cf_service_auth::DelegatedPlatformContext,
+        correlation_id: &CorrelationId,
+    ) -> Result<Authentication, AuthorityUnavailable> {
+        let request = OutboundServiceRequest::continuing(platform_access(), correlation_id)
+            .with_delegated_context(ctx.clone());
+        let response = self
+            .client
+            .post_json(
+                &request,
+                "/internal/v1/credentials/delegated-authority",
+                &json!({}),
+            )
+            .await
+            .map_err(unavailable)?;
+        match authentication_outcome(&response)? {
+            // Defence in depth: the chain must be the delegated credential's, in the
+            // delegated scope (Platform Access checks the same).
+            Authentication::Authenticated(chain) if !chain.is_chain_of(ctx) => Err(
+                AuthorityUnavailable("inconsistent delegated authority chain".into()),
+            ),
+            outcome => Ok(outcome),
         }
     }
 

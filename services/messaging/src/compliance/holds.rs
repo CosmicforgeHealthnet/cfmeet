@@ -210,6 +210,17 @@ pub async fn create(state: &AppState, ctx: &TrustedContext, request: CreateHold)
         ],
     )
     .await?;
+    crate::events::outbox::record(
+        &txn,
+        "messaging.legal-hold.applied",
+        "LEGAL_HOLD",
+        id,
+        crate::conversations::service::scope_of(ctx),
+        json!({ "hold_id": id, "scope_kind": request.scope_kind, "conversation_id": request.conversation_id,
+                "principal_id": request.principal_id, "reason_category": request.reason_category }),
+        now,
+    )
+    .await?;
     txn.commit().await?;
     audit::record(
         &state.db,
@@ -272,9 +283,10 @@ pub async fn release(
         ));
     }
     let now = state.now();
-    load(&state.db, ctx, id).await?;
+    let hold = load(&state.db, ctx, id).await?;
+    let txn = state.db.begin().await?;
     let n = db::exec(
-        &state.db,
+        &txn,
         "UPDATE messaging_legal_holds SET status = 'RELEASED', released_at = $3, released_by_credential_id = $4, release_reason = $5 \
          WHERE id = $1 AND environment_id = $2 AND status = 'ACTIVE'",
         vec![id.into(), ctx.scope.environment_id.into(), now.into(), ctx.credential_id.into(), request.reason.clone().into()],
@@ -283,11 +295,25 @@ pub async fn release(
     if n == 1 {
         // Deletions held by this hold are re-evaluated at once.
         db::exec(
-            &state.db,
+            &txn,
             "UPDATE messaging_object_deletions SET status = 'PENDING', next_attempt_at = $2 WHERE environment_id = $1 AND status = 'HELD'",
             vec![ctx.scope.environment_id.into(), now.into()],
         )
         .await?;
+        crate::events::outbox::record(
+            &txn,
+            "messaging.legal-hold.released",
+            "LEGAL_HOLD",
+            id,
+            crate::conversations::service::scope_of(ctx),
+            json!({ "hold_id": id, "scope_kind": hold.scope_kind, "conversation_id": hold.conversation_id,
+                    "principal_id": hold.principal_id, "reason": request.reason }),
+            now,
+        )
+        .await?;
+    }
+    txn.commit().await?;
+    if n == 1 {
         audit::record(
             &state.db,
             AuditEntry {

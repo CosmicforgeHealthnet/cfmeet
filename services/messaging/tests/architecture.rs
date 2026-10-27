@@ -155,9 +155,13 @@ fn the_backend_links_only_the_public_half_of_the_crypto_core() {
 #[test]
 fn e2ee_content_is_opaque_to_the_backend() {
     for (file, code) in sources() {
-        // The MANAGED store seals / opens MANAGED text with the deployment's managed key
-        // ring; it is unreachable from E2EE paths (managed_content_never_enters_e2ee_paths).
-        if file == "src/domain/profile.rs" || file == "src/messages/managed.rs" {
+        // The MANAGED store seals / opens MANAGED text with the managed envelope keys
+        // (src/messages/keys.rs: wrapped per-environment DEKs, Appendix J); it is
+        // unreachable from E2EE paths (managed_content_never_enters_e2ee_paths).
+        if file == "src/domain/profile.rs"
+            || file == "src/messages/managed.rs"
+            || file == "src/messages/keys.rs"
+        {
             continue;
         }
         // Ciphertext is never turned into text, and no message-body parser exists.

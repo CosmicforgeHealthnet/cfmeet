@@ -1,0 +1,155 @@
+{
+  "description": "CF Meet Part VI §52 / §20.2 SDK parity certification: the scenarios EVERY platform SDK runs against the real certification stack (cfmeet-cert-stack up --env-out <file>; CFMEET_STACK_ENV=<file>). Each SDK's real-stack suite implements exactly this set of ids (sdks/typescript/test/integration.test.ts, sdks/dart/test/stack_integration_test.dart) and fails when its implemented set differs, so the SDKs cannot drift apart. `expect` is the contract outcome each SDK asserts through its public API (status, error code, typed error class, response shape).",
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "discovery",
+      "description": "GET /discovery anonymously through the gateway.",
+      "expect": {
+        "status": 200,
+        "shape": "service = cfmeet.api-gateway, families is a list, requestId surfaced"
+      }
+    },
+    {
+      "id": "context.credential",
+      "description": "GET /v1/developer-platform/context with the sandbox platform credential.",
+      "expect": {
+        "status": 200,
+        "shape": "tenantId / applicationId / environmentId / serviceAccountId equal the provisioned sandbox, authority PLATFORM_ACCESS, forwardedBy cfmeet.api-gateway, requestId + correlationId surfaced"
+      }
+    },
+    {
+      "id": "errors.defaultDeny",
+      "description": "A path the gateway does not route, with a valid credential.",
+      "expect": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "error": "CfMeetNotFoundError",
+        "shape": "requestId surfaced"
+      }
+    },
+    {
+      "id": "errors.invalidCredential",
+      "description": "A well-formed but unknown platform credential.",
+      "expect": {
+        "status": 401,
+        "code": "AUTHENTICATION_FAILED",
+        "error": "CfMeetAuthenticationError",
+        "shape": "the credential never appears in the error"
+      }
+    },
+    {
+      "id": "errors.missingScope",
+      "description": "credentials.sandboxLimited (organizations.read only) calls GET /v1/calls (calls.read).",
+      "expect": {
+        "status": 403,
+        "code": "INSUFFICIENT_SCOPE",
+        "error": "CfMeetPermissionError",
+        "shape": "the same credential reads GET /v1/organizations (200)"
+      }
+    },
+    {
+      "id": "isolation.otherTenant",
+      "description": "credentials.otherTenant reads the sandbox tenant's organization, project and environment.",
+      "expect": {
+        "status": 404,
+        "error": "CfMeetNotFoundError",
+        "shape": "indistinguishable from an unknown id (no sandbox id in the error); the sandbox credential reads the same organization (200)"
+      }
+    },
+    {
+      "id": "developerPlatform.session.list",
+      "description": "With the user session: list organizations and the organization's projects.",
+      "expect": {
+        "status": 200,
+        "shape": "items contain the provisioned organizationId / projectId"
+      }
+    },
+    {
+      "id": "developerPlatform.session.idempotentCreate",
+      "description": "With the user session: create a project with an explicit Idempotency-Key, replay the same request with the same key, then reuse the key for a different body.",
+      "expect": {
+        "status": 201,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "error": "CfMeetValidationError",
+        "shape": "the replay answers 201 with the SAME project id; idempotentReplayed is exactly what the Idempotent-Replayed header says (the Developer Platform does not send it today); the key reused for another body is refused with 422 IDEMPOTENCY_KEY_REUSED"
+      }
+    },
+    {
+      "id": "idempotency.replayHeader",
+      "description": "With the sandbox credential: create a Privacy Relay communication context with an explicit Idempotency-Key, replay it, then reuse the key for a different body.",
+      "expect": {
+        "status": 201,
+        "code": "IDEMPOTENCY_CONFLICT",
+        "error": "CfMeetConflictError",
+        "shape": "first idempotentReplayed false; replay idempotentReplayed true (Idempotent-Replayed: true) with the same contextId; the key reused for another body is refused with 409 IDEMPOTENCY_CONFLICT"
+      }
+    },
+    {
+      "id": "pagination.cursor",
+      "description": "With the user session: list the organization's projects one per page with the SDK paginator (pages and items).",
+      "expect": {
+        "status": 200,
+        "shape": "at least 2 pages, every page carries nextCursor until the last, items unique and include every project created"
+      }
+    },
+    {
+      "id": "quota.headers",
+      "description": "A platform-credential request surfaces the gateway's x-cf-quota-* headers.",
+      "expect": {
+        "status": 200,
+        "shape": "quota.limit(Per)Minute = limits.sandboxRequestsPerMinute, remaining < limit, reset seconds and daily limit present"
+      }
+    },
+    {
+      "id": "retry.neverPaidTelecom",
+      "description": "POST /v1/calls (retry class NEVER, paid telecom) with retries enabled on the client: Calling refuses it (no media provider in the stack).",
+      "expect": {
+        "status": 422,
+        "code": "CAPABILITY_UNAVAILABLE",
+        "error": "CfMeetValidationError",
+        "shape": "exactly ONE HTTP request reached the gateway (counted at the SDK transport) although the client allows 5 retries; it carried a generated Idempotency-Key"
+      }
+    },
+    {
+      "id": "messaging.e2ee",
+      "description": "Two devices registered with the SDK's crypto bridge (TypeScript: wasm adapter over the shipped module; Dart: FFI) create a PRIVATE_E2EE group through the gateway (KeyPackages, claim, commit + Welcome, join), then one sends a bridge-encrypted message and the other decrypts it.",
+      "expect": {
+        "status": 201,
+        "shape": "conversation encryption.serverCanReadContent false; the stored message (send response and listMessages) carries e2ee.ciphertext equal to the bridge output, no text, and the plaintext appears nowhere in any response; plaintext text on the E2EE conversation is refused (4xx CfMeetValidationError)"
+      }
+    },
+    {
+      "id": "messaging.e2ee.crossSdk",
+      "description": "Interop: this SDK's device creates a PRIVATE_E2EE group with a device run by the OTHER SDK (a peer process speaking JSON lines: sdks/typescript/test/support/interop-peer.ts, sdks/dart/test/support/interop_peer.dart); each side sends one message the other decrypts.",
+      "expect": {
+        "status": 201,
+        "shape": "the peer decrypts this SDK's message and this SDK decrypts the peer's reply"
+      }
+    },
+    {
+      "id": "realtime.messaging",
+      "description": "Client token (POST /v1/messaging/client-tokens) -> realtime ticket -> WebSocket /v1/realtime through the gateway with the SDK's realtime helper.",
+      "expect": {
+        "status": 101,
+        "shape": "welcome frame (protocolVersion 1), ping -> pong, close by the client without reconnecting"
+      }
+    },
+    {
+      "id": "realtime.meetings",
+      "description": "With the user session: an instant meeting, then the SDK's meeting realtime helper (ticket in the query) through the gateway.",
+      "expect": {
+        "status": 101,
+        "shape": "subscribed frame (scope FULL), close by the client without reconnecting"
+      }
+    },
+    {
+      "id": "realtime.meetings.resume",
+      "description": "Meeting realtime resume: lock the conference and receive its event frame (sequence n), drop the socket (client close 3000), and unlock the conference while the helper is reconnecting (its next ticket is held until the unlock is committed).",
+      "expect": {
+        "status": 101,
+        "shape": "the helper reconnects by itself with a FRESH ticket and cursor=n (subscribed.cursor = n), and the conference.unlocked event (sequence n+1) emitted while it was disconnected is delivered by replay"
+      }
+    }
+  ]
+}

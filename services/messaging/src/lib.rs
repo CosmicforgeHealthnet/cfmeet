@@ -17,6 +17,7 @@
 
 pub mod attachments;
 pub mod audit;
+pub mod backups;
 pub mod compliance;
 pub mod config;
 pub mod conversations;
@@ -43,5 +44,6 @@ pub mod sms_bridge;
 pub mod state;
 pub mod transparency;
 pub mod usage;
+pub mod usage_export;
 pub mod webhook_relay;
 pub mod workers;

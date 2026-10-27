@@ -7,6 +7,11 @@
 //! restricted from sending for `MESSAGING_ABUSE_RESTRICTION_SECONDS` and a
 //! `SUSPENSION_RECOMMENDED` audit entry is written: suspending a principal is Platform
 //! Access's authority, never Messaging's. Moderators can also restrict / lift.
+//!
+//! Repeated rejected sends (blocked, muted, restricted, refused content) are signals
+//! (§133), restricting only when sustained (five times the threshold within the hour). Recipient complaints (a report naming a principal) are recorded as
+//! [`COMPLAINT`] signals for scoring and moderation, but never count toward the automatic
+//! restriction: otherwise a group could silence anyone by reporting them.
 
 use chrono::{DateTime, Utc};
 use sea_orm::FromQueryResult;
@@ -19,6 +24,12 @@ use crate::{
     identity::TrustedContext,
     state::AppState,
 };
+
+/// A recipient complaint (a report naming the principal); excluded from the automatic
+/// restriction threshold.
+pub const COMPLAINT: &str = "REPORTED";
+/// A send the server refused (blocked, muted, restricted, refused content).
+pub const REJECTED_SEND: &str = "REJECTED_SEND";
 
 /// Refuses sending while an active restriction exists.
 pub async fn require_not_restricted(
@@ -55,6 +66,35 @@ pub async fn restricted_until(
     .map(|r| r.ends_at))
 }
 
+/// Automatic restrictions of one environment within an hour that raise ABUSE_WAVE (§141).
+pub const ABUSE_WAVE_RESTRICTIONS: i64 = 5;
+
+/// Raises ABUSE_WAVE when the environment's automatic restrictions of the last hour
+/// reach [`ABUSE_WAVE_RESTRICTIONS`]. Returns whether it did.
+pub async fn check_abuse_wave(
+    db: &sea_orm::DatabaseConnection,
+    env: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let wave = db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_principal_restrictions WHERE environment_id = $1 AND source = 'AUTOMATIC' AND starts_at > $2",
+        vec![env.into(), (now - chrono::Duration::hours(1)).into()],
+    )
+    .await?;
+    let raised = wave >= ABUSE_WAVE_RESTRICTIONS;
+    if raised {
+        crate::operations::raise(
+            db,
+            crate::operations::IncidentCategory::AbuseWave,
+            &env.to_string(),
+            now,
+        )
+        .await;
+    }
+    Ok(raised)
+}
+
 /// Records one abuse signal and applies the automatic restriction when the threshold is
 /// crossed. Never fails the caller's request (a failure is logged).
 pub async fn signal(state: &AppState, ctx: &TrustedContext, principal: Uuid, kind: &'static str) {
@@ -78,15 +118,41 @@ async fn record(
     )
     .await?;
     crate::metrics::inc("messaging_abuse_signals_total", &[("signal", kind)]);
-    let recent = db::scalar_i64(
-        &state.db,
-        "SELECT count(*) FROM messaging_abuse_signals WHERE environment_id = $1 AND principal_id = $2 AND occurred_at > $3",
-        vec![env.into(), principal.into(), (now - chrono::Duration::hours(1)).into()],
-    )
-    .await?;
-    if recent >= state.conversations.abuse_signal_threshold
-        && restricted_until(state, env, principal).await?.is_none()
-    {
+    if kind == COMPLAINT {
+        return Ok(());
+    }
+    // Rejected sends are counted on their own, against five times the threshold: a burst
+    // of retries racing a block is not abuse, sustained retrying after refusals is.
+    let (recent, threshold) = if kind == REJECTED_SEND {
+        (
+            db::scalar_i64(
+                &state.db,
+                "SELECT count(*) FROM messaging_abuse_signals WHERE environment_id = $1 AND principal_id = $2 \
+                   AND occurred_at > $3 AND signal = $4",
+                vec![env.into(), principal.into(), (now - chrono::Duration::hours(1)).into(), REJECTED_SEND.into()],
+            )
+            .await?,
+            state.conversations.abuse_signal_threshold.saturating_mul(5),
+        )
+    } else {
+        (
+            db::scalar_i64(
+                &state.db,
+                "SELECT count(*) FROM messaging_abuse_signals WHERE environment_id = $1 AND principal_id = $2 \
+                   AND occurred_at > $3 AND signal NOT IN ($4, $5)",
+                vec![
+                    env.into(),
+                    principal.into(),
+                    (now - chrono::Duration::hours(1)).into(),
+                    COMPLAINT.into(),
+                    REJECTED_SEND.into(),
+                ],
+            )
+            .await?,
+            state.conversations.abuse_signal_threshold,
+        )
+    };
+    if recent >= threshold && restricted_until(state, env, principal).await?.is_none() {
         let ends = now + chrono::Duration::seconds(state.conversations.abuse_restriction_seconds);
         db::exec(
             &state.db,
@@ -118,6 +184,7 @@ async fn record(
             now,
         )
         .await?;
+        check_abuse_wave(&state.db, env, now).await?;
         crate::metrics::inc(
             "messaging_abuse_restrictions_total",
             &[("source", "automatic")],

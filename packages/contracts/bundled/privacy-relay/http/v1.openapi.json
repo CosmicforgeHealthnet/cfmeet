@@ -5,10 +5,43 @@
     "version": "1.2.0",
     "description": "The CF Meet platform Privacy Relay API (Part D sections 26-36): Communication Contexts, Privacy Relay Sessions and the Contact Vault. One generic model for first-party and external applications alike; it never knows a consumer's business object. Privacy Relay (services/privacy-relay) is the business and data authority; the API is currently served by the authenticated platform ingress (services/calling), which authenticates the customer credential, checks the scope, validates referenced principals and forwards over authenticated internal service calls with a signed delegated platform context — the customer credential is never forwarded. Tenant, application and environment come only from the credential; a resource of another scope is answered exactly like a missing one (404). Every mutation requires expectedVersion where it changes an existing resource and an Idempotency-Key (a replay returns the recorded response with Idempotent-Replayed: true; a different request under the same key is 409 IDEMPOTENCY_CONFLICT). Lifecycle changes are explicit commands; there is no status patch. The Contact Vault routes (x-cfmeet-served-by: cfmeet.privacy-relay) are served by Privacy Relay itself and authenticated by a short-lived Contact Vault access token minted by Calling (POST /v1/privacy-relay/contact-access-grants), so a raw telephone number never transits Calling; they are the ONLY routes that accept a telephone number (telephoneNumber), and no route ever returns one. No provider id, carrier, Contact Vault ciphertext, fingerprint, key or credential is ever accepted or returned."
   },
+  "tags": [
+    {
+      "name": "Communication Contexts",
+      "description": "Communication Contexts operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Contact Access Grants",
+      "description": "Contact Access Grants operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Contact Verification",
+      "description": "Contact Verification operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Protected Contacts",
+      "description": "Protected Contacts operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Relay Evidence",
+      "description": "Relay Evidence operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Relay Session Creation",
+      "description": "Relay Session Creation operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    },
+    {
+      "name": "Relay Sessions",
+      "description": "Relay Sessions operations in the Privacy Relay API. Review the operation description for behavior, required permissions and schemas."
+    }
+  ],
   "paths": {
     "/v1/privacy-relay/contexts": {
       "post": {
         "operationId": "createContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Create a communication context",
         "description": "Creates a Communication Context (version 1): the consumer-neutral authority for WHY (opaque externalContextReference), WHO (participants: principal ids or opaque ContactReference ids), in which DIRECTION, over which CHANNEL, during which window and under which bounded policy parties may communicate. Requires privacy.contexts.write and an Idempotency-Key. Referenced principals must be active principals of the credential's own application environment. Scope comes only from the credential; status, version, authorization results, telephone numbers, providers and relay numbers are never inputs. One context per external reference in an application environment. 503 PRIVACY_RELAY_DISABLED while the feature is disabled.",
         "security": [
@@ -84,6 +117,9 @@
       },
       "get": {
         "operationId": "listContexts",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "List communication contexts",
         "description": "Contexts of the credential's application environment, newest first, keyset-paginated (no offsets). Requires privacy.contexts.read.",
         "security": [
@@ -148,6 +184,9 @@
     "/v1/privacy-relay/contexts/{context_id}": {
       "get": {
         "operationId": "getContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Get a communication context",
         "description": "Requires privacy.contexts.read. A context of another tenant, application or environment is answered exactly like a missing one (404 CONTEXT_NOT_FOUND).",
         "security": [
@@ -201,6 +240,9 @@
       },
       "patch": {
         "operationId": "updateContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Update a communication context",
         "description": "Typed, versioned configuration update (participant replacement / reassignment on the SAME context, channels, directions, validity, bounded policy, allowed strategies) — never a status patch or an arbitrary merge patch. Requires privacy.contexts.write, expectedVersion (409 CONTEXT_VERSION_CONFLICT when stale; a stale write can never restore removed authority) and an Idempotency-Key. The version increments exactly once; removed participants lose authority the moment the update commits, in every relay session; active calls of removed participants are terminated when the policy says so (enforcement.status APPLIED or PENDING, never claimed early).",
         "security": [
@@ -281,6 +323,9 @@
     "/v1/privacy-relay/contexts/{context_id}/evidence": {
       "get": {
         "operationId": "getContextEvidence",
+        "tags": [
+          "Relay Evidence"
+        ],
         "summary": "Privacy-safe context evidence",
         "description": "Lifecycle, versions, participant and direction history, sessions, recent authorization decisions, audit events and enforcement status for support and debugging. Never contact values. Requires privacy.contexts.read.",
         "security": [
@@ -336,6 +381,9 @@
     "/v1/privacy-relay/contexts/{context_id}/suspend": {
       "post": {
         "operationId": "suspendContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Suspend a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. ACTIVE -> SUSPENDED: new authority is denied immediately; active calls are terminated when terminateActiveCallsOnSuspend.",
         "security": [
@@ -416,6 +464,9 @@
     "/v1/privacy-relay/contexts/{context_id}/resume": {
       "post": {
         "operationId": "resumeContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Resume a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. SUSPENDED -> ACTIVE, only while the validity window remains and never from COMPLETED, REVOKED or EXPIRED.",
         "security": [
@@ -496,6 +547,9 @@
     "/v1/privacy-relay/contexts/{context_id}/complete": {
       "post": {
         "operationId": "completeContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Complete a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> COMPLETED (never back to ACTIVE): relay sessions complete; new calls during the grace period only when graceAllowsNewCalls; without remaining grace active calls are terminated; after the final grace all authority ends.",
         "security": [
@@ -576,6 +630,9 @@
     "/v1/privacy-relay/contexts/{context_id}/revoke": {
       "post": {
         "operationId": "revokeContext",
+        "tags": [
+          "Communication Contexts"
+        ],
         "summary": "Revoke a context",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.contexts.write, expectedVersion and an Idempotency-Key. -> REVOKED (terminal, irreversible): every relay session is revoked, all new authority is denied, active calls are terminated when terminateActiveCallsOnRevoke. Repeating it is a safe idempotent answer.",
         "security": [
@@ -656,6 +713,9 @@
     "/v1/privacy-relay/contexts/{context_id}/sessions": {
       "post": {
         "operationId": "createRelaySession",
+        "tags": [
+          "Relay Session Creation"
+        ],
         "summary": "Create a Privacy Relay Session",
         "description": "Creates a Privacy Relay Session (NOT a call: one session may authorize many call attempts during its window) under a relay strategy. Requires privacy.sessions.write and an Idempotency-Key. Participants, channels, directions, validity and strategy may only NARROW the context; anything broader is refused (PARTICIPANT_NOT_AUTHORIZED, CHANNEL_NOT_ALLOWED, DIRECTION_NOT_ALLOWED, STRATEGY_NOT_ALLOWED, VALIDITY_NOT_CONTAINED). Strategies are policy: only the application route is executable today.",
         "security": [
@@ -736,6 +796,9 @@
     "/v1/privacy-relay/sessions": {
       "get": {
         "operationId": "listRelaySessions",
+        "tags": [
+          "Relay Sessions"
+        ],
         "summary": "List Privacy Relay Sessions",
         "description": "Sessions of the credential's application environment, newest first, keyset-paginated. Requires privacy.sessions.read.",
         "security": [
@@ -800,6 +863,9 @@
     "/v1/privacy-relay/sessions/{relay_session_id}": {
       "get": {
         "operationId": "getRelaySession",
+        "tags": [
+          "Relay Sessions"
+        ],
         "summary": "Get a Privacy Relay Session",
         "description": "Requires privacy.sessions.read. A session of another scope is answered exactly like a missing one (404 SESSION_NOT_FOUND).",
         "security": [
@@ -855,6 +921,9 @@
     "/v1/privacy-relay/sessions/{relay_session_id}/suspend": {
       "post": {
         "operationId": "suspendSession",
+        "tags": [
+          "Relay Sessions"
+        ],
         "summary": "Suspend a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. New authority under this session is denied immediately.",
         "security": [
@@ -935,6 +1004,9 @@
     "/v1/privacy-relay/sessions/{relay_session_id}/resume": {
       "post": {
         "operationId": "resumeSession",
+        "tags": [
+          "Relay Sessions"
+        ],
         "summary": "Resume a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Only within the session window and while its context is not terminal.",
         "security": [
@@ -1015,6 +1087,9 @@
     "/v1/privacy-relay/sessions/{relay_session_id}/revoke": {
       "post": {
         "operationId": "revokeSession",
+        "tags": [
+          "Relay Sessions"
+        ],
         "summary": "Revoke a session",
         "description": "Explicit lifecycle command (no status patch). Requires privacy.sessions.write, expectedVersion and an Idempotency-Key. Terminal; active protected calls under the session are terminated when the context policy says so.",
         "security": [
@@ -1095,6 +1170,9 @@
     "/v1/privacy-relay/contact-access-grants": {
       "post": {
         "operationId": "createContactAccessGrant",
+        "tags": [
+          "Contact Access Grants"
+        ],
         "summary": "Mint a Contact Vault access token",
         "description": "Served by Calling. Authenticates the platform credential and returns a short-lived Contact Vault access token for the requested privacy.contacts.* scopes; the credential must itself hold every requested scope (403 INSUFFICIENT_SCOPE otherwise). The body never contains a telephone number. 503 when Contact Vault delegated access is not configured.",
         "security": [
@@ -1157,6 +1235,9 @@
     "/v1/privacy-relay/contacts": {
       "post": {
         "operationId": "createContact",
+        "tags": [
+          "Protected Contacts"
+        ],
         "summary": "Protect a telephone number",
         "description": "The ONLY public entry point of a raw telephone number. Canonicalizes it to E.164 (libphonenumber metadata; malformed, ambiguous, URI or extension input is 422 CONTACT_INVALID), encrypts it with AES-256-GCM bound to the scope and ContactReference, stores only ciphertext and safe metadata, writes the contact access audit and returns the safe contact (UNVERIFIED). Requires privacy.contacts.write. 503 CONTACT_VAULT_DISABLED while the Contact Vault is disabled or not configured. The request body is never logged.",
         "x-cfmeet-served-by": "cfmeet.privacy-relay",
@@ -1224,6 +1305,9 @@
     "/v1/privacy-relay/contacts/{contact_reference}": {
       "get": {
         "operationId": "getContact",
+        "tags": [
+          "Protected Contacts"
+        ],
         "summary": "Get a protected contact (masked)",
         "description": "Requires privacy.contacts.read. Returns only the safe representation; every read is audited.",
         "x-cfmeet-served-by": "cfmeet.privacy-relay",
@@ -1275,6 +1359,9 @@
       },
       "patch": {
         "operationId": "updateContact",
+        "tags": [
+          "Protected Contacts"
+        ],
         "summary": "Replace a contact's telephone number",
         "description": "Requires privacy.contacts.write and expectedVersion (409 CONTACT_VERSION_CONFLICT otherwise). The same ContactReference gets the new canonical value under the active key, version + 1, and verification UNVERIFIED (a changed number is never still verified). The request body is never logged.",
         "x-cfmeet-served-by": "cfmeet.privacy-relay",
@@ -1347,6 +1434,9 @@
     "/v1/privacy-relay/contacts/{contact_reference}/disable": {
       "post": {
         "operationId": "disableContact",
+        "tags": [
+          "Protected Contacts"
+        ],
         "summary": "Disable a protected contact",
         "description": "Requires privacy.contacts.write and expectedVersion. A disabled contact is never resolved or newly referenced. Restrictive: allowed while the Contact Vault is disabled. Repeating it on a disabled contact returns the contact.",
         "x-cfmeet-served-by": "cfmeet.privacy-relay",
@@ -1419,6 +1509,9 @@
     "/v1/privacy-relay/contacts/{contact_reference}/verification": {
       "post": {
         "operationId": "assertContactVerification",
+        "tags": [
+          "Contact Verification"
+        ],
         "summary": "Assert contact verification (trusted integrations)",
         "description": "Requires a Contact Vault access token with privacy.contacts.verify (privacy.contacts.write is not enough) and expectedVersion. Records a bounded trust source and an opaque evidence reference (never evidence JSON); appends the verification history and the access audit. VERIFIED may carry validUntil, after which the contact is EXPIRED at read time. BLOCKED / INVALID contacts are never resolved, whatever their history. Restrictive targets are accepted while the Contact Vault is disabled.",
         "x-cfmeet-served-by": "cfmeet.privacy-relay",
@@ -1488,6 +1581,9 @@
     "/v1/privacy-relay/sessions/{relay_session_id}/evidence": {
       "get": {
         "operationId": "getRelaySessionCallEvidence",
+        "tags": [
+          "Relay Evidence"
+        ],
         "summary": "Privacy-safe call evidence of a Relay Session",
         "description": "Requires privacy.evidence.read (knowing a session id is never enough). Calling verifies with Privacy Relay, in the credential's scope, that the session exists for the caller — a session of another scope is exactly 404 SESSION_NOT_FOUND — then returns evidence from its OWN Call records: canonical timestamps, final state, normalized terminal reason and failure category, Calling's authoritative connected duration (never requestedAt -> endedAt), per-participant connected time, attempts, route class and the Privacy Relay decision ids. NO_ANSWER comes from the canonical Call record (independent of push delivery). Never a telephone number, masked number, Contact Vault material, provider / carrier identifier, provider payload or credential. Keyset pages (limit 1-100, default 25); 503 when ownership cannot be proven.",
         "security": [

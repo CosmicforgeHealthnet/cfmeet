@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ use crate::{
 };
 
 /// Version of the platform defaults below.
-pub const PLATFORM_POLICY_VERSION: i32 = 3;
+pub const PLATFORM_POLICY_VERSION: i32 = 5;
 /// Version of the policy document schema.
 pub const POLICY_SCHEMA_VERSION: i32 = 1;
 /// Version of the security policy persisted with every conversation (profile rules).
@@ -64,6 +64,8 @@ pub struct ContextPolicy {
     pub max_lifetime_seconds: Option<i64>,
     pub reopen_allowed: bool,
     pub legal_hold_eligible: bool,
+    /// §106 / §108: a MANAGED conversation of this context may be bridged to SMS (by
+    /// default whenever MANAGED is allowed; never for a PRIVATE_E2EE-only context).
     pub sms_bridge_eligible: bool,
     /// Regulated context (§92): MANAGED conversations need an explicit disclosure
     /// acknowledgement at creation; exports / reporting follow the flags below.
@@ -78,6 +80,9 @@ pub struct ContextPolicy {
     pub exports_enabled: bool,
     /// `None`: the environment's retention applies.
     pub retention_days: Option<i64>,
+    /// Appendix K (DIRECT only): a new direct conversation is a message REQUEST — the
+    /// counterpart is INVITED and receives nothing until it accepts.
+    pub requests_require_acceptance: bool,
 }
 
 /// Attachment policy of an environment (§69–§80). Sizes in bytes.
@@ -106,6 +111,8 @@ pub struct PrivacyPolicy {
     pub typing_indicators: bool,
     pub read_receipts: bool,
     pub last_seen: bool,
+    /// §52: other members learn when a message was DELIVERED to a recipient.
+    pub delivery_receipts: bool,
 }
 
 /// Retention (§89–§90). `None` days: kept until deleted.
@@ -132,6 +139,32 @@ pub struct EditingPolicy {
     /// `None`: no window.
     pub edit_window_seconds: Option<i64>,
     pub delete_window_seconds: Option<i64>,
+    /// §46: whether members may read the kept revisions of an edited MANAGED message.
+    /// Revisions are always kept (compliance exports and legal holds see them).
+    pub revision_history_visible: bool,
+}
+
+/// Message features (§28, §46–§49). Replies are always supported; a tenant may turn off
+/// threads (replies stay), reactions or pins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageFeatures {
+    pub replies: bool,
+    pub threads: bool,
+    pub reactions: bool,
+    pub pins: bool,
+}
+
+/// Opt-in secure backups (Appendix I.3): client-encrypted objects the server stores but
+/// cannot read. OFF until an application enables them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPolicy {
+    pub enabled: bool,
+    /// Largest backup object (bytes).
+    pub max_bytes: i64,
+    /// READY backups kept per principal (older ones are deleted when a new one is ready).
+    pub retain_count: i64,
 }
 
 /// Abuse limits (§88), per acting principal unless stated.
@@ -155,14 +188,14 @@ pub struct EffectivePolicy {
     pub application_policy_version: i64,
     pub contexts: BTreeMap<ContextClass, ContextPolicy>,
     pub sending_enabled: bool,
-    /// Message features not implemented yet: present, explicit, and unset.
-    pub messages: Value,
+    pub messages: MessageFeatures,
     pub attachments: AttachmentPolicy,
     pub editing: EditingPolicy,
     pub privacy: PrivacyPolicy,
     pub retention: RetentionPolicy,
     pub moderation: ModerationPolicy,
     pub abuse: AbusePolicy,
+    pub backups: BackupPolicy,
 }
 
 /// Attachment kinds (generic; no product vocabulary).
@@ -194,6 +227,7 @@ pub fn platform_defaults() -> EffectivePolicy {
                     reporting_enabled: true,
                     exports_enabled: false,
                     retention_days: None,
+                    requests_require_acceptance: false,
                 },
             )
         })
@@ -204,7 +238,12 @@ pub fn platform_defaults() -> EffectivePolicy {
         application_policy_version: 0,
         contexts,
         sending_enabled: true,
-        messages: json!({ "replies": null, "threads": null, "reactions": null, "pins": null }),
+        messages: MessageFeatures {
+            replies: true,
+            threads: true,
+            reactions: true,
+            pins: true,
+        },
         // Attachments exist but are OFF until an application enables them; no commercial
         // storage budget is invented here (deployment limits apply).
         attachments: AttachmentPolicy {
@@ -222,6 +261,7 @@ pub fn platform_defaults() -> EffectivePolicy {
         editing: EditingPolicy {
             edit_window_seconds: None,
             delete_window_seconds: None,
+            revision_history_visible: false,
         },
         // Privacy-respecting defaults: presence only to co-members, no last-seen.
         privacy: PrivacyPolicy {
@@ -229,6 +269,7 @@ pub fn platform_defaults() -> EffectivePolicy {
             typing_indicators: true,
             read_receipts: true,
             last_seen: false,
+            delivery_receipts: true,
         },
         retention: RetentionPolicy {
             message_days: None,
@@ -245,6 +286,11 @@ pub fn platform_defaults() -> EffectivePolicy {
             reports_per_hour: 20,
             uploads_per_hour: 120,
             managed_links_per_hour: 60,
+        },
+        backups: BackupPolicy {
+            enabled: false,
+            max_bytes: 256 * 1024 * 1024,
+            retain_count: 2,
         },
     }
 }
@@ -277,6 +323,10 @@ pub struct ContextOverride {
     pub exports_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sms_bridge_eligible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requests_require_acceptance: Option<bool>,
 }
 
 macro_rules! overrides {
@@ -307,6 +357,7 @@ overrides!(PrivacyOverride {
     typing_indicators: bool,
     read_receipts: bool,
     last_seen: bool,
+    delivery_receipts: bool,
 });
 overrides!(RetentionOverride {
     message_days: i64,
@@ -320,6 +371,17 @@ overrides!(ModerationOverride {
 overrides!(EditingOverride {
     edit_window_seconds: i64,
     delete_window_seconds: i64,
+    revision_history_visible: bool,
+});
+overrides!(BackupOverride {
+    enabled: bool,
+    max_bytes: i64,
+    retain_count: i64,
+});
+overrides!(MessageFeaturesOverride {
+    threads: bool,
+    reactions: bool,
+    pins: bool,
 });
 overrides!(AbuseOverride {
     messages_per_minute: i64,
@@ -349,6 +411,10 @@ pub struct ApplicationPolicy {
     pub editing: Option<EditingOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abuse: Option<AbuseOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messages: Option<MessageFeaturesOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backups: Option<BackupOverride>,
 }
 
 const MAX_LIFETIME: i64 = 10 * 365 * 86_400;
@@ -481,6 +547,10 @@ impl ApplicationPolicy {
                 "editing.deleteWindowSeconds",
             )?;
         }
+        if let Some(b) = &self.backups {
+            within(b.max_bytes, 1024, 1024 * 1024 * 1024, "backups.maxBytes")?;
+            within(b.retain_count, 1, 10, "backups.retainCount")?;
+        }
         if let Some(a) = &self.abuse {
             within(a.messages_per_minute, 1, 100_000, "abuse.messagesPerMinute")?;
             within(
@@ -578,8 +648,26 @@ pub fn resolve(
         if o.retention_days.is_some() {
             c.retention_days = o.retention_days;
         }
+        if let Some(v) = o.requests_require_acceptance {
+            if v && *class != ContextClass::Direct {
+                return Err(format!(
+                    "{}: requestsRequireAcceptance applies to DIRECT conversations only",
+                    class.as_str()
+                ));
+            }
+            c.requests_require_acceptance = v;
+        }
         c.legal_hold_eligible = c.allowed_profiles.contains(&SecurityProfile::Managed);
-        c.sms_bridge_eligible = false;
+        c.sms_bridge_eligible = match o.sms_bridge_eligible {
+            Some(true) if !c.allowed_profiles.contains(&SecurityProfile::Managed) => {
+                return Err(format!(
+                    "{}: smsBridgeEligible requires MANAGED (SMS is never end-to-end encrypted)",
+                    class.as_str()
+                ));
+            }
+            Some(v) => v,
+            None => c.allowed_profiles.contains(&SecurityProfile::Managed),
+        };
     }
     if let Some(a) = &overrides.attachments {
         let t = &mut p.attachments;
@@ -631,6 +719,9 @@ pub fn resolve(
         if let Some(v) = o.last_seen {
             t.last_seen = v;
         }
+        if let Some(v) = o.delivery_receipts {
+            t.delivery_receipts = v;
+        }
     }
     if let Some(o) = &overrides.retention {
         if o.message_days.is_some() {
@@ -658,6 +749,33 @@ pub fn resolve(
         }
         if o.delete_window_seconds.is_some() {
             p.editing.delete_window_seconds = o.delete_window_seconds;
+        }
+        if let Some(v) = o.revision_history_visible {
+            p.editing.revision_history_visible = v;
+        }
+    }
+    if let Some(o) = &overrides.backups {
+        let t = &mut p.backups;
+        if let Some(v) = o.enabled {
+            t.enabled = v;
+        }
+        if let Some(v) = o.max_bytes {
+            t.max_bytes = v;
+        }
+        if let Some(v) = o.retain_count {
+            t.retain_count = v;
+        }
+    }
+    if let Some(o) = &overrides.messages {
+        let t = &mut p.messages;
+        if let Some(v) = o.threads {
+            t.threads = v;
+        }
+        if let Some(v) = o.reactions {
+            t.reactions = v;
+        }
+        if let Some(v) = o.pins {
+            t.pins = v;
         }
     }
     if let Some(o) = &overrides.abuse {
@@ -827,6 +945,7 @@ pub async fn current_snapshot<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn platform_defaults_are_e2ee_where_eligible_and_never_managed() {
@@ -869,7 +988,7 @@ mod tests {
         assert_ne!(a.digest(), platform_defaults().digest());
         let e = a.context(ContextClass::Enterprise);
         assert_eq!(e.default_profile, Some(SecurityProfile::Managed));
-        assert!(e.legal_hold_eligible && !e.sms_bridge_eligible);
+        assert!(e.legal_hold_eligible && e.sms_bridge_eligible);
         // Profile order in the override does not change the digest.
         o.contexts
             .get_mut(&ContextClass::Enterprise)
@@ -927,9 +1046,62 @@ mod tests {
     }
 
     #[test]
+    fn version_4_message_features_revisions_and_sms_eligibility_are_explicit() {
+        let p = platform_defaults();
+        assert_eq!(
+            p.messages,
+            MessageFeatures {
+                replies: true,
+                threads: true,
+                reactions: true,
+                pins: true
+            }
+        );
+        assert!(
+            !p.editing.revision_history_visible,
+            "revisions are kept, not shown, by default"
+        );
+        let o: ApplicationPolicy = serde_json::from_value(json!({
+            "messages": { "threads": false, "reactions": false },
+            "editing": { "revisionHistoryVisible": true },
+            "contexts": { "ENTERPRISE": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" },
+                          "SUPPORT": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED", "smsBridgeEligible": false } }
+        }))
+        .unwrap();
+        let r = resolve(&o, 1).unwrap();
+        assert!(
+            r.messages.replies && !r.messages.threads && !r.messages.reactions && r.messages.pins
+        );
+        assert!(r.editing.revision_history_visible);
+        assert!(
+            r.context(ContextClass::Enterprise).sms_bridge_eligible,
+            "MANAGED contexts default eligible"
+        );
+        assert!(
+            !r.context(ContextClass::Support).sms_bridge_eligible,
+            "a tenant can opt a context out"
+        );
+        // SMS is never E2EE: eligibility cannot be granted to an E2EE-only context, and
+        // replies cannot be switched off.
+        let e2ee: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": { "DIRECT": { "smsBridgeEligible": true } }
+        }))
+        .unwrap();
+        assert!(resolve(&e2ee, 1).is_err());
+        assert!(serde_json::from_value::<ApplicationPolicy>(
+            json!({ "messages": { "replies": false } })
+        )
+        .is_err());
+    }
+
+    #[test]
     fn version_3_feature_policies_are_explicit_and_regulated_contexts_never_hold_e2ee_archives() {
         let p = platform_defaults();
-        assert_eq!(p.platform_policy_version, 3);
+        assert_eq!(p.platform_policy_version, 5);
+        assert!(
+            p.contexts.values().all(|c| !c.requests_require_acceptance),
+            "message requests are off unless a policy turns them on"
+        );
         assert!(!p.attachments.enabled, "attachments are off until enabled");
         assert!(
             p.attachments.storage_budget_bytes.is_none(),

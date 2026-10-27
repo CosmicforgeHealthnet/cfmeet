@@ -204,6 +204,68 @@ pub enum InternalPermission {
     /// request for a MANAGED bridge copy (Messaging only; never E2EE ciphertext).
     #[serde(rename = "sms-bridge.submit")]
     SmsBridgeSubmit,
+    /// Developer Platform (Part VI §§1–5): receive a customer request the API Gateway
+    /// authenticated through Platform Access, with the signed delegated context the
+    /// gateway derived from the authority chain. API Gateway only.
+    #[serde(rename = "developer-request.forward")]
+    DeveloperRequestForward,
+    /// Platform Access (Part VI §50): create and change the lifecycle of the canonical
+    /// tenant / application / non-production environment behind a developer workspace,
+    /// on behalf of an authorized human member. EXTERNAL tenants and STANDARD scopes only;
+    /// never credentials, verifiers, privileged scopes or PRODUCTION environments.
+    #[serde(rename = "platform-identity.delegate")]
+    PlatformIdentityDelegate,
+    /// Calling (Part VI §51): receive a customer request (Calling and the Privacy Relay
+    /// customer proxy) the API Gateway authenticated through Platform Access.
+    #[serde(rename = "calling-request.forward")]
+    CallingRequestForward,
+    /// Messaging (Part VI §51): receive a customer request the API Gateway authenticated
+    /// through Platform Access.
+    #[serde(rename = "messaging-request.forward")]
+    MessagingRequestForward,
+    /// Numbering (Part VI §51): receive a customer `/v1/numbers` request the API Gateway
+    /// authenticated through Platform Access (never `/v1/admin`).
+    #[serde(rename = "numbering-request.forward")]
+    NumberingRequestForward,
+    /// SMS Gateway (Part VI §51): receive a customer `/v1/sms` request the API Gateway
+    /// authenticated through Platform Access.
+    #[serde(rename = "sms-request.forward")]
+    SmsRequestForward,
+    /// Meeting Service (Part VI §51): receive a customer `/api/v2` meetings request the
+    /// API Gateway authenticated through Platform Access (credential re-verified live).
+    #[serde(rename = "meeting-request.forward")]
+    MeetingRequestForward,
+    /// Meeting Service (Part VI §50): verify a presented CF Meet human session (the
+    /// session-to-organization authorization bridge of the Developer Console).
+    #[serde(rename = "user-session.verify")]
+    UserSessionVerify,
+    /// Developer Platform (Part VI §51): read the effective platform entitlements (API
+    /// request quotas) of an application environment.
+    #[serde(rename = "developer-entitlement.read")]
+    DeveloperEntitlementRead,
+    /// Developer Platform (Part VI §51): record durable daily API request accounting.
+    #[serde(rename = "developer-usage.record")]
+    DeveloperUsageRecord,
+    /// Developer Platform (Part VI §53): publish a committed domain event (platform
+    /// envelope, the publisher's own events only) for central customer webhooks.
+    #[serde(rename = "developer-event.publish")]
+    DeveloperEventPublish,
+    /// Calling (Part VI §53): export Calling-owned webhook records for the controlled
+    /// migration to the Developer Platform (signing secrets only re-sealed under the
+    /// migration transfer key; never plaintext).
+    #[serde(rename = "webhook-migration.export")]
+    WebhookMigrationExport,
+    /// Calling (Part VI §53): apply the Developer Platform's rollback export of webhook
+    /// subscriptions (signing secrets only re-sealed under the migration transfer key) and
+    /// settle Calling deliveries the Developer Platform already delivered — only for a
+    /// controlled rollback of the webhook cutover.
+    #[serde(rename = "webhook-migration.import")]
+    WebhookMigrationImport,
+    /// Developer Platform (Part VI §50): operator administration of the control plane
+    /// (organization restriction / suspension, plan versions and assignments, explicit
+    /// first-party registration). Operator tooling only.
+    #[serde(rename = "developer-platform.administer")]
+    DeveloperPlatformAdminister,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -424,7 +486,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformCredentialAuthenticate,
         name: "platform-credential.authenticate",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING, services::API_GATEWAY, services::MEETING_SERVICE],
         sensitive: false,
         description: "Verify a presented customer API credential; returns the trusted authority chain and effective scopes (never verifier material)",
     },
@@ -448,7 +510,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformIdentityRead,
         name: "platform-identity.read",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING],
+        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING, services::DEVELOPER_PLATFORM],
         sensitive: false,
         description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
     },
@@ -588,6 +650,125 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Submit one authorized outbound SMS Bridge transport request (MANAGED copies only)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperRequestForward,
+        name: "developer-request.forward",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Forward a customer request the API Gateway authenticated through Platform Access (signed delegated context derived from the authority chain only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityDelegate,
+        name: "platform-identity.delegate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Create and change the lifecycle of the canonical tenant / application / non-production environment of a developer workspace for an authorized human member (EXTERNAL tenants, STANDARD scopes; no credentials, verifiers or production)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingRequestForward,
+        name: "calling-request.forward",
+        receiver: services::CALLING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingRequestForward,
+        name: "messaging-request.forward",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NumberingRequestForward,
+        name: "numbering-request.forward",
+        receiver: services::NUMBERING,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer /v1/numbers request the API Gateway authenticated through Platform Access (never /v1/admin)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::SmsRequestForward,
+        name: "sms-request.forward",
+        receiver: services::SMS_GATEWAY,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer /v1/sms request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingRequestForward,
+        name: "meeting-request.forward",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Receive a customer meetings request the API Gateway authenticated through Platform Access (credential re-verified with Platform Access; environment-scoped meetings only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::UserSessionVerify,
+        name: "user-session.verify",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Verify a presented CF Meet human session (revocation and account status checked) and return the user id and verified email",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperEntitlementRead,
+        name: "developer-entitlement.read",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Read the effective platform entitlements (API request quotas) of an application environment",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperUsageRecord,
+        name: "developer-usage.record",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::API_GATEWAY],
+        sensitive: false,
+        description: "Record durable daily API request accounting of application environments",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperEventPublish,
+        name: "developer-event.publish",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::CALLING,
+            services::PRIVACY_RELAY,
+            services::MESSAGING,
+            services::NUMBERING,
+            services::SMS_GATEWAY,
+        ],
+        sensitive: false,
+        description: "Publish a committed domain event (platform envelope, the publisher's own events only) for central customer webhooks",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::WebhookMigrationExport,
+        name: "webhook-migration.export",
+        receiver: services::CALLING,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Export Calling-owned webhook subscriptions, events, deliveries and attempts for the controlled migration (secrets re-sealed under the migration transfer key only)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::WebhookMigrationImport,
+        name: "webhook-migration.import",
+        receiver: services::CALLING,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Apply the Developer Platform's rollback export of webhook subscriptions (secrets re-sealed under the migration transfer key only) and settle deliveries it already delivered; controlled webhook cutover rollback only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::DeveloperPlatformAdminister,
+        name: "developer-platform.administer",
+        receiver: services::DEVELOPER_PLATFORM,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Administer the developer control plane (organization restriction / suspension, plan versions and assignments, first-party registration); operator tooling only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -641,6 +822,20 @@ impl InternalPermission {
         InternalPermission::MessagingContextAuthorityApply,
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
+        InternalPermission::DeveloperRequestForward,
+        InternalPermission::PlatformIdentityDelegate,
+        InternalPermission::CallingRequestForward,
+        InternalPermission::MessagingRequestForward,
+        InternalPermission::NumberingRequestForward,
+        InternalPermission::SmsRequestForward,
+        InternalPermission::MeetingRequestForward,
+        InternalPermission::UserSessionVerify,
+        InternalPermission::DeveloperEntitlementRead,
+        InternalPermission::DeveloperUsageRecord,
+        InternalPermission::DeveloperEventPublish,
+        InternalPermission::WebhookMigrationExport,
+        InternalPermission::WebhookMigrationImport,
+        InternalPermission::DeveloperPlatformAdminister,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -885,8 +1080,12 @@ mod tests {
             .collect();
         assert_eq!(
             receiving,
-            ["sms-bridge.submit"],
-            "only Messaging's SMS Bridge submissions are received by the SMS Gateway"
+            ["sms-bridge.submit", "sms-request.forward"],
+            "only Messaging's SMS Bridge submissions and the API Gateway's authenticated customer requests are received by the SMS Gateway"
+        );
+        assert_eq!(
+            SmsRequestForward.definition().grantable_to,
+            &[services::API_GATEWAY]
         );
         assert_eq!(
             SmsBridgeSubmit.definition().grantable_to,
@@ -917,6 +1116,7 @@ mod tests {
                     &[services::PRIVACY_RELAY][..]
                 ),
                 ("messaging-sms-bridge.deliver", &[services::SMS_GATEWAY][..]),
+                ("messaging-request.forward", &[services::API_GATEWAY][..]),
             ]
         );
         // Principal creation is the Meeting Service's (first-party login authority) only.
@@ -953,7 +1153,133 @@ mod tests {
         "platform-principal.resolve",
         "platform-identity.read",
         "sms-bridge.submit",
+        "developer-event.publish",
     ];
+
+    #[test]
+    fn part_vi_developer_platform_and_gateway_flows_are_least_privilege() {
+        let granted = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.grantable_to.contains(&service))
+                .map(|d| d.name)
+                .collect()
+        };
+        let received = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.receiver == service)
+                .map(|d| d.name)
+                .collect()
+        };
+        // The gateway authenticates customers through Platform Access and forwards to the
+        // owning customer services and the Developer Platform; it receives nothing
+        // (customer ingress only, no internal API).
+        assert_eq!(
+            granted(services::API_GATEWAY),
+            [
+                "platform-credential.authenticate",
+                "developer-request.forward",
+                "calling-request.forward",
+                "messaging-request.forward",
+                "numbering-request.forward",
+                "sms-request.forward",
+                "meeting-request.forward",
+                "developer-entitlement.read",
+                "developer-usage.record",
+            ]
+        );
+        assert!(received(services::API_GATEWAY).is_empty());
+        // The Developer Platform reads identity and delegates the canonical workspace
+        // hierarchy; it never administers, registers principals or authenticates
+        // credentials (Platform Access stays the only authority).
+        assert_eq!(
+            granted(services::DEVELOPER_PLATFORM),
+            [
+                "platform-identity.read",
+                "platform-identity.delegate",
+                "user-session.verify",
+                "webhook-migration.export",
+                "webhook-migration.import",
+            ]
+        );
+        assert_eq!(
+            received(services::DEVELOPER_PLATFORM),
+            [
+                "developer-request.forward",
+                "developer-entitlement.read",
+                "developer-usage.record",
+                "developer-event.publish",
+                "developer-platform.administer",
+            ]
+        );
+        assert_eq!(
+            InternalPermission::DeveloperPlatformAdminister
+                .definition()
+                .grantable_to,
+            &[services::OPERATOR_CONSOLE]
+        );
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            for s in [services::API_GATEWAY, services::DEVELOPER_PLATFORM] {
+                assert!(!d.grantable_to.contains(&s), "{} -> {s}", d.name);
+            }
+        }
+        // Telephony, Platform Access administration and operator tooling are never
+        // reachable from the customer ingress.
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::API_GATEWAY))
+        {
+            assert_ne!(d.receiver, services::TELEPHONY, "{}", d.name);
+            assert_ne!(d.permission, InternalPermission::PlatformIdentityAdminister);
+        }
+    }
+
+    #[test]
+    fn meeting_service_platform_flows_are_least_privilege() {
+        use InternalPermission::*;
+        // Part VI §51: only the API Gateway forwards authenticated customer meetings
+        // requests; the Meeting Service re-verifies the credential with Platform Access
+        // and publishes its own environment-scoped events to the Developer Platform.
+        let d = MeetingRequestForward.definition();
+        assert_eq!(
+            (d.receiver, d.grantable_to, d.sensitive),
+            (
+                services::MEETING_SERVICE,
+                &[services::API_GATEWAY][..],
+                false
+            )
+        );
+        for p in [PlatformCredentialAuthenticate, DeveloperEventPublish] {
+            assert!(
+                p.definition()
+                    .grantable_to
+                    .contains(&services::MEETING_SERVICE),
+                "{}",
+                p.as_str()
+            );
+        }
+        let received: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::MEETING_SERVICE)
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(received, ["meeting-request.forward", "user-session.verify"]);
+        for d in REGISTRY.iter().filter(|d| d.sensitive) {
+            assert!(
+                !d.grantable_to.contains(&services::MEETING_SERVICE),
+                "{}",
+                d.name
+            );
+        }
+        // Identity administration and delegation stay out of reach.
+        for p in [PlatformIdentityAdminister, PlatformIdentityDelegate] {
+            assert!(!p
+                .definition()
+                .grantable_to
+                .contains(&services::MEETING_SERVICE));
+        }
+    }
 
     #[test]
     fn wildcard_like_values_are_detected() {

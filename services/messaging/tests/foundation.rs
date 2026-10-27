@@ -73,7 +73,8 @@ async fn customer_routes_fail_closed() {
         conforms("messaging/common/v1.schema.json#/$defs/Error", &r.json);
         assert!(r.headers.get("www-authenticate").is_some());
     }
-    // A client token is refused explicitly (no fake or permanent client tokens).
+    // This deployment has no client-token keys: client tokens are accepted nowhere (with
+    // keys, member routes verify them — tests/client_tokens_rest.rs).
     let r = h
         .raw(
             Request::get(&path)
@@ -86,7 +87,35 @@ async fn customer_routes_fail_closed() {
         (r.status, r.code()),
         (StatusCode::UNAUTHORIZED, "CLIENT_TOKENS_NOT_ENABLED")
     );
-    // A service token never authenticates a customer route.
+    let r = h
+        .raw(
+            Request::get("/v1/messaging/policy")
+                .header("authorization", "CF-Client-Token abc.def.ghi")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::UNAUTHORIZED, "CLIENT_TOKENS_NOT_ENABLED")
+    );
+    // A service token never accompanies a customer credential, and only the API
+    // Gateway's forwarding grant makes one acceptable on a customer route
+    // (tests/gateway_forwarding.rs): a trusted peer without it is refused.
+    let r = h
+        .call_internal(
+            &peers().meeting,
+            Method::GET,
+            &path,
+            None,
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", &alice.to_string())],
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED")
+    );
     let r = h
         .raw(
             Request::get(&path)

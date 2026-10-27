@@ -14,6 +14,11 @@ use crate::{
 };
 
 /// Register a new user
+///
+/// Creates an email-and-password account with the `user` role and `pending_verification` status,
+/// then emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are
+/// returned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.
+/// Returns 409 if the email or username is already in use.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/register",
@@ -122,6 +127,10 @@ pub async fn register(
 }
 
 /// Verify email with token
+///
+/// Activates a newly registered account using the 6-digit code emailed at registration. Public
+/// endpoint. The code is single-use; repeated wrong codes for the same email are rate-limited
+/// (429). Returns 400 if the code is wrong or expired, or if the account is already verified.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/verify-email",
@@ -181,6 +190,12 @@ pub async fn verify_email(
 }
 
 /// Login user
+///
+/// Authenticates with email and password and returns an access token (valid 15 minutes), a refresh
+/// token (valid 7 days) and basic user info. Public endpoint. Accounts still pending email
+/// verification can log in, so check `user.status` and route to verification if needed; deactivated
+/// accounts get 403. More than 5 attempts per email within 15 minutes returns 429; a successful
+/// login resets the count.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/login",
@@ -274,6 +289,10 @@ pub async fn login(
 }
 
 /// Refresh access token
+///
+/// Exchanges a valid, unexpired refresh token for a new access token (valid 15 minutes) and a new
+/// refresh token (valid 7 days). Public endpoint: send the refresh token in the request body, not
+/// in the `Authorization` header. Returns 401 if the token is invalid or expired.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/refresh",
@@ -314,6 +333,11 @@ pub async fn refresh_token(
 }
 
 /// Logout user
+///
+/// Revokes the bearer access token sent in the `Authorization` header so it is rejected for the
+/// rest of its lifetime. When the Messaging integration is enabled, it also ends the account's
+/// Messaging sessions; a Messaging outage does not block logout. Clients should also discard their
+/// stored refresh token.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/logout",
@@ -377,6 +401,10 @@ pub async fn logout(
 }
 
 /// Resend verification email
+///
+/// Generates a new 6-digit verification code for an account that is still pending verification and
+/// emails it, replacing the previous code. Public endpoint. Limited to 5 sends per email within 15
+/// minutes (429 after that). Returns 400 if the account is already verified.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/resend-verification",
@@ -437,6 +465,11 @@ pub async fn resend_verification_email(
 }
 
 /// Request password reset
+///
+/// Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an
+/// email-and-password account. Public endpoint. Returns 404 if no account uses the email, 400 for
+/// Google sign-in accounts, and 429 after 5 requests per email within 15 minutes. Finish with
+/// `POST /api/v1/auth/reset-password`.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/forgot-password",
@@ -517,6 +550,10 @@ pub async fn forgot_password(
 }
 
 /// Reset password with token
+///
+/// Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public
+/// endpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is
+/// single-use; repeated wrong codes for the same email are rate-limited (429).
 #[utoipa::path(
     post,
     path = "/api/v1/auth/reset-password",
@@ -570,6 +607,11 @@ pub async fn reset_password(
 }
 
 /// Verify password reset token
+///
+/// Checks whether a password reset is pending for the given email, for example before showing the
+/// reset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted
+/// code must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does
+/// that). Returns 400 if no reset is pending and 404 if the email is unknown.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/verify-reset-token",
@@ -618,6 +660,10 @@ pub async fn verify_reset_token(
 }
 
 /// Change password for authenticated user
+///
+/// Changes the signed-in user's password after checking `current_password`. Requires a bearer
+/// access token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400
+/// if the current password is wrong or the account uses Google sign-in.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/change-password",

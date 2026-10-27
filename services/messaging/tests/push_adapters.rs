@@ -30,7 +30,7 @@ use messaging::realtime::push_adapters::{
 };
 use p256::{
     ecdsa::{signature::Verifier, Signature, VerifyingKey},
-    elliptic_curve::sec1::ToEncodedPoint,
+    elliptic_curve::{sec1::ToSec1Point, Generate},
     pkcs8::{EncodePrivateKey, LineEnding},
     PublicKey, SecretKey,
 };
@@ -239,7 +239,7 @@ fn decrypt(body: &[u8], ua_secret: &SecretKey, auth: &[u8; 16]) -> Vec<u8> {
     assert_eq!(idlen, 65);
     let as_public = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).unwrap();
     let ct = &body[21 + idlen..];
-    let ua_public = ua_secret.public_key().to_encoded_point(false);
+    let ua_public = ua_secret.public_key().to_sec1_point(false);
     let shared = p256::ecdh::diffie_hellman(ua_secret.to_nonzero_scalar(), as_public.as_affine());
     let prk_key = hmac256(auth, &[&shared.raw_secret_bytes()[..]]);
     let ikm = hmac256(
@@ -348,7 +348,7 @@ async fn world() -> Option<World> {
     let dir = std::env::temp_dir().join(format!("cf-push-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(&dir).unwrap();
     // APNs
-    let apns_key = SecretKey::random(&mut rand::rngs::OsRng);
+    let apns_key = SecretKey::generate();
     let apns = Arc::new(Fake::default());
     let apns_url = serve(
         Router::new()
@@ -376,7 +376,7 @@ async fn world() -> Option<World> {
     .await;
     *token_uri.lock().unwrap() = format!("{fcm_url}/token");
     // Web Push
-    let ua = Arc::new(SecretKey::random(&mut rand::rngs::OsRng));
+    let ua = Arc::new(SecretKey::generate());
     let web_auth: [u8; 16] = rand::random();
     let web = Arc::new(Fake::default());
     let origin = Arc::new(Mutex::new(String::new()));
@@ -392,7 +392,7 @@ async fn world() -> Option<World> {
     )
     .await;
     *origin.lock().unwrap() = web_base.clone();
-    let vapid = SecretKey::random(&mut rand::rngs::OsRng);
+    let vapid = SecretKey::generate();
     let adapters = PushAdapters {
         apns: Some(
             Apns::new(ApnsSettings {
@@ -444,7 +444,7 @@ async fn world() -> Option<World> {
 impl World {
     fn subscription(&self, id: &str) -> String {
         json!({ "endpoint": format!("{}/push/{id}", self.web_base), "keys": {
-            "p256dh": B64URL.encode(self.web_ua.public_key().to_encoded_point(false).as_bytes()),
+            "p256dh": B64URL.encode(self.web_ua.public_key().to_sec1_point(false).as_bytes()),
             "auth": B64URL.encode(self.web_auth) } })
         .to_string()
     }

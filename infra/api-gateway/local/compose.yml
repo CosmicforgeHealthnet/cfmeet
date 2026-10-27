@@ -1,0 +1,54 @@
+# LOCAL-ONLY container topology of the Part VI services (never used by staging or
+# production; the root docker-compose.yml and docker-compose.prod.yml are unchanged).
+#
+#   infra/api-gateway/local/bootstrap.sh             # keys, bundles, env files
+#   docker compose -f infra/api-gateway/local/compose.yml up --build
+#
+# Networking:
+#   * `ingress` — the only network with a published port: the API Gateway on 127.0.0.1:8099.
+#   * `internal` — `internal: true` (no external access, no published ports): the Developer
+#     Platform is reachable ONLY from the gateway (and the host-side Platform Access via
+#     host.docker.internal for local development).
+# Platform Access and PostgreSQL run natively (as in infra/deployment/README.md).
+name: cfmeet-part-vi-local
+
+services:
+  developer-platform:
+    build:
+      context: ../../..
+      dockerfile: services/developer-platform/Dockerfile
+    env_file: .generated/developer-platform.container.env
+    networks: [internal]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./.generated:/run/cfmeet:ro
+
+  developer-platform-worker:
+    build:
+      context: ../../..
+      dockerfile: services/developer-platform/Dockerfile
+    command: ["./developer-platform-worker"]
+    env_file: .generated/developer-platform.container.env
+    networks: [internal]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./.generated:/run/cfmeet:ro
+
+  api-gateway:
+    build:
+      context: ../../..
+      dockerfile: services/api-gateway/Dockerfile
+    env_file: .generated/api-gateway.container.env
+    environment:
+      CF_DEVELOPER_PLATFORM_BASE_URL: http://developer-platform:8098
+    networks: [ingress, internal]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports:
+      - "127.0.0.1:8099:8099"
+    volumes:
+      - ./.generated:/run/cfmeet:ro
+
+networks:
+  ingress: {}
+  internal:
+    internal: true

@@ -96,6 +96,27 @@ fn any_tampered_byte_breaks_validation_or_changes_nothing_security_relevant() {
     }
 }
 
+/// A KeyPackage of another cipher suite (here P-256, 0x0002, and the X25519 / ChaCha20 suite
+/// 0x0003) is reported as an unsupported suite, before any signature check.
+#[test]
+fn key_packages_of_other_suites_are_refused_as_unsupported() {
+    let device = Device::generate(Uuid::new_v4()).unwrap();
+    let encoded = device.key_package().unwrap();
+    assert_eq!(
+        &encoded[6..8],
+        &[0x00, 0x01],
+        "suite field of the KeyPackage"
+    );
+    for suite in [[0x00, 0x02], [0x00, 0x03]] {
+        let mut other = encoded.clone();
+        other[6..8].copy_from_slice(&suite);
+        assert_eq!(
+            validate_key_package(&other, now(), &LifetimePolicy::default()).err(),
+            Some(KeyPackageError::UnsupportedCiphersuite)
+        );
+    }
+}
+
 #[test]
 fn lifetime_policy_is_enforced_on_the_validators_clock() {
     let device = Device::generate(Uuid::new_v4()).unwrap();
@@ -143,18 +164,17 @@ fn device_debug_output_never_contains_key_material() {
 #[test]
 fn mls_authenticates_the_application_message_aad_between_two_devices() {
     use cf_messaging_crypto::profile::MANDATORY_CIPHERSUITE;
+    use cf_messaging_crypto::provider::{CfMlsProvider, SignatureKeys};
     use openmls::prelude::{
         tls_codec::{Deserialize as _, Serialize as _},
         BasicCredential, CredentialWithKey, GroupId, KeyPackage, MlsGroup, MlsGroupCreateConfig,
         MlsGroupJoinConfig, MlsMessageBodyIn, MlsMessageIn, ProcessedMessageContent,
         ProtocolMessage, StagedWelcome,
     };
-    use openmls_basic_credential::SignatureKeyPair;
-    use openmls_rust_crypto::OpenMlsRustCrypto;
 
     let party = |device: Uuid| {
-        let provider = OpenMlsRustCrypto::default();
-        let signer = SignatureKeyPair::new(MANDATORY_CIPHERSUITE.signature_algorithm()).unwrap();
+        let provider = CfMlsProvider::default();
+        let signer = SignatureKeys::generate(MANDATORY_CIPHERSUITE.signature_algorithm()).unwrap();
         let credential = CredentialWithKey {
             credential: BasicCredential::new(binding::device_credential_identity(device)).into(),
             signature_key: signer.to_public_vec().into(),

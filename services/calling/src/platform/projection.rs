@@ -370,13 +370,95 @@ pub async fn apply_change(
     }
 }
 
+/// Projects one Platform Access snapshot row keyed by `id` (column 1), newer revisions
+/// only (`pa_revision`, the last column). Returns whether the row was inserted.
+///
+/// Not `INSERT … ON CONFLICT (id) DO UPDATE`: these tables carry further unique keys
+/// (slugs, scoped references, public ids), and two transactions inserting the SAME new
+/// row concurrently then fail on a non-arbiter key (23505) — as concurrent first
+/// requests of a new party / credential did. `ON CONFLICT DO NOTHING` (no target) waits
+/// for a concurrent inserter and absorbs a conflict on any key; the revision-guarded
+/// UPDATE by id then applies newer state. A unique key held by a DIFFERENT row (an id
+/// that is not there) is still an error.
+async fn project_row<C: ConnectionTrait>(
+    db: &C,
+    table: &'static str,
+    columns: &[&'static str],
+    updated: &[&'static str],
+    values: Vec<sea_orm::Value>,
+) -> ProjectionResult<bool> {
+    debug_assert_eq!(columns[0], "id");
+    debug_assert_eq!(columns.last(), Some(&"pa_revision"));
+    let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("${i}")).collect();
+    let inserted = db
+        .query_one(stmt(
+            &format!(
+                "INSERT INTO {table} ({}) VALUES ({}) ON CONFLICT DO NOTHING RETURNING id",
+                columns.join(", "),
+                placeholders.join(", ")
+            ),
+            values.clone(),
+        ))
+        .await?
+        .is_some();
+    if inserted {
+        return Ok(true);
+    }
+    let position = |c: &str| {
+        columns
+            .iter()
+            .position(|x| *x == c)
+            .expect("projected column")
+            + 1
+    };
+    let set: Vec<String> = updated
+        .iter()
+        .map(|c| format!("{c} = ${}", position(c)))
+        .collect();
+    let revision = position("pa_revision");
+    let applied = db
+        .execute(stmt(
+            &format!(
+                "UPDATE {table} SET {} WHERE id = $1 AND pa_revision < ${revision}",
+                set.join(", ")
+            ),
+            values.clone(),
+        ))
+        .await?
+        .rows_affected();
+    if applied == 0 {
+        let present = db
+            .query_one(stmt(
+                &format!("SELECT 1 FROM {table} WHERE id = $1"),
+                vec![values[0].clone()],
+            ))
+            .await?
+            .is_some();
+        if !present {
+            return Err(ProjectionError::Database(format!(
+                "{table}: a unique key of the projected row is held by another row"
+            )));
+        }
+    }
+    Ok(false)
+}
+
 async fn upsert_tenant<C: ConnectionTrait>(db: &C, t: &TenantSnapshot) -> ProjectionResult<()> {
-    db.execute(stmt(
-        "INSERT INTO platform_tenants (id, slug, display_name, classification, status, billing_currency, \
-           created_at, updated_at, pa_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
-         ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, status = EXCLUDED.status, \
-           updated_at = EXCLUDED.updated_at, pa_revision = EXCLUDED.pa_revision \
-         WHERE platform_tenants.pa_revision < EXCLUDED.pa_revision",
+    project_row(
+        db,
+        "platform_tenants",
+        &[
+            "id",
+            "slug",
+            "display_name",
+            "classification",
+            "status",
+            "billing_currency",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &["display_name", "status", "updated_at", "pa_revision"],
         vec![
             t.id.into(),
             t.slug.clone().into(),
@@ -388,7 +470,7 @@ async fn upsert_tenant<C: ConnectionTrait>(db: &C, t: &TenantSnapshot) -> Projec
             t.updated_at.into(),
             t.revision.into(),
         ],
-    ))
+    )
     .await?;
     Ok(())
 }
@@ -397,12 +479,20 @@ async fn upsert_application<C: ConnectionTrait>(
     db: &C,
     a: &ApplicationSnapshot,
 ) -> ProjectionResult<()> {
-    db.execute(stmt(
-        "INSERT INTO platform_applications (id, tenant_id, slug, display_name, status, created_at, \
-           updated_at, pa_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
-         ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, status = EXCLUDED.status, \
-           updated_at = EXCLUDED.updated_at, pa_revision = EXCLUDED.pa_revision \
-         WHERE platform_applications.pa_revision < EXCLUDED.pa_revision",
+    project_row(
+        db,
+        "platform_applications",
+        &[
+            "id",
+            "tenant_id",
+            "slug",
+            "display_name",
+            "status",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &["display_name", "status", "updated_at", "pa_revision"],
         vec![
             a.id.into(),
             a.tenant_id.into(),
@@ -413,7 +503,7 @@ async fn upsert_application<C: ConnectionTrait>(
             a.updated_at.into(),
             a.revision.into(),
         ],
-    ))
+    )
     .await?;
     Ok(())
 }
@@ -425,13 +515,26 @@ async fn upsert_environment<C: ConnectionTrait>(
     // Defence in depth: never project live telecom outside PRODUCTION (the CHECK refuses
     // it too).
     let live = e.live_telecom_allowed && e.kind.may_allow_live_telecom();
-    db.execute(stmt(
-        "INSERT INTO platform_environments (id, tenant_id, application_id, kind, status, live_telecom_allowed, \
-           created_at, updated_at, pa_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
-         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, \
-           live_telecom_allowed = EXCLUDED.live_telecom_allowed, updated_at = EXCLUDED.updated_at, \
-           pa_revision = EXCLUDED.pa_revision \
-         WHERE platform_environments.pa_revision < EXCLUDED.pa_revision",
+    project_row(
+        db,
+        "platform_environments",
+        &[
+            "id",
+            "tenant_id",
+            "application_id",
+            "kind",
+            "status",
+            "live_telecom_allowed",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &[
+            "status",
+            "live_telecom_allowed",
+            "updated_at",
+            "pa_revision",
+        ],
         vec![
             e.id.into(),
             e.tenant_id.into(),
@@ -443,7 +546,7 @@ async fn upsert_environment<C: ConnectionTrait>(
             e.updated_at.into(),
             e.revision.into(),
         ],
-    ))
+    )
     .await?;
     Ok(())
 }
@@ -452,14 +555,29 @@ async fn upsert_service_account<C: ConnectionTrait>(
     db: &C,
     s: &ServiceAccountSnapshot,
 ) -> ProjectionResult<()> {
-    db.execute(stmt(
-        "INSERT INTO platform_service_accounts (id, tenant_id, application_id, environment_id, name, \
-           description, status, revoked_at, created_at, updated_at, pa_revision) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
-         ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description, status = EXCLUDED.status, \
-           revoked_at = EXCLUDED.revoked_at, updated_at = EXCLUDED.updated_at, \
-           pa_revision = EXCLUDED.pa_revision \
-         WHERE platform_service_accounts.pa_revision < EXCLUDED.pa_revision",
+    project_row(
+        db,
+        "platform_service_accounts",
+        &[
+            "id",
+            "tenant_id",
+            "application_id",
+            "environment_id",
+            "name",
+            "description",
+            "status",
+            "revoked_at",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &[
+            "description",
+            "status",
+            "revoked_at",
+            "updated_at",
+            "pa_revision",
+        ],
         vec![
             s.id.into(),
             s.tenant_id.into(),
@@ -473,7 +591,7 @@ async fn upsert_service_account<C: ConnectionTrait>(
             s.updated_at.into(),
             s.revision.into(),
         ],
-    ))
+    )
     .await?;
     Ok(())
 }
@@ -482,47 +600,63 @@ async fn upsert_credential<C: ConnectionTrait>(
     db: &C,
     c: &CredentialSnapshot,
 ) -> ProjectionResult<()> {
-    let inserted = db
-        .query_one(stmt(
-            "INSERT INTO platform_api_credentials (id, public_id, tenant_id, application_id, environment_id, \
-               service_account_id, label, last_four, status, not_before, expires_at, revoked_at, \
-               rotated_from_credential_id, superseded_by_credential_id, superseded_at, \
-               supersession_valid_until, created_at, updated_at, pa_revision) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) \
-             ON CONFLICT (id) DO UPDATE SET label = EXCLUDED.label, status = EXCLUDED.status, \
-               revoked_at = EXCLUDED.revoked_at, \
-               superseded_by_credential_id = EXCLUDED.superseded_by_credential_id, \
-               superseded_at = EXCLUDED.superseded_at, \
-               supersession_valid_until = EXCLUDED.supersession_valid_until, \
-               updated_at = EXCLUDED.updated_at, pa_revision = EXCLUDED.pa_revision \
-             WHERE platform_api_credentials.pa_revision < EXCLUDED.pa_revision \
-             RETURNING (xmax = 0) AS inserted",
-            vec![
-                c.id.into(),
-                c.public_id.clone().into(),
-                c.tenant_id.into(),
-                c.application_id.into(),
-                c.environment_id.into(),
-                c.service_account_id.into(),
-                c.label.clone().into(),
-                c.last_four.clone().into(),
-                c.status.as_str().into(),
-                c.not_before.into(),
-                c.expires_at.into(),
-                c.revoked_at.into(),
-                c.rotated_from_credential_id.into(),
-                c.superseded_by_credential_id.into(),
-                c.superseded_at.into(),
-                c.supersession_valid_until.into(),
-                c.created_at.into(),
-                c.updated_at.into(),
-                c.revision.into(),
-            ],
-        ))
-        .await?
-        .map(|r| r.try_get::<bool>("", "inserted"))
-        .transpose()?
-        .unwrap_or(false);
+    let inserted = project_row(
+        db,
+        "platform_api_credentials",
+        &[
+            "id",
+            "public_id",
+            "tenant_id",
+            "application_id",
+            "environment_id",
+            "service_account_id",
+            "label",
+            "last_four",
+            "status",
+            "not_before",
+            "expires_at",
+            "revoked_at",
+            "rotated_from_credential_id",
+            "superseded_by_credential_id",
+            "superseded_at",
+            "supersession_valid_until",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &[
+            "label",
+            "status",
+            "revoked_at",
+            "superseded_by_credential_id",
+            "superseded_at",
+            "supersession_valid_until",
+            "updated_at",
+            "pa_revision",
+        ],
+        vec![
+            c.id.into(),
+            c.public_id.clone().into(),
+            c.tenant_id.into(),
+            c.application_id.into(),
+            c.environment_id.into(),
+            c.service_account_id.into(),
+            c.label.clone().into(),
+            c.last_four.clone().into(),
+            c.status.as_str().into(),
+            c.not_before.into(),
+            c.expires_at.into(),
+            c.revoked_at.into(),
+            c.rotated_from_credential_id.into(),
+            c.superseded_by_credential_id.into(),
+            c.superseded_at.into(),
+            c.supersession_valid_until.into(),
+            c.created_at.into(),
+            c.updated_at.into(),
+            c.revision.into(),
+        ],
+    )
+    .await?;
     if let (true, Some(predecessor)) = (inserted, c.rotated_from_credential_id) {
         // Part G §70: a rotation successor keeps its predecessor's credential limits.
         db.execute(stmt(
@@ -547,14 +681,30 @@ pub(crate) async fn upsert_principal<C: ConnectionTrait>(
     p: &PrincipalSnapshot,
     now: DateTime<Utc>,
 ) -> ProjectionResult<u64> {
-    db.execute(stmt(
-        "INSERT INTO platform_principals (id, tenant_id, application_id, environment_id, kind, \
-           external_reference, linked_service_account_id, status, tombstoned_at, created_at, \
-           updated_at, pa_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
-         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, \
-           external_reference = EXCLUDED.external_reference, tombstoned_at = EXCLUDED.tombstoned_at, \
-           updated_at = EXCLUDED.updated_at, pa_revision = EXCLUDED.pa_revision \
-         WHERE platform_principals.pa_revision < EXCLUDED.pa_revision",
+    project_row(
+        db,
+        "platform_principals",
+        &[
+            "id",
+            "tenant_id",
+            "application_id",
+            "environment_id",
+            "kind",
+            "external_reference",
+            "linked_service_account_id",
+            "status",
+            "tombstoned_at",
+            "created_at",
+            "updated_at",
+            "pa_revision",
+        ],
+        &[
+            "status",
+            "external_reference",
+            "tombstoned_at",
+            "updated_at",
+            "pa_revision",
+        ],
         vec![
             p.id.into(),
             p.tenant_id.into(),
@@ -569,7 +719,7 @@ pub(crate) async fn upsert_principal<C: ConnectionTrait>(
             p.updated_at.into(),
             p.revision.into(),
         ],
-    ))
+    )
     .await?;
     if p.tombstoned_at.is_some() {
         return minimize_participations(db, p, now).await;

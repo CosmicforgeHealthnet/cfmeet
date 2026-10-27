@@ -565,7 +565,7 @@ use utoipa::OpenApi;
             // deliberately NOT part of the public consumer contract.
         )
     ),
-    modifiers(&SecurityAddon),
+    modifiers(&SecurityAddon, &PlatformCredentialAddon),
     tags(
         (name = "General", description = "Application information and health endpoints"),
         (name = "Authentication", description = "User authentication endpoints"),
@@ -608,7 +608,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.1.0",
+        version = "1.2.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",
@@ -647,6 +647,60 @@ impl utoipa::Modify for SecurityAddon {
                     ),
                 ),
             );
+        }
+    }
+}
+
+/// Part VI §51: the machine-callable operations
+/// ([`crate::services::platform::operations::OPERATIONS`], the single source of truth)
+/// additionally accept a platform credential through the API Gateway. Each gets the
+/// `platformCredential` security alternative (its role is the required scope) and
+/// `x-cfmeet-required-scope`, from which the gateway's route manifest is generated.
+struct PlatformCredentialAddon;
+
+impl utoipa::Modify for PlatformCredentialAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{
+            security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme},
+            PathItemType,
+        };
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "platformCredential",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("cfmk_<sbx|test|live>_<public id>_<secret>")
+                        .description(Some(
+                            "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes.",
+                        ))
+                        .build(),
+                ),
+            );
+        }
+        for op in crate::services::platform::operations::OPERATIONS {
+            let Some(item) = openapi.paths.paths.get_mut(op.path) else {
+                continue;
+            };
+            let kind = match op.method {
+                "GET" => PathItemType::Get,
+                "POST" => PathItemType::Post,
+                "PATCH" => PathItemType::Patch,
+                "PUT" => PathItemType::Put,
+                "DELETE" => PathItemType::Delete,
+                _ => continue,
+            };
+            let Some(operation) = item.operations.get_mut(&kind) else {
+                continue;
+            };
+            operation
+                .security
+                .get_or_insert_with(Vec::new)
+                .push(SecurityRequirement::new("platformCredential", [op.scope]));
+            operation
+                .extensions
+                .get_or_insert_with(Default::default)
+                .insert("x-cfmeet-required-scope".into(), op.scope.into());
         }
     }
 }
@@ -695,10 +749,17 @@ const SMS_GATEWAY_API: &str =
     include_str!("../../../../packages/contracts/bundled/sms-gateway/http/v1.openapi.json");
 const MESSAGING_API: &str =
     include_str!("../../../../packages/contracts/bundled/messaging/http/v1.openapi.json");
+// Part VI: already audience-filtered, bundled OpenAPI from the gateway route catalogue.
+// This documentation host never proxies these APIs or exposes their internal variants.
+const DEVELOPER_PLATFORM_PUBLIC_API: &str = include_str!(
+    "../../../../packages/contracts/bundled/public/developer-platform/v1.openapi.json"
+);
+const API_GATEWAY_PUBLIC_API: &str =
+    include_str!("../../../../packages/contracts/bundled/public/gateway/v1.openapi.json");
 
 /// (Swagger name, served path, document). The Meeting Service document is generated at
 /// runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 8] = [
+const PEER_DOCS: [(&str, &str, &str); 10] = [
     ("Calling", "/api-docs/calling.json", CALLING_API),
     (
         "Platform Access (internal)",
@@ -727,6 +788,16 @@ const PEER_DOCS: [(&str, &str, &str); 8] = [
     ),
     ("SMS Gateway", "/api-docs/sms-gateway.json", SMS_GATEWAY_API),
     ("Messaging", "/api-docs/messaging.json", MESSAGING_API),
+    (
+        "Developer Platform",
+        "/api-docs/developer-platform.json",
+        DEVELOPER_PLATFORM_PUBLIC_API,
+    ),
+    (
+        "API Gateway",
+        "/api-docs/api-gateway.json",
+        API_GATEWAY_PUBLIC_API,
+    ),
 ];
 
 /// swagger-ui-dist, pinned by version AND by Subresource Integrity (sha384 of the exact
@@ -745,7 +816,47 @@ const SWAGGER_UI_CSP: &str =
      style-src https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data:; \
      connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-const SWAGGER_INIT: &str = "window.onload=function(){fetch('/api-docs/swagger-config.json').then(function(r){return r.json()}).then(function(c){window.ui=SwaggerUIBundle({dom_id:'#swagger-ui',deepLinking:true,displayRequestDuration:true,filter:true,urls:c.urls,'urls.primaryName':c.primaryName});});};";
+const SWAGGER_INIT: &str = r#"
+window.addEventListener('load', function() {
+  var selector = document.getElementById('swagger-service');
+  var controls = document.getElementById('swagger-controls');
+  function render(url) {
+    window.ui = SwaggerUIBundle({
+      url: url,
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      displayRequestDuration: true,
+      filter: true,
+      supportedSubmitMethods: [],
+      validatorUrl: null
+    });
+  }
+  fetch('/api-docs/swagger-config.json', {cache:'no-store'})
+    .then(function(response) {
+      if (!response.ok) throw new Error('Swagger config unavailable');
+      return response.json();
+    })
+    .then(function(config) {
+      var docs = Array.isArray(config.urls) ? config.urls.filter(function(d) {
+        return d && typeof d.url === 'string' && d.url.startsWith('/api-docs/')
+          && typeof d.name === 'string';
+      }) : [];
+      if (!docs.length) { render('/api-docs/openapi.json'); return; }
+      docs.forEach(function(d) {
+        var option = document.createElement('option');
+        option.value = d.url;
+        option.textContent = d.name;
+        selector.appendChild(option);
+      });
+      var primary = docs.find(function(d) { return d.name === config.primaryName; }) || docs[0];
+      selector.value = primary.url;
+      selector.addEventListener('change', function() { render(selector.value); });
+      controls.hidden = false;
+      render(primary.url);
+    })
+    .catch(function() { render('/api-docs/openapi.json'); });
+});
+"#;
 
 fn swagger_page() -> String {
     format!(
@@ -758,6 +869,7 @@ fn swagger_page() -> String {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui.css" integrity="{css}" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
+  <div id="swagger-controls" hidden style="padding:12px 20px;font:14px sans-serif"><label for="swagger-service">API service: </label><select id="swagger-service" aria-label="Select API service"></select></div>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui-bundle.js" integrity="{js}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>{init}</script>
@@ -783,12 +895,107 @@ fn swagger_config() -> serde_json::Value {
     urls.extend(
         PEER_DOCS
             .iter()
+            .filter(|(name, _, _)| !name.ends_with("(internal)"))
             .map(|(name, path, _)| serde_json::json!({ "name": name, "url": path })),
     );
     serde_json::json!({ "urls": urls, "primaryName": "Meetings" })
 }
 
-fn contract_doc(body: &'static str) -> impl IntoResponse {
+/// Public API documentation is an audience-specific view of the canonical contract.
+/// Filtering happens before the JSON reaches a public endpoint (not just in the UI).
+/// The original contracts remain unchanged for tests, SDK generation and the private portal.
+fn public_doc(service: &str, raw: &str) -> String {
+    let mut doc: serde_json::Value =
+        serde_json::from_str(raw).expect("checked-in OpenAPI contract must be valid JSON");
+    let paths = doc["paths"]
+        .as_object_mut()
+        .expect("checked-in OpenAPI must have paths");
+    paths.retain(|path, item| {
+        if path.starts_with("/internal/")
+            || path.starts_with("/provider-")
+            || path.starts_with("/v1/admin/")
+            || path.starts_with("/api/v1/admin/")
+            || path.starts_with("/api/v2/admin/")
+            || matches!(path.as_str(), "/health" | "/ready" | "/openapi.json")
+        {
+            return false;
+        }
+        // Restrict operational compliance and credential-minting endpoints to the
+        // private engineering catalog. This is discoverability policy, not API auth.
+        if (service == "Messaging"
+            && [
+                "/v1/messaging/policy",
+                "/v1/messaging/legal-holds",
+                "/v1/messaging/reports",
+                "/v1/messaging/moderation",
+                "/v1/messaging/exports",
+                "/v1/messaging/deletion-requests",
+                "/v1/messaging/audit",
+            ]
+            .iter()
+            .any(|prefix| path.starts_with(prefix)))
+            || (service == "Calling" && path == "/v1/abuse-reports")
+            || (service == "Privacy Relay"
+                && (path == "/v1/privacy-relay/contact-access-grants"
+                    || path.ends_with("/verification")))
+        {
+            return false;
+        }
+        let methods = item
+            .as_object()
+            .expect("checked-in OpenAPI path item must be an object");
+        methods.keys().any(|method| {
+            matches!(
+                method.as_str(),
+                "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+            )
+        })
+    });
+    // The source Developer Platform public bundle uses operation tags but currently omits
+    // the top-level tag declarations. Swagger can render those operations only if their
+    // existing source tags are declared. Do not invent any additional API operation.
+    // The public gateway contract has one context operation without a tag/summary;
+    // provide read-only documentation labels while keeping its canonical contract intact.
+    if service == "API Gateway" {
+        let context = doc["paths"]["/v1/developer-platform/context"]["get"]
+            .as_object_mut()
+            .expect("gateway context operation must be present");
+        context
+            .entry("tags".to_string())
+            .or_insert_with(|| serde_json::json!(["API Gateway"]));
+        context
+            .entry("summary".to_string())
+            .or_insert_with(|| serde_json::json!("Read the delegated Developer Platform context."));
+    }
+    // A section whose operations were all filtered out (e.g. "Admin") would still render
+    // as an empty Swagger heading; publish only the sections that still hold operations.
+    let used: std::collections::BTreeSet<String> = doc["paths"]
+        .as_object()
+        .into_iter()
+        .flat_map(|paths| paths.values())
+        .filter_map(serde_json::Value::as_object)
+        .flat_map(|item| item.values())
+        .filter_map(|operation| operation["tags"].as_array())
+        .flatten()
+        .filter_map(|tag| tag.as_str().map(str::to_owned))
+        .collect();
+    if doc["tags"].as_array().is_none() {
+        doc["tags"] = serde_json::json!([]);
+    }
+    if let Some(tags) = doc["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"].as_str().is_some_and(|name| used.contains(name)));
+        let declared: std::collections::BTreeSet<String> = tags
+            .iter()
+            .filter_map(|tag| tag["name"].as_str().map(str::to_owned))
+            .collect();
+        for name in used.difference(&declared) {
+            tags.push(serde_json::json!({ "name": name }));
+        }
+    }
+    serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
+}
+
+fn contract_doc(body: String) -> impl IntoResponse {
     (
         [
             (CONTENT_TYPE, "application/json"),
@@ -801,17 +1008,19 @@ fn contract_doc(body: &'static str) -> impl IntoResponse {
 /// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
 /// the default and keeps its original /api-docs/openapi.json contract unchanged.
 /// Peer service documents come from the bundled renderings of the checked-in contracts.
-pub fn swagger_router(server_addr: &str) -> Router {
+pub fn swagger_router(_server_addr: &str) -> Router {
     let mut openapi = ApiDoc::openapi();
 
-    // Meeting Service Try It Out continues to use its configured deployment URL.
-    let mut current_server = utoipa::openapi::Server::new(format!("http://{}", server_addr));
-    current_server.description = Some("Current Meeting Service".to_string());
+    // Documentation is read-only: never advertise a bind address such as 0.0.0.0
+    // as a callable OpenAPI server. Only the configured public origin is meaningful.
     let configured = std::env::var("SWAGGER_SERVER_URL").ok();
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
-    openapi.servers = Some(vec![current_server, public_server]);
-    let meeting_doc = openapi.to_json().expect("OpenAPI document serializes");
+    openapi.servers = Some(vec![public_server]);
+    let meeting_doc = public_doc(
+        "Meetings",
+        &openapi.to_json().expect("OpenAPI document serializes"),
+    );
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
@@ -829,7 +1038,15 @@ pub fn swagger_router(server_addr: &str) -> Router {
             get(move || {
                 let page = page.clone();
                 let csp = csp.clone();
-                async move { ([(CONTENT_SECURITY_POLICY, csp)], Html(page)) }
+                async move {
+                    (
+                        [
+                            (CONTENT_SECURITY_POLICY, csp),
+                            (CACHE_CONTROL, "no-store, max-age=0".to_string()),
+                        ],
+                        Html(page),
+                    )
+                }
             }),
         )
         .route(
@@ -846,8 +1063,18 @@ pub fn swagger_router(server_addr: &str) -> Router {
                 async move { ([(CONTENT_TYPE, "application/json")], doc) }
             }),
         );
-    for (_, path, body) in PEER_DOCS {
-        router = router.route(path, get(move || async move { contract_doc(body) }));
+    for (name, path, body) in PEER_DOCS {
+        if name.ends_with("(internal)") {
+            continue;
+        }
+        let public_body = public_doc(name, body);
+        router = router.route(
+            path,
+            get(move || {
+                let doc = public_body.clone();
+                async move { contract_doc(doc) }
+            }),
+        );
     }
     router
 }
@@ -880,7 +1107,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn swagger_serves_all_peer_contracts_from_the_doc_host() {
+    async fn swagger_serves_only_public_contracts_from_the_doc_host() {
         use axum::{
             body::Body,
             http::{Request, StatusCode},
@@ -891,13 +1118,12 @@ mod tests {
         for path in [
             "/api-docs/openapi.json",
             "/api-docs/calling.json",
-            "/api-docs/platform-access.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
-            "/api-docs/privacy-relay-internal.json",
-            "/api-docs/telephony.json",
             "/api-docs/sms-gateway.json",
             "/api-docs/messaging.json",
+            "/api-docs/developer-platform.json",
+            "/api-docs/api-gateway.json",
             "/api-docs/swagger-config.json",
             "/swagger-ui/",
         ] {
@@ -908,6 +1134,59 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
+        for forbidden in [
+            "/api-docs/platform-access.json",
+            "/api-docs/privacy-relay-internal.json",
+            "/api-docs/telephony.json",
+            "/api-docs/messaging-internal.json",
+            "/api-docs/sms-gateway-internal.json",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(forbidden)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{forbidden}");
+        }
+    }
+
+    #[test]
+    fn public_specs_exclude_internal_and_privileged_operations() {
+        for (name, _, raw) in PEER_DOCS {
+            if name.ends_with("(internal)") {
+                continue;
+            }
+            let public: serde_json::Value = serde_json::from_str(&public_doc(name, raw)).unwrap();
+            let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+            assert!(!public["paths"].as_object().unwrap().is_empty(), "{name}");
+            assert!(
+                public["paths"].as_object().unwrap().len()
+                    <= original["paths"].as_object().unwrap().len(),
+                "{name}"
+            );
+            for key in public["paths"].as_object().unwrap().keys() {
+                assert!(!key.starts_with("/internal/"), "{name}: {key}");
+                assert!(!key.starts_with("/provider-"), "{name}: {key}");
+                assert!(!key.starts_with("/v1/admin/"), "{name}: {key}");
+            }
+        }
+        let public_calling: serde_json::Value =
+            serde_json::from_str(&public_doc("Calling", CALLING_API)).unwrap();
+        assert!(public_calling["paths"]["/v1/calls"].is_object());
+        assert!(public_calling["paths"]["/internal/v1/telephony/events"].is_null());
+        let public_numbering: serde_json::Value =
+            serde_json::from_str(&public_doc("Numbering / DCNs", NUMBERING_API)).unwrap();
+        assert!(public_numbering["paths"]["/v1/numbers/search"].is_object());
+        assert!(public_numbering["paths"]["/v1/admin/controls"].is_null());
+        let public_messaging: serde_json::Value =
+            serde_json::from_str(&public_doc("Messaging", MESSAGING_API)).unwrap();
+        assert!(public_messaging["paths"]["/v1/conversations"].is_object());
+        assert!(public_messaging["paths"]["/v1/messaging/legal-holds"].is_null());
     }
 
     /// Every `$ref` of every document Swagger renders resolves INSIDE that document: no
@@ -963,13 +1242,162 @@ mod tests {
             "SRI on CSS and JS"
         );
         assert!(page.contains(&format!("swagger-ui-dist@{SWAGGER_UI_VERSION}/")));
+        assert!(page.contains(r#"id="swagger-service""#));
+        assert!(SWAGGER_INIT.contains("supportedSubmitMethods: []"));
+        assert!(SWAGGER_INIT.contains("url: url"));
+        assert!(SWAGGER_INIT.contains("selector.addEventListener"));
+        assert!(!SWAGGER_INIT.contains("urls:c.urls"));
         let csp = swagger_csp();
         assert!(csp.contains("default-src 'none'") && csp.contains("connect-src 'self'"));
         assert!(!csp.contains("SWAGGER_INIT") && !csp.contains("'unsafe-eval'"));
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS.len() + 1
+            PEER_DOCS
+                .iter()
+                .filter(|(name, _, _)| !name.ends_with("(internal)"))
+                .count()
+                + 1
+        );
+    }
+
+    /// The Swagger selector offers the six legacy services plus Part VI Developer
+    /// Platform and API Gateway. Every operation of
+    /// every document it serves sits in a named, declared section (never Swagger's
+    /// `default`) with a summary, a description and a unique operationId. Checked on the
+    /// bytes the router serves, after public filtering, so neither the contracts nor the
+    /// Meeting Service handlers can regress to undocumented or `default`-grouped operations.
+    #[tokio::test]
+    async fn every_served_public_operation_is_labeled_and_documented() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{uri}: {e}"))
+        }
+
+        let router = swagger_router("127.0.0.1:18081");
+        let config = get_json(&router, "/api-docs/swagger-config.json").await;
+        let urls = config["urls"].as_array().expect("selector urls");
+        let names: Vec<&str> = urls.iter().map(|u| u["name"].as_str().unwrap()).collect();
+        assert_eq!(
+            names,
+            [
+                "Meetings",
+                "Calling",
+                "Numbering / DCNs",
+                "Privacy Relay",
+                "SMS Gateway",
+                "Messaging",
+                "Developer Platform",
+                "API Gateway"
+            ],
+            "public Swagger selector"
+        );
+
+        let dp = get_json(&router, "/api-docs/developer-platform.json").await;
+        assert!(dp["paths"]["/v1/organizations"]["get"].is_object());
+        assert!(dp["paths"]["/internal/v1/operator/organizations"].is_null());
+        let gateway = get_json(&router, "/api-docs/api-gateway.json").await;
+        assert!(gateway["paths"]["/v1/developer-platform/context"]["get"].is_object());
+        assert!(gateway["paths"]["/internal/v1/gateway/context"].is_null());
+        let meeting = get_json(&router, "/api-docs/openapi.json").await;
+        let servers = meeting["servers"].as_array().expect("public server list");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["url"], DEFAULT_PUBLIC_SERVER_URL);
+
+        let mut problems = Vec::new();
+        for entry in urls {
+            let name = entry["name"].as_str().unwrap();
+            let doc = get_json(&router, entry["url"].as_str().unwrap()).await;
+            let declared: std::collections::BTreeSet<&str> = doc["tags"]
+                .as_array()
+                .map(|tags| tags.iter().filter_map(|t| t["name"].as_str()).collect())
+                .unwrap_or_default();
+            let mut used = std::collections::BTreeSet::new();
+            let mut operation_ids = std::collections::BTreeSet::new();
+            let mut operations = 0;
+            for (path, item) in doc["paths"].as_object().expect("paths") {
+                for (method, op) in item.as_object().expect("path item") {
+                    if !matches!(
+                        method.as_str(),
+                        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+                    ) {
+                        continue;
+                    }
+                    operations += 1;
+                    let at = format!("{name}: {} {path}", method.to_uppercase());
+                    let tags: Vec<&str> = op["tags"]
+                        .as_array()
+                        .map(|t| t.iter().filter_map(|t| t.as_str()).collect())
+                        .unwrap_or_default();
+                    if tags.is_empty() {
+                        problems.push(format!("{at}: no section (renders under `default`)"));
+                    }
+                    for tag in &tags {
+                        if tag.trim().is_empty() || tag.eq_ignore_ascii_case("default") {
+                            problems.push(format!("{at}: section `{tag}`"));
+                        } else if !declared.contains(tag) {
+                            problems.push(format!("{at}: undeclared section `{tag}`"));
+                        }
+                        used.insert(*tag);
+                    }
+                    for field in ["summary", "description", "operationId"] {
+                        if !op[field].as_str().is_some_and(|v| !v.trim().is_empty()) {
+                            problems.push(format!("{at}: no {field}"));
+                        }
+                    }
+                    // A doc-comment summary wrapped onto a second `///` line is cut off
+                    // mid-sentence (utoipa takes the first line only): unbalanced brackets or
+                    // quotes, a trailing separator, or no final period after a connective.
+                    if let Some(summary) = op["summary"].as_str() {
+                        let summary = summary.trim_end();
+                        let last = summary
+                            .rsplit(' ')
+                            .next()
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if summary.matches('(').count() != summary.matches(')').count()
+                            || summary.matches('`').count() % 2 == 1
+                            || summary.ends_with([',', ';', ':', '(', '-', '+'])
+                            || (!summary.ends_with('.')
+                                && [
+                                    "a", "an", "and", "as", "at", "by", "every", "for", "from",
+                                    "in", "into", "of", "on", "or", "the", "to", "with",
+                                ]
+                                .contains(&last.as_str()))
+                        {
+                            problems.push(format!("{at}: truncated summary `{summary}`"));
+                        }
+                    }
+                    if let Some(id) = op["operationId"].as_str() {
+                        if !operation_ids.insert(id.to_owned()) {
+                            problems.push(format!("{at}: duplicate operationId {id}"));
+                        }
+                    }
+                }
+            }
+            if operations == 0 {
+                problems.push(format!("{name}: no operations"));
+            }
+            for tag in declared.difference(&used) {
+                problems.push(format!("{name}: empty section `{tag}`"));
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "{} Swagger documentation problems:\n{}",
+            problems.len(),
+            problems.join("\n")
         );
     }
 

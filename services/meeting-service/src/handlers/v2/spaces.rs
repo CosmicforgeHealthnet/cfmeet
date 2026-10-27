@@ -7,6 +7,12 @@ use super::{views, V2Json, V2OptionalJson, V2Path};
 use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::AppState};
 
 /// Create a meeting space. The owner is always the authenticated caller.
+///
+/// Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the
+/// client is ignored. Requires a signed-in user with v2 meetings enabled for the account
+/// (FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified
+/// member of that organization, and an optional passcode is validated and stored only as a hash. No
+/// conference is created; schedule one separately or use `POST /api/v2/instant-meetings`.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces", tag = "Meeting Spaces (v2)", operation_id = "v2_create_meeting_space",
     request_body = CreateMeetingSpaceRequest,
@@ -29,6 +35,11 @@ pub async fn create_meeting_space(
 }
 
 /// List meeting spaces the caller owns or is a member of.
+///
+/// Returns every non-deleted meeting space the signed-in caller owns or is an active member of,
+/// newest first; archived spaces are included. Each item carries the caller's role and its
+/// canonical conference (the LIVE one, else the next upcoming one, else the latest). Owners, hosts
+/// and co-hosts get the full view, other members the summary view. Not paginated.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces", tag = "Meeting Spaces (v2)", operation_id = "v2_list_meeting_spaces",
     responses(
@@ -48,8 +59,9 @@ pub async fn list_meeting_spaces(
 }
 
 /// Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.
-/// Callers without management rights receive the SUMMARY view; resolution never
-/// implies authorization.
+///
+/// Callers without management rights receive the SUMMARY view; resolution never implies
+/// authorization.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}", tag = "Meeting Spaces (v2)", operation_id = "v2_get_meeting_space",
     params(("id" = String, Path, description = "Space UUID, meeting code, legacy meeting UUID or legacy code")),
@@ -74,6 +86,12 @@ pub async fn get_meeting_space(
 }
 
 /// Resolve any supported meeting identifier to the canonical space and conference.
+///
+/// Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the
+/// matching space, its canonical conference (the LIVE one, else the next upcoming one, else the
+/// latest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.
+/// Resolving does not grant access: callers who cannot manage the space get the summary view only.
+/// Unknown identifiers return MEETING_NOT_FOUND.
 #[utoipa::path(
     get, path = "/api/v2/resolve/{identifier}", tag = "Meeting Spaces (v2)", operation_id = "v2_resolve_identifier",
     params(("identifier" = String, Path, description = "Space UUID, meeting code, legacy meeting UUID or legacy code")),
@@ -108,6 +126,13 @@ pub async fn resolve_identifier(
 }
 
 /// Update a meeting space (optimistic concurrency via `version`).
+///
+/// Partially updates the space's settings and policies; omitted fields are left unchanged. Requires
+/// the owner or a host, v2 meetings enabled for the account, and the space's current `version` (a
+/// stale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode
+/// can be set or cleared with `clearPasscode`; changing the timezone re-anchors an active
+/// recurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;
+/// use the owner-transfer endpoint.
 #[utoipa::path(
     patch, path = "/api/v2/meeting-spaces/{id}", tag = "Meeting Spaces (v2)", operation_id = "v2_update_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -131,6 +156,12 @@ pub async fn update_meeting_space(
 }
 
 /// Soft-archive a meeting space (owner only). History is preserved.
+///
+/// Archives the space: it can no longer be modified, its recurring series is ended and unstarted
+/// future occurrences are cancelled, while past conferences, participants and audit history are
+/// kept. Only the owner (or a platform administrator) may archive. The optional body `version` is
+/// checked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an
+/// already-archived space returns it unchanged.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/archive", tag = "Meeting Spaces (v2)", operation_id = "v2_archive_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -157,6 +188,12 @@ pub async fn archive_meeting_space(
 }
 
 /// Duplicate reusable configuration into a new space owned by the caller.
+///
+/// Creates a new ACTIVE space with a new meeting code, owned by the caller, copying the source
+/// space's settings and policies, including its passcode. Conferences, members, invitations,
+/// history and recordings are not copied. Requires the owner or a host of the source space and v2
+/// meetings enabled for the account. The title defaults to "Copy of " plus the source title; the
+/// organization is dropped if the caller is not a verified member of it.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/duplicate", tag = "Meeting Spaces (v2)", operation_id = "v2_duplicate_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -179,6 +216,11 @@ pub async fn duplicate_meeting_space(
 }
 
 /// Transfer ownership (dedicated, protected operation).
+///
+/// Makes another active registered (non-guest) user the owner of an active space. Only the current
+/// owner (or a platform administrator) may transfer, and the request must carry the space's current
+/// `version`. The new owner's existing membership is replaced by ownership. The previous owner
+/// stays on as a HOST member unless `retainPreviousOwner` is false.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/owner-transfer", tag = "Meeting Spaces (v2)", operation_id = "v2_transfer_owner",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -202,6 +244,12 @@ pub async fn transfer_owner(
 }
 
 /// Instant meeting: creates a meeting space and a LIVE conference atomically.
+///
+/// Creates a meeting space owned by the caller and a conference that is LIVE immediately, in one
+/// step, and returns both. The body is optional: the title defaults to "Instant meeting" and the
+/// access policy to PUBLIC; timezone, waiting-room policy and passcode may be set. Requires a
+/// signed-in user with v2 meetings enabled for the account. The conference's media room is prepared
+/// right away on a best-effort basis.
 #[utoipa::path(
     post, path = "/api/v2/instant-meetings", tag = "Meeting Spaces (v2)", operation_id = "v2_create_instant_meeting",
     request_body = InstantMeetingRequest,
@@ -228,6 +276,13 @@ pub async fn create_instant_meeting(
 }
 
 /// Create or replace the space's recurrence (RFC 5545 RRULE in the space timezone).
+///
+/// Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time
+/// in the space's timezone) and a duration of 1–1440 minutes. An existing active rule is ended and
+/// its unstarted future occurrences are removed or cancelled before the new rule takes effect;
+/// occurrences within the scheduling horizon are created right away. Requires permission to
+/// schedule conferences (owner and host; co-host by default) and v2 meetings enabled for the
+/// account. Archived spaces cannot recur.
 #[utoipa::path(
     put, path = "/api/v2/meeting-spaces/{id}/recurrence", tag = "Scheduling (v2)", operation_id = "v2_set_recurrence",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -250,6 +305,9 @@ pub async fn set_recurrence(
 }
 
 /// Read the active recurrence rule.
+///
+/// Returns the space's active recurrence rule (RRULE, timezone, start and duration), or 404 if the
+/// space has no active recurrence. The caller must be a signed-in owner or member of the space.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/recurrence", tag = "Scheduling (v2)", operation_id = "v2_get_recurrence",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -279,6 +337,11 @@ pub async fn get_recurrence(
 }
 
 /// End the recurring series (past and exception occurrences are preserved).
+///
+/// Ends the space's active recurrence: future unstarted occurrences of the series are removed or
+/// cancelled, while started or past occurrences and recorded exceptions are kept. Requires
+/// permission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even
+/// when there is no active recurrence.
 #[utoipa::path(
     delete, path = "/api/v2/meeting-spaces/{id}/recurrence", tag = "Scheduling (v2)", operation_id = "v2_end_recurrence",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -312,9 +375,10 @@ fn exception_view(
     }
 }
 
-/// Cancel or reschedule ONE future occurrence of the series — whether or not it has
-/// been materialized yet. Idempotent; applied by the scheduler when the occurrence is
-/// generated (or immediately if it already exists).
+/// Cancel or reschedule ONE future occurrence of the series.
+///
+/// Works whether or not the occurrence has been materialized yet. Idempotent; applied by the
+/// scheduler when the occurrence is generated (or immediately if it already exists).
 #[utoipa::path(
     put, path = "/api/v2/meeting-spaces/{id}/recurrence/exceptions", tag = "Scheduling (v2)", operation_id = "v2_set_recurrence_exception",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -349,6 +413,10 @@ pub async fn set_recurrence_exception(
 }
 
 /// List exceptions of the active series.
+///
+/// Returns the cancelled or rescheduled occurrences recorded for the space's active recurrence,
+/// ordered by original start time, each with the series timezone. Returns an empty list when there
+/// is no active recurrence. The caller must be a signed-in owner or member of the space.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/recurrence/exceptions", tag = "Scheduling (v2)", operation_id = "v2_list_recurrence_exceptions",
     params(("id" = Uuid, Path, description = "Meeting space id")),

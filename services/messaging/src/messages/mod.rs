@@ -19,6 +19,7 @@
 
 pub mod e2ee;
 pub mod http;
+pub mod keys;
 pub mod managed;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -152,6 +153,12 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
             v["e2ee"] = json!({
+                "envelopeVersion": 1,
+                "protocol": cf_messaging_crypto::profile::PROTOCOL_ID,
+                "cipherSuite": cf_messaging_crypto::profile::CIPHERSUITE_NAME,
+                "tenantId": row.tenant_id,
+                "applicationId": row.application_id,
+                "environmentId": row.environment_id,
                 "epoch": row.mls_epoch,
                 "ciphertext": if show { row.mls_ciphertext.as_deref().map(b64) } else { None },
                 "ciphertextSha256": row.ciphertext_sha256,
@@ -160,7 +167,7 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         }
         SecurityProfile::Managed => {
             let text = if show {
-                managed::text_of(state, row)
+                managed::text_of(state, row, managed::DecryptPurpose::MemberRead).await
             } else {
                 None
             };
@@ -292,6 +299,12 @@ pub(crate) async fn send_prelude(
     if !member.may_send(now) {
         return Err(Error::reason(ErrorCode::SendRestricted, "MUTED"));
     }
+    if member.is_read_only() {
+        return Err(Error::reason(
+            ErrorCode::PrincipalNotAuthorized,
+            "READ_ONLY_MEMBER",
+        ));
+    }
     crate::safety::abuse::require_not_restricted(state, ctx, acting.principal_id).await?;
     // Tenant fairness first (one environment cannot monopolize shared capacity), then
     // the principal's own velocity.
@@ -341,11 +354,14 @@ pub(crate) async fn send_prelude(
 /// since the prelude: the member row (shared lock: a removal / mute waits for us or we
 /// see it), the conversation row (shared lock against lock / close) and, for DIRECT
 /// conversations, blocks (the pair's advisory lock serializes with block creation).
+/// Locks the sender's membership for the send. `application`: an application message
+/// (READ_ONLY members send none); MLS handshake messages pass `false`.
 pub(crate) async fn lock_sender<C: ConnectionTrait>(
     db: &C,
     conversation: &ConversationRow,
     principal: Uuid,
     now: DateTime<Utc>,
+    application: bool,
 ) -> Result<()> {
     #[derive(FromQueryResult)]
     struct L {
@@ -369,6 +385,12 @@ pub(crate) async fn lock_sender<C: ConnectionTrait>(
     )
     .await?;
     match m {
+        Some(m) if application && m.may_send(now) && m.is_read_only() => {
+            return Err(Error::reason(
+                ErrorCode::PrincipalNotAuthorized,
+                "READ_ONLY_MEMBER",
+            ))
+        }
         Some(m) if m.may_send(now) => {}
         Some(m) if m.is_active() => return Err(Error::reason(ErrorCode::SendRestricted, "MUTED")),
         _ => return Err(Error::code(ErrorCode::NotFound)),
@@ -378,11 +400,71 @@ pub(crate) async fn lock_sender<C: ConnectionTrait>(
         if crate::safety::blocks::direct_blocked(db, conversation, principal).await? {
             return Err(Error::code(ErrorCode::DeliveryRefused));
         }
+        if application {
+            // Appendix K message requests: nothing reaches a counterpart that declined;
+            // an E2EE request carries no messages before acceptance (the counterpart's
+            // devices cannot be in the group yet).
+            #[derive(FromQueryResult)]
+            struct Other {
+                state: String,
+                removed_reason: Option<String>,
+            }
+            let other: Option<Other> = db::one(
+                db,
+                "SELECT state, removed_reason FROM messaging_conversation_members WHERE conversation_id = $1 AND principal_id <> $2",
+                vec![conversation.id.into(), principal.into()],
+            )
+            .await?;
+            match other {
+                Some(o)
+                    if o.state == "LEFT"
+                        && o.removed_reason.as_deref() == Some("INVITATION_DECLINED") =>
+                {
+                    return Err(Error::reason(
+                        ErrorCode::DeliveryRefused,
+                        "REQUEST_DECLINED",
+                    ));
+                }
+                Some(o)
+                    if o.state == "INVITED"
+                        && conversation.profile() == SecurityProfile::PrivateE2ee =>
+                {
+                    return Err(Error::reason(ErrorCode::Conflict, "REQUEST_PENDING"));
+                }
+                _ => {}
+            }
+        }
     }
     Ok(())
 }
 
 pub async fn send(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    request: SendRequest,
+) -> Result<(u16, Value)> {
+    let result = send_checked(state, ctx, acting, conversation_id, request).await;
+    // §133: repeated rejected sends are an abuse signal (never the content).
+    if let Err(e) = &result {
+        if matches!(
+            e.error_code(),
+            ErrorCode::DeliveryRefused | ErrorCode::SendRestricted | ErrorCode::ContentRejected
+        ) {
+            crate::safety::abuse::signal(
+                state,
+                ctx,
+                acting.principal_id,
+                crate::safety::abuse::REJECTED_SEND,
+            )
+            .await;
+        }
+    }
+    result
+}
+
+async fn send_checked(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,
@@ -794,7 +876,43 @@ pub async fn set_read_cursor(
                     vec![conversation.id.into(), acting.principal_id.into(), request.sequence.into(), now.into()],
                 )
                 .await?;
-                if effective.privacy.read_receipts && current == request.sequence {
+                // Synchronizing past a message delivers it (§52).
+                advance_delivery(
+                    txn,
+                    scope_of(&ctx),
+                    conversation.id,
+                    acting.principal_id,
+                    current,
+                    effective.privacy.delivery_receipts,
+                    now,
+                )
+                .await?;
+                // §55: the principal's other sessions follow its read position, whether or
+                // not read receipts are shared with other members.
+                if current == request.sequence {
+                    outbox::record(
+                        txn,
+                        "messaging.read-cursor.synced",
+                        "CONVERSATION",
+                        conversation.id,
+                        scope_of(&ctx),
+                        json!({ "conversation_id": conversation.id, "principal_id": acting.principal_id, "read_sequence": current }),
+                        now,
+                    )
+                    .await?;
+                }
+                // Appendix K: receipts per environment, conversation and user.
+                let shares = effective.privacy.read_receipts
+                    && conversation.read_receipts != Some(false)
+                    && db::scalar_i64(
+                        txn,
+                        "SELECT count(*) FROM messaging_presence_settings WHERE environment_id = $1 AND principal_id = $2 \
+                           AND NOT share_read_receipts",
+                        vec![ctx.scope.environment_id.into(), acting.principal_id.into()],
+                    )
+                    .await?
+                        == 0;
+                if shares && current == request.sequence {
                     outbox::enqueue_conversation(
                         txn,
                         conversation.id,
@@ -817,6 +935,76 @@ pub async fn set_read_cursor(
         .map_err(Error::from)
 }
 
+/// Advances a member's delivery cursor (§52: DELIVERED once a session acknowledged the
+/// message or the member synchronized past it) and, when the policy shares delivery
+/// receipts, records `messaging.delivery-cursor.updated` in the same transaction.
+/// Returns the new delivered sequence when it moved.
+pub(crate) async fn advance_delivery<C: ConnectionTrait>(
+    txn: &C,
+    scope: crate::events::outbox::EventScope,
+    conversation_id: Uuid,
+    principal_id: Uuid,
+    sequence: i64,
+    share: bool,
+    now: DateTime<Utc>,
+) -> Result<Option<i64>> {
+    if sequence <= 0 {
+        return Ok(None);
+    }
+    let moved: Option<i64> = db::one::<DeliveredRow, _>(
+        txn,
+        "INSERT INTO messaging_received_cursors (conversation_id, principal_id, delivered_sequence, updated_at) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT (conversation_id, principal_id) DO UPDATE \
+           SET delivered_sequence = EXCLUDED.delivered_sequence, updated_at = EXCLUDED.updated_at \
+           WHERE messaging_received_cursors.delivered_sequence < EXCLUDED.delivered_sequence \
+         RETURNING delivered_sequence",
+        vec![conversation_id.into(), principal_id.into(), sequence.into(), now.into()],
+    )
+    .await?
+    .map(|r| r.delivered_sequence);
+    if let (Some(delivered), true) = (moved, share) {
+        outbox::enqueue_conversation(
+            txn,
+            conversation_id,
+            NewEvent {
+                event_type: "messaging.delivery-cursor.updated",
+                aggregate_type: "CONVERSATION",
+                aggregate_id: conversation_id,
+                scope,
+                payload: json!({ "principal_id": principal_id, "delivered_sequence": delivered }),
+            },
+            &request_context(),
+            now,
+        )
+        .await?;
+    }
+    Ok(moved)
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DeliveredRow {
+    delivered_sequence: i64,
+}
+
+/// The highest APPLICATION message sequence among the `message.created` events at or
+/// before an acknowledged conversation event position (MLS handshake messages are not
+/// "delivered" to a person).
+pub(crate) async fn message_sequence_at<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    event_sequence: i64,
+) -> Result<i64> {
+    Ok(db::scalar_i64(
+        db,
+        "SELECT COALESCE((SELECT (payload->>'sequence')::bigint FROM messaging_outbox_events \
+            WHERE conversation_id = $1 AND conversation_event_sequence <= $2 AND event_type = 'messaging.message.created' \
+              AND payload->>'message_kind' = 'APPLICATION' \
+            ORDER BY conversation_event_sequence DESC LIMIT 1), 0)",
+        vec![conversation_id.into(), event_sequence.into()],
+    )
+    .await?)
+}
+
 // ---------------------------------------------------------------------------------------
 // The durable conversation event log (replay)
 // ---------------------------------------------------------------------------------------
@@ -826,6 +1014,9 @@ pub struct EventRow {
     pub id: Uuid,
     pub event_type: String,
     pub schema_version: i16,
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
     pub conversation_id: Option<Uuid>,
     pub conversation_event_sequence: Option<i64>,
     pub payload: Value,
@@ -841,7 +1032,8 @@ pub async fn events_after<C: ConnectionTrait>(
 ) -> Result<Vec<EventRow>> {
     Ok(db::all(
         db,
-        "SELECT id, event_type, schema_version, conversation_id, conversation_event_sequence, payload, occurred_at \
+        "SELECT id, event_type, schema_version, tenant_id, application_id, environment_id, conversation_id, \
+           conversation_event_sequence, payload, occurred_at \
          FROM messaging_outbox_events WHERE conversation_id = $1 AND conversation_event_sequence > $2 \
          ORDER BY conversation_event_sequence LIMIT $3",
         vec![conversation_id.into(), after.into(), limit.into()],
@@ -883,6 +1075,7 @@ pub fn client_type(event_type: &str) -> String {
         .strip_prefix("messaging.")
         .unwrap_or(event_type)
         .replace("read-cursor", "read.cursor")
+        .replace("delivery-cursor", "delivery.cursor")
         .replace("lifecycle-changed", "lifecycle.changed")
 }
 
@@ -943,6 +1136,9 @@ pub async fn hydrate(
             "eventId": format!("evt_{}", e.id.simple()),
             "type": client_type(&e.event_type),
             "schemaVersion": e.schema_version,
+            "tenantId": e.tenant_id,
+            "applicationId": e.application_id,
+            "environmentId": e.environment_id,
             "conversationId": e.conversation_id,
             "eventSequence": e.conversation_event_sequence,
             "occurredAt": rfc3339(e.occurred_at),

@@ -720,6 +720,14 @@ async fn publish_in(
             now,
         )
         .await?;
+        if available + fresh >= state.devices.key_package_low_watermark {
+            db::exec(
+                txn,
+                "DELETE FROM messaging_key_package_alerts WHERE device_id = $1",
+                vec![device.id.into()],
+            )
+            .await?;
+        }
     }
     Ok(out)
 }
@@ -935,4 +943,108 @@ pub async fn active_devices(
         ],
     )
     .await?)
+}
+
+// ---------------------------------------------------------------------------------------
+// KeyPackage maintenance (§136, Appendix G.4)
+// ---------------------------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct KeyPackageMaintenance {
+    /// AVAILABLE KeyPackages past `not_after`, closed as EXPIRED.
+    pub expired: usize,
+    /// Devices that crossed below the low watermark (one alert each until replenished).
+    pub alerted: usize,
+}
+
+#[derive(FromQueryResult)]
+struct LowStock {
+    id: Uuid,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    principal_id: Uuid,
+    available: i64,
+}
+
+/// One bounded, idempotent pass: closes expired AVAILABLE KeyPackages (they were already
+/// never claimed) and raises one `messaging.device.key-packages-low` event per ACTIVE
+/// device whose usable stock fell below the watermark; publishing clears the alert.
+pub async fn key_package_maintenance(state: &AppState) -> Result<KeyPackageMaintenance> {
+    let now = state.now();
+    let mut report = KeyPackageMaintenance {
+        expired: db::exec(
+            &state.db,
+            "UPDATE messaging_key_packages SET status = 'EXPIRED', closed_at = $1 WHERE id IN ( \
+               SELECT id FROM messaging_key_packages WHERE status = 'AVAILABLE' AND not_after <= $1 \
+               ORDER BY not_after LIMIT 1000 FOR UPDATE SKIP LOCKED)",
+            vec![now.into()],
+        )
+        .await? as usize,
+        alerted: 0,
+    };
+    if report.expired > 0 {
+        crate::metrics::inc("messaging_key_packages_expired_total", &[]);
+    }
+    // Alerts of devices that are no longer ACTIVE are moot.
+    db::exec(
+        &state.db,
+        "DELETE FROM messaging_key_package_alerts a USING messaging_devices d WHERE d.id = a.device_id AND d.status <> 'ACTIVE'",
+        vec![],
+    )
+    .await?;
+    let watermark = state.devices.key_package_low_watermark;
+    if watermark == 0 {
+        return Ok(report);
+    }
+    report.alerted = state
+        .db
+        .transaction::<_, usize, Error>(move |txn| {
+            Box::pin(async move {
+                let low: Vec<LowStock> = db::all(
+                    txn,
+                    "SELECT d.id, d.tenant_id, d.application_id, d.environment_id, d.principal_id, \
+                            (SELECT count(*) FROM messaging_key_packages k WHERE k.device_id = d.id \
+                               AND k.status = 'AVAILABLE' AND k.not_after > $1) AS available \
+                       FROM messaging_devices d \
+                      WHERE d.status = 'ACTIVE' \
+                        AND NOT EXISTS (SELECT 1 FROM messaging_key_package_alerts a WHERE a.device_id = d.id) \
+                        AND (SELECT count(*) FROM messaging_key_packages k WHERE k.device_id = d.id \
+                               AND k.status = 'AVAILABLE' AND k.not_after > $1) < $2 \
+                      ORDER BY d.id LIMIT 500 FOR UPDATE OF d SKIP LOCKED",
+                    vec![now.into(), watermark.into()],
+                )
+                .await?;
+                for d in &low {
+                    let inserted = db::exec(
+                        txn,
+                        "INSERT INTO messaging_key_package_alerts (device_id, environment_id, available, alerted_at) \
+                         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+                        vec![d.id.into(), d.environment_id.into(), (d.available as i32).into(), now.into()],
+                    )
+                    .await?;
+                    if inserted == 1 {
+                        outbox::record(
+                            txn,
+                            "messaging.device.key-packages-low",
+                            "DEVICE",
+                            d.id,
+                            EventScope {
+                                tenant_id: d.tenant_id,
+                                application_id: d.application_id,
+                                environment_id: d.environment_id,
+                            },
+                            json!({ "device_id": d.id, "principal_id": d.principal_id,
+                                    "available": d.available, "threshold": watermark }),
+                            now,
+                        )
+                        .await?;
+                    }
+                }
+                Ok(low.len())
+            })
+        })
+        .await
+        .map_err(Error::from)?;
+    Ok(report)
 }

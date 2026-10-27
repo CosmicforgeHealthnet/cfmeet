@@ -1,0 +1,8 @@
+{
+  "status": "ACCEPTED",
+  "eventId": null,
+  "duplicate": false,
+  "payload": {
+    "text": "hello"
+  }
+}

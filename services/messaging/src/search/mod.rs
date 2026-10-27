@@ -109,6 +109,12 @@ pub async fn conversation(
     conversation_id: Uuid,
     q: SearchQuery,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Search,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let limit = validate(&q)?;
     let (conversation, member) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
@@ -137,6 +143,16 @@ pub async fn conversation(
         .then(|| rows.last().map(|r| r.sequence))
         .flatten();
     crate::metrics::inc("messaging_searches_total", &[("scope", "conversation")]);
+    crate::usage::record_best_effort(
+        &state.db,
+        ctx.into(),
+        crate::usage::SEARCH_QUERY,
+        1,
+        conversation.id,
+        Some("MANAGED"),
+        state.now(),
+    )
+    .await;
     Ok(
         json!({ "results": rendered(state, acting, rows).await?, "nextBeforeSequence": next, "searchedProfile": "MANAGED" }),
     )
@@ -150,6 +166,12 @@ pub async fn across(
     acting: &Acting,
     q: SearchQuery,
 ) -> Result<Value> {
+    crate::operations::require_open(
+        &state.db,
+        crate::operations::KillSwitch::Search,
+        ctx.scope.environment_id,
+    )
+    .await?;
     let limit = validate(&q)?;
     if q.before_sequence.is_some() {
         return Err(Error::validation(
@@ -189,6 +211,16 @@ pub async fn across(
     )
     .await?;
     crate::metrics::inc("messaging_searches_total", &[("scope", "principal")]);
+    crate::usage::record_best_effort(
+        &state.db,
+        ctx.into(),
+        crate::usage::SEARCH_QUERY,
+        1,
+        acting.principal_id,
+        Some("MANAGED"),
+        state.now(),
+    )
+    .await;
     Ok(json!({
         "results": rendered(state, acting, rows).await?,
         "searchedProfile": "MANAGED",

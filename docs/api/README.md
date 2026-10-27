@@ -1,35 +1,194 @@
 # API documentation
 
-## Unified CF Meet Swagger explorer
+## Swagger release status
 
-The **Meeting Service** Swagger UI at `/swagger-ui/` provides a service selector for the
-versioned OpenAPI contracts checked into `packages/contracts`. It uses its own
-`/api-docs/openapi.json` for meetings and serves peer-domain specifications from
-`/api-docs/*.json`. The meeting schema and all existing meeting routes are unchanged.
+**Status: CLOSED. Released and verified in production on 2026-10-25.**
 
-| Swagger selector | JSON document | Contract authority | Operation scope |
-|---|---|---|---|
-| Meetings | `/api-docs/openapi.json` | `services/meeting-service/src/swagger` | Meeting Service |
-| Calling | `/api-docs/calling.json` | `calling/http/v1.openapi.json` | Calling + platform ingress |
-| Platform Access (internal) | `/api-docs/platform-access.json` | `platform-access/internal/v1.openapi.json` | Service-auth only |
-| Numbering / DCNs | `/api-docs/numbering.json` | `numbering/internal/v1.openapi.json` | Customer + internal Numbering |
-| Privacy Relay | `/api-docs/privacy-relay.json` | `privacy-relay/http/v1.openapi.json` | Customer ingress + Contact Vault |
-| Privacy Relay (internal) | `/api-docs/privacy-relay-internal.json` | `privacy-relay/internal/v1.openapi.json` | Service-auth only |
-| Telephony (internal) | `/api-docs/telephony.json` | `telephony/internal/v1.openapi.json` | Service-auth only |
-| SMS Gateway | `/api-docs/sms-gateway.json` | `sms-gateway/http/v1.openapi.json` | Customer SMS + signed provider callbacks |
+| Item | Value |
+|---|---|
+| Released `main` commit | `6c39351` (merge of #31) |
+| Private catalog | **Provision Private Swagger on VPS** run `40163268551`. 12 specifications; each returns 401 without credentials and 200 with identical bytes with credentials; listener `127.0.0.1:18099` only |
+| Public deployment | **Deploy Backend** (`production`) run `40163625275`. Pre-deploy tests, image build, migrations, health and Swagger smoke checks all passed; the rollback guard stayed armed until the container was verified |
+| Security gate | **Dependency and image security** run `40158337085` (attempt 2) on `bc709ae`, every lockfile clean; the same gate ran on #31's head |
+| Live verification | Chromium against `https://api.cfmeet.com/swagger-ui/`: the selector offers exactly Meetings, Calling, Numbering / DCNs, Privacy Relay, SMS Gateway and Messaging |
 
-**Discovery versus deployment:** The Swagger selector is a read-only *documentation
-aggregation*. It does not proxy or publish the peer services at the Meeting Service host.
-Actual API calls still require a separately deployed and reachable target service,
-its designated ingress, and its existing customer/service/provider authentication.
-Do not use Meeting Service's URL as an assumed Numbering or SMS Gateway API base.
-Only claim that the public Swagger page has changed after deploying the updated Meeting
-Service image and verifying the running `/swagger-ui/` and `/api-docs/numbering.json`.
+Live public inventory: **478 operations in 107 sections, 0 under `default`**.
 
-**Internal APIs:** Their schemas are discoverable for engineering review; they are not
-customer APIs and cannot be called without service-auth. The original service-specific
-`GET /openapi.json` endpoints remain the canonical served contracts for Numbering and
-SMS Gateway. Real carrier certification and production deployment are separate gates.
+| Service | Operations | Sections |
+|---|---|---|
+| Meetings | 193 | 36 |
+| Calling | 127 | 29 |
+| Numbering / DCNs | 52 | 11 |
+| Privacy Relay | 20 | 5 |
+| SMS Gateway | 6 | 3 |
+| Messaging | 80 | 23 |
+
+Every live operation:
+- renders, with a summary and a description;
+- has its `$ref`s resolved;
+- has Try-it-out disabled (`supportedSubmitMethods: []`).
+
+Internal specification URLs (`platform-access`, `privacy-relay-internal`, `telephony`, `messaging-internal`, `sms-gateway-internal`) return 404, and no public document contains internal, provider or admin paths.
+
+## Labeled Swagger operations (all non-Meeting services)
+
+Non-Meeting service API operations are grouped by named OpenAPI `tags`, not
+the Swagger UI catch-all `default` tag. This includes *both* external and
+internal engineering catalogs; the public/private documentation routing remains
+a separate audience-specific filter.
+
+- Calling: **136 operations**, including Call Management, Call Controls,
+  Calling Devices, Calling Signaling, Call History, Recording & Consent, IVR,
+  Voicemail, Call Queues, SIP Devices, Enterprise Policies and internal events.
+- Messaging: **99 operations** grouped by Conversations, Messages, Membership,
+  Attachments, MLS Group Encryption, Device Keys & E2EE, Realtime, Presence,
+  Search, Moderation, SMS Bridges and Compliance; Messaging internal: **7**.
+- Numbering / DCNs: **98 operations**, including Search, Reservations,
+  Assignments, Catalog, KYC, Porting, Risk, and administrative/internal sections.
+- Platform Access internal: **37 operations** grouped by identity, authorization,
+  credentials and administration.
+- Privacy Relay: **22 operations**; Privacy Relay internal: **25**.
+- SMS Gateway: **11 operations**; SMS Gateway internal: **4**.
+- Telephony internal: **17 operations**.
+- Platform internal HTTP conventions: **0 operations**, components-only by design.
+
+**Total: 456 non-Meeting source-documented operations**. Each has an
+`operationId`, concise `summary`, meaningful `description`, and exactly
+one `tag` with a top-level section definition.
+
+The authoritative files in `packages/contracts/**` and the committed
+self-contained `packages/contracts/bundled/**` variants contain identical
+operation labels. Both are checked by
+`python3 scripts/contracts/check_swagger_labels.py` and
+`python3 scripts/contracts/bundle_openapi.py --check` during CI.
+
+This is **documentation-only**. It does not modify endpoint URLs, route
+handlers, authentication/authorization, schemas, SDK behavior, frontend
+deployments, production E2EE, or public/private access controls. The public
+Swagger will show the improved group headings **only after the changed Meeting
+Service documentation image is deployed and verified**.
+
+
+## Meetings (Meeting Service) operations
+
+The Meetings document is generated by utoipa from `#[utoipa::path]` handlers in
+`services/meeting-service/src/handlers/**`. Every operation declares a `tag`
+listed in `ApiDoc` (`src/swagger/mod.rs`), and its doc comment provides both
+texts Swagger shows: the **first line is the summary** and the paragraph after a
+blank `///` line is the **description**. A summary wrapped onto a second `///`
+line is cut off in Swagger, so keep it on one line. Handlers generated by macros
+(`lock_handler!`, `poll_transition!`) pass their summary and description as
+literals.
+
+## Adding or changing an endpoint (Swagger checklist)
+
+1. **Pick a section.** Use an existing tag of that service or add a new one to
+   the document's top-level `tags` (contracts) or `ApiDoc` `tags(...)` (Meeting
+   Service), with a one-line description. Never leave an operation untagged:
+   Swagger UI would show it under `default`.
+2. **Write the texts.** `operationId` (unique), a one-line `summary`, and a
+   `description` that says who may call it, what it changes and notable rules
+   (state preconditions, idempotency, pagination).
+3. **Regenerate derived files.**
+   - Contracts: `python3 scripts/contracts/bundle_openapi.py` (the bundles under
+     `packages/contracts/bundled/**` are what Swagger serves).
+   - Meeting Service: `cargo run --bin export_openapi >
+     ../../packages/contracts/openapi/meeting-service.json` (from
+     `services/meeting-service`).
+4. **Decide the audience.** Internal, provider, admin and operational
+   compliance routes are removed from the public JSON by `public_doc()` in
+   `services/meeting-service/src/swagger/mod.rs`; they stay in the private
+   12-document catalog. Add to that filter, not to the UI, when a new route must
+   not be public.
+5. **Run the gates locally** (CI runs the same ones):
+
+   ```bash
+   python3 scripts/contracts/check_swagger_labels.py   # contracts: tags, summaries, descriptions, source = bundle
+   python3 scripts/contracts/bundle_openapi.py --check # bundles current and self-contained
+   python3 scripts/swagger/test_private_docs.py        # private 12-document catalog builds
+   (cd services/meeting-service && cargo test --lib swagger)
+   ```
+
+   The Meeting Service test `every_served_public_operation_is_labeled_and_documented`
+   reads the documents **as the router serves them** (after public filtering) and
+   fails on: a selector that is not exactly the six public services; an operation
+   without a section, in `default`, or in an undeclared section; a missing or
+   truncated summary; a missing description or `operationId`; duplicate
+   `operationId`s; and empty sections. Sibling tests fail on internal or
+   privileged paths in public JSON, unresolved `$ref`s, and a Swagger page
+   without pinned assets or with Try-it-out enabled.
+
+Merging does not publish documentation: run **Provision Private Swagger on VPS**
+and then **Deploy Backend** (`production`) on the merged `main` SHA.
+
+## Public and private API documentation
+
+**Public:** `https://api.cfmeet.com/swagger-ui/` remains the default read-only
+Swagger explorer. It includes filtered customer/developer contracts for Meetings,
+Calling, Messaging, Numbering / DCNs, Privacy Relay and SMS Gateway. The JSON
+returned by `/api-docs/*.json` is filtered **on the server**: removing entries
+from the dropdown alone is not a security or documentation split.
+
+| Public selector | Public JSON | Source (unchanged) |
+|---|---|---|
+| Meetings | `/api-docs/openapi.json` | Meeting Service generated OpenAPI |
+| Calling | `/api-docs/calling.json` | `calling/http/v1.openapi.json` |
+| Numbering / DCNs | `/api-docs/numbering.json` | `numbering/internal/v1.openapi.json` (public operations only) |
+| Privacy Relay | `/api-docs/privacy-relay.json` | `privacy-relay/http/v1.openapi.json` |
+| SMS Gateway | `/api-docs/sms-gateway.json` | `sms-gateway/http/v1.openapi.json` |
+| Messaging | `/api-docs/messaging.json` | `messaging/http/v1.openapi.json` |
+
+At this commit's contract baseline, **476** HTTP operations are intended for
+the public documentation view (193 Meetings, 125 Calling, 52 Numbering,
+20 Privacy Relay, 6 SMS, 80 Messaging). This is **NOT** the frontend team's
+API consumption count, nor a certification that each service is deployed.
+Server-side filtering removes internal-only routes, provider callbacks, privileged
+admin routes, and select operational compliance endpoints. These APIs continue
+to exist and remain described in the canonical contracts.
+
+**Private engineering catalog:** use the offline generator:
+
+```bash
+python3 scripts/swagger/test_private_docs.py
+python3 scripts/swagger/build-private-docs.py --out /tmp/cfmeet-private-docs-new
+```
+
+This produces a separate, **complete 12-document** static catalog from
+`packages/contracts/openapi` and `packages/contracts/bundled`. It includes
+**661** source-documented HTTP operations, including Platform Access, Messaging
+internal, SMS Gateway internal, Privacy Relay internal, Telephony and Platform
+internal HTTP. The generator refuses to write inside the repository and refuses
+non-empty output destinations to prevent accidental publication.
+
+The **recommended first deployment is loopback-only, behind SSH and Nginx
+HTTP authentication**, using
+`infra/deployment/private-api-docs.nginx.conf.example`. This lets authorized
+engineers access the full catalog without publishing internal API definitions.
+For a dedicated `internal-docs.cfmeet.com` domain, provision TLS plus an
+independently verified VPN/SSO access gate first; the hostname is **not
+created automatically** by this code change.
+
+**Deployment ordering:**
+
+1. Install and validate the private catalog **in its own protected site**,
+   including all 12 documents and access-denied checks from unauthorized hosts.
+2. Verify the private reader's access and audit logs; fail closed if authentication
+   or network restrictions are missing.
+3. Only then deploy the updated Meeting Service that filters public documentation.
+4. From an unauthenticated network, verify public selector shows exactly six
+   services and old `/api-docs/platform-access.json`,
+   `/api-docs/privacy-relay-internal.json` and
+   `/api-docs/telephony.json` return 404.
+5. Verify every public JSON renders and Swagger still has Try-it-out disabled.
+   Verify production feature/API routes, auth, and Nginx routing were not changed.
+6. Keep a rollback of the previous docs/Meeting image. Do not expose the private
+   catalog on the public API hostname.
+
+**Security:** documentation visibility is NOT endpoint authorization. Existing
+application/service credentials, tenant-scoped authorization, network controls,
+and provider callback validation remain mandatory. The public Swagger host is
+not a proxy for all services: use each service's real authorized ingress for API
+traffic.
 
 
 ## Meeting service (`services/meeting-service`)

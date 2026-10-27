@@ -748,6 +748,28 @@
             }
           },
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "readSequence"
+          ],
+          "description": "The acting principal's own read position moved on another of its sessions (§55). Sent only to that principal's sessions subscribed to the conversation, whatever the read-receipt policy shares with other members.",
+          "properties": {
+            "type": {
+              "const": "read-cursor.synced"
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "readSequence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
         }
       ]
     }

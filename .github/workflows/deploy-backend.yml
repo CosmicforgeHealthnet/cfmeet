@@ -1,8 +1,8 @@
 name: Deploy Backend
 
-# Meeting Service: validate pull requests; production deployment is MANUAL ONLY.
-# Promoting validated staging code to main must not modify the live VPS.
-# A separately authorized workflow_dispatch deploys production. No staging target is configured here.
+# Meeting Service only: automatically release successful, validated main changes.
+# Staging and PRs run tests without deployment. Manual production releases remain available.
+# Other backend services and production API routing/cutovers are never deployed by this workflow.
 # Never deploy PR commits or overwrite the live service before smoke checks and rollback setup.
 # Requires GitHub Secrets:
 #   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
@@ -11,6 +11,17 @@ name: Deploy Backend
 #   - VPS_DEPLOY_PATH: Deployment path (e.g., /opt/cfmeet-production)
 
 on:
+  push:
+    branches: [main]
+    # Only deploy changes that alter this Meeting Service image and its dependencies.
+    paths:
+      - "services/meeting-service/**"
+      - "packages/contracts/openapi/**"
+      - "packages/contracts/bundled/**"
+      - "packages/service-auth/**"
+      - "packages/usage-facts/**"
+      - ".github/workflows/backend.yml"
+      - ".github/workflows/deploy-backend.yml"
   pull_request:
     paths:
       - "services/meeting-service/**"
@@ -25,6 +36,11 @@ on:
         type: choice
         options:
           - production
+
+# Only the CI-gate needs Actions API read; no workflow-write access.
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: deploy-backend-production
@@ -81,10 +97,76 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
 
+  release-ci:
+    name: Verify green main CI before production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Require same-commit main CI success
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.sha;
+            const required = [
+              'Meeting service',
+              'Service boundaries',
+              'Dependency and image security'
+            ];
+            const deadline = Date.now() + 70 * 60 * 1000;
+            let stable = 0;
+            while (Date.now() < deadline) {
+              // Fail closed if a newer main commit superseded this deployment.
+              const { data: main } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
+              if (main.commit.sha !== sha) {
+                core.setFailed('Main advanced; refusing to release superseded commit ' + sha);
+                return;
+              }
+
+              const all = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, head_sha: sha, event: 'push', per_page: 100
+              });
+              const runs = all.filter(r => r.head_sha === sha &&
+                r.event === 'push' && r.head_branch === 'main' &&
+                r.name !== 'Deploy Backend');
+              const names = new Set(runs.map(r => r.name));
+              const missing = required.filter(n => !names.has(n));
+              const bad = runs.filter(r => r.status === 'completed' &&
+                !['success', 'skipped', 'neutral'].includes(r.conclusion));
+              const pending = runs.filter(r => r.status !== 'completed');
+
+              if (bad.length) {
+                core.setFailed('Main CI failed: ' + bad.map(r => r.name + ': ' + r.conclusion).join(', '));
+                return;
+              }
+              if (!missing.length && !pending.length) {
+                // Observe a second clean inventory to avoid an early release while
+                // other main-push workflows are still being registered.
+                stable += 1;
+                if (stable >= 2) {
+                  core.info('All ' + runs.length + ' main-push workflows green for ' + sha);
+                  return;
+                }
+              } else {
+                stable = 0;
+                core.info('Waiting for main CI: missing [' + missing.join(', ') +
+                  '], unfinished [' + pending.map(r => r.name).join(', ') + ']');
+              }
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            core.setFailed('Timed out waiting for green main CI for ' + sha);
+
   deploy:
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{ always() && github.ref == 'refs/heads/main' &&
+          needs.test.result == 'success' &&
+          ((github.event_name == 'push' && needs['release-ci'].result == 'success') ||
+           github.event_name == 'workflow_dispatch') }}
     name: Deploy to VPS
-    needs: test
+    needs: [test, release-ci]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -201,6 +283,8 @@ jobs:
               if curl -fsS --max-time 5 http://127.0.0.1:18081/health >/dev/null \
                  && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/numbering.json >/dev/null \
                  && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/sms-gateway.json >/dev/null \
+                 && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/developer-platform.json >/dev/null \
+                 && curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/api-gateway.json >/dev/null \
                  && curl -fsSL --max-time 5 http://127.0.0.1:18081/swagger-ui/ >/dev/null; then
                 READY=1
                 break
@@ -212,6 +296,14 @@ jobs:
               echo "Health / Swagger smoke check failed."
               exit 1
             fi
+
+            # A successful process start alone is not enough: verify the served
+            # Part VI selector actually contains both new public API families.
+            CONFIG="$(curl -fsS --max-time 5 http://127.0.0.1:18081/api-docs/swagger-config.json)"
+            echo "$CONFIG" | grep -Fq '"Developer Platform"'
+            echo "$CONFIG" | grep -Fq '"API Gateway"'
+            # Internal contracts must remain hidden on the public docs host.
+            test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18081/api-docs/platform-access.json)" = "404"
 
             SWITCH_STARTED=0
             trap - EXIT

@@ -247,7 +247,7 @@ impl AppCallService {
                 offer.caller_contact_reference,
             )
             .await
-            .map_err(|_| CallError::TargetUnavailable)?;
+            .map_err(super::super::create::public_party)?;
         match verified.target.kind.as_str() {
             "PRINCIPAL" => {
                 self.accept_dcn_principal(

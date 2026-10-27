@@ -19,7 +19,6 @@ use calling::{
     state::{AppState, CallingRuntime},
     telemetry,
 };
-use calling_migration::MigratorTrait;
 use sea_orm::{ConnectOptions, Database};
 
 /// Rate windows older than this are pruned (windows are one minute long).
@@ -75,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         )
     })?;
 
-    let pending = calling_migration::Migrator::get_pending_migrations(&db)
+    let pending = calling_migration::pending_migrations(&db)
         .await
         .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?;
     if !pending.is_empty() {
@@ -291,6 +290,59 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
+    // Part VI §53: receivers of Calling's own public events (the in-process webhook
+    // pipeline, the Developer Platform, or both for shadow comparison).
+    let public_events =
+        match calling::webhooks::publication::PublicEventsDestination::from_lookup(&lookup) {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::error!(error = %err, "public event destination configuration error");
+                std::process::exit(2);
+            }
+        };
+    let developer_platform_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::DEVELOPER_PLATFORM);
+    if public_events.includes_developer_platform() && !developer_platform_configured {
+        tracing::error!(
+            destination = public_events.as_str(),
+            "CALLING_PUBLIC_EVENTS_DESTINATION requires CF_DEVELOPER_PLATFORM_BASE_URL"
+        );
+        std::process::exit(2);
+    }
+    tracing::info!(
+        public_events_destination = public_events.as_str(),
+        "public event receivers"
+    );
+    // Part VI §55: Calling's usage facts to the Developer Platform's unified ledger.
+    match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
+        Ok(s) if s.enabled && developer_platform_configured => {
+            let exporter = cf_usage_facts::exporter::Exporter::new(
+                Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
+                    service_auth.client_arc(),
+                )),
+                s,
+            )
+            .with_events(Arc::new(calling::usage::export::CallFacts::new(db.clone())))
+            .with_intervals(Arc::new(calling::usage::export::ArtifactStorage::new(
+                db.clone(),
+            )));
+            tokio::spawn(Arc::new(exporter).run());
+            tracing::info!("call usage facts are exported to the Developer Platform");
+        }
+        Ok(s) if s.enabled => tracing::warn!(
+            "CFMEET_USAGE_EXPORT_ENABLED needs CF_DEVELOPER_PLATFORM_BASE_URL: usage export off"
+        ),
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "usage export configuration error");
+            std::process::exit(2);
+        }
+    }
+    let developer_platform = public_events.includes_developer_platform().then(|| {
+        calling::webhooks::publication::DeveloperPlatformTransport::new(service_auth.client_arc())
+    });
     // Key rotation (Part H §74.12): every stored seal must name a configured key
     // (current or previous) — otherwise those subscriptions could never be signed.
     if let Some(secret_box) = webhook_settings.secret_box.as_deref() {
@@ -312,6 +364,14 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     }
+    tracing::info!(
+        webhook_mutations_frozen = webhook_settings.mutations_frozen,
+        webhook_delivery_enabled = webhook_settings.delivers(),
+        webhook_authority = webhook_settings.authority.as_str(),
+        webhook_migration_transfer_key_id =
+            calling::webhooks::ownership_migration::transfer_key_id(&webhook_settings),
+        "customer webhook migration flags"
+    );
     tracing::info!(
         webhooks_available = webhook_settings.secret_box.is_some(),
         webhook_key_id = webhook_settings
@@ -378,7 +438,7 @@ async fn main() -> anyhow::Result<()> {
     let authority: Arc<dyn IdentityAuthority> =
         Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
     let clock: SharedClock = Arc::new(SystemClock);
-    let state = AppState::new(
+    let mut state = AppState::new(
         db,
         clock.clone(),
         authority,
@@ -405,6 +465,15 @@ async fn main() -> anyhow::Result<()> {
             abuse_controls,
         },
     );
+    state.legacy_usage_retired = config.legacy_usage_retired;
+    tracing::info!(
+        legacy_usage_authority = if config.legacy_usage_retired {
+            "retired"
+        } else {
+            "active"
+        },
+        "customer usage / limit views (Part VI §19.4 legacy compatibility)"
+    );
 
     // Durable invitation expiry and media reconciliation on every instance (row locks /
     // SKIP LOCKED leases make the sweeps multi-instance safe).
@@ -418,10 +487,18 @@ async fn main() -> anyhow::Result<()> {
     let webhooks = (*state.webhooks).clone();
     tokio::spawn(async move {
         let transport = calling::webhooks::worker::LocalWebhookTransport::new(webhooks.clone());
+        let destinations = calling::webhooks::worker::OutboxDestinations {
+            local: public_events
+                .includes_local()
+                .then_some(&transport as &dyn calling::webhooks::worker::EventTransport),
+            developer_platform: developer_platform
+                .as_ref()
+                .map(|t| t as &dyn calling::webhooks::worker::EventTransport),
+        };
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            if let Err(error) = webhooks.publish_outbox_once(&transport, 200).await {
+            if let Err(error) = webhooks.publish_outbox_to(destinations, 200).await {
                 tracing::warn!(%error, "outbox publication pass failed; retried");
             }
             if let Err(error) = webhooks.deliver_due_once(50).await {

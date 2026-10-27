@@ -28,6 +28,16 @@ the credential's principal restriction and when Platform Access resolves it ACTI
 credential's own environment. Client tokens are refused there
 (`CLIENT_TOKENS_NOT_ENABLED`); only the device-direct realtime routes accept them.
 
+Requests forwarded by the public API Gateway (Part VI §51) reach the same `/v1` routes
+WITHOUT `Authorization`: they carry a fresh gateway service token instead, accepted only
+when Messaging's trust bundle grants `cfmeet.api-gateway` `messaging-request.forward` and
+its signed delegated context names the initiating credential. Messaging then asks Platform
+Access for that credential's LIVE authority chain
+(`POST /internal/v1/credentials/delegated-authority`, `platform-credential.authenticate`,
+never cached) and continues exactly as for a bearer credential. A token together with
+`Authorization`, any other issuer, a missing grant or credential id, or a rejected chain is
+401; Platform Access unreachable is 503. Without the grant in the bundle the path is off.
+
 | Route | Scope |
 |---|---|
 | `GET /health`, `GET /ready`, `GET /openapi.json` | — |
@@ -86,6 +96,13 @@ Platform Access must run too (`make platform-access`); its trust bundle must gra
 operations then refuse every caller). SMS Gateway / Calling are optional
 (`CF_SMS_GATEWAY_BASE_URL`, `CF_CALLING_BASE_URL`); without them bridges are refused and
 webhook relays wait, in-app messaging is unaffected.
+`MESSAGING_PUBLIC_EVENTS_DESTINATION` (Part VI §53) chooses the receivers of relayed
+public events: `calling` (default — today's behaviour), `developer-platform` (the
+Developer Platform's central event ingestion, `developer-event.publish`; requires
+`CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each
+receiver's outcome is recorded on the `messaging_webhook_relay` row, so a retry re-sends
+only to the receiver that has not accepted, and a refusal dead-letters the event once every
+receiver settled).
 
 Operator CLI (no network API):
 
