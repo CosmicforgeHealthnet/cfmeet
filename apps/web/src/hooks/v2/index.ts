@@ -32,3 +32,5 @@ export * from "./useArtifacts";
 
 // Realtime (WebSocket)
 export * from "./useRealtime";
+export * from "./useMessaging";
+export * from "./useChatMigration";

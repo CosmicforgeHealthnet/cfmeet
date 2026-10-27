@@ -17,7 +17,7 @@ export const invitationsService = {
    */
   list: async (spaceId: string) => {
     const response = await apiV2.get<InvitationResponse[]>(
-      `/meeting-spaces/${spaceId}/invitations`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/invitations`,
     );
     return response.data;
   },
@@ -27,7 +27,7 @@ export const invitationsService = {
    */
   create: async (spaceId: string, data?: CreateInvitationRequest) => {
     const response = await apiV2.post<CreateInvitationResponse>(
-      `/meeting-spaces/${spaceId}/invitations`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/invitations`,
       data ?? {},
     );
     return response.data;
@@ -38,7 +38,8 @@ export const invitationsService = {
    */
   revoke: async (spaceId: string, invitationId: string) => {
     const response = await apiV2.post<InvitationResponse>(
-      `/meeting-spaces/${spaceId}/invitations/${invitationId}/revoke`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/invitations/${encodeURIComponent(invitationId)}/revoke`,
+      {},
     );
     return response.data;
   },
@@ -48,7 +49,8 @@ export const invitationsService = {
    */
   resolve: async (token: string) => {
     const response = await publicApiV2.post<ResolveInvitationResponse>(
-      `/invitations/${token}/resolve`,
+      `/invitations/${encodeURIComponent(token)}/resolve`,
+      {},
     );
     return response.data;
   },

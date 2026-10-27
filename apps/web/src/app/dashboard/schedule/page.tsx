@@ -1,5 +1,5 @@
-import ScheduleContent from "@/components/dashboard/ScheduleContent";
+import { redirect } from "next/navigation";
 
 export default function SchedulePage() {
-  return <ScheduleContent />;
+  redirect("/dashboard/conferences");
 }

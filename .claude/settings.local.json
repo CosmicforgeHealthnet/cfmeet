@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(curl:*)",
+      "Bash(xargs:*)",
+      "Bash(grep:*)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

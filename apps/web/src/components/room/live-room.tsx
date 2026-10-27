@@ -25,7 +25,9 @@ import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Maximize, Minimize, UserPlus, UserMinus } from "lucide-react";
 import { usePublicMeeting } from "@/hooks";
-import { cookieStore } from "@/store";
+import { cookieStore, storageStore } from "@/store";
+import { conferencesService } from "@/services/v2/conferences.service";
+import ConferenceControls from "./conference-controls";
 import { useQueryClient } from "@tanstack/react-query";
 
 // Notification type for participant events
@@ -75,15 +77,24 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isDisconnectingRef = useRef(false);
+  const isRefreshingCredentialRef = useRef(false);
+  const sessionClosed = useRef(false);
+  const queryClient = useQueryClient();
+  const closeSession = useCallback(async () => {
+    if (!joinData.conference_id || sessionClosed.current) return;
+    await conferencesService.leave(joinData.conference_id, { participantSessionId: joinData.participant_session_id });
+    sessionClosed.current = true;
+    await queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] });
+  }, [joinData.conference_id, joinData.participant_session_id, queryClient]);
 
   // Guest detection: backend only returns access_token for guests
   // Authenticated users (host or logged-in participants) don't receive tokens in join response
-  const isGuest = !!joinData.access_token;
+  const isGuest = joinData.is_guest ?? !!joinData.access_token;
 
   // Poll meeting status to auto-redirect if meeting ends
   // We use usePublicMeeting because useMeeting requires authentication,
   // which would fail for guest users.
-  const { data: meetingData } = usePublicMeeting(joinData.room_name);
+  const { data: meetingData } = usePublicMeeting(joinData.conference_id ? "" : joinData.room_name);
 
   useEffect(() => {
     if (isDisconnectingRef.current) return;
@@ -98,9 +109,19 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
     }
   }, [meetingData, router, isGuest]);
 
-  const handleDisconnect = useCallback(() => {
+  const handleDisconnect = useCallback(async () => {
     if (isDisconnectingRef.current) return;
     isDisconnectingRef.current = true;
+    if (joinData.conference_id) {
+      try {
+        await closeSession();
+      } finally {
+        storageStore.clearParticipantToken();
+        storageStore.clearV2JoinData();
+        router.replace(isGuest ? "/" : "/dashboard");
+      }
+      return;
+    }
     if (isGuest) {
       // Guest: clear temporary tokens and go to home
       cookieStore.clearTokens();
@@ -109,7 +130,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
       // Authenticated user/host: keep tokens and go to dashboard
       router.replace("/dashboard");
     }
-  }, [router, isGuest]);
+  }, [router, isGuest, joinData.conference_id, closeSession]);
 
   if (!joinData.join_token) {
     return (
@@ -122,21 +143,26 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   return (
     <LayoutContextProvider>
       <LiveKitRoom
-        video={initialVideo}
-        audio={initialAudio}
+        video={initialVideo && (joinData.permissions?.videoPublish ?? true)}
+        audio={initialAudio && (joinData.permissions?.audioPublish ?? true)}
         token={joinData.join_token}
         serverUrl={joinData.livekit_url}
         data-lk-theme="default"
         style={{ height: "100vh" }}
-        onDisconnected={handleDisconnect}
+        onDisconnected={() => {
+          if (!isRefreshingCredentialRef.current) {
+            void handleDisconnect().catch(() => { /* Session expiration also closes a disconnected session. */ });
+          }
+        }}
       >
-        <ChatProvider meetingId={joinData.meeting_id} participantId={joinData.participant_id}>
+        {joinData.conference_id ? <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} /> : <ChatProvider meetingId={joinData.meeting_id} participantId={joinData.participant_id}>
           <RoomContent
             joinData={joinData}
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
+            onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }}
           />
-        </ChatProvider>
+        </ChatProvider>}
         <RoomAudioRenderer />
       </LiveKitRoom>
     </LayoutContextProvider>
@@ -148,9 +174,11 @@ interface RoomContentProps {
   joinData: JoinMeetingData;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
+  onLeave?: () => Promise<void>;
+  onCredentialRefreshStateChange: (refreshing: boolean) => void;
 }
 
-function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentProps) {
+function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCredentialRefreshStateChange }: RoomContentProps) {
   const room = useRoomContext();
   const queryClient = useQueryClient();
   const [notifications, setNotifications] = useState<ParticipantNotification[]>([]);
@@ -208,6 +236,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentP
     <>
       <div className="flex h-screen bg-card overflow-hidden">
         <div className="flex flex-col flex-1 overflow-hidden">
+          {joinData.conference_id && <ConferenceControls id={joinData.conference_id} role={joinData.conference_role} sessionId={joinData.participant_session_id} onCredentialRefreshStateChange={onCredentialRefreshStateChange} />}
           {/* Main Video Area */}
           <main className="flex-1 overflow-hidden transition-all duration-300 ease-in-out relative bg-muted">
             <VideoGridContent />
@@ -242,6 +271,9 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentP
             isSidebarOpen={isSidebarOpen}
             meetingId={joinData.meeting_id}
             participantId={joinData.participant_id}
+            conferenceId={joinData.conference_id}
+            permissions={joinData.permissions}
+            onLeave={onLeave}
           />
         </div>
 
@@ -250,6 +282,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen }: RoomContentP
           <aside className="fixed inset-y-0 right-0 z-50 w-[85%] sm:w-80 bg-card sm:bg-transparent shadow-2xl sm:shadow-none sm:relative sm:z-0 border-l sm:border-none border-border flex flex-col h-full transition-all duration-300 sm:p-4">
             <Sidebar
               meetingId={joinData.meeting_id}
+              conferenceId={joinData.conference_id}
               isHost={joinData.role === "host"}
               participantId={joinData.participant_id}
               onClose={() => setIsSidebarOpen(false)}

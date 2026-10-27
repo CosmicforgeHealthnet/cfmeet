@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { conferencesService } from "@/services/v2";
+import { conferencesService } from "@/services/v2/conferences.service";
 import type {
   CreateConferenceRequest,
   RescheduleConferenceRequest,
@@ -37,7 +37,8 @@ export function useConferences(spaceId: string, query?: ListConferencesQuery) {
     queryKey: conferenceKeys.list(spaceId, query),
     queryFn: () => conferencesService.list(spaceId, query),
     enabled: !!spaceId,
-    staleTime: 1000 * 30, // 30 seconds
+    staleTime: 1000 * 30,
+    refetchInterval: 5000,
   });
 }
 
@@ -78,6 +79,9 @@ export function useCreateConference(spaceId: string) {
   return useMutation({
     mutationFn: (data?: CreateConferenceRequest) =>
       conferencesService.create(spaceId, data),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
       queryClient.invalidateQueries({ queryKey: spaceKeys.detail(spaceId) });
@@ -93,6 +97,9 @@ export function usePrepareConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.prepare(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
     },
@@ -107,6 +114,9 @@ export function useStartConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.start(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
     },
@@ -121,6 +131,9 @@ export function useLockConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.lock(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
     },
@@ -135,6 +148,9 @@ export function useUnlockConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.unlock(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
     },
@@ -149,6 +165,9 @@ export function useEndConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.end(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
       queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
@@ -164,6 +183,9 @@ export function useCancelConference() {
 
   return useMutation({
     mutationFn: (id: string) => conferencesService.cancel(id),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
       queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
@@ -180,6 +202,9 @@ export function useRescheduleConference(id: string) {
   return useMutation({
     mutationFn: (data: RescheduleConferenceRequest) =>
       conferencesService.reschedule(id, data),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(id), data.conference);
       queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });

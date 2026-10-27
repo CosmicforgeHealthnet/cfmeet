@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { spacesService } from "@/services/v2/spaces.service";
+import { meetingIdentifier } from "@/lib/meeting-spaces";
+import { getErrorMessage } from "@/utils/error";
 
 interface JoinMeetingInputProps {
   className?: string;
@@ -19,33 +22,29 @@ export default function JoinMeetingInput({
 }: JoinMeetingInputProps) {
   const router = useRouter();
   const [joinInput, setJoinInput] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!joinInput.trim()) return;
-
-    let identifier = joinInput.trim();
-    // extract from URL if present
+    if (pending) return;
+    setPending(true); setError("");
     try {
-      if (identifier.includes("http") || identifier.includes("https")) {
-        const url = new URL(identifier);
-        const parts = url.pathname.split("/").filter((p) => p);
-        if (parts.length > 0) identifier = parts[parts.length - 1];
-      }
-    } catch {
-      // ignore
-    }
-
-    router.push(`/${identifier}`);
+      const result = await spacesService.resolve(meetingIdentifier(joinInput));
+      if (result.meetingSpace.status !== "ACTIVE") throw new Error("This meeting space is archived.");
+      router.push(`/${encodeURIComponent(result.meetingSpace.meetingCode)}`);
+    } catch (cause) { setError(getErrorMessage(cause, "Could not resolve this meeting.")); }
+    finally { setPending(false); }
   };
 
   return (
-    <div className={cn("flex w-full gap-2", className)}>
+    <div className="w-full"><div className={cn("flex w-full gap-2", className)}>
       <Input
         placeholder="Enter Link or Code"
         className={cn("flex-1", inputClassName)}
         value={joinInput}
         onChange={(e) => setJoinInput(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+        onKeyDown={(e) => e.key === "Enter" && void handleJoin()}
       />
       <Button
         size="sm"
@@ -53,10 +52,11 @@ export default function JoinMeetingInput({
           "shrink-0",
           buttonClassName,
         )}
-        onClick={handleJoin}
+        onClick={() => void handleJoin()}
+        disabled={pending || !joinInput.trim()}
       >
-        Join
+        {pending ? "Finding…" : "Join"}
       </Button>
-    </div>
+    </div>{error ? <p role="alert" className="mt-2 text-sm text-destructive">{error}</p> : null}</div>
   );
 }

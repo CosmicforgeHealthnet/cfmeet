@@ -21,6 +21,8 @@ export type CspOptions = {
   /** The document was requested over HTTPS (directly or via the TLS-terminating proxy). */
   secure?: boolean;
   apiUrl?: string;
+  /** CF Meet Calling service origin (call API + media / signaling gateways). */
+  callingUrl?: string;
   extraConnectSrc?: string;
   /** Messaging realtime gateway origin (ticket POST + WebSocket). */
   messagingUrl?: string;
@@ -67,7 +69,11 @@ export function buildCsp(o: CspOptions): string {
   }
   const api = origin(o.apiUrl);
   const connect = ["'self'", api, "wss:", "https://*.livekit.cloud"]
-    .concat(serviceOrigins(o.messagingUrl, true), serviceOrigins(o.storageUrl, false))
+    .concat(
+      serviceOrigins(o.callingUrl, true),
+      serviceOrigins(o.messagingUrl, true),
+      serviceOrigins(o.storageUrl, false),
+    )
     .concat((o.extraConnectSrc ?? "").split(/\s+/).filter((s) => /^(https|wss):\/\//.test(s)))
     .filter((s): s is string => Boolean(s));
   const directives: Record<string, string[]> = {

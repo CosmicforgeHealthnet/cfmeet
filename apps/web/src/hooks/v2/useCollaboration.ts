@@ -53,6 +53,12 @@ export function useMessages(conferenceId: string, query?: MessageListQuery) {
   });
 }
 
+export function useLoadOlderMessages(conferenceId: string) {
+  return useMutation({
+    mutationFn: (before: string) => collaborationService.getMessages(conferenceId, { before }),
+  });
+}
+
 /**
  * Get raised hands
  */
@@ -78,7 +84,7 @@ export function useUpdateCollaborationPolicy(conferenceId: string) {
   return useMutation({
     mutationFn: (data: CollaborationPolicyUpdateRequest) =>
       collaborationService.updatePolicy(conferenceId, data),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: collaborationKeys.state(conferenceId),
       });
@@ -91,7 +97,7 @@ export function useUpdateCollaborationPolicy(conferenceId: string) {
  */
 export function useMediaCredential(conferenceId: string) {
   return useMutation({
-    mutationFn: (data?: MediaCredentialRequest) =>
+    mutationFn: (data: MediaCredentialRequest) =>
       collaborationService.getMediaCredential(conferenceId, data),
   });
 }
@@ -168,13 +174,39 @@ export function useUnlockVideo(conferenceId: string) {
   });
 }
 
+export function useLockScreenShare(conferenceId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (participantId: string) =>
+      collaborationService.lockScreenShare(conferenceId, participantId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: collaborationKeys.state(conferenceId) }),
+  });
+}
+
+export function useUnlockScreenShare(conferenceId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (participantId: string) =>
+      collaborationService.unlockScreenShare(conferenceId, participantId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: collaborationKeys.state(conferenceId) }),
+  });
+}
+
 /**
  * Stop screen share for a participant
  */
 export function useStopScreenShare(conferenceId: string) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (participantId: string) =>
       collaborationService.stopScreenShare(conferenceId, participantId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: collaborationKeys.state(conferenceId) }),
   });
 }
 
@@ -275,9 +307,13 @@ export function useUpdateChatPolicy(conferenceId: string) {
  * Restrict chat for a participant
  */
 export function useRestrictChat(conferenceId: string) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (participantId: string) =>
       collaborationService.restrictChat(conferenceId, participantId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: collaborationKeys.state(conferenceId) }),
   });
 }
 
@@ -285,9 +321,13 @@ export function useRestrictChat(conferenceId: string) {
  * Unrestrict chat for a participant
  */
 export function useUnrestrictChat(conferenceId: string) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (participantId: string) =>
       collaborationService.unrestrictChat(conferenceId, participantId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: collaborationKeys.state(conferenceId) }),
   });
 }
 

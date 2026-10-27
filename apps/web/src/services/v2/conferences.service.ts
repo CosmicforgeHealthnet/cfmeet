@@ -28,7 +28,7 @@ export const conferencesService = {
    */
   list: async (spaceId: string, query?: ListConferencesQuery) => {
     const response = await apiV2.get<ConferenceListResponse>(
-      `/meeting-spaces/${spaceId}/conferences`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/conferences`,
       { params: query },
     );
     return response.data;
@@ -38,7 +38,7 @@ export const conferencesService = {
    * Get a single conference by ID
    */
   get: async (id: string) => {
-    const response = await apiV2.get<ConferenceResponse>(`/conferences/${id}`);
+    const response = await apiV2.get<ConferenceResponse>(`/conferences/${encodeURIComponent(id)}`);
     return response.data;
   },
 
@@ -47,7 +47,7 @@ export const conferencesService = {
    */
   create: async (spaceId: string, data?: CreateConferenceRequest) => {
     const response = await apiV2.post<ConferenceResponse>(
-      `/meeting-spaces/${spaceId}/conferences`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/conferences`,
       data ?? {},
     );
     return response.data;
@@ -62,7 +62,8 @@ export const conferencesService = {
    */
   prepare: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/prepare`,
+      `/conferences/${encodeURIComponent(id)}/prepare`,
+      {},
     );
     return response.data;
   },
@@ -72,7 +73,8 @@ export const conferencesService = {
    */
   start: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/start`,
+      `/conferences/${encodeURIComponent(id)}/start`,
+      {},
     );
     return response.data;
   },
@@ -82,7 +84,8 @@ export const conferencesService = {
    */
   lock: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/lock`,
+      `/conferences/${encodeURIComponent(id)}/lock`,
+      {},
     );
     return response.data;
   },
@@ -92,7 +95,8 @@ export const conferencesService = {
    */
   unlock: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/unlock`,
+      `/conferences/${encodeURIComponent(id)}/unlock`,
+      {},
     );
     return response.data;
   },
@@ -102,7 +106,8 @@ export const conferencesService = {
    */
   end: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/end`,
+      `/conferences/${encodeURIComponent(id)}/end`,
+      {},
     );
     return response.data;
   },
@@ -112,7 +117,8 @@ export const conferencesService = {
    */
   cancel: async (id: string) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/cancel`,
+      `/conferences/${encodeURIComponent(id)}/cancel`,
+      {},
     );
     return response.data;
   },
@@ -122,7 +128,7 @@ export const conferencesService = {
    */
   reschedule: async (id: string, data: RescheduleConferenceRequest) => {
     const response = await apiV2.post<ConferenceActionResponse>(
-      `/conferences/${id}/reschedule`,
+      `/conferences/${encodeURIComponent(id)}/reschedule`,
       data,
     );
     return response.data;
@@ -136,7 +142,7 @@ export const conferencesService = {
    * Get pre-join information (requirements, consent, etc.)
    */
   preJoin: async (id: string) => {
-    const response = await apiV2.get<PreJoinResponse>(`/conferences/${id}/pre-join`);
+    const response = await apiV2.get<PreJoinResponse>(`/conferences/${encodeURIComponent(id)}/pre-join`);
     return response.data;
   },
 
@@ -145,7 +151,7 @@ export const conferencesService = {
    */
   join: async (id: string, data?: JoinConferenceRequestV2) => {
     const response = await apiV2.post<JoinConferenceResponseV2>(
-      `/conferences/${id}/join`,
+      `/conferences/${encodeURIComponent(id)}/join`,
       data ?? {},
     );
     return response.data;
@@ -156,7 +162,7 @@ export const conferencesService = {
    */
   leave: async (id: string, data?: LeaveConferenceRequest) => {
     const response = await apiV2.post<LeaveConferenceResponse>(
-      `/conferences/${id}/leave`,
+      `/conferences/${encodeURIComponent(id)}/leave`,
       data ?? {},
     );
     return response.data;

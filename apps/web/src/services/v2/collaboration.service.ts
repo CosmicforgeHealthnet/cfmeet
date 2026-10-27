@@ -36,7 +36,7 @@ export const collaborationService = {
    */
   getState: async (conferenceId: string) => {
     const response = await apiV2.get<CollaborationStateResponse>(
-      `/conferences/${conferenceId}/collaboration`,
+      `/conferences/${encodeURIComponent(conferenceId)}/collaboration`,
     );
     return response.data;
   },
@@ -46,7 +46,7 @@ export const collaborationService = {
    */
   updatePolicy: async (conferenceId: string, data: CollaborationPolicyUpdateRequest) => {
     const response = await apiV2.patch<CollaborationPolicyResponse>(
-      `/conferences/${conferenceId}/collaboration-policy`,
+      `/conferences/${encodeURIComponent(conferenceId)}/collaboration-policy`,
       data,
     );
     return response.data;
@@ -55,10 +55,10 @@ export const collaborationService = {
   /**
    * Get/refresh media credential
    */
-  getMediaCredential: async (conferenceId: string, data?: MediaCredentialRequest) => {
+  getMediaCredential: async (conferenceId: string, data: MediaCredentialRequest) => {
     const response = await apiV2.post<MediaCredentialResponse>(
-      `/conferences/${conferenceId}/media-credential`,
-      data ?? {},
+      `/conferences/${encodeURIComponent(conferenceId)}/media-credential`,
+      data,
     );
     return response.data;
   },
@@ -72,7 +72,7 @@ export const collaborationService = {
    */
   lockAudio: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/audio-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/audio-lock`,
     );
     return response.data;
   },
@@ -82,7 +82,7 @@ export const collaborationService = {
    */
   unlockAudio: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/audio-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/audio-lock`,
     );
     return response.data;
   },
@@ -92,7 +92,7 @@ export const collaborationService = {
    */
   lockVideo: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/video-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/video-lock`,
     );
     return response.data;
   },
@@ -102,7 +102,7 @@ export const collaborationService = {
    */
   unlockVideo: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/video-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/video-lock`,
     );
     return response.data;
   },
@@ -112,7 +112,7 @@ export const collaborationService = {
    */
   lockScreenShare: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/screen-share-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/screen-share-lock`,
     );
     return response.data;
   },
@@ -122,7 +122,7 @@ export const collaborationService = {
    */
   unlockScreenShare: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<MediaLockResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/screen-share-lock`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/screen-share-lock`,
     );
     return response.data;
   },
@@ -132,7 +132,7 @@ export const collaborationService = {
    */
   stopScreenShare: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<StopScreenShareResponse>(
-      `/conferences/${conferenceId}/screen-share/${participantId}/stop`,
+      `/conferences/${encodeURIComponent(conferenceId)}/screen-share/${encodeURIComponent(participantId)}/stop`,
     );
     return response.data;
   },
@@ -146,7 +146,7 @@ export const collaborationService = {
    */
   addSpotlight: async (conferenceId: string, data: SpotlightRequest) => {
     const response = await apiV2.post<SpotlightListResponse>(
-      `/conferences/${conferenceId}/spotlights`,
+      `/conferences/${encodeURIComponent(conferenceId)}/spotlights`,
       data,
     );
     return response.data;
@@ -157,7 +157,7 @@ export const collaborationService = {
    */
   removeSpotlight: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<SpotlightListResponse>(
-      `/conferences/${conferenceId}/spotlights/${participantId}`,
+      `/conferences/${encodeURIComponent(conferenceId)}/spotlights/${encodeURIComponent(participantId)}`,
     );
     return response.data;
   },
@@ -171,7 +171,7 @@ export const collaborationService = {
    */
   getMessages: async (conferenceId: string, query?: MessageListQuery) => {
     const response = await apiV2.get<MessagePage>(
-      `/conferences/${conferenceId}/messages`,
+      `/conferences/${encodeURIComponent(conferenceId)}/messages`,
       { params: query },
     );
     return response.data;
@@ -182,7 +182,7 @@ export const collaborationService = {
    */
   sendMessage: async (conferenceId: string, data: SendMessageRequest) => {
     const response = await apiV2.post<MessageView>(
-      `/conferences/${conferenceId}/messages`,
+      `/conferences/${encodeURIComponent(conferenceId)}/messages`,
       data,
     );
     return response.data;
@@ -192,8 +192,8 @@ export const collaborationService = {
    * Delete a chat message
    */
   deleteMessage: async (conferenceId: string, messageId: string) => {
-    const response = await apiV2.delete<MessageView>(
-      `/conferences/${conferenceId}/messages/${messageId}`,
+    const response = await apiV2.delete<ChangedResponse>(
+      `/conferences/${encodeURIComponent(conferenceId)}/messages/${encodeURIComponent(messageId)}`,
     );
     return response.data;
   },
@@ -203,7 +203,7 @@ export const collaborationService = {
    */
   updateChatPolicy: async (conferenceId: string, data: ChatPolicyUpdateRequest) => {
     const response = await apiV2.patch<CollaborationPolicyResponse>(
-      `/conferences/${conferenceId}/chat-policy`,
+      `/conferences/${encodeURIComponent(conferenceId)}/chat-policy`,
       data,
     );
     return response.data;
@@ -214,7 +214,7 @@ export const collaborationService = {
    */
   restrictChat: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<ChangedResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/chat-restriction`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/chat-restriction`,
     );
     return response.data;
   },
@@ -224,7 +224,7 @@ export const collaborationService = {
    */
   unrestrictChat: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<ChangedResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/chat-restriction`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/chat-restriction`,
     );
     return response.data;
   },
@@ -238,7 +238,7 @@ export const collaborationService = {
    */
   sendReaction: async (conferenceId: string, data: ReactionRequest) => {
     const response = await apiV2.post<ReactionResponse>(
-      `/conferences/${conferenceId}/reactions`,
+      `/conferences/${encodeURIComponent(conferenceId)}/reactions`,
       data,
     );
     return response.data;
@@ -253,7 +253,7 @@ export const collaborationService = {
    */
   getRaisedHands: async (conferenceId: string) => {
     const response = await apiV2.get<RaisedHandsResponse>(
-      `/conferences/${conferenceId}/hand-raise`,
+      `/conferences/${encodeURIComponent(conferenceId)}/hand-raise`,
     );
     return response.data;
   },
@@ -263,7 +263,7 @@ export const collaborationService = {
    */
   raiseHand: async (conferenceId: string) => {
     const response = await apiV2.post<HandRaiseResponse>(
-      `/conferences/${conferenceId}/hand-raise`,
+      `/conferences/${encodeURIComponent(conferenceId)}/hand-raise`,
     );
     return response.data;
   },
@@ -273,7 +273,7 @@ export const collaborationService = {
    */
   lowerHand: async (conferenceId: string) => {
     const response = await apiV2.delete<HandRaiseResponse>(
-      `/conferences/${conferenceId}/hand-raise`,
+      `/conferences/${encodeURIComponent(conferenceId)}/hand-raise`,
     );
     return response.data;
   },
@@ -283,7 +283,7 @@ export const collaborationService = {
    */
   lowerOtherHand: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.delete<HandRaiseResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/hand-raise`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/hand-raise`,
     );
     return response.data;
   },

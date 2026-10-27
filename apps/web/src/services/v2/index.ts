@@ -20,9 +20,13 @@ export { artifactsService } from "./artifacts.service";
 export { qualityService } from "./quality.service";
 export { profilesService } from "./profiles.service";
 export { organizationsService } from "./organizations.service";
+export { messagingService } from "./messaging.service";
+export { chatMigrationService } from "./chat-migration.service";
 
 // Unified V2 Service Object
 export const v2 = {
+  messaging: () => import("./messaging.service").then((m) => m.messagingService),
+  chatMigration: () => import("./chat-migration.service").then((m) => m.chatMigrationService),
   spaces: () => import("./spaces.service").then((m) => m.spacesService),
   conferences: () => import("./conferences.service").then((m) => m.conferencesService),
   members: () => import("./members.service").then((m) => m.membersService),

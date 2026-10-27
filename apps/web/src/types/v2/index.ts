@@ -3,6 +3,7 @@
  * Matches the backend Rust DTOs at services/meeting-service/src/dto/v2.rs
  * All responses use camelCase JSON serialization
  */
+export type * from "../messaging";
 
 // ---------------------------------------------------------------------------
 // Common Enums
@@ -10,27 +11,25 @@
 
 export type MeetingType = "STANDARD" | "HEALTHCARE" | "WEBINAR" | "TOWN_HALL" | "TRAINING";
 
-export type SpaceStatus = "ACTIVE" | "ARCHIVED";
+export type SpaceStatus = "ACTIVE" | "ARCHIVED" | "DELETED";
 
 export type AccessPolicy =
   | "PUBLIC"
   | "PUBLIC_PASSCODE"
-  | "REGISTERED_USERS"
+  | "AUTHENTICATED"
   | "ORGANIZATION_ONLY"
   | "DOMAIN_RESTRICTED"
-  | "EXTERNAL_ONLY"
-  | "MEMBERS_ONLY"
-  | "INVITATION_ONLY"
+  | "INVITE_ONLY"
   | "CUSTOM"
   | "HEALTHCARE_APPOINTMENT";
 
-export type WaitingRoomPolicy = "OFF" | "GUESTS_ONLY" | "EVERYONE" | "CUSTOM";
+export type WaitingRoomPolicy = "OFF" | "GUESTS_ONLY" | "EVERYONE" | "UNAUTHENTICATED_ONLY" | "NON_MEMBERS_ONLY" | "EXTERNAL_ONLY" | "CUSTOM";
 
-export type SecurityProfile = "STANDARD" | "HEALTHCARE" | "HIGH_SECURITY";
+export type SecurityProfile = "STANDARD" | "BUSINESS" | "ENTERPRISE" | "HEALTHCARE" | "HIGH_SECURITY";
 
-export type Role = "HOST" | "CO_HOST" | "PRESENTER" | "PARTICIPANT" | "VIEWER";
+export type Role = "OWNER" | "HOST" | "CO_HOST" | "MODERATOR" | "PRESENTER" | "PARTICIPANT" | "VIEWER";
 
-export type MediaCapturePolicy = "DISABLED" | "HOST_ONLY" | "ALLOWED";
+export type MediaCapturePolicy = "DISABLED" | "HOST_OPTIONAL" | "AUTO_START" | "ORGANIZATION_CONTROLLED";
 
 export type ConferenceStatus =
   | "CREATED"
@@ -42,27 +41,30 @@ export type ConferenceStatus =
   | "CANCELLED"
   | "FAILED";
 
-export type ConferenceKind = "INSTANT" | "SCHEDULED" | "RECURRING";
+export type ConferenceKind = "INSTANT" | "SCHEDULED" | "RECURRING" | "LEGACY";
 
 export type TerminationReason =
   | "HOST_ENDED"
-  | "SYSTEM_TIMEOUT"
-  | "PROVIDER_TERMINATED"
+  | "SCHEDULED_END"
+  | "ADMIN"
+  | "FAILURE"
+  | "EMPTY_TIMEOUT"
+  | "LEGACY"
   | "CANCELLED";
 
-export type IdentityType = "REGISTERED" | "GUEST";
+export type IdentityType = "REGISTERED_USER" | "INVITED_EXTERNAL" | "GUEST" | "PHONE" | "SERVICE" | "BOT";
 
-export type AdmissionState = "WAITING" | "ADMITTED" | "DENIED" | "LEFT" | "REMOVED" | "BANNED";
+export type AdmissionState = "WAITING" | "ADMITTED" | "DENIED" | "REMOVED" | "BANNED";
 
 export type PrincipalType = "USER" | "EMAIL";
 
 export type MemberStatus = "ACTIVE" | "REVOKED";
 
-export type InvitationStatus = "ACTIVE" | "REVOKED" | "EXPIRED" | "EXHAUSTED";
+export type InvitationStatus = "ACTIVE" | "REVOKED";
 
 export type RecurrenceStatus = "ACTIVE" | "ENDED";
 
-export type RecurrenceExceptionKind = "CANCEL" | "RESCHEDULE";
+export type RecurrenceExceptionKind = "CANCELLED" | "RESCHEDULED";
 
 export type BanScope = "CONFERENCE" | "SPACE";
 
@@ -80,13 +82,13 @@ export type OrganizationMemberStatus = "ACTIVE" | "SUSPENDED" | "REMOVED";
 
 export type TrackKind = "AUDIO" | "VIDEO" | "SCREEN_SHARE";
 
-export type ChatSendMode = "EVERYONE" | "HOST_ONLY" | "DISABLED";
+export type ChatSendMode = "EVERYONE" | "HOSTS_ONLY";
 
-export type PrivateChatMode = "ENABLED" | "HOSTS_ONLY" | "DISABLED";
+export type PrivateChatMode = "EVERYONE" | "HOSTS_ONLY" | "DISABLED";
 
-export type ScreenShareMode = "HOST_ONLY" | "PRESENTERS_AND_ABOVE" | "EVERYONE" | "DISABLED";
+export type ScreenSharePolicy = "HOST_ONLY" | "PRESENTERS_ONLY" | "ALL_INTERACTIVE";
 
-export type ConsentKind = "RECORDING" | "TRANSCRIPTION" | "AI_PROCESSING" | "DATA_SHARING";
+export type ConsentKind = "RECORDING" | "TRANSCRIPTION" | "AI_PROCESSING" | "DATA_SHARING" | "HEALTHCARE_TERMS" | "PRIVACY_NOTICE";
 
 export type ArtifactType =
   | "RECORDING"
@@ -124,31 +126,53 @@ export interface SchedulePolicy {
 }
 
 export interface RolePolicy {
-  hostCanUnmuteOthers?: boolean;
-  participantCanUnmute?: boolean;
-  participantCanShareScreen?: boolean;
-  participantCanChat?: boolean;
-  viewerCanChat?: boolean;
-  viewerCanReact?: boolean;
+  overrides?: Partial<Record<Role, Record<string, boolean>>>;
 }
 
 export interface CollaborationPolicyPatch {
-  audioLockDefault?: boolean;
-  videoLockDefault?: boolean;
-  screenShareMode?: ScreenShareMode;
+  screenSharePolicy?: ScreenSharePolicy;
+  audioLocked?: boolean;
+  videoLocked?: boolean;
+  maxSpotlights?: number;
   chatEnabled?: boolean;
   chatSendMode?: ChatSendMode;
   privateChatMode?: PrivateChatMode;
   breakoutChatEnabled?: boolean;
   mainChatVisibleInBreakouts?: boolean;
   reactionsEnabled?: boolean;
+  allowedReactions?: string[];
   handRaiseEnabled?: boolean;
-  pollsEnabled?: boolean;
   qnaEnabled?: boolean;
-  breakoutsEnabled?: boolean;
-  recordingConsentRequired?: boolean;
-  transcriptionConsentRequired?: boolean;
-  aiProcessingConsentRequired?: boolean;
+  qnaAnonymousAllowed?: boolean;
+  pollsEnabled?: boolean;
+  maxBreakouts?: number;
+  breakoutRecordingPolicy?: "INHERIT_MAIN_POLICY" | "DISABLED" | "SEPARATE_ALLOWED";
+  requiredConsents?: ConsentKind[];
+  consentVersion?: string;
+  aiNotice?: boolean;
+}
+
+export interface CollaborationPolicy {
+  screenSharePolicy: ScreenSharePolicy;
+  audioLocked: boolean;
+  videoLocked: boolean;
+  maxSpotlights: number;
+  chatEnabled: boolean;
+  chatSendMode: ChatSendMode;
+  privateChatMode: PrivateChatMode;
+  breakoutChatEnabled: boolean;
+  mainChatVisibleInBreakouts: boolean;
+  reactionsEnabled: boolean;
+  allowedReactions: string[];
+  handRaiseEnabled: boolean;
+  qnaEnabled: boolean;
+  qnaAnonymousAllowed: boolean;
+  pollsEnabled: boolean;
+  maxBreakouts: number;
+  breakoutRecordingPolicy: "INHERIT_MAIN_POLICY" | "DISABLED" | "SEPARATE_ALLOWED";
+  requiredConsents: ConsentKind[];
+  consentVersion: string;
+  aiNotice: boolean;
 }
 
 export interface CreateMeetingSpaceRequest {
@@ -608,7 +632,7 @@ export interface MuteResponse {
 
 export interface ResolveResponse {
   meetingSpace: MeetingSpaceResponse;
-  conference?: ConferenceResponse;
+  conference?: ConferenceResponse | null;
   matchedBy: string;
 }
 
@@ -687,7 +711,7 @@ export interface CollaborationPolicyUpdateRequest {
 export interface CollaborationPolicyResponse {
   conferenceId: string;
   collaborationVersion: number;
-  policy: CollaborationPolicyPatch;
+  policy: CollaborationPolicy;
   providerEnforcement: ProviderEnforcement;
 }
 
@@ -714,14 +738,14 @@ export interface CollaborationStateResponse {
   collaborationVersion: number;
   eventSequence: number;
   me?: MyCollaborationState;
-  policy: CollaborationPolicyPatch;
+  policy: CollaborationPolicy;
   spotlights: SpotlightView[];
   raisedHands: RaisedHand[];
   activeScreenShares: string[];
 }
 
 export interface MediaCredentialRequest {
-  participantSessionId?: string;
+  participantSessionId: string;
 }
 
 export interface MediaCredentialResponse {

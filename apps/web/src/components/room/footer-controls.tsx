@@ -20,12 +20,17 @@ import {
 import { useMemo, useState } from "react";
 import { MicVisualizer } from "../ui/mic-visualizer";
 import { useMediaControl } from "@/hooks";
+import { schedulingError } from "@/lib/meeting-scheduling";
+import { useCollaborationState } from "@/hooks/v2/useCollaboration";
 
 interface FooterControlsProps {
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
   meetingId: string;
   participantId: string;
+  conferenceId?: string;
+  permissions?: import("@/types/v2").JoinPermissions;
+  onLeave?: () => Promise<void>;
 }
 
 export default function FooterControls({
@@ -33,6 +38,9 @@ export default function FooterControls({
   isSidebarOpen,
   meetingId,
   participantId,
+  conferenceId,
+  permissions,
+  onLeave,
 }: FooterControlsProps) {
   const {
     localParticipant,
@@ -42,7 +50,10 @@ export default function FooterControls({
     microphoneTrack,
   } = useLocalParticipant();
   const room = useRoomContext();
+  const collaboration = useCollaborationState(conferenceId || "");
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState("");
 
   const { startScreenShare, stopScreenShare, updateAudio, updateVideo } =
     useMediaControl();
@@ -54,6 +65,8 @@ export default function FooterControls({
   } = useMediaDeviceSelect({ kind: "audiooutput" });
 
   const [isDeviceMenuOpen, setIsDeviceMenuOpen] = useState(false);
+  const [mediaError, setMediaError] = useState("");
+  const effectivePermissions = collaboration.data?.me?.permissions || permissions;
 
   const toggleSpeaker = () => {
     const newState = !isSpeakerOn;
@@ -74,37 +87,58 @@ export default function FooterControls({
   }, [mediaStreamTrack]);
 
   const toggleMic = async () => {
-    const newState = !isMicrophoneEnabled;
-    await localParticipant.setMicrophoneEnabled(newState, {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    });
-    updateAudio.mutate({ participantId, isMuted: !newState });
-  };
-
-  const toggleCamera = async () => {
-    const newState = !isCameraEnabled;
-    await localParticipant.setCameraEnabled(newState);
-    updateVideo.mutate({ participantId, isVideoOn: newState });
-  };
-
-  const toggleScreenShare = async () => {
-    const newState = !isScreenShareEnabled;
-    await localParticipant.setScreenShareEnabled(newState);
-    if (newState) {
-      startScreenShare.mutate(meetingId);
-    } else {
-      stopScreenShare.mutate(meetingId);
+    setMediaError("");
+    try {
+      const newState = !isMicrophoneEnabled;
+      await localParticipant.setMicrophoneEnabled(newState, {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      });
+      if (!conferenceId) updateAudio.mutate({ participantId, isMuted: !newState });
+    } catch (error) {
+      setMediaError(schedulingError(error));
     }
   };
 
-  const handleDisconnect = () => {
-    room.disconnect();
+  const toggleCamera = async () => {
+    setMediaError("");
+    try {
+      const newState = !isCameraEnabled;
+      await localParticipant.setCameraEnabled(newState);
+      if (!conferenceId) updateVideo.mutate({ participantId, isVideoOn: newState });
+    } catch (error) {
+      setMediaError(schedulingError(error));
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    setMediaError("");
+    try {
+      const newState = !isScreenShareEnabled;
+      await localParticipant.setScreenShareEnabled(newState);
+      if (conferenceId) return;
+      if (newState) {
+        startScreenShare.mutate(meetingId);
+      } else {
+        stopScreenShare.mutate(meetingId);
+      }
+    } catch (error) {
+      setMediaError(schedulingError(error));
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (leaving) return;
+    setLeaving(true); setLeaveError("");
+    try { await onLeave?.(); await room.disconnect(); }
+    catch (error) { setLeaveError(schedulingError(error)); setLeaving(false); }
   };
 
   return (
     <footer className="p-2 sm:p-6 flex items-center justify-center gap-2 sm:gap-4 bg-card border-t border-border z-10 relative">
+      {leaveError && <p role="alert" className="absolute bottom-full bg-card border border-border rounded-md p-3 text-sm text-destructive">{leaveError}</p>}
+      {mediaError && <p role="alert" className="absolute bottom-full mb-14 bg-card border border-border rounded-md p-3 text-sm text-destructive">{mediaError}</p>}
       <div className="flex flex-wrap items-center justify-between w-full max-w-5xl rounded-lg gap-2 sm:gap-4 px-1 sm:px-6">
         {/* Audio Controls Group */}
         <div className="relative flex items-center gap-1 bg-card/50 rounded-lg p-1">
@@ -162,6 +196,7 @@ export default function FooterControls({
         <div className="flex items-center gap-2 sm:gap-4">
           <Button
             onClick={toggleScreenShare}
+            disabled={effectivePermissions?.screenSharePublish === false && !isScreenShareEnabled}
             className={`p-2 sm:p-3 rounded-lg transition-colors ${
               isScreenShareEnabled
                 ? "bg-green-100 text-green-600 hover:bg-green-200"
@@ -179,6 +214,7 @@ export default function FooterControls({
           <div className="relative">
             <Button
               onClick={toggleMic}
+              disabled={effectivePermissions?.audioPublish === false && !isMicrophoneEnabled}
               className={`p-2 sm:p-3 rounded-lg transition-colors relative z-10 ${
                 !isMicrophoneEnabled
                   ? "bg-red-50 text-red-500 hover:bg-red-100"
@@ -211,6 +247,8 @@ export default function FooterControls({
 
           <Button
             onClick={handleDisconnect}
+            aria-label="Leave conference"
+            disabled={leaving}
             style={{
               width: "56px",
               height: "56px",
@@ -225,6 +263,7 @@ export default function FooterControls({
 
           <Button
             onClick={toggleCamera}
+            disabled={effectivePermissions?.videoPublish === false && !isCameraEnabled}
             className={`p-2 sm:p-3 rounded-lg transition-colors ${
               !isCameraEnabled
                 ? "bg-red-50 text-red-500 hover:bg-red-100"

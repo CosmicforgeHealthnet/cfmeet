@@ -76,6 +76,11 @@ export interface UpdateMeetingRequest {
 }
 
 export interface JoinMeetingData {
+  conference_id?: string;
+  participant_session_id?: string;
+  conference_role?: import("./v2").Role;
+  permissions?: import("./v2").JoinPermissions;
+  is_guest?: boolean;
   meeting_id: string;
   participant_id: string;
   role: "host" | "participant" | "viewer";

@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { membersService } from "@/services/v2";
+import { membersService } from "@/services/v2/members.service";
 import type { AddMemberRequest, UpdateMemberRequest } from "@/types/v2";
 
 // Query Keys
@@ -41,6 +41,9 @@ export function useAddMember(spaceId: string) {
 
   return useMutation({
     mutationFn: (data: AddMemberRequest) => membersService.add(spaceId, data),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memberKeys.list(spaceId) });
     },
@@ -61,6 +64,9 @@ export function useUpdateMember(spaceId: string) {
       memberId: string;
       data: UpdateMemberRequest;
     }) => membersService.update(spaceId, memberId, data),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memberKeys.list(spaceId) });
     },
@@ -75,6 +81,9 @@ export function useRevokeMember(spaceId: string) {
 
   return useMutation({
     mutationFn: (memberId: string) => membersService.revoke(spaceId, memberId),
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: memberKeys.list(spaceId) });
     },

@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { participantsService } from "@/services/v2";
+import { participantsService } from "@/services/v2/participants.service";
 import type {
   AdmitRequest,
   DenyRequest,
@@ -48,6 +48,7 @@ export function useCurrentParticipant(conferenceId: string) {
     queryKey: participantKeys.me(conferenceId),
     queryFn: () => participantsService.me(conferenceId),
     enabled: !!conferenceId,
+    retry: false,
     refetchInterval: 2000, // Poll every 2 seconds for admission updates
   });
 }
@@ -78,14 +79,7 @@ export function useAdmitParticipants(conferenceId: string) {
 
   return useMutation({
     mutationFn: (data: AdmitRequest) => participantsService.admit(conferenceId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.waitingRoom(conferenceId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.list(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 
@@ -97,11 +91,7 @@ export function useDenyParticipants(conferenceId: string) {
 
   return useMutation({
     mutationFn: (data: DenyRequest) => participantsService.deny(conferenceId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.waitingRoom(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 
@@ -114,14 +104,7 @@ export function useReturnToWaiting(conferenceId: string) {
   return useMutation({
     mutationFn: (participantId: string) =>
       participantsService.returnToWaiting(conferenceId, participantId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.waitingRoom(conferenceId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.list(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 
@@ -139,11 +122,7 @@ export function useChangeRole(conferenceId: string) {
       participantId: string;
       data: RoleChangeRequest;
     }) => participantsService.changeRole(conferenceId, participantId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.list(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 
@@ -161,11 +140,7 @@ export function useRemoveParticipant(conferenceId: string) {
       participantId: string;
       data?: RemoveParticipantRequest;
     }) => participantsService.remove(conferenceId, participantId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.list(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 
@@ -183,11 +158,7 @@ export function useBanParticipant(conferenceId: string) {
       participantId: string;
       data?: BanParticipantRequest;
     }) => participantsService.ban(conferenceId, participantId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: participantKeys.list(conferenceId),
-      });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: participantKeys.all }),
   });
 }
 

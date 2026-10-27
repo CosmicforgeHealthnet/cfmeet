@@ -18,6 +18,7 @@ export function proxy(request: NextRequest) {
       request.nextUrl.protocol === "https:" ||
       request.headers.get("x-forwarded-proto") === "https",
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    callingUrl: process.env.NEXT_PUBLIC_CALLING_API_URL || "http://localhost:8090",
     extraConnectSrc: process.env.CSP_EXTRA_CONNECT_SRC,
     messagingUrl: process.env.NEXT_PUBLIC_MESSAGING_URL,
     storageUrl: process.env.NEXT_PUBLIC_MESSAGING_STORAGE_URL,

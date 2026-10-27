@@ -1,37 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import JoinMeetingInput from "@/components/layout/JoinMeetingInput";
 import { Video } from "lucide-react";
 
 export default function JoinPage() {
-  const [meetingCode, setMeetingCode] = useState("");
-  const [error, setError] = useState("");
-  const router = useRouter();
-
-  const handleJoin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-
-    const code = meetingCode.trim().toUpperCase();
-
-    if (!code) {
-      setError("Please enter a meeting code");
-      return;
-    }
-
-    if (code.length < 6) {
-      setError("Meeting code must be at least 6 characters");
-      return;
-    }
-
-    // Navigate to the room with the meeting identifier
-    router.push(`/${code}`);
-  };
-
   return (
     <div className="flex items-center justify-center min-h-screen bg-muted">
       <div className="w-full max-w-md px-6">
@@ -52,28 +25,9 @@ export default function JoinPage() {
           </div>
 
           {/* Form */}
-          <form onSubmit={handleJoin} className="space-y-4">
-            <div>
-              <Input
-                type="text"
-                placeholder="Enter meeting code (e.g., ABCD1234)"
-                value={meetingCode}
-                onChange={(e) => {
-                  setMeetingCode(e.target.value.toUpperCase());
-                  setError("");
-                }}
-                className="text-center text-lg tracking-wider uppercase h-12"
-                maxLength={12}
-              />
-              {error && (
-                <p className="text-sm text-red-500 mt-2 text-center">{error}</p>
-              )}
-            </div>
-
-            <Button type="submit" className="w-full h-12 text-base">
-              Join Meeting
-            </Button>
-          </form>
+          <JoinMeetingInput />
+          <p className="mt-4 text-sm"><Link href="/invite" className="text-primary hover:underline">Have an invitation link or token?</Link></p>
+          <p className="mt-3 text-xs text-muted-foreground">Meeting links and codes identify a space. Membership, roles and admission are checked separately.</p>
 
           {/* Divider */}
           <div className="flex items-center gap-4 my-6">
@@ -87,7 +41,7 @@ export default function JoinPage() {
             <p className="text-sm text-muted-foreground">
               Want to create a meeting?{" "}
               <Link
-                href="/dashboard/schedule"
+                href="/dashboard/conferences"
                 className="text-primary hover:underline font-medium"
               >
                 Schedule one

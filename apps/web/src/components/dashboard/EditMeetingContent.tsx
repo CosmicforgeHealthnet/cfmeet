@@ -2,339 +2,55 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMeeting, useUpdateMeeting } from "@/hooks";
+import { useSpace, useUpdateSpace } from "@/hooks/v2/useSpaces";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
-import type { ApiErrorResponse } from "@/types/auth";
-import type { Meeting } from "@/types/meeting";
-import type { AxiosError } from "axios";
-import { Calendar, Clock, Lock, Globe, ArrowLeft } from "lucide-react";
-import { getUserTimezone, toLocalDateValue, toLocalTimeValue } from "@/utils/timezone";
+import { spacePermissions, spaceUpdate, type SpaceFormValues } from "@/lib/meeting-spaces";
+import { getErrorMessage } from "@/utils/error";
+import type { MeetingSpaceResponse } from "@/types/v2";
 
-const DURATION_OPTIONS = [
-  { value: "15", label: "15 minutes" },
-  { value: "30", label: "30 minutes" },
-  { value: "45", label: "45 minutes" },
-  { value: "60", label: "1 hour" },
-  { value: "90", label: "1.5 hours" },
-  { value: "120", label: "2 hours" },
-  { value: "180", label: "3 hours" },
-];
-
-function calculateDuration(startTime: string, endTime: string): string {
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-  const diffMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
-
-  // Find the closest duration option
-  const option = DURATION_OPTIONS.find((opt) => parseInt(opt.value) === diffMinutes);
-  if (option) return option.value;
-
-  // Default to 30 minutes if no match
-  return "30";
-}
-
-interface EditMeetingFormProps {
-  meeting: Meeting;
-  meetingId: string;
-}
-
-function EditMeetingForm({ meeting, meetingId }: EditMeetingFormProps) {
+function EditSpaceForm({ space, reload }: { space: MeetingSpaceResponse; reload: () => void }) {
   const router = useRouter();
-  const updateMeeting = useUpdateMeeting();
-
-  // Initialize state directly from props - no useEffect needed
-  const [title, setTitle] = useState(meeting.title || "");
-  const [date, setDate] = useState(toLocalDateValue(meeting.start_time));
-  const [startTime, setStartTime] = useState(toLocalTimeValue(meeting.start_time));
-  const [duration, setDuration] = useState(calculateDuration(meeting.start_time, meeting.end_time));
-  const [isPrivate, setIsPrivate] = useState(meeting.is_private);
-  const [metadata, setMetadata] = useState(meeting.metadata || "");
+  const update = useUpdateSpace(space.id);
+  // Keep the reviewed version with the draft; a background refetch must never
+  // silently turn an outdated draft into a write against the newest version.
+  const [reviewed] = useState(space);
+  const [values, setValues] = useState<SpaceFormValues>({ title: space.title ?? "", description: space.description ?? "",
+    timezone: space.timezone ?? "UTC", meetingType: space.meetingType, accessPolicy: space.accessPolicy,
+    waitingRoomPolicy: space.waitingRoomPolicy ?? "OFF", passcode: "", clearPasscode: false });
   const [error, setError] = useState("");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
-    if (!date || !startTime || !duration) {
-      setError("Date, time, and duration are required");
-      return;
-    }
-
-    const start_time = `${date}T${startTime}:00`;
-    const startDate = new Date(start_time);
-    const endDate = new Date(startDate.getTime() + parseInt(duration) * 60000);
-
-    // Format end_time in local time (YYYY-MM-DDTHH:mm:ss)
-    const endYear = endDate.getFullYear();
-    const endMonth = String(endDate.getMonth() + 1).padStart(2, "0");
-    const endDay = String(endDate.getDate()).padStart(2, "0");
-    const endHours = String(endDate.getHours()).padStart(2, "0");
-    const endMinutes = String(endDate.getMinutes()).padStart(2, "0");
-    const end_time = `${endYear}-${endMonth}-${endDay}T${endHours}:${endMinutes}:00`;
-
-    updateMeeting.mutate(
-      {
-        id: meetingId,
-        data: {
-          title: title.trim(),
-          start_time,
-          end_time,
-          timezone: getUserTimezone(),
-          is_private: isPrivate,
-          metadata: metadata.trim() || undefined,
-        },
-      },
-      {
-        onSuccess: () => {
-          router.push("/dashboard/meetings");
-        },
-        onError: (err: AxiosError<ApiErrorResponse>) => {
-          const message =
-            err.response?.data?.error?.message || "Failed to update meeting";
-          setError(message);
-        },
-      },
-    );
-  };
-
-  return (
-    <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter">
-      {/* Back Button */}
-      <button
-        onClick={() => router.push("/dashboard/meetings")}
-        className="flex items-center gap-2 text-foreground hover:text-primary transition-colors mb-4"
-      >
-        <ArrowLeft className="w-5 h-5" />
-        <span className="text-sm font-medium">Back to Meetings</span>
-      </button>
-
-      {/* Header */}
-      <div className="mb-6 sm:mb-8">
-        <h2 className="text-xl sm:text-2xl font-bold text-foreground">
-          Edit Meeting
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Update your meeting details
-        </p>
-      </div>
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="max-w-lg space-y-5">
-        {/* Title */}
-        <div className="space-y-1.5">
-          <Label htmlFor="title" className="text-sm font-medium text-foreground">
-            Meeting Title
-          </Label>
-          <Input
-            id="title"
-            placeholder="e.g. Weekly Team Standup"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-
-        {/* Date */}
-        <div className="space-y-1.5">
-          <Label htmlFor="date" className="text-sm font-medium text-foreground">
-            <Calendar className="w-3.5 h-3.5 inline mr-1.5" />
-            Date
-          </Label>
-          <Input
-            id="date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </div>
-
-        {/* Time and Duration */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label
-              htmlFor="startTime"
-              className="text-sm font-medium text-foreground"
-            >
-              <Clock className="w-3.5 h-3.5 inline mr-1.5" />
-              Start Time
-            </Label>
-            <Input
-              id="startTime"
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label
-              htmlFor="duration"
-              className="text-sm font-medium text-foreground"
-            >
-              <Clock className="w-3.5 h-3.5 inline mr-1.5" />
-              Duration
-            </Label>
-            <select
-              id="duration"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              className="flex h-9 sm:h-10 w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 text-sm sm:text-base font-medium focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
-            >
-              {DURATION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Privacy Toggle */}
-        <div className="space-y-1.5">
-          <Label className="text-sm font-medium text-foreground">
-            Meeting Type
-          </Label>
-          <TooltipProvider>
-            <div className="flex gap-3">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setIsPrivate(true)}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                      isPrivate
-                        ? "bg-primary text-white shadow-sm"
-                        : "bg-sidebar text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <Lock className="w-4 h-4" />
-                    Private
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="max-w-xs">
-                    Private meetings require authentication. Guests cannot join,
-                    and authenticated participants must wait for host approval
-                    before entering.
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setIsPrivate(false)}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                      !isPrivate
-                        ? "bg-primary text-white shadow-sm"
-                        : "bg-sidebar text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <Globe className="w-4 h-4" />
-                    Public
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="max-w-xs">
-                    Public meetings allow anyone with the link to join
-                    instantly, including guests. No waiting room or approval
-                    needed.
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
-        </div>
-
-        {/* Metadata / Description */}
-        <div className="space-y-1.5">
-          <Label
-            htmlFor="metadata"
-            className="text-sm font-medium text-foreground"
-          >
-            Description{" "}
-            <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <textarea
-            id="metadata"
-            placeholder="Add a description or agenda..."
-            value={metadata}
-            onChange={(e) => setMetadata(e.target.value)}
-            rows={3}
-            className="flex w-full rounded-xl border border-[var(--primary)4D] bg-transparent px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base font-medium placeholder:text-[var(--primary)4D] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] resize-none"
-          />
-        </div>
-
-        {/* Error */}
-        {error && <p className="text-sm text-red-500 font-medium">{error}</p>}
-
-        {/* Actions */}
-        <div className="flex gap-3">
-          <Button
-            type="submit"
-            size="lg"
-            className="flex-1"
-            loading={updateMeeting.isPending}
-          >
-            Save Changes
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            onClick={() => router.push("/dashboard/meetings")}
-          >
-            Cancel
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
+  const changed = reviewed.version !== space.version;
+  const set = <K extends keyof SpaceFormValues>(key: K, value: SpaceFormValues[K]) => setValues((old) => ({ ...old, [key]: value }));
+  return <form className="max-w-xl space-y-5" onSubmit={async (event) => {
+    event.preventDefault(); setError("");
+    try { await update.mutateAsync(spaceUpdate(reviewed, values)); router.push("/dashboard/meetings"); }
+    catch (cause) { setError(getErrorMessage(cause, "Could not update the meeting space.")); }
+  }}>
+    <p className="text-sm text-muted-foreground">Edit reusable meeting settings. Conference dates and live-call status are managed separately.</p>
+    {changed ? <div role="alert" className="rounded-xl border border-border bg-muted p-3 text-sm">This space changed while you were editing. Reload its settings before saving. <Button type="button" size="sm" variant="outline" onClick={reload}>Reload settings</Button></div> : null}
+    <div className="space-y-2"><Label htmlFor="space-title">Title</Label><Input id="space-title" value={values.title} maxLength={255} required onChange={(e) => set("title", e.target.value)} /></div>
+    <div className="space-y-2"><Label htmlFor="space-description">Description</Label><Input id="space-description" value={values.description} onChange={(e) => set("description", e.target.value)} /></div>
+    <div className="space-y-2"><Label htmlFor="space-type">Meeting type</Label><select id="space-type" className="h-10 w-full rounded-md border border-input bg-background px-3" value={values.meetingType} onChange={(e) => set("meetingType", e.target.value as SpaceFormValues["meetingType"])}>{["STANDARD", "HEALTHCARE", "WEBINAR", "TOWN_HALL", "TRAINING"].map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></div>
+    <div className="space-y-2"><Label htmlFor="space-timezone">Timezone</Label><Input id="space-timezone" value={values.timezone} required placeholder="Africa/Lagos" onChange={(e) => set("timezone", e.target.value)} /></div>
+    <div className="space-y-2"><Label htmlFor="space-access">Who can request admission?</Label><select id="space-access" className="h-10 w-full rounded-md border border-input bg-background px-3" value={values.accessPolicy} onChange={(e) => set("accessPolicy", e.target.value as SpaceFormValues["accessPolicy"])}>
+      <option value="PUBLIC">Public</option><option value="PUBLIC_PASSCODE">Public with passcode</option><option value="AUTHENTICATED">Signed-in users</option><option value="INVITE_ONLY">Members and valid invitations</option>
+      {!["PUBLIC", "PUBLIC_PASSCODE", "AUTHENTICATED", "INVITE_ONLY"].includes(reviewed.accessPolicy) ? <option value={reviewed.accessPolicy}>{reviewed.accessPolicy.replaceAll("_", " ")}</option> : null}
+    </select><p className="text-xs text-muted-foreground">A meeting link identifies this space. It does not grant membership or a host role.</p></div>
+    <div className="space-y-2"><Label htmlFor="space-passcode">New passcode</Label><Input id="space-passcode" type="password" autoComplete="new-password" value={values.passcode} maxLength={64} placeholder={space.requiresPasscode ? "Leave blank to keep the existing passcode" : "Optional unless passcode access is selected"} onChange={(e) => set("passcode", e.target.value)} /></div>
+    {space.requiresPasscode ? <label className="flex items-center gap-2 text-sm"><Checkbox checked={values.clearPasscode} onCheckedChange={(checked) => set("clearPasscode", checked === true)} /> Remove existing passcode</label> : null}
+    <div className="space-y-2"><Label htmlFor="space-waiting">Waiting room</Label><select id="space-waiting" className="h-10 w-full rounded-md border border-input bg-background px-3" value={values.waitingRoomPolicy} onChange={(e) => set("waitingRoomPolicy", e.target.value as SpaceFormValues["waitingRoomPolicy"])}>{["OFF", "GUESTS_ONLY", "EVERYONE", "UNAUTHENTICATED_ONLY", "NON_MEMBERS_ONLY", "EXTERNAL_ONLY", "CUSTOM"].map((policy) => <option key={policy} value={policy}>{policy.replaceAll("_", " ")}</option>)}</select></div>
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+    <div className="flex gap-3"><Button type="button" variant="outline" onClick={() => router.push("/dashboard/meetings")}>Cancel</Button><Button type="submit" disabled={changed || update.isPending}>Save space settings</Button></div>
+  </form>;
 }
 
 export default function EditMeetingContent({ meetingId }: { meetingId: string }) {
-  const router = useRouter();
-  const { data: meetingData, isLoading: isFetching, isError } = useMeeting(meetingId);
-
-  if (isFetching) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Spinner />
-      </div>
-    );
-  }
-
-  if (isError || !meetingData?.data) {
-    return (
-      <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter">
-        <div className="text-center py-20">
-          <p className="text-red-500 font-medium">Failed to load meeting</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            The meeting may not exist or you don&apos;t have access to it.
-          </p>
-          <Button
-            variant="outline"
-            className="mt-4"
-            onClick={() => router.push("/dashboard/meetings")}
-          >
-            Back to Meetings
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Render form only when data is available - state initializes from props
-  return <EditMeetingForm meeting={meetingData.data} meetingId={meetingId} />;
+  const space = useSpace(meetingId);
+  const [revision, setRevision] = useState(0);
+  return <div className="space-y-5 p-4 sm:p-6 md:p-10"><h1 className="text-2xl font-bold">Edit meeting space</h1>
+    {space.isPending ? <Spinner /> : space.error || !space.data ? <p role="alert">{getErrorMessage(space.error, "Meeting space not found.")}</p> : !spacePermissions(space.data).configure || space.data.status !== "ACTIVE" ? <p>You need owner or host permission to edit an active meeting space.</p> : <EditSpaceForm key={`${space.data.id}-${revision}`} space={space.data} reload={() => void space.refetch().then(() => setRevision((value) => value + 1))} />}
+  </div>;
 }

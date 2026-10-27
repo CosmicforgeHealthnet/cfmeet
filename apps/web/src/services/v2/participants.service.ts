@@ -28,7 +28,7 @@ export const participantsService = {
    */
   list: async (conferenceId: string) => {
     const response = await apiV2.get<ParticipantResponse[]>(
-      `/conferences/${conferenceId}/participants`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants`,
     );
     return response.data;
   },
@@ -38,7 +38,7 @@ export const participantsService = {
    */
   me: async (conferenceId: string) => {
     const response = await apiV2.get<ParticipantResponse>(
-      `/conferences/${conferenceId}/participants/me`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/me`,
     );
     return response.data;
   },
@@ -52,7 +52,7 @@ export const participantsService = {
    */
   waitingRoom: async (conferenceId: string) => {
     const response = await apiV2.get<WaitingRoomResponse>(
-      `/conferences/${conferenceId}/waiting-room`,
+      `/conferences/${encodeURIComponent(conferenceId)}/waiting-room`,
     );
     return response.data;
   },
@@ -62,7 +62,7 @@ export const participantsService = {
    */
   admit: async (conferenceId: string, data: AdmitRequest) => {
     const response = await apiV2.post<BulkAdmissionResponse>(
-      `/conferences/${conferenceId}/waiting-room/admit`,
+      `/conferences/${encodeURIComponent(conferenceId)}/waiting-room/admit`,
       data,
     );
     return response.data;
@@ -73,7 +73,7 @@ export const participantsService = {
    */
   deny: async (conferenceId: string, data: DenyRequest) => {
     const response = await apiV2.post<BulkAdmissionResponse>(
-      `/conferences/${conferenceId}/waiting-room/deny`,
+      `/conferences/${encodeURIComponent(conferenceId)}/waiting-room/deny`,
       data,
     );
     return response.data;
@@ -84,7 +84,7 @@ export const participantsService = {
    */
   returnToWaiting: async (conferenceId: string, participantId: string) => {
     const response = await apiV2.post<ParticipantResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/return-to-waiting`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/return-to-waiting`,
     );
     return response.data;
   },
@@ -102,7 +102,7 @@ export const participantsService = {
     data: RoleChangeRequest,
   ) => {
     const response = await apiV2.patch<ParticipantResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/role`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/role`,
       data,
     );
     return response.data;
@@ -121,7 +121,7 @@ export const participantsService = {
     data?: RemoveParticipantRequest,
   ) => {
     const response = await apiV2.post<ModerationResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/remove`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/remove`,
       data ?? {},
     );
     return response.data;
@@ -136,7 +136,7 @@ export const participantsService = {
     data?: BanParticipantRequest,
   ) => {
     const response = await apiV2.post<ModerationResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/ban`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/ban`,
       data ?? {},
     );
     return response.data;
@@ -151,7 +151,7 @@ export const participantsService = {
     data: MuteRequest,
   ) => {
     const response = await apiV2.post<MuteResponse>(
-      `/conferences/${conferenceId}/participants/${participantId}/mute`,
+      `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/mute`,
       data,
     );
     return response.data;

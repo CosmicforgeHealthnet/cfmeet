@@ -4,7 +4,8 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { spacesService } from "@/services/v2";
+import { spacesService } from "@/services/v2/spaces.service";
+import { isAxiosError } from "axios";
 import type {
   CreateMeetingSpaceRequest,
   UpdateMeetingSpaceRequest,
@@ -71,7 +72,13 @@ export function useResolveSpace(identifier: string) {
 export function useSpaceRecurrence(spaceId: string) {
   return useQuery({
     queryKey: spaceKeys.recurrence(spaceId),
-    queryFn: () => spacesService.getRecurrence(spaceId),
+    queryFn: async () => {
+      try { return await spacesService.getRecurrence(spaceId); }
+      catch (error) {
+        if (isAxiosError(error) && error.response?.status === 404 && error.response.data?.error?.code === "MEETING_NOT_FOUND") return null;
+        throw error;
+      }
+    },
     enabled: !!spaceId,
   });
 }
@@ -117,6 +124,7 @@ export function useUpdateSpace(id: string) {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
 }
 
@@ -133,6 +141,7 @@ export function useArchiveSpace() {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
 }
 
@@ -164,6 +173,7 @@ export function useTransferOwnership(id: string) {
       queryClient.setQueryData(spaceKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: spaceKeys.all }),
   });
 }
 
@@ -190,8 +200,8 @@ export function useSetRecurrence(spaceId: string) {
   return useMutation({
     mutationFn: (data: SetRecurrenceRequest) =>
       spacesService.setRecurrence(spaceId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: spaceKeys.recurrence(spaceId) });
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: spaceKeys.all }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] })]);
     },
   });
 }
@@ -204,8 +214,8 @@ export function useDeleteRecurrence(spaceId: string) {
 
   return useMutation({
     mutationFn: () => spacesService.deleteRecurrence(spaceId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: spaceKeys.recurrence(spaceId) });
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: spaceKeys.all }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] })]);
     },
   });
 }
@@ -219,8 +229,8 @@ export function useSetException(spaceId: string) {
   return useMutation({
     mutationFn: (data: RecurrenceExceptionRequest) =>
       spacesService.setException(spaceId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: spaceKeys.exceptions(spaceId) });
+    onSettled: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: spaceKeys.all }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] })]);
     },
   });
 }

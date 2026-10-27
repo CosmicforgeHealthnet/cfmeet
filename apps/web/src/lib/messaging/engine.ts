@@ -17,10 +17,12 @@
  * text is only ever rendered as text.
  */
 import { MessagingRealtimeTransport } from "@/services/messaging-realtime";
-import { messagingTokenProvider } from "@/services/messaging-session";
-import { cookieStore } from "@/store";
+import { messagingClientAccessToken } from "@/services/messaging-session";
 
-import { b64u, identityApi, MessagingApiError, relay, type Colleague, type MessagingIdentity } from "./api";
+import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
+import { b64u } from "./api";
+import { MessagingApiError } from "./errors";
+import type { Colleague, MessagingIdentity } from "@/types/messaging";
 import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
@@ -74,6 +76,7 @@ export type EngineSnapshot = {
   names: Record<string, string>;
   incomingTransfers: IncomingTransfer[];
   ktPinned: boolean;
+  sessionsPaused: boolean;
 };
 
 type ServerConversation = {
@@ -110,7 +113,6 @@ const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS)
 /** How often a member device checks an encrypted group for members' new devices. */
 const DEVICE_CHECK_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_DEVICE_CHECK_MS) || 30_000);
 const MESSAGING_URL = process.env.NEXT_PUBLIC_MESSAGING_URL ?? "";
-const API_V1_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const KT_LOG_KEY = process.env.NEXT_PUBLIC_MESSAGING_KT_LOG_KEY ?? "";
 const KT_LOG_ID = process.env.NEXT_PUBLIC_MESSAGING_KT_LOG_ID ?? "";
 const ATTACHMENT_FORMAT = "CFMEET_ATTACHMENT_XCHACHA20POLY1305_STREAM_V1";
@@ -155,6 +157,7 @@ export class MessagingEngine {
     names: {},
     incomingTransfers: [],
     ktPinned: Boolean(KT_LOG_KEY && KT_LOG_ID),
+    sessionsPaused: false,
   };
   private readonly listeners = new Set<() => void>();
   private crypto: CryptoClient | null = null;
@@ -377,6 +380,26 @@ export class MessagingEngine {
     await this.onDeviceRevoked("This device was removed. Its local keys and history were erased.");
   }
 
+  /** Revoke existing client sessions without deleting any device's encryption keys. */
+  async revokeAllSessions(): Promise<number> {
+    if (this.stopped) return 0;
+    this.set({ sessionsPaused: true, connection: "disconnected" });
+    this.detachTransport();
+    try {
+      return (await identityApi.revokeAllSessions()).revokedSessions;
+    } catch (error) {
+      this.set({ sessionsPaused: false });
+      this.connect();
+      throw error;
+    }
+  }
+
+  resumeSession(): void {
+    if (this.stopped || this.snapshot.phase !== "ready") return;
+    this.set({ sessionsPaused: false });
+    this.connect();
+  }
+
   private async onDeviceRevoked(detail = "This browser's messaging device was revoked. Its local keys and history were erased."): Promise<void> {
     if (this.stopped) return;
     this.detachTransport();
@@ -409,6 +432,7 @@ export class MessagingEngine {
   // -------------------------------------------------------------- realtime
 
   private connect(): void {
+    if (this.snapshot.sessionsPaused) return;
     const deviceId = this.snapshot.deviceId;
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       this.set({ connection: "offline" });
@@ -421,7 +445,7 @@ export class MessagingEngine {
     this.detachTransport();
     const transport = new MessagingRealtimeTransport({
       baseUrl: MESSAGING_URL,
-      getAccessToken: messagingTokenProvider({ meetingApiV1Url: API_V1_URL, getLoginToken: () => cookieStore.getAccessToken() ?? null, deviceId }),
+      getAccessToken: async () => messagingClientAccessToken(await identityApi.clientToken(deviceId), deviceId),
       onEvent: (event) => {
         this.scheduleSync(event.conversationId);
       },

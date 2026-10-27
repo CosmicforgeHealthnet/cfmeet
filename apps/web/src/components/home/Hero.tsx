@@ -3,8 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import JoinMeetingInput from "@/components/layout/JoinMeetingInput";
 
 const slides = [
@@ -172,15 +170,9 @@ const Hero = () => {
         ))}
       </div>
 
-      <Link href="/signup">
-        <Button size="lg" className="mb-8 sm:mb-12">
-          Sign Up
-        </Button>
-      </Link>
-
       {/* Join Link Input */}
       <JoinMeetingInput
-        className="max-w-xs sm:max-w-md mb-6 sm:mb-12"
+        className="mx-auto max-w-xs sm:max-w-md mb-6 sm:mb-12"
         inputClassName="border-primary focus:ring-primary/30 text-sm sm:text-base"
         buttonClassName="px-5 sm:px-8"
       />

@@ -89,22 +89,22 @@ export function messagingTokenProvider(options: MessagingSessionOptions): () => 
     } catch {
       throw new MessagingSessionError("Invalid Messaging session response");
     }
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new MessagingSessionError("Invalid Messaging session response");
-    }
-    const data = body as Record<string, unknown>;
-    if (data.tokenType !== "CF-Client-Token" ||
-        typeof data.token !== "string" || !data.token || data.token.length > 2048 ||
-        typeof data.deviceId !== "string" ||
-        data.deviceId.toLowerCase() !== options.deviceId.toLowerCase() ||
-        typeof data.sessionId !== "string" || !UUID.test(data.sessionId) ||
-        typeof data.expiresAt !== "string" || !(Date.parse(data.expiresAt) > Date.now())) {
-      throw new MessagingSessionError("Invalid or expired device-bound Messaging session");
-    }
-    return {
-      token: data.token,
-      tokenType: "CF-Client-Token",
-      expiresAt: data.expiresAt,
-    };
+    return messagingClientAccessToken(body, options.deviceId);
   };
+}
+
+/** Validate bridge answers before handing a credential to the realtime transport. */
+export function messagingClientAccessToken(body: unknown, deviceId: string): MessagingAccessToken {
+  if (!UUID.test(deviceId) || !body || typeof body !== "object" || Array.isArray(body)) {
+    throw new MessagingSessionError("Invalid Messaging session response");
+  }
+  const data = body as Record<string, unknown>;
+  if (data.tokenType !== "CF-Client-Token" ||
+    typeof data.token !== "string" || !data.token || data.token.length > 2048 ||
+    typeof data.deviceId !== "string" || data.deviceId.toLowerCase() !== deviceId.toLowerCase() ||
+    typeof data.sessionId !== "string" || !UUID.test(data.sessionId) ||
+    typeof data.expiresAt !== "string" || !(Date.parse(data.expiresAt) > Date.now())) {
+    throw new MessagingSessionError("Invalid or expired device-bound Messaging session");
+  }
+  return { token: data.token, tokenType: "CF-Client-Token", expiresAt: data.expiresAt };
 }

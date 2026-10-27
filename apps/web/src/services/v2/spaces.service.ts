@@ -3,7 +3,7 @@
  * Handles all meeting space CRUD operations
  */
 
-import apiV2, { publicApiV2 } from "./api";
+import apiV2 from "./api";
 import type {
   MeetingSpaceResponse,
   MeetingSpaceListResponse,
@@ -37,7 +37,7 @@ export const spacesService = {
    * Get a single meeting space by ID
    */
   get: async (id: string) => {
-    const response = await apiV2.get<MeetingSpaceResponse>(`/meeting-spaces/${id}`);
+    const response = await apiV2.get<MeetingSpaceResponse>(`/meeting-spaces/${encodeURIComponent(id)}`);
     return response.data;
   },
 
@@ -63,7 +63,7 @@ export const spacesService = {
   archive: async (id: string, version?: number) => {
     const response = await apiV2.post<MeetingSpaceResponse>(
       `/meeting-spaces/${id}/archive`,
-      version ? { version } : {},
+      version !== undefined ? { version } : {},
     );
     return response.data;
   },
@@ -113,7 +113,7 @@ export const spacesService = {
    * Resolve any meeting identifier (code, ID, legacy) to a meeting space
    */
   resolve: async (identifier: string) => {
-    const response = await publicApiV2.get<ResolveResponse>(`/resolve/${identifier}`);
+    const response = await apiV2.get<ResolveResponse>(`/resolve/${encodeURIComponent(identifier)}`);
     return response.data;
   },
 
@@ -146,7 +146,7 @@ export const spacesService = {
    * Delete recurrence rule
    */
   deleteRecurrence: async (spaceId: string) => {
-    const response = await apiV2.delete<{ deleted: boolean }>(
+    const response = await apiV2.delete<void>(
       `/meeting-spaces/${spaceId}/recurrence`,
     );
     return response.data;

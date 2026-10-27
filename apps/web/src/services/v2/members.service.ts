@@ -17,7 +17,7 @@ export const membersService = {
    */
   list: async (spaceId: string) => {
     const response = await apiV2.get<MemberListResponse>(
-      `/meeting-spaces/${spaceId}/members`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/members`,
     );
     return response.data;
   },
@@ -27,7 +27,7 @@ export const membersService = {
    */
   add: async (spaceId: string, data: AddMemberRequest) => {
     const response = await apiV2.post<MemberResponse>(
-      `/meeting-spaces/${spaceId}/members`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/members`,
       data,
     );
     return response.data;
@@ -38,7 +38,7 @@ export const membersService = {
    */
   update: async (spaceId: string, memberId: string, data: UpdateMemberRequest) => {
     const response = await apiV2.patch<MemberResponse>(
-      `/meeting-spaces/${spaceId}/members/${memberId}`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(memberId)}`,
       data,
     );
     return response.data;
@@ -49,7 +49,7 @@ export const membersService = {
    */
   revoke: async (spaceId: string, memberId: string) => {
     const response = await apiV2.delete<MemberResponse>(
-      `/meeting-spaces/${spaceId}/members/${memberId}`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(memberId)}`,
     );
     return response.data;
   },

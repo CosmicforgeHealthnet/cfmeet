@@ -8,7 +8,7 @@ import { cookieStore, storageStore } from "@/store";
 
 const V2_BASE_URL = process.env.NEXT_PUBLIC_API_URL
   ? process.env.NEXT_PUBLIC_API_URL.replace("/api/v1", "/api/v2")
-  : "http://localhost:3001/api/v2";
+  : "http://localhost:8080/api/v2";
 
 // Public V2 API instance (no auth interceptors)
 export const publicApiV2 = axios.create({
@@ -31,15 +31,20 @@ apiV2.interceptors.request.use(
   (config) => {
     const accessToken = cookieStore.getAccessToken();
     const participantToken = storageStore.getParticipantToken?.();
+    const boundConference = storageStore.getV2JoinData?.<{ conference?: { id?: string } }>()?.conference?.id;
+    const conferencePath = config.url?.match(/^\/conferences\/([^/]+)(?:\/|$)/)?.[1];
+    const tokenMatchesScope = !boundConference || conferencePath === encodeURIComponent(boundConference);
 
     if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
     }
 
     // For participant-scoped requests, add the X-Participant-Token header
-    if (participantToken) {
+    const accountOperation = /^\/(meeting-spaces(?:\/|$)|instant-meetings(?:\/|$)|resolve\/)/.test(config.url ?? "");
+    if (participantToken && !accountOperation && tokenMatchesScope) {
       config.headers["X-Participant-Token"] = participantToken;
     }
+    if (accountOperation) delete config.headers["X-Participant-Token"];
 
     return config;
   },
@@ -76,12 +81,14 @@ apiV2.interceptors.response.use(
 
     if (
       error.response?.status !== 401 ||
+      !originalRequest ||
       originalRequest._retry ||
       isAuthEndpoint
     ) {
       return Promise.reject(error);
     }
 
+    originalRequest._retry = true;
     if (isRefreshing) {
       return new Promise((resolve, reject) => {
         failedQueue.push({

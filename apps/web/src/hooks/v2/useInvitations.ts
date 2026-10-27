@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { invitationsService } from "@/services/v2";
+import { invitationsService } from "@/services/v2/invitations.service";
 import type { CreateInvitationRequest } from "@/types/v2";
 
 // Query Keys
@@ -12,7 +12,6 @@ export const invitationKeys = {
   all: ["v2", "invitations"] as const,
   lists: () => [...invitationKeys.all, "list"] as const,
   list: (spaceId: string) => [...invitationKeys.lists(), spaceId] as const,
-  resolve: (token: string) => [...invitationKeys.all, "resolve", token] as const,
 };
 
 // -------------------------------------------------------------------------
@@ -27,17 +26,17 @@ export function useInvitations(spaceId: string) {
     queryKey: invitationKeys.list(spaceId),
     queryFn: () => invitationsService.list(spaceId),
     enabled: !!spaceId,
+    refetchInterval: 30000,
   });
 }
 
 /**
  * Resolve an invitation token
  */
-export function useResolveInvitation(token: string) {
-  return useQuery({
-    queryKey: invitationKeys.resolve(token),
-    queryFn: () => invitationsService.resolve(token),
-    enabled: !!token,
+export function useResolveInvitation() {
+  return useMutation({
+    mutationFn: (token: string) => invitationsService.resolve(token),
+    gcTime: 0,
     retry: false,
   });
 }
@@ -53,9 +52,10 @@ export function useCreateInvitation(spaceId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    gcTime: 0,
     mutationFn: (data?: CreateInvitationRequest) =>
       invitationsService.create(spaceId, data),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: invitationKeys.list(spaceId) });
     },
   });
@@ -70,7 +70,7 @@ export function useRevokeInvitation(spaceId: string) {
   return useMutation({
     mutationFn: (invitationId: string) =>
       invitationsService.revoke(spaceId, invitationId),
-    onSuccess: () => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: invitationKeys.list(spaceId) });
     },
   });

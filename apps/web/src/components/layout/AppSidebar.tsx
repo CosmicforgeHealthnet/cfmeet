@@ -4,27 +4,12 @@ import { useState } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  Home,
-  Video,
-  Calendar,
-  MessageSquare,
-  Code2,
-  Settings,
-  ChevronRight,
-  ChevronLeft,
-} from "lucide-react";
+import { ChevronRight, ChevronLeft } from "lucide-react";
+import { dashboardNavigation } from "@/lib/dashboard-navigation";
 import ProfileMenu from "./ProfileMenu";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-const menu = [
-  { label: "Dashboard", icon: Home, href: "/dashboard" },
-  { label: "Meetings", icon: Video, href: "/dashboard/meetings" },
-  { label: "Schedule", icon: Calendar, href: "/dashboard/schedule" },
-  { label: "Messages", icon: MessageSquare, href: "/dashboard/messages" },
-  { label: "Developers", icon: Code2, href: "/dashboard/developers" },
-  { label: "Settings", icon: Settings, href: "/dashboard/settings" },
-];
+const menu = dashboardNavigation;
 
 export default function AppSidebar() {
   const router = useRouter();
@@ -94,6 +79,8 @@ export default function AppSidebar() {
           return (
             <button
               key={label}
+              title={label}
+              aria-label={label}
               onClick={() => router.push(href)}
               className={cn(
                 "relative w-full flex items-center gap-3 py-3 transition-colors",

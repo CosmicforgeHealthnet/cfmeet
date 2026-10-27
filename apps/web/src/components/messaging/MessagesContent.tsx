@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { MessagingEngine, type ConversationView, type MessageView, type SecurityProfile } from "@/lib/messaging/engine";
-import type { Colleague } from "@/lib/messaging/api";
+import { useMessagingDirectory, useMessagingDevices, useRegisterMessagingDevice, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
+import { messagingErrorMessage } from "@/lib/messaging/errors";
+import MessagingDevicesPanel from "./MessagingDevicesPanel";
 
 function useEngine(): MessagingEngine {
   // One engine per mounted page (lazy state initializer, never re-created on render).
@@ -49,7 +51,7 @@ function StatusBar({ engine }: { engine: MessagingEngine }) {
       </span>
       <span className="inline-flex items-center gap-1" data-testid="connection-state" data-connection={s.connection}>
         {connected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-        {connected ? "Live" : s.connection === "connecting" ? "Connecting…" : s.connection === "offline" ? "Live updates unavailable (refreshing periodically)" : "Reconnecting…"}
+        {s.sessionsPaused ? "Live updates paused" : connected ? "Live" : s.connection === "connecting" ? "Connecting…" : s.connection === "offline" ? "Live updates unavailable (refreshing periodically)" : "Reconnecting…"}
       </span>
       <span className="inline-flex items-center gap-1" data-testid="kt-state">
         {s.ktPinned ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
@@ -61,8 +63,17 @@ function StatusBar({ engine }: { engine: MessagingEngine }) {
 
 function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
-  const [busy, setBusy] = useState(false);
-  const [devices, setDevices] = useState<{ deviceId: string; displayLabel: string | null }[]>([]);
+  const [recovering, setRecovering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const devices = useMessagingDevices(recovering ? s.identity?.principalId ?? "" : "");
+  const registration = useRegisterMessagingDevice(engine);
+  const removal = useRemoveCurrentMessagingDevice(engine);
+  const busy = registration.isPending || removal.isPending;
+  const sources = devices.data?.devices.filter((d) => d.status === "ACTIVE" && d.deviceId !== s.deviceId) ?? [];
+  const run = async (action: () => Promise<unknown>) => {
+    setError(null);
+    try { await action(); } catch (cause) { setError(messagingErrorMessage(cause)); }
+  };
   const [transfer, setTransfer] = useState<{ code: string; state: string } | null>(null);
   if (s.phase === "loading") return null;
   if (s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering") {
@@ -73,14 +84,11 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
         <Button
           data-testid="register-device"
           disabled={busy || s.phase === "registering"}
-          onClick={async () => {
-            setBusy(true);
-            await engine.registerDevice();
-            setBusy(false);
-          }}
+          onClick={() => void run(() => registration.mutateAsync())}
         >
           {s.phase === "registering" ? <Spinner /> : null} Set up secure messaging
         </Button>
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </div>
     );
   }
@@ -93,13 +101,14 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   }
   return (
     <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {s.incomingTransfers.map((t) => (
         <div key={t.transferId} className="space-y-2 rounded-xl border border-border p-3" data-testid="incoming-transfer">
           <p className="text-sm">Another of your devices asks for your message history. Continue only if it shows this code:</p>
           <p className="font-mono text-lg tracking-widest" data-testid="incoming-code">{t.comparisonCode}</p>
           <div className="flex gap-2">
-            <Button data-testid="approve-transfer" onClick={() => void engine.approveTransfer(t.transferId)}>Codes match — send history</Button>
-            <Button variant="outline" onClick={() => void engine.declineTransfer(t.transferId)}>Decline</Button>
+            <Button data-testid="approve-transfer" onClick={() => void run(() => engine.approveTransfer(t.transferId))}>Codes match — send history</Button>
+            <Button variant="outline" onClick={() => void run(() => engine.declineTransfer(t.transferId))}>Decline</Button>
           </div>
         </div>
       ))}
@@ -108,23 +117,27 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
           variant="outline"
           size="sm"
           data-testid="recover-history"
-          onClick={async () => setDevices(await engine.otherDevices())}
+          onClick={() => setRecovering(!recovering)}
+          aria-expanded={recovering}
         >
           <History className="h-4 w-4" /> Recover history from another device
         </Button>
-        <Button variant="outline" size="sm" data-testid="remove-device" onClick={() => void engine.removeThisDevice()}>
+        <Button variant="outline" size="sm" disabled={busy} data-testid="remove-device" onClick={() => void run(() => removal.mutateAsync())}>
           Remove this device
         </Button>
       </div>
-      {devices.length > 0 && !transfer ? (
+      {recovering && devices.isPending ? <p className="text-sm text-muted-foreground">Loading your other devices…</p> : null}
+      {recovering && devices.error ? <p role="alert" className="text-sm text-destructive">{messagingErrorMessage(devices.error)} <button className="underline" onClick={() => void devices.refetch()}>Retry</button></p> : null}
+      {recovering && devices.isSuccess && sources.length === 0 ? <p className="text-sm text-muted-foreground">No other active devices to recover history from.</p> : null}
+      {recovering && sources.length > 0 && !transfer ? (
         <ul className="space-y-1">
-          {devices.map((d) => (
+          {sources.map((d) => (
             <li key={d.deviceId}>
               <Button
                 variant="ghost"
                 size="sm"
                 data-testid="transfer-source"
-                onClick={async () => {
+                onClick={() => void run(async () => {
                   const r = await engine.requestHistory(d.deviceId);
                   setTransfer({ code: r.comparisonCode, state: "waiting" });
                   try {
@@ -133,7 +146,7 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
                   } catch (e) {
                     setTransfer({ code: r.comparisonCode, state: `failed: ${e instanceof Error ? e.message : "error"}` });
                   }
-                }}
+                })}
               >
                 {d.displayLabel ?? "Device"} · {d.deviceId.slice(0, 8)}
               </Button>
@@ -155,17 +168,16 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
 function NewConversation({ engine, onCreated }: { engine: MessagingEngine; onCreated: (id: string) => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [open, setOpen] = useState(false);
-  const [people, setPeople] = useState<Colleague[]>([]);
+  const [search, setSearch] = useState("");
+  const directory = useMessagingDirectory(search, open && !!s.identity);
+  const people = directory.data?.people ?? [];
   const [chosen, setChosen] = useState<string[]>([]);
   const [profile, setProfile] = useState<SecurityProfile>("PRIVATE_E2EE");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open) void engine.directory().then(setPeople).catch(() => setPeople([]));
-  }, [open, engine]);
   if (!open) {
     return (
-      <Button size="sm" data-testid="new-conversation" onClick={() => setOpen(true)}>
+      <Button size="sm" data-testid="new-conversation" disabled={!s.identity} onClick={() => setOpen(true)}>
         <UserPlus className="h-4 w-4" /> New conversation
       </Button>
     );
@@ -173,7 +185,8 @@ function NewConversation({ engine, onCreated }: { engine: MessagingEngine; onCre
   return (
     <div className="space-y-2 rounded-xl border border-border p-3" data-testid="new-conversation-form">
       <p className="text-sm font-medium">Colleagues in your organizations</p>
-      {people.length === 0 ? <p className="text-xs text-muted-foreground">No colleagues found.</p> : null}
+      <Input aria-label="Search colleagues" placeholder="Search colleagues" maxLength={64} value={search} onChange={(event) => setSearch(event.target.value)} />
+      {directory.isPending ? <p className="text-xs text-muted-foreground">Loading colleagues…</p> : directory.error ? <p role="alert" className="text-xs text-destructive">{messagingErrorMessage(directory.error)} <button className="underline" onClick={() => void directory.refetch()}>Retry</button></p> : people.length === 0 ? <p className="text-xs text-muted-foreground">No colleagues found.</p> : null}
       <ul className="max-h-40 space-y-1 overflow-auto">
         {people.map((p) => (
           <li key={p.userId}>
@@ -205,7 +218,7 @@ function NewConversation({ engine, onCreated }: { engine: MessagingEngine; onCre
         <Button
           size="sm"
           data-testid="create-conversation"
-          disabled={busy || chosen.length === 0}
+          disabled={busy || chosen.length === 0 || (profile === "PRIVATE_E2EE" && s.phase !== "ready")}
           onClick={async () => {
             setBusy(true);
             setError(null);
@@ -214,7 +227,7 @@ function NewConversation({ engine, onCreated }: { engine: MessagingEngine; onCre
               setOpen(false);
               setChosen([]);
             } catch (e) {
-              setError(e instanceof Error ? e.message : "Could not create the conversation");
+              setError(messagingErrorMessage(e));
             } finally {
               setBusy(false);
             }
@@ -258,12 +271,17 @@ function ConversationPane({ engine, conversation }: { engine: MessagingEngine; c
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [text, setText] = useState("");
   const [members, setMembers] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
   const e2ee = conversation.securityProfile === "PRIVATE_E2EE";
-  const canSend = !e2ee || (s.phase === "ready" && conversation.groupReady);
+  const canSend = !!s.identity && (!e2ee || (s.phase === "ready" && conversation.groupReady));
   useEffect(() => {
-    void engine.sync(conversation.id).then(() => engine.markRead(conversation.id));
+    let active = true;
+    void engine.sync(conversation.id).then(() => engine.markRead(conversation.id)).catch((cause) => {
+      if (active) setError(messagingErrorMessage(cause));
+    });
+    return () => { active = false; };
   }, [engine, conversation.id]);
   const download = useCallback(
     async (m: MessageView) => {
@@ -295,7 +313,10 @@ function ConversationPane({ engine, conversation }: { engine: MessagingEngine; c
             <li key={p} className="flex items-center justify-between">
               <span>{p === s.identity?.principalId ? "You" : s.names[p] ?? "CF Meet user"}</span>
               {p !== s.identity?.principalId ? (
-                <Button variant="ghost" size="sm" data-testid="remove-member" onClick={() => void engine.removeMember(conversation.id, p)}>
+                <Button variant="ghost" size="sm" data-testid="remove-member" onClick={() => {
+                  setError(null);
+                  void engine.removeMember(conversation.id, p).catch((cause) => setError(messagingErrorMessage(cause)));
+                }}>
                   Remove
                 </Button>
               ) : null}
@@ -310,16 +331,24 @@ function ConversationPane({ engine, conversation }: { engine: MessagingEngine; c
       ) : null}
       <ol className="flex-1 space-y-2 overflow-y-auto p-3" data-testid="messages">
         {messages.map((m) => (
-          <MessageBubble key={m.key} m={m} name={(m.senderPrincipalId && s.names[m.senderPrincipalId]) || "CF Meet user"} onDownload={() => void download(m)} />
+          <MessageBubble key={m.key} m={m} name={(m.senderPrincipalId && s.names[m.senderPrincipalId]) || "CF Meet user"} onDownload={() => {
+            setError(null);
+            void download(m).catch((cause) => setError(messagingErrorMessage(cause)));
+          }} />
         ))}
       </ol>
+      {error ? <p role="alert" className="px-3 pb-2 text-sm text-destructive">{error}</p> : null}
       <form
         className="flex items-center gap-2 border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
           const t = text;
           setText("");
-          void engine.send(conversation.id, t);
+          setError(null);
+          void engine.send(conversation.id, t).catch((cause) => {
+            setText((draft) => draft || t);
+            setError(messagingErrorMessage(cause));
+          });
         }}
       >
         <input
@@ -329,7 +358,10 @@ function ConversationPane({ engine, conversation }: { engine: MessagingEngine; c
           data-testid="file-input"
           onChange={(e) => {
             const f = e.target.files?.[0];
-            if (f) void engine.sendFile(conversation.id, f);
+            if (f) {
+              setError(null);
+              void engine.sendFile(conversation.id, f).catch((cause) => setError(messagingErrorMessage(cause)));
+            }
             e.target.value = "";
           }}
         />
@@ -357,6 +389,7 @@ export default function MessagesContent() {
         <StatusBar engine={engine} />
       </div>
       <DevicePanel engine={engine} />
+      <MessagingDevicesPanel engine={engine} />
       {s.phase === "loading" ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> Loading…
