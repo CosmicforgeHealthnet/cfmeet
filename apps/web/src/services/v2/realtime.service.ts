@@ -16,7 +16,7 @@ export const realtimeService = {
    */
   getTicket: async (conferenceId: string) => {
     const response = await apiV2.post<RealtimeTicketResponse>(
-      `/conferences/${conferenceId}/realtime/ticket`,
+      `/conferences/${encodeURIComponent(conferenceId)}/realtime/ticket`,
     );
     return response.data;
   },
@@ -26,7 +26,7 @@ export const realtimeService = {
    */
   getEvents: async (conferenceId: string, query?: EventReplayQuery) => {
     const response = await apiV2.get<EventReplayResponse>(
-      `/conferences/${conferenceId}/events`,
+      `/conferences/${encodeURIComponent(conferenceId)}/events`,
       { params: query },
     );
     return response.data;
@@ -36,20 +36,15 @@ export const realtimeService = {
    * Create a WebSocket connection for realtime events
    */
   createWebSocket: (
-    conferenceId: string,
+    websocketPath: string,
     ticket: string,
     cursor?: number,
   ): WebSocket => {
     const baseUrl = apiV2.defaults.baseURL || "";
-    const wsUrl = baseUrl
-      .replace("https://", "wss://")
-      .replace("http://", "ws://");
-
-    const params = new URLSearchParams({ ticket });
-    if (cursor !== undefined) {
-      params.set("cursor", cursor.toString());
-    }
-
-    return new WebSocket(`${wsUrl}/conferences/${conferenceId}/realtime?${params}`);
+    const wsUrl = new URL(websocketPath, baseUrl);
+    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+    wsUrl.searchParams.set("ticket", ticket);
+    if (cursor !== undefined) wsUrl.searchParams.set("cursor", cursor.toString());
+    return new WebSocket(wsUrl);
   },
 };

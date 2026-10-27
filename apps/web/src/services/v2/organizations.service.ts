@@ -49,7 +49,7 @@ export const organizationsService = {
    */
   listMembers: async (orgId: string) => {
     const response = await apiV2.get<OrganizationMemberResponse[]>(
-      `/organizations/${orgId}/members`,
+      `/organizations/${encodeURIComponent(orgId)}/members`,
     );
     return response.data;
   },
@@ -63,7 +63,7 @@ export const organizationsService = {
     data: UpsertOrganizationMemberRequest,
   ) => {
     const response = await apiV2.put<OrganizationMemberResponse>(
-      `/organizations/${orgId}/members/${userId}`,
+      `/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
       data,
     );
     return response.data;

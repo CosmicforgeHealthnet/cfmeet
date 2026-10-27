@@ -11,6 +11,7 @@ export * from "./useConferences";
 
 // Members
 export * from "./useMembers";
+export * from "./useOrganizations";
 
 // Invitations
 export * from "./useInvitations";

@@ -16,6 +16,8 @@ export function invitationAvailability(inv: Pick<InvitationResponse, "status" | 
 }
 export type MeetingPermission =
   | "participant.admit"
+  | "participant.deny"
+  | "participant.return_to_waiting"
   | "participant.remove"
   | "participant.ban"
   | "participant.mute"
@@ -36,6 +38,8 @@ export function meetingAllows(role: Role | undefined, permission: MeetingPermiss
   if (role === "CO_HOST") {
     if ([
       "participant.admit",
+      "participant.deny",
+      "participant.return_to_waiting",
       "participant.remove",
       "participant.mute",
       "participant.audio_lock",
@@ -54,6 +58,9 @@ export function meetingAllows(role: Role | undefined, permission: MeetingPermiss
   if (role === "MODERATOR") {
     if (permission === "participant.remove") return true;
     if (permission === "cohost.assign") return false;
+    if (permission === "participant.deny" || permission === "participant.return_to_waiting") {
+      return policy?.overrides?.[role]?.[permission] ?? true;
+    }
     if (["participant.audio_lock", "participant.video_lock", "participant.screen_share_stop", "participant.spotlight", "hand.lower_other", "conference.configure_live"].includes(permission)) {
       return policy?.overrides?.[role]?.[permission] ?? true;
     }

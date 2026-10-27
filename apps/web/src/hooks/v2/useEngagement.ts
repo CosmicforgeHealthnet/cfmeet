@@ -55,12 +55,12 @@ export function usePoll(conferenceId: string, pollId: string) {
 /**
  * Get poll results
  */
-export function usePollResults(conferenceId: string, pollId: string) {
+export function usePollResults(conferenceId: string, pollId: string, enabled = true) {
   return useQuery({
     queryKey: engagementKeys.pollResults(conferenceId, pollId),
     queryFn: () => engagementService.getPollResults(conferenceId, pollId),
-    enabled: !!conferenceId && !!pollId,
-    refetchInterval: 2000,
+    enabled: !!conferenceId && !!pollId && enabled,
+    refetchInterval: enabled ? 3000 : false,
   });
 }
 
@@ -144,6 +144,9 @@ export function useSubmitPollResponse(conferenceId: string, pollId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: engagementKeys.pollResults(conferenceId, pollId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: engagementKeys.polls(conferenceId),
       });
     },
   });

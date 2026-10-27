@@ -29,6 +29,7 @@ import { cookieStore, storageStore } from "@/store";
 import { conferencesService } from "@/services/v2/conferences.service";
 import ConferenceControls from "./conference-controls";
 import { useQueryClient } from "@tanstack/react-query";
+import RealtimeRoomSync from "./RealtimeRoomSync";
 
 // Notification type for participant events
 interface ParticipantNotification {
@@ -155,6 +156,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
           }
         }}
       >
+        {joinData.conference_id && <RealtimeRoomSync conferenceId={joinData.conference_id} />}
         {joinData.conference_id ? <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} /> : <ChatProvider meetingId={joinData.meeting_id} participantId={joinData.participant_id}>
           <RoomContent
             joinData={joinData}

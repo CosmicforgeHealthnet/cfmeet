@@ -102,9 +102,11 @@ export type ArtifactStatus = "REQUESTED" | "PROCESSING" | "READY" | "FAILED" | "
 
 export type PollStatus = "DRAFT" | "OPEN" | "CLOSED" | "ARCHIVED";
 
-export type PollType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "QUIZ";
+export type PollType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_TEXT" | "LONG_TEXT" | "RATING" | "RANKING";
 
-export type QuestionStatus = "PENDING" | "ANSWERED" | "DISMISSED" | "ARCHIVED";
+export type ResultsVisibility = "HOST_ONLY" | "AFTER_VOTE" | "AFTER_CLOSE";
+
+export type QuestionStatus = "OPEN" | "ANSWERED" | "DISMISSED" | "ARCHIVED";
 
 // ---------------------------------------------------------------------------
 // Meeting Spaces
@@ -525,9 +527,11 @@ export interface JoinPolicy {
 }
 
 export interface MediaContextView {
-  roomType: "MAIN" | "BREAKOUT";
-  breakoutId?: string;
+  kind?: "MAIN" | "BREAKOUT" | "BACKSTAGE";
+  roomType?: "MAIN" | "BREAKOUT";
+  breakoutId?: string | null;
   breakoutName?: string;
+  visit?: boolean;
 }
 
 export interface JoinRealtimeInfo {
@@ -785,27 +789,26 @@ export interface MessageListQuery {
 export interface MessageView {
   id: string;
   conferenceId: string;
-  senderId: string;
+  breakoutId?: string | null;
+  senderParticipantId: string;
   senderDisplayName: string;
-  content: string;
-  scope: string;
-  breakoutId?: string;
-  recipientId?: string;
+  recipientParticipantId?: string | null;
+  kind: "MESSAGE" | "ANNOUNCEMENT" | "BREAKOUT_ANNOUNCEMENT";
+  body?: string | null;
+  deleted: boolean;
   createdAt: string;
-  deletedAt?: string;
 }
 
 export interface MessagePage {
   messages: MessageView[];
-  hasMore: boolean;
-  cursor?: string;
+  nextCursor?: string | null;
 }
 
 export interface SendMessageRequest {
-  content: string;
-  scope?: "MAIN" | "BREAKOUT" | "PRIVATE";
+  body: string;
   breakoutId?: string;
-  recipientId?: string;
+  recipientParticipantId?: string;
+  announcement?: boolean;
 }
 
 export interface ChatPolicyUpdateRequest {
@@ -853,13 +856,16 @@ export interface BreakoutView {
   id: string;
   conferenceId: string;
   name: string;
-  displayOrder: number;
-  status: "PENDING" | "OPEN" | "CLOSING" | "CLOSED";
+  position: number;
+  status: "CREATED" | "OPEN" | "CLOSING" | "CLOSED";
+  capacity?: number | null;
+  recordingPolicy: string;
   participantCount: number;
-  assignedParticipants?: string[];
+  participantIds?: string[];
   openedAt?: string;
-  closingAt?: string;
+  closingAt?: string | null;
   closedAt?: string;
+  version: number;
 }
 
 export interface BreakoutListResponse {
@@ -870,7 +876,8 @@ export interface BreakoutListResponse {
 export interface CreateBreakoutsRequest {
   names?: string[];
   count?: number;
-  autoOpen?: boolean;
+  capacity?: number;
+  recordingPolicy?: "INHERIT_MAIN_POLICY" | "DISABLED" | "SEPARATE_ALLOWED";
 }
 
 export interface BreakoutListCreatedResponse {
@@ -878,18 +885,23 @@ export interface BreakoutListCreatedResponse {
 }
 
 export interface AssignBreakoutsRequest {
-  mode: "MANUAL" | "RANDOM" | "BALANCED";
-  assignments?: Record<string, string[]>;
+  mode?: "MANUAL" | "RANDOM" | "BALANCED";
+  assignments?: { participantId: string; breakoutId: string }[];
+  breakoutIds?: string[];
+  includeHosts?: boolean;
+  includeViewers?: boolean;
+  onlyUnassigned?: boolean;
 }
 
 export interface AssignmentResult {
-  assignments: Record<string, string[]>;
-  moved: number;
+  assigned: { participantId: string; breakoutId: string }[];
+  unassigned: string[];
+  enforcement: string;
 }
 
 export interface MoveParticipantRequest {
   participantId: string;
-  targetBreakoutId?: string;
+  toBreakoutId: string | null;
 }
 
 export interface MediaContextResponse {
@@ -931,35 +943,58 @@ export interface CloseBreakoutsResponse {
 // Polls
 // ---------------------------------------------------------------------------
 
+export type PollQuestionType = PollType;
+
 export interface PollOption {
   id: string;
-  text: string;
-  isCorrect?: boolean;
+  label: string;
+}
+
+export interface PollQuestionInput {
+  type: PollQuestionType;
+  prompt: string;
+  options?: string[];
+  required?: boolean;
+  minSelections?: number;
+  maxSelections?: number;
+  maxLength?: number;
+  ratingMin?: number;
+  ratingMax?: number;
+  correct?: number[];
+  points?: number;
 }
 
 export interface CreatePollRequest {
-  pollType: PollType;
-  question: string;
-  options: Omit<PollOption, "id">[];
-  allowMultiple?: boolean;
-  showResultsMode?: "ALWAYS" | "AFTER_CLOSE" | "NEVER";
-  isAnonymous?: boolean;
+  title: string;
+  questions: PollQuestionInput[];
+  anonymous?: boolean;
+  quizMode?: boolean;
+  resultsVisibility?: ResultsVisibility;
+}
+
+export interface PollQuestion extends Omit<PollQuestionInput, "correct" | "options"> {
+  id: string;
+  options: PollOption[];
+  correct?: string[];
+  points?: number;
 }
 
 export interface PollView {
   id: string;
   conferenceId: string;
-  pollType: PollType;
-  question: string;
-  options: PollOption[];
+  title: string;
   status: PollStatus;
-  allowMultiple: boolean;
-  showResultsMode: string;
-  isAnonymous: boolean;
+  anonymous: boolean;
+  quizMode: boolean;
+  resultsVisibility: ResultsVisibility;
+  questions: PollQuestion[];
   responseCount: number;
+  hasResponded: boolean;
   createdAt: string;
-  openedAt?: string;
-  closedAt?: string;
+  openedAt?: string | null;
+  closedAt?: string | null;
+  archivedAt?: string | null;
+  version: number;
 }
 
 export interface PollListResponse {
@@ -972,29 +1007,45 @@ export interface PollTransitionResponse {
 }
 
 export interface SubmitPollResponseRequest {
-  optionIds: string[];
+  answers: {
+    questionId: string;
+    optionIds?: string[];
+    text?: string;
+    rating?: number;
+    ranking?: string[];
+  }[];
+  idempotencyKey?: string;
 }
 
 export interface PollResponseReceipt {
   pollId: string;
-  participantId: string;
-  submittedAt: string;
+  recorded: boolean;
   idempotentReplay: boolean;
+  score?: number;
+  maxScore?: number;
 }
 
-export interface PollOptionResult {
-  optionId: string;
-  text: string;
-  count: number;
-  percentage: number;
-  isCorrect?: boolean;
+export interface PollQuestionResult {
+  questionId: string;
+  type: PollQuestionType;
+  answered: number;
+  optionCounts?: Record<string, number>;
+  ratingDistribution?: Record<string, number>;
+  ratingAverage?: number;
+  averagePositions?: Record<string, number>;
+  texts?: { text: string; participantId?: string }[];
+  correct?: string[];
 }
 
 export interface PollResults {
   pollId: string;
-  totalResponses: number;
-  options: PollOptionResult[];
-  myResponse?: string[];
+  status: PollStatus;
+  anonymous: boolean;
+  responseCount: number;
+  questions: PollQuestionResult[];
+  averageScore?: number;
+  maxScore?: number;
+  myScore?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,25 +1053,26 @@ export interface PollResults {
 // ---------------------------------------------------------------------------
 
 export interface SubmitQuestionRequest {
-  content: string;
-  isAnonymous?: boolean;
+  body: string;
+  anonymous?: boolean;
 }
 
 export interface QuestionView {
   id: string;
   conferenceId: string;
-  content: string;
-  askerId?: string;
-  askerDisplayName?: string;
-  isAnonymous: boolean;
+  body: string;
+  participantId?: string;
+  displayName?: string;
+  anonymous: boolean;
   status: QuestionStatus;
-  upvotes: number;
-  hasMyVote: boolean;
-  isPinned: boolean;
-  answer?: string;
-  answeredBy?: string;
-  answeredAt?: string;
+  upvoteCount: number;
+  votedByMe: boolean;
+  isMine: boolean;
+  pinned: boolean;
+  answer?: string | null;
+  answeredAt?: string | null;
   createdAt: string;
+  version: number;
 }
 
 export interface QuestionListResponse {

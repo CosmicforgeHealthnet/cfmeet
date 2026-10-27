@@ -29,6 +29,41 @@ test("invitation availability reflects revocation, expiry and transactional use 
   assert.equal(authority.invitationAvailability({ ...invitation, status: "REVOKED" }, now), "Revoked");
 });
 
+test("waiting-room operations use conference-scoped backend routes and payloads", async () => {
+  const { participants, requests } = services();
+  await participants.waitingRoom("conference/1");
+  await participants.admit("conference/1", { participantIds: ["participant/1"] });
+  await participants.deny("conference/1", { all: true, reasonCode: "POLICY", message: "Please contact the host." });
+  const response = await participants.returnToWaiting("conference/1", "participant/2");
+  assert.deepEqual(requests.map(request => [request.method, request.url]), [
+    ["get", "/conferences/conference%2F1/waiting-room"],
+    ["post", "/conferences/conference%2F1/waiting-room/admit"],
+    ["post", "/conferences/conference%2F1/waiting-room/deny"],
+    ["post", "/conferences/conference%2F1/participants/participant%2F2/return-to-waiting"],
+  ]);
+  assert.deepEqual(JSON.parse(requests[1].data), { participantIds: ["participant/1"] });
+  assert.deepEqual(JSON.parse(requests[2].data), { all: true, reasonCode: "POLICY", message: "Please contact the host." });
+  assert.equal(response.providerEnforcement, "PENDING_PROVIDER_CONTROL");
+});
+
+test("organization and realtime services use the documented V2 routes", async () => {
+  const { organizations, realtime, requests } = services();
+  await organizations.mine();
+  await organizations.listMembers("org/1");
+  await organizations.upsertMember("org/1", "user/1", { role: "MEMBER", status: "ACTIVE" });
+  await realtime.getTicket("conference/1");
+  await realtime.getEvents("conference/1", { after: 12 });
+  assert.deepEqual(requests.map(request => [request.method, request.url]), [
+    ["get", "/me/organizations"],
+    ["get", "/organizations/org%2F1/members"],
+    ["put", "/organizations/org%2F1/members/user%2F1"],
+    ["post", "/conferences/conference%2F1/realtime/ticket"],
+    ["get", "/conferences/conference%2F1/events"],
+  ]);
+  assert.deepEqual(JSON.parse(requests[2].data), { role: "MEMBER", status: "ACTIVE" });
+  assert.deepEqual(requests[4].params, { after: 12 });
+});
+
 test("invitations respect grant authority, including delegated co-host assignment", () => {
   assert.equal(authority.invitationRoles("OWNER").includes("OWNER"), false);
   assert.equal(authority.invitationRoles("OWNER").includes("HOST"), true);
@@ -51,6 +86,10 @@ test("participant moderation excludes self, owner and equal/higher roles; policy
   assert.equal(authority.mayTarget("HOST", "PARTICIPANT", true), false);
   assert.equal(authority.mayTarget("MODERATOR", "PARTICIPANT", false), true);
   assert.equal(authority.meetingAllows("MODERATOR", "participant.remove"), true);
+  assert.equal(authority.meetingAllows("MODERATOR", "participant.deny"), true);
+  assert.equal(authority.meetingAllows("MODERATOR", "participant.return_to_waiting"), true);
+  assert.equal(authority.meetingAllows("MODERATOR", "participant.deny", { overrides: { MODERATOR: { "participant.deny": false } } }), false);
+  assert.equal(authority.meetingAllows("PRESENTER", "participant.return_to_waiting"), false);
   assert.equal(authority.meetingAllows("MODERATOR", "participant.role_change"), false);
   assert.equal(authority.meetingAllows("CO_HOST", "participant.ban"), false);
   assert.equal(authority.meetingAllows("CO_HOST", "participant.ban", { overrides: { CO_HOST: { "participant.ban": true } } }), true);
@@ -79,7 +118,13 @@ function services() {
     requests.push(config); return { config, status: 200, statusText: "OK", headers: {}, data: { providerEnforcement: "PENDING_PROVIDER_CONTROL" } };
   } });
   const dependencies = { "./api": { __esModule: true, default: make(true), publicApiV2: make(false) } };
-  return { requests, invitations: load("../src/services/v2/invitations.service.ts", dependencies).invitationsService, participants: load("../src/services/v2/participants.service.ts", dependencies).participantsService };
+  return {
+    requests,
+    invitations: load("../src/services/v2/invitations.service.ts", dependencies).invitationsService,
+    participants: load("../src/services/v2/participants.service.ts", dependencies).participantsService,
+    organizations: load("../src/services/v2/organizations.service.ts", dependencies).organizationsService,
+    realtime: load("../src/services/v2/realtime.service.ts", dependencies).realtimeService,
+  };
 }
 
 test("all invitation operations use scoped v2 routes; resolving is public and never joins", async () => {

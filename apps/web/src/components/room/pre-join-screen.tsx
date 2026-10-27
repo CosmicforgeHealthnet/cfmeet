@@ -169,6 +169,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
   const isLoadingMeeting = loadingSpace || (!!selectedId && selected.isLoading);
   const isError = spaceError || (!!selectedId && (selected.isError || (!selected.isLoading && !validSelection)));
   const preJoin = usePreJoin(resolveData?.conference?.id || "");
+  const consentRequirements = preJoin.data?.consentRequirements ?? [];
 
   // Join conference mutation (V2 API)
   const joinMutation = useJoinConference();
@@ -510,8 +511,9 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
             {(preJoin.data?.requiresPasscode || resolveData.meetingSpace.requiresPasscode) && <Input aria-label="Meeting passcode" type="password" placeholder="Meeting passcode" value={passcode} onChange={e => setPasscode(e.target.value)} />}
             {preJoin.data?.requiresInvitation && <Input aria-label="Invitation token" placeholder="Invitation token" value={invitationToken} onChange={e => setInvitationToken(e.target.value)} />}
             {preJoin.data?.requiresAuth && !cookieStore.getAccessToken() && <p className="text-sm text-muted-foreground">Sign in to join this conference.</p>}
+            {preJoin.data?.waitingRoomEnabled && <p className="text-sm text-muted-foreground">This conference uses a waiting room. A host may need to admit you before you can join.</p>}
             {preJoin.isError && <p role="alert" className="text-sm text-destructive">Could not load admission requirements. <button type="button" className="underline" onClick={() => void preJoin.refetch()}>Retry</button></p>}
-            {preJoin.data?.consentRequirements.map(item => <label key={item.consentType} className="flex items-start gap-2 text-sm"><Checkbox checked={!!consents[item.consentType]} onCheckedChange={value => setConsents(current => ({ ...current, [item.consentType]: value === true }))} /><span>{item.description || item.consentType.replaceAll("_", " ")}{item.required ? " (required)" : " (optional)"}</span></label>)}
+            {consentRequirements.map(item => <label key={item.consentType} className="flex items-start gap-2 text-sm"><Checkbox checked={!!consents[item.consentType]} onCheckedChange={value => setConsents(current => ({ ...current, [item.consentType]: value === true }))} /><span>{item.description || item.consentType.replaceAll("_", " ")}{item.required ? " (required)" : " (optional)"}</span></label>)}
             {error && (
               <p className="text-sm text-red-500 mt-2 text-center">{error}</p>
             )}
@@ -595,7 +597,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
                 size="lg"
                 className="w-full max-w-xs"
                 onClick={handleJoin}
-                disabled={joinMutation.isPending || preJoin.isLoading || preJoin.isError || !resolveData.conference || (!!preJoin.data?.requiresAuth && !cookieStore.getAccessToken()) || !!preJoin.data?.consentRequirements.some(item => item.required && !consents[item.consentType])}
+                disabled={joinMutation.isPending || preJoin.isLoading || preJoin.isError || !resolveData.conference || (!!preJoin.data?.requiresAuth && !cookieStore.getAccessToken()) || consentRequirements.some(item => item.required && !consents[item.consentType])}
               >
                 {joinMutation.isPending ? "Joining..." : "Join Meeting"}
               </Button>

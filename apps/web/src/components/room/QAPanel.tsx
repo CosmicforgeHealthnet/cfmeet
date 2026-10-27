@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import {
   useQuestions,
   useSubmitQuestion,
@@ -21,6 +22,7 @@ import {
   useUnvoteQuestion,
   useAnswerQuestion,
   useDismissQuestion,
+  useArchiveQuestion,
   usePinQuestion,
   useUnpinQuestion,
 } from "@/hooks/v2";
@@ -29,17 +31,17 @@ import type { QuestionView, QuestionStatus } from "@/types/v2";
 interface QAPanelProps {
   conferenceId: string;
   isHost: boolean;
-  participantId: string;
+  anonymousAllowed?: boolean;
   onClose: () => void;
 }
 
 export default function QAPanel({
   conferenceId,
   isHost,
-  participantId,
+  anonymousAllowed = false,
   onClose,
 }: QAPanelProps) {
-  const { data, isLoading } = useQuestions(conferenceId);
+  const { data, isLoading, isError, error, refetch } = useQuestions(conferenceId);
   const questions = data?.questions || [];
 
   const [newQuestion, setNewQuestion] = useState("");
@@ -50,16 +52,16 @@ export default function QAPanel({
 
   // Sort: pinned first, then by upvotes
   const sortedQuestions = [...questions].sort((a, b) => {
-    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-    return b.upvotes - a.upvotes;
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.upvoteCount - a.upvoteCount;
   });
 
   const handleSubmitQuestion = () => {
     if (!newQuestion.trim()) return;
     submitQuestion.mutate(
       {
-        content: newQuestion.trim(),
-        isAnonymous,
+        body: newQuestion.trim(),
+        anonymous: isAnonymous,
       },
       {
         onSuccess: () => {
@@ -84,8 +86,8 @@ export default function QAPanel({
           <X className="w-4 h-4 text-foreground" />
         </button>
       </div>
-
       {/* Question Input */}
+      {submitQuestion.isError && <div className="px-6"><RequestError error={submitQuestion.error} /></div>}
       <div className="px-6 py-4 border-b">
         <div className="flex gap-2">
           <input
@@ -103,7 +105,7 @@ export default function QAPanel({
             <Send className="w-4 h-4" />
           </Button>
         </div>
-        <label className="flex items-center gap-2 mt-2 cursor-pointer">
+        {anonymousAllowed && <label className="flex items-center gap-2 mt-2 cursor-pointer">
           <input
             type="checkbox"
             checked={isAnonymous}
@@ -113,7 +115,7 @@ export default function QAPanel({
           <span className="text-xs text-muted-foreground">
             Ask anonymously
           </span>
-        </label>
+        </label>}
       </div>
 
       {/* Questions List */}
@@ -122,7 +124,12 @@ export default function QAPanel({
           <div className="flex items-center justify-center py-10">
             <Loader2 className="w-6 h-6 text-primary animate-spin" />
           </div>
-        ) : questions.length === 0 ? (
+        ) : null}
+        {submitQuestion.isError && <div className="px-6"><RequestError error={submitQuestion.error} /></div>}
+        {isError && <RequestError error={error} retry={() => void refetch()} />}
+        {data && (
+          <>
+        {questions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <MessageCircleQuestion className="w-12 h-12 text-muted-foreground mb-3" />
             <p className="text-foreground font-medium">No questions yet</p>
@@ -138,13 +145,14 @@ export default function QAPanel({
                 question={question}
                 conferenceId={conferenceId}
                 isHost={isHost}
-                participantId={participantId}
                 isAnswering={answeringId === question.id}
                 onStartAnswer={() => setAnsweringId(question.id)}
                 onCancelAnswer={() => setAnsweringId(null)}
               />
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
@@ -157,7 +165,6 @@ interface QuestionCardProps {
   question: QuestionView;
   conferenceId: string;
   isHost: boolean;
-  participantId: string;
   isAnswering: boolean;
   onStartAnswer: () => void;
   onCancelAnswer: () => void;
@@ -167,7 +174,6 @@ function QuestionCard({
   question,
   conferenceId,
   isHost,
-  participantId,
   isAnswering,
   onStartAnswer,
   onCancelAnswer,
@@ -178,11 +184,12 @@ function QuestionCard({
   const unvoteQuestion = useUnvoteQuestion(conferenceId);
   const answerQuestion = useAnswerQuestion(conferenceId);
   const dismissQuestion = useDismissQuestion(conferenceId);
+  const archiveQuestion = useArchiveQuestion(conferenceId);
   const pinQuestion = usePinQuestion(conferenceId);
   const unpinQuestion = useUnpinQuestion(conferenceId);
 
   const handleVote = () => {
-    if (question.hasMyVote) {
+    if (question.votedByMe) {
       unvoteQuestion.mutate(question.id);
     } else {
       voteQuestion.mutate(question.id);
@@ -207,7 +214,7 @@ function QuestionCard({
   };
 
   const handleTogglePin = () => {
-    if (question.isPinned) {
+    if (question.pinned) {
       unpinQuestion.mutate(question.id);
     } else {
       pinQuestion.mutate(question.id);
@@ -215,7 +222,7 @@ function QuestionCard({
   };
 
   const statusColors: Record<QuestionStatus, string> = {
-    PENDING: "",
+    OPEN: "",
     ANSWERED: "border-green-500/50 bg-green-50/50 dark:bg-green-900/10",
     DISMISSED: "opacity-60",
     ARCHIVED: "opacity-40",
@@ -224,7 +231,7 @@ function QuestionCard({
   return (
     <div
       className={`rounded-xl border p-4 transition-all ${
-        question.isPinned
+        question.pinned
           ? "border-primary bg-primary/5"
           : `border-border ${statusColors[question.status]}`
       }`}
@@ -232,27 +239,27 @@ function QuestionCard({
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          {question.isAnonymous ? (
+          {question.anonymous ? (
             <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
               <EyeOff className="w-4 h-4 text-muted-foreground" />
             </div>
           ) : (
             <Avatar className="w-8 h-8">
               <AvatarImage
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${question.askerDisplayName}`}
+                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${question.displayName}`}
               />
               <AvatarFallback>
-                {question.askerDisplayName?.[0] || "?"}
+                {question.displayName?.[0] || "?"}
               </AvatarFallback>
             </Avatar>
           )}
           <div>
             <span className="text-sm font-medium text-foreground">
-              {question.isAnonymous
+              {question.anonymous
                 ? "Anonymous"
-                : question.askerDisplayName || "Unknown"}
+                : question.displayName || "Unknown"}
             </span>
-            {question.isPinned && (
+            {question.pinned && (
               <span className="ml-2 text-xs text-primary font-medium">
                 Pinned
               </span>
@@ -268,7 +275,7 @@ function QuestionCard({
       </div>
 
       {/* Question Content */}
-      <p className="text-sm text-foreground mt-3">{question.content}</p>
+      <p className="text-sm text-foreground mt-3">{question.body}</p>
 
       {/* Answer */}
       {question.answer && (
@@ -317,19 +324,19 @@ function QuestionCard({
         {/* Vote */}
         <button
           onClick={handleVote}
-          disabled={voteQuestion.isPending || unvoteQuestion.isPending}
+          disabled={question.isMine || !["OPEN", "ANSWERED"].includes(question.status) || voteQuestion.isPending || unvoteQuestion.isPending}
           className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${
-            question.hasMyVote
+            question.votedByMe
               ? "text-primary"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
           <ThumbsUp className="w-4 h-4" />
-          {question.upvotes}
+          {question.upvoteCount}
         </button>
 
         {/* Host Actions */}
-        {isHost && question.status !== "DISMISSED" && (
+        {isHost && question.status !== "DISMISSED" && question.status !== "ARCHIVED" && (
           <div className="flex gap-2">
             {!question.answer && !isAnswering && (
               <Button size="sm" variant="ghost" onClick={onStartAnswer}>
@@ -341,10 +348,10 @@ function QuestionCard({
               variant="ghost"
               onClick={handleTogglePin}
               disabled={pinQuestion.isPending || unpinQuestion.isPending}
-              title={question.isPinned ? "Unpin" : "Pin"}
+              title={question.pinned ? "Unpin" : "Pin"}
             >
               <Pin
-                className={`w-4 h-4 ${question.isPinned ? "text-primary" : ""}`}
+                className={`w-4 h-4 ${question.pinned ? "text-primary" : ""}`}
               />
             </Button>
             <Button
@@ -358,7 +365,17 @@ function QuestionCard({
             </Button>
           </div>
         )}
+        {isHost && question.status !== "ARCHIVED" && (
+          <Button size="sm" variant="ghost" onClick={() => archiveQuestion.mutate(question.id)} disabled={archiveQuestion.isPending} title="Archive question">
+            <Archive className="size-4" />
+          </Button>
+        )}
       </div>
+        {(voteQuestion.isError || unvoteQuestion.isError || answerQuestion.isError || dismissQuestion.isError || archiveQuestion.isError || pinQuestion.isError || unpinQuestion.isError) && (
+          <div className="mt-2">
+            <RequestError error={[voteQuestion.error, unvoteQuestion.error, answerQuestion.error, dismissQuestion.error, archiveQuestion.error, pinQuestion.error, unpinQuestion.error].find(Boolean)} />
+          </div>
+        )}
     </div>
   );
 }

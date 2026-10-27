@@ -10,10 +10,10 @@ import type {
   AdmitRequest,
   DenyRequest,
   BulkAdmissionResponse,
+  ModerationResponse,
   RoleChangeRequest,
   RemoveParticipantRequest,
   BanParticipantRequest,
-  ModerationResponse,
   MuteRequest,
   MuteResponse,
 } from "@/types/v2";
@@ -83,7 +83,7 @@ export const participantsService = {
    * Return a participant to waiting room
    */
   returnToWaiting: async (conferenceId: string, participantId: string) => {
-    const response = await apiV2.post<ParticipantResponse>(
+    const response = await apiV2.post<ModerationResponse>(
       `/conferences/${encodeURIComponent(conferenceId)}/participants/${encodeURIComponent(participantId)}/return-to-waiting`,
     );
     return response.data;

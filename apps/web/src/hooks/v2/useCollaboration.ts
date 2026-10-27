@@ -44,18 +44,18 @@ export function useCollaborationState(conferenceId: string) {
 /**
  * Get chat messages
  */
-export function useMessages(conferenceId: string, query?: MessageListQuery) {
+export function useMessages(conferenceId: string, query?: MessageListQuery, enabled = true) {
   return useQuery({
     queryKey: collaborationKeys.messages(conferenceId, query),
     queryFn: () => collaborationService.getMessages(conferenceId, query),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
     refetchInterval: 2000,
   });
 }
 
-export function useLoadOlderMessages(conferenceId: string) {
+export function useLoadOlderMessages(conferenceId: string, query?: MessageListQuery) {
   return useMutation({
-    mutationFn: (before: string) => collaborationService.getMessages(conferenceId, { before }),
+    mutationFn: (before: string) => collaborationService.getMessages(conferenceId, { ...query, before }),
   });
 }
 

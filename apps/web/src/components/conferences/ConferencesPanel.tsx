@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { ConferenceResponse, MeetingSpaceResponse } from "@/types/v2";
+import type { ConferenceResponse, CreateConferenceRequest, MeetingSpaceResponse } from "@/types/v2";
 import { useConferences, useCreateConference, usePrepareConference, useStartConference, useLockConference, useUnlockConference, useEndConference, useCancelConference, useRescheduleConference } from "@/hooks/v2/useConferences";
 import { scheduledWindow, unstarted, joinable, conferencePermission } from "@/lib/meeting-scheduling";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,23 @@ export default function ConferencesPanel({ space }: { space: MeetingSpaceRespons
   const create = useCreateConference(space.id);
   const canManage = conferencePermission(space, "start");
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const scheduleOccurrence = (): CreateConferenceRequest => {
+    if (!start) {
+      if (end) throw new Error("Choose a start date before an end date.");
+      return {};
+    }
+    if (!end) {
+      const startAt = new Date(start);
+      if (!Number.isFinite(+startAt) || +startAt <= Date.now()) {
+        throw new Error("Choose a future start date and time.");
+      }
+      return { scheduledStartAt: startAt.toISOString() };
+    }
+    return scheduledWindow(start, end);
+  };
   return <section className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{space.title || space.meetingCode} — conferences</h2><p className="text-sm text-muted-foreground">Each session has its own lifecycle. Dates below use {timezone}.</p></div>
-      {canManage && <ActionDialog label="Schedule occurrence" description={`Create a one-time conference. Enter dates in ${timezone}.`} submit={async () => { await create.mutateAsync(scheduledWindow(start, end)); setStart(""); setEnd(""); }}><Field label="Start" type="datetime-local" required value={start} onChange={e => setStart(e.target.value)} /><Field label="End" type="datetime-local" required value={end} onChange={e => setEnd(e.target.value)} /></ActionDialog>}
+      {canManage && <ActionDialog label="Schedule occurrence" description={`Create one conference occurrence. Leave both dates blank for an unscheduled occurrence, or enter a start and optional end in ${timezone}.`} submit={async () => { await create.mutateAsync(scheduleOccurrence()); setStart(""); setEnd(""); }}><Field label="Start (optional)" type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /><Field label="End (optional)" type="datetime-local" min={start || undefined} disabled={!start} value={end} onChange={e => setEnd(e.target.value)} /></ActionDialog>}
     </div>
     <div className="grid gap-3 sm:grid-cols-2"><Field label="From date" type="date" value={from} onChange={e => setFrom(e.target.value)} /><Field label="Through date" type="date" min={from} value={to} onChange={e => setTo(e.target.value)} /></div>
     {query.isLoading && <p role="status">Loading occurrences…</p>}

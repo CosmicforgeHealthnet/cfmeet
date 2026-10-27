@@ -64,8 +64,12 @@ test("resolution works anonymously and a previous conference token never grants 
   await guest.service.resolve("PLAN1234");
   assert.equal(guest.requests[0].headers.Authorization, undefined);
   assert.equal(guest.requests[0].headers["X-Participant-Token"], undefined);
+  await guest.api.get("/me/organizations");
+  await guest.api.get("/organizations/org-id/members");
+  assert.equal(guest.requests[1].headers["X-Participant-Token"], undefined);
+  assert.equal(guest.requests[2].headers["X-Participant-Token"], undefined);
   await guest.api.get(`/conferences/${id}/participants`);
-  assert.equal(guest.requests[1].headers["X-Participant-Token"], "old-conference-participant-token");
+  assert.equal(guest.requests[3].headers["X-Participant-Token"], "old-conference-participant-token");
 });
 
 test("a summary/link grants no configuration rights; only owners get archive/transfer rights", () => {

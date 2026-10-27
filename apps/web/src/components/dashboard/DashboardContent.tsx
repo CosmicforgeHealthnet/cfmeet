@@ -1,105 +1,49 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Video, Calendar, Copy, Check, Plus, Loader2 } from "lucide-react";
+import { Video, Calendar, Copy, Check, Plus } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { useSpaces, useCreateInstantMeeting } from "@/hooks/v2/useSpaces";
+import { useSpaces } from "@/hooks/v2/useSpaces";
 import type { MeetingSpaceResponse } from "@/types/v2";
 import { formatDateForDisplay } from "@/utils/timezone";
 import { getErrorMessage } from "@/utils/error";
 import JoinMeetingInput from "@/components/layout/JoinMeetingInput";
-import MeetingSuccessView from "./MeetingSuccessView";
 
 export default function DashboardContent() {
-  const router = useRouter();
   const { data: spacesData, isLoading, error: spacesError } = useSpaces();
-  const createInstantMeeting = useCreateInstantMeeting();
-  const [error, setError] = useState("");
-  const [createdMeeting, setCreatedMeeting] = useState<{
-    meetingCode: string;
-    conferenceId: string;
-  } | null>(null);
-
   const spaces = (spacesData?.items ?? []).filter((space) => space.status === "ACTIVE");
-
-  const handleInstantMeeting = async () => {
-    if (createInstantMeeting.isPending) return;
-
-    setError("");
-    try {
-      // Create instant meeting (space + live conference)
-      const instantResponse = await createInstantMeeting.mutateAsync({});
-      const { meetingSpace, conference } = instantResponse;
-
-      // Show success view with meeting details
-      setCreatedMeeting({
-        meetingCode: meetingSpace.meetingCode,
-        conferenceId: conference.id,
-      });
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to create meeting. Please try again."));
-    }
-  };
-
-  const handleJoinNow = () => {
-    if (createdMeeting) {
-      router.push(`/${createdMeeting.meetingCode}?conference=${createdMeeting.conferenceId}`);
-    }
-  };
-
-  const isCreatingInstant = createInstantMeeting.isPending;
-
-  // Show success view after instant meeting creation
-  if (createdMeeting) {
-    const joinUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/${createdMeeting.meetingCode}`;
-    return (
-      <MeetingSuccessView
-        meetingIdentifier={createdMeeting.meetingCode}
-        joinUrl={joinUrl}
-        title="Conference started"
-        description="Your live conference is ready. Its meeting space holds the reusable settings."
-        showJoinNow={true}
-        onJoinNow={handleJoinNow}
-        showScheduleAnother={false}
-        onBack={() => setCreatedMeeting(null)}
-      />
-    );
-  }
 
   return (
     <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter overflow-hidden">
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-      {/* Top actions */}
-      <div className="flex justify-center gap-8 sm:gap-12 md:gap-16 mt-8 sm:mt-14 md:mt-20">
-        <div
-          className={`flex flex-col items-center gap-2 sm:gap-3 ${isCreatingInstant ? "cursor-wait" : "cursor-pointer"}`}
-          onClick={handleInstantMeeting}
+      <div className="mt-8 grid gap-4 sm:mt-14 sm:grid-cols-2 md:mt-20">
+        <Link
+          href="/dashboard/meetings/new"
+          className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 text-center transition-colors hover:border-primary/50 hover:bg-muted/30"
         >
-          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-primary flex items-center justify-center shadow-lg">
-            {isCreatingInstant ? (
-              <Loader2 className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-white animate-spin" />
-            ) : (
-              <Video className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-white" />
-            )}
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg sm:h-20 sm:w-20">
+            <Video className="h-7 w-7 text-white sm:h-8 sm:w-8" />
           </div>
-          <span className="font-semibold text-sm sm:text-base md:text-lg">
-            {isCreatingInstant ? "Starting..." : "Instant conference"}
+          <span className="font-semibold text-sm sm:text-base">Create meeting space</span>
+          <span className="max-w-xs text-xs text-muted-foreground sm:text-sm">
+            Set up reusable meeting details, access policies, members, and recurrence.
           </span>
-        </div>
+        </Link>
 
-        <div
-          className="flex flex-col items-center gap-2 sm:gap-3 cursor-pointer"
-          onClick={() => router.push("/dashboard/conferences")}
+        <Link
+          href="/dashboard/conferences"
+          className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 text-center transition-colors hover:border-primary/50 hover:bg-muted/30"
         >
-          <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-2xl bg-sidebar flex items-center justify-center shadow">
-            <Calendar className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-primary" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sidebar shadow sm:h-20 sm:w-20">
+            <Calendar className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
           </div>
-          <span className="font-semibold text-sm sm:text-base md:text-lg">
-            Conferences
+          <span className="font-semibold text-sm sm:text-base">Manage conferences</span>
+          <span className="max-w-xs text-xs text-muted-foreground sm:text-sm">
+            Schedule, prepare, start, and manage live or past conference sessions.
           </span>
-        </div>
+        </Link>
       </div>
 
       {/* Join input */}
@@ -126,14 +70,15 @@ export default function DashboardContent() {
         ) : (
           <div className="flex items-start gap-3 sm:gap-4">
             {/* STATIC ACCENT BAR */}
-            <div
-              className="w-[36px] sm:w-[45px] h-[100px] sm:h-[118px] bg-[var(--primary)4D] rounded-sm flex items-center justify-center shrink-0 cursor-pointer"
-              onClick={() => router.push("/dashboard/meetings/new")}
+            <Link
+              href="/dashboard/meetings/new"
+              aria-label="Create meeting space"
+              className="w-[36px] sm:w-[45px] h-[100px] sm:h-[118px] bg-[var(--primary)4D] rounded-sm flex items-center justify-center shrink-0"
             >
               <div className="w-6 h-6 flex items-center justify-center">
                 <Plus className="w-4 h-4 text-primary" />
               </div>
-            </div>
+            </Link>
 
             {/* SCROLLABLE CARDS */}
             <ScrollArea className="w-full whitespace-nowrap">

@@ -40,7 +40,7 @@ apiV2.interceptors.request.use(
     }
 
     // For participant-scoped requests, add the X-Participant-Token header
-    const accountOperation = /^\/(meeting-spaces(?:\/|$)|instant-meetings(?:\/|$)|resolve\/)/.test(config.url ?? "");
+    const accountOperation = /^\/(meeting-spaces(?:\/|$)|instant-meetings(?:\/|$)|resolve\/|organizations(?:\/|$)|me\/organizations(?:\/|$)|admin\/organizations(?:\/|$))/.test(config.url ?? "");
     if (participantToken && !accountOperation && tokenMatchesScope) {
       config.headers["X-Participant-Token"] = participantToken;
     }

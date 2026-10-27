@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ParticipantResponse, Role, RolePolicy, TrackKind, BanScope } from "@/types/v2";
-import { useParticipantsV2, useCurrentParticipant, useChangeRole, useRemoveParticipant, useBanParticipant, useMuteParticipant } from "@/hooks/v2/useParticipants";
+import { useParticipantsV2, useCurrentParticipant, useChangeRole, useRemoveParticipant, useBanParticipant, useMuteParticipant, useReturnToWaiting } from "@/hooks/v2/useParticipants";
 import { useConference } from "@/hooks/v2/useConferences";
 import { useAddSpotlight, useCollaborationState, useLockAudio, useLockScreenShare, useLockVideo, useLowerOtherHand, useRemoveSpotlight, useRestrictChat, useStopScreenShare, useUnlockAudio, useUnlockScreenShare, useUnlockVideo, useUnrestrictChat } from "@/hooks/v2/useCollaboration";
 import { effectiveConferenceRole, mayTarget, meetingAllows, participantRoles } from "@/lib/meeting-authority";
@@ -43,7 +43,7 @@ function ParticipantRow({ participant: p, actorRole, self, conferenceId, policy,
   participant: ParticipantResponse; actorRole?: Role; self: boolean; conferenceId: string; policy?: RolePolicy; active: boolean; live: boolean;
   audioLocked?: boolean; videoLocked?: boolean; screenShareLocked?: boolean; isSharing: boolean; isSpotlighted: boolean; feedback: (value: string) => void;
 }) {
-  const changeRole = useChangeRole(conferenceId), remove = useRemoveParticipant(conferenceId), ban = useBanParticipant(conferenceId), mute = useMuteParticipant(conferenceId);
+  const changeRole = useChangeRole(conferenceId), remove = useRemoveParticipant(conferenceId), ban = useBanParticipant(conferenceId), mute = useMuteParticipant(conferenceId), returnToWaiting = useReturnToWaiting(conferenceId);
   const lockAudio = useLockAudio(conferenceId), unlockAudio = useUnlockAudio(conferenceId);
   const lockVideo = useLockVideo(conferenceId), unlockVideo = useUnlockVideo(conferenceId);
   const lockShare = useLockScreenShare(conferenceId), unlockShare = useUnlockScreenShare(conferenceId);
@@ -69,7 +69,7 @@ function ParticipantRow({ participant: p, actorRole, self, conferenceId, policy,
       feedback("");
     }
   };
-  const controlError = lockAudio.error || unlockAudio.error || lockVideo.error || unlockVideo.error || lockShare.error || unlockShare.error || stopShare.error || addSpotlight.error || removeSpotlight.error || restrictChat.error || unrestrictChat.error;
+  const controlError = lockAudio.error || unlockAudio.error || lockVideo.error || unlockVideo.error || lockShare.error || unlockShare.error || stopShare.error || addSpotlight.error || removeSpotlight.error || restrictChat.error || unrestrictChat.error || returnToWaiting.error;
   return <article className="space-y-2 rounded-lg border border-border bg-card p-3"><div className="flex items-center gap-2"><Avatar className="h-8 w-8"><AvatarFallback>{p.displayName.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar><div className="min-w-0"><p className="break-words text-sm font-medium">{p.displayName}{self ? " (you)" : ""}{isSpotlighted && <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Spotlighted</span>}</p><p className="text-xs text-muted-foreground">{p.role.replaceAll("_", " ")} · {p.admissionState}</p></div></div>
     {self && <p className="text-xs text-muted-foreground">{initialAudioLock ? "Microphone locked" : "Microphone unlocked"} · {initialVideoLock ? "Camera locked" : "Camera unlocked"} · {initialShareLock ? "Screen sharing locked" : "Screen sharing unlocked"}</p>}
     {controlError && <RequestError error={controlError} />}
@@ -107,6 +107,10 @@ function ParticipantRow({ participant: p, actorRole, self, conferenceId, policy,
       }}><label className="grid gap-2 text-sm font-medium">Role<select className="h-10 rounded-md border border-input bg-background px-3" value={roles.includes(role) ? role : ""} onChange={e => setRole(e.target.value as Role)} required><option value="" disabled>Select role</option>{roles.map(item => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label></ActionDialog>}
       {target && live && meetingAllows(actorRole, "participant.mute", policy) && <ActionDialog label="Mute tracks" description="Ask the provider to mute published tracks across this participant's connected sessions. This does not unmute or permanently lock media." submit={async () => { const result = await mute.mutateAsync({ participantId: p.id, data: { trackKind: track } }); feedback(`Provider muted ${result.mutedTracks} track(s) across ${result.sessions} examined session(s).`); }}><label className="grid gap-2 text-sm font-medium">Track<select className="h-10 rounded-md border border-input bg-background px-3" value={track} onChange={e => setTrack(e.target.value as TrackKind)}><option value="AUDIO">Microphone audio</option><option value="VIDEO">Camera video</option><option value="SCREEN_SHARE">Screen share</option></select></label></ActionDialog>}
       {target && meetingAllows(actorRole, "participant.remove", policy) && <ActionDialog label="Remove" destructive description="Remove this participant from this occurrence and request media disconnection. This does not ban future admission." submit={async () => enforcement(await remove.mutateAsync({ participantId: p.id, data: { ...(reason.trim() ? { reason: reason.trim() } : {}) } }))}><Field label="Reason (optional)" value={reason} maxLength={500} onChange={e => setReason(e.target.value)} /></ActionDialog>}
+      {target && meetingAllows(actorRole, "participant.return_to_waiting", policy) && <ActionDialog label="Return to waiting room" destructive description="Move this participant back to the waiting room and disconnect active media sessions. They must be admitted again to rejoin." submit={async () => {
+        const result = await returnToWaiting.mutateAsync(p.id);
+        feedback(result.providerEnforcement === "PENDING_PROVIDER_CONTROL" ? "Participant returned to waiting. Provider disconnection is still pending." : "Participant returned to waiting.");
+      }} />}
       {target && meetingAllows(actorRole, "participant.ban", policy) && <ActionDialog label="Ban" destructive description="Ban this identity and request media disconnection. A space ban also blocks admission to other occurrences in this space." submit={async () => {
         if (expires && (!Number.isFinite(Date.parse(expires)) || Date.parse(expires) <= Date.now())) throw new Error("Ban expiry must be in the future.");
         enforcement(await ban.mutateAsync({ participantId: p.id, data: { scope, ...(reason.trim() ? { reason: reason.trim() } : {}), ...(expires ? { expiresAt: new Date(expires).toISOString() } : {}) } }));
