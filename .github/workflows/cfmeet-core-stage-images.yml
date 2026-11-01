@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           free_kb="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${VPS_USER}@${VPS_HOST}" "df -Pk / | awk 'NR==2{print \\$4}'")"
+            "${VPS_USER}@${VPS_HOST}" 'df -k --output=avail / | tail -n1 | tr -d "[:space:]"')"
           if ! [[ "${free_kb}" =~ ^[0-9]+$ ]] || (( free_kb < 10485760 )); then
             echo "::error::Staging stopped: less than 10 GiB free or disk capacity unknown."
             exit 1
