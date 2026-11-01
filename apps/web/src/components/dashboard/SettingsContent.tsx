@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { userService } from "@/services/user.service";
 import { UserProfile } from "@/types/user";
@@ -104,11 +104,7 @@ function ProfileSettings() {
   const [updating, setUpdating] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
       const data = await userService.getProfile();
@@ -119,7 +115,11 @@ function ProfileSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchProfile();
+  }, [fetchProfile]);
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
