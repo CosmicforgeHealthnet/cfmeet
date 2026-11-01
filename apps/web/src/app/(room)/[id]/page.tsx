@@ -21,12 +21,17 @@ export default function RoomPage() {
 
   // Check for instant meeting join data on mount
   useEffect(() => {
-    const instantData = storageStore.getInstantJoinData();
-    if (instantData && instantData.room_name === id) {
-      setJoinData(instantData);
-      storageStore.clearInstantJoinData();
-    }
-    setIsCheckingInstant(false);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const instantData = storageStore.getInstantJoinData();
+      if (instantData && instantData.room_name === id) {
+        setJoinData(instantData);
+        storageStore.clearInstantJoinData();
+      }
+      setIsCheckingInstant(false);
+    });
+    return () => { active = false; };
   }, [id]);
 
   const handleJoin = (data: JoinMeetingData, prefs: MediaPreferences) => {
