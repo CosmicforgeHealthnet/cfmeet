@@ -1,0 +1,169 @@
+name: Publish CF Meet authenticated Calling ingress
+
+# Public routes only for Calling client controls, signaling, and RTC gateway.
+# Uses loopback-only Docker proxy. Backs up and validates host Nginx.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-public-ingress.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-calling-public-ingress
+  cancel-in-progress: false
+jobs:
+  ingress:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 18
+    steps:
+      - name: SSH setup
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Configure loopback proxy and authenticated Calling routes
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core/ingress
+          SITE=/etc/nginx/sites-enabled/api.cfmeet.com
+          BAK="$ROOT/api.cfmeet.com.pre-calling.conf"
+          SNIPPET=/etc/nginx/snippets/cfmeet-calling-routes.conf
+          LOOPBACK=cfmeet-calling-loopback
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-calling)" = true
+          test -f "$SITE"
+          mkdir -p "$ROOT" /etc/nginx/snippets
+          chmod 0700 "$ROOT"
+          if test ! -f "$BAK"; then cp -p "$SITE" "$BAK"; fi
+
+          cat > "$ROOT/nginx.conf" <<'NGINX'
+          worker_processes 1;
+          error_log /dev/stderr warn;
+          events { worker_connections 1024; }
+          http {
+            resolver 127.0.0.11 valid=10s ipv6=off;
+            access_log off;
+            server {
+              listen 8090;
+              location / {
+                set $peer cfmeet-calling:8090;
+                proxy_pass http://$peer$request_uri;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_read_timeout 3600;
+              }
+            }
+          }
+          NGINX
+          chmod 0600 "$ROOT/nginx.conf"
+          if ! docker container inspect "$LOOPBACK" >/dev/null 2>&1; then
+            docker run -d --name "$LOOPBACK" --restart unless-stopped \
+              --network cfmeet-core-private \
+              --publish 127.0.0.1:18090:8090 \
+              --mount type=bind,src="$ROOT/nginx.conf",dst=/etc/nginx/nginx.conf,readonly \
+              nginx:stable-alpine >/dev/null
+          else
+            test "$(docker inspect -f '{{.State.Running}}' "$LOOPBACK")" = true
+          fi
+          for i in $(seq 1 18); do
+            curl -fsS --max-time 6 http://127.0.0.1:18090/health >/dev/null && break
+            sleep 2
+          done
+          curl -fsS --max-time 6 http://127.0.0.1:18090/health >/dev/null
+
+          # Client HTTP routes require Platform Access credentials at Calling.
+          # WebSocket signaling/media routes require short-lived device/edge
+          # credentials, which Calling validates. No internal/admin API added.
+          cat > "$SNIPPET" <<'NGINX'
+          location ~ ^/v1/calls(?:/|$) {
+            limit_except GET POST DELETE { deny all; }
+            client_max_body_size 64k;
+            proxy_pass http://127.0.0.1:18090;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_buffering off;
+            proxy_read_timeout 3600;
+          }
+          location ^~ /v1/calling/ {
+            limit_except GET POST DELETE { deny all; }
+            client_max_body_size 64k;
+            proxy_pass http://127.0.0.1:18090;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_buffering off;
+            proxy_read_timeout 3600;
+          }
+          NGINX
+          chmod 0644 "$SNIPPET"
+          python3 - "$SITE" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1])
+          s=p.read_text()
+          line='    include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'
+          if line in s:
+              print('CALLING_NGINX_INCLUDE_ALREADY_PRESENT: yes')
+          else:
+              # Verified existing production site has the HTTPS server first
+              # and a second 80-only redirect server. Never edit the redirect.
+              marker='server_name api.cfmeet.com;'
+              assert s.count(marker)==2, 'Unexpected API host server layout'
+              first=s.index(marker)
+              second=s.index(marker,first+len(marker))
+              assert 'listen 443 ssl' in s[first:second], 'First server is not HTTPS'
+              assert 'listen 80' in s[second:], 'Second server is not HTTP redirect'
+              pos=first+len(marker)
+              p.write_text(s[:pos]+'\n'+line+s[pos:])
+              print('CALLING_NGINX_INCLUDE_ADDED: yes')
+          PY
+
+          recover() {
+            rc=$?
+            trap - ERR
+            cp -p "$BAK" "$SITE"
+            nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+            echo 'PUBLIC_NGINX_ROLLED_BACK: yes'
+            exit "$rc"
+          }
+          trap recover ERR
+          nginx -t
+          systemctl reload nginx
+          # Existing Meeting API must remain healthy.
+          curl -fsS --max-time 8 --resolve api.cfmeet.com:443:127.0.0.1 \
+            https://api.cfmeet.com/health >/dev/null
+          # Calling customer endpoints must refuse anonymous access, not
+          # return HTML from the Meeting Service or proxy errors.
+          status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 \
+            --resolve api.cfmeet.com:443:127.0.0.1 \
+            https://api.cfmeet.com/v1/calls)"
+          test "$status" = 401 || { echo "Unexpected Calling anonymous status $status"; exit 1; }
+          # The port is bound only to loopback.
+          bind="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$LOOPBACK")"
+          echo "$bind" | grep -Fq '"HostIp":"127.0.0.1"'
+          trap - ERR
+          echo "MEETING_PUBLIC_HEALTH: ok"
+          echo "CALLING_ANONYMOUS_ACCESS: 401"
+          echo "CALLING_LOOPBACK_PORT: 127.0.0.1:18090"
+          echo "CALLING_HTTPS_INGRESS: configured"
+          echo "BACKUP_NGINX_CONFIG: retained"
+          REMOTE
