@@ -71,15 +71,21 @@ jobs:
           }
           NGINX
           chmod 0600 "$ROOT/nginx.conf"
-          if ! docker container inspect "$LOOPBACK" >/dev/null 2>&1; then
-            docker run -d --name "$LOOPBACK" --restart unless-stopped \
-              --network cfmeet-core-private \
-              --publish 127.0.0.1:18090:8090 \
-              --mount type=bind,src="$ROOT/nginx.conf",dst=/etc/nginx/nginx.conf,readonly \
-              nginx:stable-alpine >/dev/null
-          else
-            test "$(docker inspect -f '{{.State.Running}}' "$LOOPBACK")" = true
+          # A container whose primary network is --internal cannot reliably
+          # publish a host loopback port. Give this proxy a dedicated non-internal
+          # bridge for loopback access, plus the isolated core network upstream.
+          if ! docker network inspect cfmeet-calling-ingress-net >/dev/null 2>&1; then
+            docker network create cfmeet-calling-ingress-net >/dev/null
           fi
+          if docker container inspect "$LOOPBACK" >/dev/null 2>&1; then
+            docker rm -f "$LOOPBACK" >/dev/null
+          fi
+          docker run -d --name "$LOOPBACK" --restart unless-stopped \
+            --network cfmeet-calling-ingress-net \
+            --publish 127.0.0.1:18090:8090 \
+            --mount type=bind,src="$ROOT/nginx.conf",dst=/etc/nginx/nginx.conf,readonly \
+            nginx:stable-alpine >/dev/null
+          docker network connect cfmeet-core-private "$LOOPBACK"
           for i in $(seq 1 18); do
             curl -fsS --max-time 6 http://127.0.0.1:18090/health >/dev/null && break
             sleep 2
