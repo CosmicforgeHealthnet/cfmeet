@@ -147,7 +147,7 @@ export default function ConferenceArtifactsPanel({
               <select
                 className="h-9 rounded-md border border-input bg-background px-2"
                 value={reportType}
-                onChange={event => setReportType(event.target.value as ArtifactType)}
+                onChange={event => setReportType(event.target.value as ReportArtifactType)}
               >
                 {reportOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
