@@ -109,5 +109,12 @@ jobs:
           else
             echo 'MEETING_HEALTH: FAILED'
           fi
+          echo '---- Existing CF Meet TLS certificate SANs (public names only) ----'
+          for f in /etc/letsencrypt/live/api.cfmeet.com/fullchain.pem /etc/letsencrypt/live/cfmeet.com/fullchain.pem; do
+            if test -r "$f"; then
+              echo "CERT_PATH: $f"
+              openssl x509 -in "$f" -noout -ext subjectAltName 2>/dev/null | tail -n +2 || true
+            fi
+          done
           echo '===== PREFLIGHT DONE: NO CHANGES MADE ====='
           REMOTE
