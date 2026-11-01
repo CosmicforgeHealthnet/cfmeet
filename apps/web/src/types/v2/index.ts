@@ -98,7 +98,14 @@ export type ArtifactType =
   | "POLL_REPORT"
   | "CHAT_EXPORT";
 
-export type ArtifactStatus = "REQUESTED" | "PROCESSING" | "READY" | "FAILED" | "DELETED";
+export type ArtifactStatus =
+  | "REQUESTED"
+  | "RECORDING"
+  | "STOPPING"
+  | "PROCESSING"
+  | "READY"
+  | "FAILED"
+  | "DELETED";
 
 export type PollStatus = "DRAFT" | "OPEN" | "CLOSED" | "ARCHIVED";
 
@@ -467,8 +474,8 @@ export interface RecurrenceExceptionResponse {
 // ---------------------------------------------------------------------------
 
 export interface ConsentGrant {
-  consentType: ConsentKind;
-  granted: boolean;
+  type: ConsentKind;
+  version: string;
 }
 
 export interface JoinConferenceRequestV2 {
@@ -527,11 +534,9 @@ export interface JoinPolicy {
 }
 
 export interface MediaContextView {
-  kind?: "MAIN" | "BREAKOUT" | "BACKSTAGE";
-  roomType?: "MAIN" | "BREAKOUT";
-  breakoutId?: string | null;
-  breakoutName?: string;
-  visit?: boolean;
+  kind: "MAIN" | "BREAKOUT" | "BACKSTAGE";
+  breakoutId: string | null;
+  visit: boolean;
 }
 
 export interface JoinRealtimeInfo {
@@ -1094,11 +1099,12 @@ export interface AnswerQuestionRequest {
 
 export interface StartRecordingRequest {
   layout?: string;
-  outputFormat?: string;
+  idempotencyKey?: string;
 }
 
 export interface RecordingResponse {
   recording: ArtifactView;
+  providerDispatch: "DISPATCHED" | "PENDING_RETRY" | "NOT_REQUIRED";
   created: boolean;
 }
 
@@ -1137,25 +1143,22 @@ export interface ArtifactAccess {
 export interface AttendanceEntry {
   participantId: string;
   displayName: string;
-  identityType: IdentityType;
   role: Role;
-  joinTime: string;
-  leaveTime?: string;
-  durationSeconds: number;
+  identityType: IdentityType;
+  admissionState: AdmissionState;
+  admittedAt?: string;
+  attendanceSeconds: number;
 }
 
 export interface AttendanceReport {
   conferenceId: string;
-  startedAt?: string;
-  endedAt?: string;
-  totalDurationSeconds: number;
-  peakParticipants: number;
-  uniqueParticipants: number;
-  entries: AttendanceEntry[];
+  generatedAt: string;
+  sessionCount: number;
+  participants: AttendanceEntry[];
 }
 
 export interface GenerateReportRequest {
-  reportType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT";
+  artifactType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT";
 }
 
 // ---------------------------------------------------------------------------
@@ -1164,25 +1167,45 @@ export interface GenerateReportRequest {
 
 export interface ConsentDecision {
   consentType: ConsentKind;
-  granted: boolean;
-  decidedAt: string;
+  decision: "ACCEPTED" | "DECLINED" | "WITHDRAWN";
+  decidedAt?: string;
+}
+
+export interface ConsentRequirement {
+  consentType: ConsentKind;
+  mode: "NOTICE_ONLY" | "EXPLICIT_CONSENT_REQUIRED";
+  required: boolean;
+  active: boolean;
+  consentVersion: string;
+  decision?: "ACCEPTED" | "DECLINED" | "WITHDRAWN";
+  decidedAt?: string;
 }
 
 export interface ConsentRequirementsResponse {
   conferenceId: string;
-  participantId: string;
   requirements: ConsentRequirement[];
-  decisions: ConsentDecision[];
+  recordingNotice: boolean;
+}
+
+export interface ConsentDecisionInput {
+  consentType: ConsentKind;
+  decision: "ACCEPTED" | "DECLINED";
 }
 
 export interface RecordConsentRequest {
-  consents: ConsentGrant[];
+  consentVersion: string;
+  decisions: ConsentDecisionInput[];
 }
 
 export interface WithdrawalResponse {
   consentType: ConsentKind;
-  withdrawnAt: string;
-  effect: string;
+  effect: "RECORDED" | "PROCESSING_STOPPED" | "PARTICIPANT_EXITED";
+  withdrawalMode:
+    | "STOP_FUTURE_PROCESSING"
+    | "REQUIRE_PARTICIPANT_EXIT"
+    | "STOP_PROCESSING_MODE"
+    | "NO_RETROACTIVE_DELETION";
+  retroactiveDeletion: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,6 +1215,7 @@ export interface WithdrawalResponse {
 export interface StartTranscriptionRequest {
   mode?: "LIVE" | "POST_MEETING";
   language?: string;
+  sourceRecordingId?: string;
 }
 
 export interface TranscriptionJobView {
@@ -1200,10 +1224,11 @@ export interface TranscriptionJobView {
   mode: string;
   status: string;
   language: string;
-  artifactId?: string;
-  createdAt: string;
+  artifactId: string;
+  segmentCount: number;
+  failureCode?: string;
   startedAt?: string;
-  completedAt?: string;
+  endedAt?: string;
 }
 
 export interface TranscriptionJobListResponse {
@@ -1211,27 +1236,25 @@ export interface TranscriptionJobListResponse {
 }
 
 export interface TranscriptQuery {
-  after?: string;
+  after?: number;
   limit?: number;
 }
 
 export interface TranscriptSegment {
-  id: string;
-  speakerId?: string;
-  speakerName?: string;
-  startTime: number;
-  endTime: number;
+  sequence: number;
+  speakerParticipantId?: string;
+  startMs: number;
+  endMs: number;
+  language: string;
   text: string;
-  confidence: number;
+  confidence?: number;
 }
 
 export interface TranscriptView {
-  artifactId: string;
-  conferenceId: string;
-  language: string;
+  artifact: ArtifactView;
+  job?: TranscriptionJobView;
   segments: TranscriptSegment[];
-  hasMore: boolean;
-  cursor?: string;
+  nextAfter?: number;
 }
 
 export interface TranslateRequest {
@@ -1239,13 +1262,14 @@ export interface TranslateRequest {
 }
 
 export interface TranslationResponse {
-  originalArtifactId: string;
-  translatedArtifactId: string;
+  artifactId: string;
   targetLanguage: string;
+  translatedSegments: number;
 }
 
 export interface IntelligenceRequest {
-  outputType: "MEETING_SUMMARY" | "ACTION_ITEMS" | "KEY_POINTS";
+  sourceArtifactId: string;
+  kind: "SUMMARY" | "ACTION_ITEMS";
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,36 +1278,49 @@ export interface IntelligenceRequest {
 
 export interface QualitySample {
   timestamp: string;
-  audioJitter?: number;
-  videoJitter?: number;
-  audioPacketLoss?: number;
-  videoPacketLoss?: number;
-  roundTripTime?: number;
-  bitrate?: number;
+  rttMs?: number;
+  jitterMs?: number;
+  packetLossRatio?: number;
+  bitrateKbps?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  publishHealth?: "OK" | "DEGRADED" | "FAILED";
+  subscribeHealth?: "OK" | "DEGRADED" | "FAILED";
+  networkType?: "WIFI" | "CELLULAR" | "ETHERNET" | "UNKNOWN";
+  failure?: {
+    kind: "AUDIO_PUBLISH" | "VIDEO_PUBLISH" | "SCREEN_SHARE_PUBLISH" | "SUBSCRIBE" | "JOIN_MEDIA";
+    category: "PERMISSION_DENIED" | "PROVIDER_UNAVAILABLE" | "TRANSPORT" | "UNKNOWN";
+  };
 }
 
 export interface QualitySampleBatch {
-  sessionId: string;
+  participantSessionId?: string;
+  batchId?: string;
+  providerRegion?: string;
+  providerNode?: string;
   samples: QualitySample[];
 }
 
 export interface QualityIngestResponse {
+  participantSessionId: string;
   accepted: number;
-  rejected: number;
-}
-
-export interface ParticipantQuality {
-  participantId: string;
-  displayName: string;
-  averageScore: number;
-  issues: string[];
+  sinkDropped: number;
+  duplicateBatch: boolean;
+  qualityState: string;
 }
 
 export interface ConferenceQualityView {
   conferenceId: string;
-  overallScore: number;
-  sampleCount: number;
-  participants: ParticipantQuality[];
+  healthState: string;
+  activeSessions: number;
+  healthySessions: number;
+  degradedSessions: number;
+  unhealthySessions: number;
+  avgRttMs: number | null;
+  avgJitterMs: number | null;
+  avgPacketLossRatio: number | null;
+  reconnects: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1292,37 +1329,154 @@ export interface ConferenceQualityView {
 
 export interface ProfilePolicyResponse {
   meetingSpaceId: string;
-  effectivePolicy: CollaborationPolicyPatch;
-  spaceOverride?: CollaborationPolicyPatch;
-  organizationPolicy?: CollaborationPolicyPatch;
-  version: number;
+  profilePolicyVersion: number;
+  overrides: Record<string, unknown>;
+  effective: ResolvedProfile;
 }
 
 export interface ProfilePolicyUpdateRequest {
-  version: number;
-  policy: CollaborationPolicyPatch;
+  profilePolicyVersion: number;
+  changes: Record<string, unknown>;
+}
+
+export type MeetingProfile =
+  | "STANDARD"
+  | "WEBINAR"
+  | "TOWN_HALL"
+  | "HEALTHCARE"
+  | "HIGH_SECURITY";
+export type ConsentMode = "NOTICE_ONLY" | "EXPLICIT_CONSENT_REQUIRED";
+export type WithdrawalMode =
+  | "STOP_FUTURE_PROCESSING"
+  | "REQUIRE_PARTICIPANT_EXIT"
+  | "STOP_PROCESSING_MODE"
+  | "NO_RETROACTIVE_DELETION";
+export type ProcessingLocation = "DISABLED" | "SELF_HOSTED_ONLY" | "EXTERNAL_ALLOWED";
+export type FieldRequirement = "REQUIRED" | "OPTIONAL" | "DISABLED";
+
+export interface RecordingProfile {
+  allowed: boolean;
+  consentMode: ConsentMode;
+  withdrawalMode: WithdrawalMode;
+  retentionDays: number;
+  manualDeleteAllowed: boolean;
+  layout: string;
+}
+
+export interface TranscriptionProfile {
+  allowed: boolean;
+  consentMode: ConsentMode;
+  withdrawalMode: WithdrawalMode;
+  location: ProcessingLocation;
+  retentionDays: number;
+}
+
+export interface IntelligenceProfile {
+  location: ProcessingLocation;
+  consentRequired: boolean;
+  retentionDays: number;
+}
+
+export interface DataSharingProfile {
+  allowed: boolean;
+  consentRequired: boolean;
+}
+
+export interface ExportProfile {
+  chatExportAllowed: boolean;
+  attendanceReportAllowed: boolean;
+  pollReportAllowed: boolean;
+  retentionDays: number;
+}
+
+export interface AccessProfile {
+  publicAccessAllowed: boolean;
+  waitingRoomForced: boolean;
+  guestSessionTtlSecs: number;
+  requireExternalContext: boolean;
+}
+
+export interface AuditProfile {
+  enhanced: boolean;
+}
+
+export interface StageProfile {
+  maxStageParticipants: number;
+  maxPresenters: number;
+  viewerCapacity: number;
+  backstageEnabled: boolean;
+}
+
+export interface CustomRegistrationField {
+  key: string;
+  label: string;
+  required: boolean;
+  maxLength: number;
+}
+
+export interface RegistrationProfile {
+  enabled: boolean;
+  email: FieldRequirement;
+  organization: FieldRequirement;
+  customFields: CustomRegistrationField[];
+  tokenTtlHours: number;
+  tokenMaxUses: number;
+}
+
+export interface RoleMappingProfile {
+  externalRoleMapping: Record<string, Role>;
+}
+
+export interface ProfilePolicy {
+  recording: RecordingProfile;
+  transcription: TranscriptionProfile;
+  intelligence: IntelligenceProfile;
+  dataSharing: DataSharingProfile;
+  exports: ExportProfile;
+  access: AccessProfile;
+  audit: AuditProfile;
+  stage: StageProfile;
+  registration: RegistrationProfile;
+  roles: RoleMappingProfile;
+}
+
+export interface ResolvedProfile {
+  profile: MeetingProfile;
+  meetingType: MeetingType;
+  securityProfile: SecurityProfile;
+  policy: ProfilePolicy;
+  misconfigured: boolean;
+  clampedFields: string[];
 }
 
 export interface RegistrationRequest {
-  email: string;
   displayName: string;
+  conferenceId?: string;
+  email?: string;
+  organization?: string;
   customFields?: Record<string, string>;
+  idempotencyKey?: string;
 }
 
 export interface RegistrationView {
   id: string;
   meetingSpaceId: string;
-  email: string;
+  conferenceId: string | null;
+  email: string | null;
+  organization: string | null;
   displayName: string;
-  status: "PENDING" | "CONFIRMED" | "CANCELLED";
-  customFields?: Record<string, string>;
+  status: string;
+  customFields: Record<string, unknown>;
   createdAt: string;
-  confirmedAt?: string;
+  cancelledAt: string | null;
 }
 
 export interface RegistrationCreated {
-  registration: RegistrationView;
-  admissionToken?: string;
+  registrationId: string;
+  meetingSpaceId: string;
+  conferenceId: string | null;
+  admissionToken: string | null;
+  expiresAt: string;
   created: boolean;
 }
 
@@ -1331,8 +1485,10 @@ export interface RegistrationListResponse {
 }
 
 export interface BackstageResponse {
+  participantId: string;
   inBackstage: boolean;
   mediaContext: MediaContextView;
+  credentialRefreshRequired: boolean;
 }
 
 // ---------------------------------------------------------------------------

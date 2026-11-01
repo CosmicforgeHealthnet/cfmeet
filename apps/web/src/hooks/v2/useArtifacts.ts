@@ -47,11 +47,11 @@ export const artifactKeys = {
 /**
  * List recordings for a conference
  */
-export function useRecordings(conferenceId: string) {
+export function useRecordings(conferenceId: string, enabled = true) {
   return useQuery({
     queryKey: artifactKeys.recordings(conferenceId),
     queryFn: () => artifactsService.listRecordings(conferenceId),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
     refetchInterval: 5000,
   });
 }
@@ -112,11 +112,11 @@ export function useStopRecording(conferenceId: string) {
 /**
  * List artifacts for a conference
  */
-export function useArtifacts(conferenceId: string, query?: ArtifactListQuery) {
+export function useArtifacts(conferenceId: string, query?: ArtifactListQuery, enabled = true) {
   return useQuery({
     queryKey: artifactKeys.artifacts(conferenceId, query),
     queryFn: () => artifactsService.listArtifacts(conferenceId, query),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
   });
 }
 
@@ -134,11 +134,11 @@ export function useArtifact(conferenceId: string, artifactId: string) {
 /**
  * Get attendance report
  */
-export function useAttendance(conferenceId: string) {
+export function useAttendance(conferenceId: string, enabled = true) {
   return useQuery({
     queryKey: artifactKeys.attendance(conferenceId),
     queryFn: () => artifactsService.getAttendance(conferenceId),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
   });
 }
 
@@ -166,9 +166,10 @@ export function useDeleteArtifact(conferenceId: string) {
     mutationFn: (artifactId: string) =>
       artifactsService.deleteArtifact(conferenceId, artifactId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.artifacts(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.recordings(conferenceId) }),
+      ]);
     },
   });
 }
@@ -183,9 +184,10 @@ export function useGenerateReport(conferenceId: string) {
     mutationFn: (data: GenerateReportRequest) =>
       artifactsService.generateReport(conferenceId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.artifacts(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.recordings(conferenceId) }),
+      ]);
     },
   });
 }
@@ -197,11 +199,11 @@ export function useGenerateReport(conferenceId: string) {
 /**
  * Get consent requirements
  */
-export function useConsentRequirements(conferenceId: string) {
+export function useConsentRequirements(conferenceId: string, enabled = true) {
   return useQuery({
     queryKey: artifactKeys.consents(conferenceId),
     queryFn: () => artifactsService.getConsentRequirements(conferenceId),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
   });
 }
 
@@ -219,9 +221,10 @@ export function useRecordConsents(conferenceId: string) {
     mutationFn: (data: RecordConsentRequest) =>
       artifactsService.recordConsents(conferenceId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.consents(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.consents(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+      ]);
     },
   });
 }
@@ -236,9 +239,10 @@ export function useWithdrawConsent(conferenceId: string) {
     mutationFn: (consentType: ConsentKind) =>
       artifactsService.withdrawConsent(conferenceId, consentType),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.consents(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.consents(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+      ]);
     },
   });
 }
@@ -250,11 +254,12 @@ export function useWithdrawConsent(conferenceId: string) {
 /**
  * List transcripts
  */
-export function useTranscripts(conferenceId: string) {
+export function useTranscripts(conferenceId: string, enabled = true) {
   return useQuery({
     queryKey: artifactKeys.transcripts(conferenceId),
     queryFn: () => artifactsService.listTranscripts(conferenceId),
-    enabled: !!conferenceId,
+    enabled: !!conferenceId && enabled,
+    refetchInterval: 5000,
   });
 }
 
@@ -265,11 +270,12 @@ export function useTranscript(
   conferenceId: string,
   artifactId: string,
   query?: TranscriptQuery,
+  enabled = true,
 ) {
   return useQuery({
     queryKey: artifactKeys.transcript(conferenceId, artifactId, query),
     queryFn: () => artifactsService.getTranscript(conferenceId, artifactId, query),
-    enabled: !!conferenceId && !!artifactId,
+    enabled: !!conferenceId && !!artifactId && enabled,
   });
 }
 
@@ -287,9 +293,10 @@ export function useStartTranscription(conferenceId: string) {
     mutationFn: (data?: StartTranscriptionRequest) =>
       artifactsService.startTranscription(conferenceId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.transcripts(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.transcripts(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+      ]);
     },
   });
 }
@@ -304,9 +311,10 @@ export function useStopTranscription(conferenceId: string) {
     mutationFn: (jobId: string) =>
       artifactsService.stopTranscription(conferenceId, jobId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.transcripts(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.transcripts(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+      ]);
     },
   });
 }
@@ -315,6 +323,8 @@ export function useStopTranscription(conferenceId: string) {
  * Translate a transcript
  */
 export function useTranslateTranscript(conferenceId: string) {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: ({
       artifactId,
@@ -323,6 +333,12 @@ export function useTranslateTranscript(conferenceId: string) {
       artifactId: string;
       data: TranslateRequest;
     }) => artifactsService.translateTranscript(conferenceId, artifactId, data),
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.transcripts(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.all }),
+      ]);
+    },
   });
 }
 
@@ -340,9 +356,10 @@ export function useRequestIntelligence(conferenceId: string) {
     mutationFn: (data: IntelligenceRequest) =>
       artifactsService.requestIntelligence(conferenceId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: artifactKeys.artifacts(conferenceId),
-      });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: artifactKeys.artifacts(conferenceId) }),
+        queryClient.invalidateQueries({ queryKey: artifactKeys.transcripts(conferenceId) }),
+      ]);
     },
   });
 }

@@ -31,10 +31,31 @@ export type MeetingPermission =
   | "conference.lock"
   | "conference.end"
   | "conference.configure_live"
-  | "cohost.assign";
+  | "cohost.assign"
+  | "recording.start"
+  | "recording.stop"
+  | "artifact.list"
+  | "artifact.read"
+  | "artifact.delete"
+  | "artifact.export"
+  | "transcript.read"
+  | "transcription.start"
+  | "transcription.stop"
+  | "intelligence.request"
+  | "backstage.enter"
+  | "quality.view";
+
 export function meetingAllows(role: Role | undefined, permission: MeetingPermission, policy?: RolePolicy) {
   if (!role) return false;
   if (role === "OWNER" || role === "HOST") return true;
+  if (permission === "backstage.enter") {
+    return ["CO_HOST", "MODERATOR", "PRESENTER"].includes(role);
+  }
+  if (permission === "quality.view") {
+    if (role === "CO_HOST") return true;
+    if (role === "MODERATOR") return policy?.overrides?.[role]?.[permission] ?? true;
+    return false;
+  }
   if (role === "CO_HOST") {
     if ([
       "participant.admit",
@@ -52,12 +73,19 @@ export function meetingAllows(role: Role | undefined, permission: MeetingPermiss
       "conference.lock",
       "conference.configure_live",
     ].includes(permission)) return true;
+    if (["artifact.list", "artifact.read", "transcript.read", "artifact.export"].includes(permission)) {
+      return policy?.overrides?.[role]?.[permission] ?? true;
+    }
     if (permission === "conference.end") return policy?.overrides?.[role]?.[permission] ?? false;
+    if (["recording.start", "recording.stop", "transcription.start", "transcription.stop", "intelligence.request", "artifact.delete"].includes(permission))
+      return policy?.overrides?.[role]?.[permission] ?? false;
     return policy?.overrides?.[role]?.[permission] ?? false;
   }
   if (role === "MODERATOR") {
     if (permission === "participant.remove") return true;
     if (permission === "cohost.assign") return false;
+    if (["recording.start", "recording.stop", "transcription.start", "transcription.stop", "intelligence.request"].includes(permission)) return true;
+    if (["artifact.list", "artifact.read", "artifact.delete", "artifact.export", "transcript.read"].includes(permission)) return false;
     if (permission === "participant.deny" || permission === "participant.return_to_waiting") {
       return policy?.overrides?.[role]?.[permission] ?? true;
     }
@@ -70,6 +98,18 @@ export function meetingAllows(role: Role | undefined, permission: MeetingPermiss
     if (permission === "chat.moderate") return true;
     return policy?.overrides?.[role]?.[permission] ?? ["participant.admit", "participant.mute"].includes(permission);
   }
+  if ([
+    "artifact.list",
+    "artifact.read",
+    "artifact.delete",
+    "artifact.export",
+    "transcript.read",
+    "recording.start",
+    "recording.stop",
+    "transcription.start",
+    "transcription.stop",
+    "intelligence.request",
+  ].includes(permission)) return false;
   return false;
 }
 export function mayTarget(actor: Role | undefined, target: Role, self: boolean) {

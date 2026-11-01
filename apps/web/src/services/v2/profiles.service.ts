@@ -3,7 +3,7 @@
  * Handles profile policies, registration, and backstage
  */
 
-import apiV2, { publicApiV2 } from "./api";
+import apiV2 from "./api";
 import type {
   ProfilePolicyResponse,
   ProfilePolicyUpdateRequest,
@@ -24,7 +24,7 @@ export const profilesService = {
    */
   getPolicy: async (spaceId: string) => {
     const response = await apiV2.get<ProfilePolicyResponse>(
-      `/meeting-spaces/${spaceId}/profile-policy`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/profile-policy`,
     );
     return response.data;
   },
@@ -34,7 +34,7 @@ export const profilesService = {
    */
   updatePolicy: async (spaceId: string, data: ProfilePolicyUpdateRequest) => {
     const response = await apiV2.patch<ProfilePolicyResponse>(
-      `/meeting-spaces/${spaceId}/profile-policy`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/profile-policy`,
       data,
     );
     return response.data;
@@ -48,8 +48,8 @@ export const profilesService = {
    * Register for a webinar/town hall (public endpoint)
    */
   register: async (spaceId: string, data: RegistrationRequest) => {
-    const response = await publicApiV2.post<RegistrationCreated>(
-      `/meeting-spaces/${spaceId}/registrations`,
+    const response = await apiV2.post<RegistrationCreated>(
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/registrations`,
       data,
     );
     return response.data;
@@ -60,7 +60,7 @@ export const profilesService = {
    */
   listRegistrations: async (spaceId: string) => {
     const response = await apiV2.get<RegistrationListResponse>(
-      `/meeting-spaces/${spaceId}/registrations`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/registrations`,
     );
     return response.data;
   },
@@ -70,7 +70,7 @@ export const profilesService = {
    */
   getRegistration: async (spaceId: string, registrationId: string) => {
     const response = await apiV2.get<RegistrationView>(
-      `/meeting-spaces/${spaceId}/registrations/${registrationId}`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/registrations/${encodeURIComponent(registrationId)}`,
     );
     return response.data;
   },
@@ -80,7 +80,7 @@ export const profilesService = {
    */
   cancelRegistration: async (spaceId: string, registrationId: string) => {
     const response = await apiV2.delete<RegistrationView>(
-      `/meeting-spaces/${spaceId}/registrations/${registrationId}`,
+      `/meeting-spaces/${encodeURIComponent(spaceId)}/registrations/${encodeURIComponent(registrationId)}`,
     );
     return response.data;
   },
@@ -94,7 +94,7 @@ export const profilesService = {
    */
   enterBackstage: async (conferenceId: string) => {
     const response = await apiV2.post<BackstageResponse>(
-      `/conferences/${conferenceId}/backstage`,
+      `/conferences/${encodeURIComponent(conferenceId)}/backstage`,
     );
     return response.data;
   },
@@ -104,7 +104,7 @@ export const profilesService = {
    */
   leaveBackstage: async (conferenceId: string) => {
     const response = await apiV2.delete<BackstageResponse>(
-      `/conferences/${conferenceId}/backstage`,
+      `/conferences/${encodeURIComponent(conferenceId)}/backstage`,
     );
     return response.data;
   },

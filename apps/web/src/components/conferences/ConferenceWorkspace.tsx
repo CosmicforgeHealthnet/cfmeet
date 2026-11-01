@@ -7,6 +7,7 @@ import { conferencePermission } from "@/lib/meeting-scheduling";
 import { Button } from "@/components/ui/button";
 import { ConferenceRow } from "./ConferencesPanel";
 import ParticipantsPanel from "./ParticipantsPanel";
+import ConferenceRecordingsPanel from "./ConferenceRecordingsPanel";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 
 export default function ConferenceWorkspace({ id }: { id: string }) {
@@ -17,7 +18,16 @@ export default function ConferenceWorkspace({ id }: { id: string }) {
     {conference.isError && <RequestError error={conference.error} retry={() => void conference.refetch()} />}
     {space.isError && <RequestError error={space.error} retry={() => void space.refetch()} />}
     {conference.data && <>{space.data ? <ConferenceRow conference={conference.data} space={space.data} canManage={conferencePermission(space.data, "start")} /> : <p>{conference.data.status}</p>}
-      {conference.data.view === "FULL" ? <ParticipantsPanel conferenceId={id} spaceRole={space.data?.viewerRole} policy={space.data?.rolePolicy} /> : <p className="text-muted-foreground">You can view the conference summary. Participant and moderation access requires conference authority.</p>}
+      {conference.data.view === "FULL" ? <>
+        <ParticipantsPanel conferenceId={id} spaceRole={space.data?.viewerRole} policy={space.data?.rolePolicy} />
+        <ConferenceRecordingsPanel
+          conferenceId={id}
+          spaceRole={space.data?.viewerRole}
+          rolePolicy={space.data?.rolePolicy}
+          recordingPolicy={space.data?.recordingPolicy}
+          live={conference.data.status === "LIVE"}
+        />
+      </> : <p className="text-muted-foreground">You can view the conference summary. Participant and moderation access requires conference authority.</p>}
     </>}
   </div>;
 }

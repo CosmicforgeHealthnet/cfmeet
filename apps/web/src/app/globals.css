@@ -247,3 +247,22 @@ body {
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
 }
+
+/* Meeting room controls inherit the platform theme in both modes. */
+.room-footer { position: relative; z-index: 20; flex-shrink: 0; border-top: 1px solid var(--border); background: var(--card); padding: 14px 12px max(14px, env(safe-area-inset-bottom)); }
+.room-controls { display: flex; align-items: center; justify-content: center; gap: clamp(8px, 2.5vw, 30px); flex-wrap: wrap; }
+.room-control { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 11px; color: var(--muted-foreground); }
+.room-control-button { display: flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; background: color-mix(in srgb, var(--muted) 65%, transparent); border: 1px solid var(--border); color: var(--foreground); cursor: pointer; transition: background .2s, box-shadow .2s; }
+.room-control-button:hover, .room-control-button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary) 14%, var(--card)); color: var(--primary); }
+.room-control-button:focus-visible, .room-leave-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.room-control-button:disabled { opacity: .4; cursor: not-allowed; }
+.room-control-button svg, .room-leave-button svg { width: 20px; height: 20px; }
+.room-leave-button { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--destructive); color: white; cursor: pointer; box-shadow: 0 5px 20px color-mix(in srgb, var(--destructive) 20%, transparent); }
+.room-tile { min-width: 0; min-height: 0; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.room-tile[data-lk-speaking="true"] { box-shadow: inset 0 0 0 3px var(--primary); border-color: var(--primary); }
+.room-tile-backdrop { position: relative; background-image: radial-gradient(ellipse at 30% 0%, #ffffff22, transparent 70%), linear-gradient(155deg, transparent 35%, #00000018); }
+.room-space .lk-participant-tile { background: var(--muted); }
+.room-floating-reaction { animation: room-reaction-rise 3.5s ease-out forwards; }
+@keyframes room-reaction-rise { 0% { opacity: 0; transform: translate(0, 0) scale(.6) rotate(-10deg); } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(35px, -55vh) scale(1.3) rotate(10deg); } }
+@media (max-width: 480px) { .room-controls { gap: 8px 5px; } .room-footer { padding-inline: 8px; } .room-control-button { width: 36px; height: 36px; } .room-control { font-size: 9px; gap: 5px; } .room-leave-button { width: 44px; height: 44px; } .room-tile { border-radius: 12px; } }
+@media (prefers-reduced-motion: reduce) { .room-floating-reaction { animation: room-reaction-fade 3.5s ease-out forwards; bottom: 25%; } @keyframes room-reaction-fade { 0%,100% { opacity: 0; } 20%,80% { opacity: 1; } } }

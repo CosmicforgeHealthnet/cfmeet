@@ -15,16 +15,17 @@ export function RequestError({ error, retry }: { error: unknown; retry?: () => v
   return <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{schedulingError(error)}{retry && <Button className="ml-3" variant="outline" size="sm" onClick={retry}>Retry</Button>}</div>;
 }
 
-export function ActionDialog({ label, title, description, children, submit, destructive = false, onOpen }: {
+export function ActionDialog({ label, title, description, children, submit, destructive = false, onOpen, disabled = false }: {
   label: string; title?: string; description: string; children?: ReactNode;
   submit: () => Promise<unknown>; destructive?: boolean;
   onOpen?: () => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>();
   return <Dialog open={open} onOpenChange={(value) => { if (!pending) { if (value) onOpen?.(); setOpen(value); setError(undefined); } }}>
-    <DialogTrigger asChild><Button size="sm" variant={destructive ? "destructive" : "outline"}>{label}</Button></DialogTrigger>
+    <DialogTrigger asChild><Button size="sm" variant={destructive ? "destructive" : "outline"} disabled={disabled}>{label}</Button></DialogTrigger>
     <DialogContent><form className="space-y-4" onSubmit={async (event) => {
       event.preventDefault(); setPending(true); setError(undefined);
       try { await submit(); setOpen(false); } catch (cause) { setError(cause); } finally { setPending(false); }

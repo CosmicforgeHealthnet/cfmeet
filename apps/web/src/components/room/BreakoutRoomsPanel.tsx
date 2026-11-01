@@ -66,7 +66,7 @@ export default function BreakoutRoomsPanel({
   const [countdownSeconds, setCountdownSeconds] = useState(30);
 
   const hasOpenRooms = breakouts.some((b) => b.status === "OPEN");
-  const isInBreakout = myContext?.kind === "BREAKOUT" || myContext?.roomType === "BREAKOUT";
+  const isInBreakout = myContext?.kind === "BREAKOUT";
   const myBreakoutName = breakouts.find((room) => room.id === myContext?.breakoutId)?.name;
 
   const handleCloseAll = () => {

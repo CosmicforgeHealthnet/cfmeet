@@ -15,6 +15,10 @@ export default function RealtimeRoomSync({ conferenceId }: { conferenceId: strin
 
   const handleEvent = useCallback((event: RealtimeEnvelope) => {
     const type = event.eventType;
+    if (type === "reaction.sent") {
+      window.dispatchEvent(new CustomEvent("cfmeet:reaction", { detail: { id: event.eventId, reaction: event.payload.reaction, conferenceId } }));
+      return;
+    }
     if (type.startsWith("conference.")) {
       void queryClient.invalidateQueries({ queryKey: conferenceKeys.detail(conferenceId) });
       void queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });

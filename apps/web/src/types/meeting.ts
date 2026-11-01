@@ -80,6 +80,7 @@ export interface JoinMeetingData {
   participant_session_id?: string;
   conference_role?: import("./v2").Role;
   permissions?: import("./v2").JoinPermissions;
+  media_context?: import("./v2").MediaContextView;
   is_guest?: boolean;
   meeting_id: string;
   participant_id: string;

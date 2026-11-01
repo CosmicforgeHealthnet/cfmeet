@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"8080: %{http_code}\\\\n\" http://localhost:8080/health)"
+    ]
+  }
+}

@@ -1,294 +1,110 @@
-import {
-  Volume2,
-  VolumeX,
-  Upload,
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  Maximize,
-  Phone,
-  ChevronUp,
-  Check,
-} from "lucide-react";
-import { Button } from "../ui/button";
-import {
-  useLocalParticipant,
-  useRoomContext,
-  useMediaDeviceSelect,
-} from "@livekit/components-react";
-import { useMemo, useState } from "react";
-import { MicVisualizer } from "../ui/mic-visualizer";
-import { useMediaControl } from "@/hooks";
-import { schedulingError } from "@/lib/meeting-scheduling";
-import { useCollaborationState } from "@/hooks/v2/useCollaboration";
+"use client";
 
-interface FooterControlsProps {
-  onToggleSidebar: () => void;
+import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, Users, MessageCircle } from "lucide-react";
+import { useLocalParticipant, useRoomContext } from "@livekit/components-react";
+import { useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { useMediaControl } from "@/hooks";
+import { useCollaborationState } from "@/hooks/v2/useCollaboration";
+import { schedulingError } from "@/lib/meeting-scheduling";
+import type { SidebarPanel } from "./sidebar";
+import RoomEngagementControls from "./RoomEngagementControls";
+interface Props {
+  onOpenPanel: (panel: SidebarPanel) => void;
+  sidebarPanel: SidebarPanel;
   isSidebarOpen: boolean;
   meetingId: string;
   participantId: string;
   conferenceId?: string;
   permissions?: import("@/types/v2").JoinPermissions;
   onLeave?: () => Promise<void>;
+  moreControls?: ReactNode;
 }
-
 export default function FooterControls({
-  onToggleSidebar,
+  onOpenPanel,
+  sidebarPanel,
   isSidebarOpen,
   meetingId,
   participantId,
   conferenceId,
   permissions,
   onLeave,
-}: FooterControlsProps) {
+  moreControls
+}: Props) {
   const {
     localParticipant,
     isMicrophoneEnabled,
     isCameraEnabled,
-    isScreenShareEnabled,
-    microphoneTrack,
+    isScreenShareEnabled
   } = useLocalParticipant();
   const room = useRoomContext();
   const collaboration = useCollaborationState(conferenceId || "");
-  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [leaving, setLeaving] = useState(false);
-  const [leaveError, setLeaveError] = useState("");
-
-  const { startScreenShare, stopScreenShare, updateAudio, updateVideo } =
-    useMediaControl();
-
+  const allowed = collaboration.data?.me?.permissions || permissions;
   const {
-    devices: audioOutputDevices,
-    activeDeviceId: activeAudioOutputDeviceId,
-    setActiveMediaDevice: setActiveAudioOutputDevice,
-  } = useMediaDeviceSelect({ kind: "audiooutput" });
-
-  const [isDeviceMenuOpen, setIsDeviceMenuOpen] = useState(false);
-  const [mediaError, setMediaError] = useState("");
-  const effectivePermissions = collaboration.data?.me?.permissions || permissions;
-
-  const toggleSpeaker = () => {
-    const newState = !isSpeakerOn;
-    setIsSpeakerOn(newState);
-    // Mute/unmute all audio elements in the room
-    const audioElements = document.querySelectorAll("audio");
-    audioElements.forEach((audio) => {
-      audio.muted = !newState;
-    });
-  };
-
-  const mediaStreamTrack = microphoneTrack?.track?.mediaStreamTrack;
-  const activeStream = useMemo(() => {
-    if (mediaStreamTrack) {
-      return new MediaStream([mediaStreamTrack]);
-    }
-    return null;
-  }, [mediaStreamTrack]);
-
-  const toggleMic = async () => {
-    setMediaError("");
+    startScreenShare,
+    stopScreenShare,
+    updateAudio,
+    updateVideo
+  } = useMediaControl();
+  const [leaveOpen, setLeaveOpen] = useState(false),
+    [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState<string>();
+  const media = async (kind: "audio" | "video" | "screen") => {
+    setError("");
+    setPending(kind);
     try {
-      const newState = !isMicrophoneEnabled;
-      await localParticipant.setMicrophoneEnabled(newState, {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      });
-      if (!conferenceId) updateAudio.mutate({ participantId, isMuted: !newState });
-    } catch (error) {
-      setMediaError(schedulingError(error));
-    }
-  };
-
-  const toggleCamera = async () => {
-    setMediaError("");
-    try {
-      const newState = !isCameraEnabled;
-      await localParticipant.setCameraEnabled(newState);
-      if (!conferenceId) updateVideo.mutate({ participantId, isVideoOn: newState });
-    } catch (error) {
-      setMediaError(schedulingError(error));
-    }
-  };
-
-  const toggleScreenShare = async () => {
-    setMediaError("");
-    try {
-      const newState = !isScreenShareEnabled;
-      await localParticipant.setScreenShareEnabled(newState);
-      if (conferenceId) return;
-      if (newState) {
-        startScreenShare.mutate(meetingId);
-      } else {
-        stopScreenShare.mutate(meetingId);
+      if (kind === "audio") {
+        await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        });
+        if (!conferenceId) await updateAudio.mutateAsync({
+          participantId,
+          isMuted: isMicrophoneEnabled
+        });
       }
-    } catch (error) {
-      setMediaError(schedulingError(error));
+      if (kind === "video") {
+        await localParticipant.setCameraEnabled(!isCameraEnabled);
+        if (!conferenceId) await updateVideo.mutateAsync({
+          participantId,
+          isVideoOn: !isCameraEnabled
+        });
+      }
+      if (kind === "screen") {
+        await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
+        if (!conferenceId) await (isScreenShareEnabled ? stopScreenShare : startScreenShare).mutateAsync(meetingId);
+      }
+    } catch (cause) {
+      setError(schedulingError(cause));
+    } finally {
+      setPending(undefined);
     }
   };
-
-  const handleDisconnect = async () => {
-    if (leaving) return;
-    setLeaving(true); setLeaveError("");
-    try { await onLeave?.(); await room.disconnect(); }
-    catch (error) { setLeaveError(schedulingError(error)); setLeaving(false); }
+  const leave = async () => {
+    setLeaving(true);
+    setError("");
+    try {
+      await onLeave?.();
+      await room.disconnect();
+    } catch (cause) {
+      setError(schedulingError(cause));
+      setLeaving(false);
+    }
   };
-
-  return (
-    <footer className="p-2 sm:p-6 flex items-center justify-center gap-2 sm:gap-4 bg-card border-t border-border z-10 relative">
-      {leaveError && <p role="alert" className="absolute bottom-full bg-card border border-border rounded-md p-3 text-sm text-destructive">{leaveError}</p>}
-      {mediaError && <p role="alert" className="absolute bottom-full mb-14 bg-card border border-border rounded-md p-3 text-sm text-destructive">{mediaError}</p>}
-      <div className="flex flex-wrap items-center justify-between w-full max-w-5xl rounded-lg gap-2 sm:gap-4 px-1 sm:px-6">
-        {/* Audio Controls Group */}
-        <div className="relative flex items-center gap-1 bg-card/50 rounded-lg p-1">
-          <Button
-            onClick={toggleSpeaker}
-            className={`p-2 sm:p-3 rounded-md transition-colors ${
-              !isSpeakerOn
-                ? "bg-red-50 text-red-500 hover:bg-red-100"
-                : "bg-sidebar text-primary hover:bg-muted"
-            }`}
-          >
-            {isSpeakerOn ? (
-              <Volume2 className="text-primary" size={24} />
-            ) : (
-              <VolumeX className="text-red-500" size={24} />
-            )}
-          </Button>
-
-          <Button
-            onClick={() => setIsDeviceMenuOpen(!isDeviceMenuOpen)}
-            className="p-1 h-full rounded-md bg-sidebar text-primary hover:bg-muted"
-          >
-            <ChevronUp size={16} />
-          </Button>
-
-          {isDeviceMenuOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-64 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
-              <div className="p-2 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Select Audio Output
-              </div>
-              <div className="max-h-60 overflow-y-auto">
-                {audioOutputDevices.map((device) => (
-                  <button
-                    key={device.deviceId}
-                    onClick={() => {
-                      setActiveAudioOutputDevice(device.deviceId);
-                      setIsDeviceMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-muted ${
-                      activeAudioOutputDeviceId === device.deviceId
-                        ? "text-sky-600 bg-sky-50"
-                        : "text-foreground"
-                    }`}
-                  >
-                    <span className="truncate">{device.label}</span>
-                    {activeAudioOutputDeviceId === device.deviceId && (
-                      <Check size={16} />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <Button
-            onClick={toggleScreenShare}
-            disabled={effectivePermissions?.screenSharePublish === false && !isScreenShareEnabled}
-            className={`p-2 sm:p-3 rounded-lg transition-colors ${
-              isScreenShareEnabled
-                ? "bg-green-100 text-green-600 hover:bg-green-200"
-                : "bg-sidebar text-primary hover:bg-muted"
-            }`}
-          >
-            <Upload
-              className={
-                isScreenShareEnabled ? "text-green-600" : "text-primary"
-              }
-              size={24}
-            />
-          </Button>
-
-          <div className="relative">
-            <Button
-              onClick={toggleMic}
-              disabled={effectivePermissions?.audioPublish === false && !isMicrophoneEnabled}
-              className={`p-2 sm:p-3 rounded-lg transition-colors relative z-10 ${
-                !isMicrophoneEnabled
-                  ? "bg-red-50 text-red-500 hover:bg-red-100"
-                  : "bg-sidebar text-primary hover:bg-muted"
-              }`}
-            >
-              {isMicrophoneEnabled ? (
-                <Mic className="text-primary" size={24} />
-              ) : (
-                <MicOff className="text-red-500" size={24} />
-              )}
-            </Button>
-
-            {/* Visualizer Overlay */}
-            {/* Visualizer Overlay */}
-            {isMicrophoneEnabled && (
-              <div className="absolute inset-0 flex items-end justify-center pb-2 pointer-events-none z-20">
-                <MicVisualizer
-                  stream={activeStream}
-                  isOn={true}
-                  barColor="bg-green-400"
-                  count={4}
-                  className="h-2"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* ... */}
-
-          <Button
-            onClick={handleDisconnect}
-            aria-label="Leave conference"
-            disabled={leaving}
-            style={{
-              width: "56px",
-              height: "56px",
-              backgroundColor: "#FF3639",
-              borderRadius: "28px",
-            }}
-            className="text-white shadow-xl hover:bg-red-600 transition-colors flex items-center justify-center p-0"
-            variant="destructive"
-          >
-            <Phone className="fill-current rotate-[135deg]" size={28} />
-          </Button>
-
-          <Button
-            onClick={toggleCamera}
-            disabled={effectivePermissions?.videoPublish === false && !isCameraEnabled}
-            className={`p-2 sm:p-3 rounded-lg transition-colors ${
-              !isCameraEnabled
-                ? "bg-red-50 text-red-500 hover:bg-red-100"
-                : "bg-sidebar text-primary hover:bg-muted"
-            }`}
-          >
-            {isCameraEnabled ? (
-              <Video className="text-primary" size={24} />
-            ) : (
-              <VideoOff className="text-red-500" size={24} />
-            )}
-          </Button>
-
-        </div>
-        <Button
-          onClick={onToggleSidebar}
-          className={`p-2 sm:p-3 rounded-lg transition-colors hover:text-white ${
-            isSidebarOpen
-              ? "bg-sky-100 text-sky-600"
-              : "bg-muted text-muted-foreground"
-          }`}
-        >
-          <Maximize size={24} />
-        </Button>
-      </div>
-    </footer>
-  );
+  return <footer className="room-footer">
+ {error && !leaveOpen && <p role="alert" className="absolute bottom-full left-2 right-2 rounded-xl border border-border bg-card p-3 text-sm text-destructive">{error}</p>}
+ <div className="room-controls">
+ <div className="room-control"><button className="room-control-button" aria-label={isMicrophoneEnabled ? "Mute microphone" : "Unmute microphone"} aria-pressed={isMicrophoneEnabled} disabled={!!pending || allowed?.audioPublish === false && !isMicrophoneEnabled} onClick={() => void media("audio")}>{isMicrophoneEnabled ? <Mic /> : <MicOff className="text-destructive" />}</button><span>{isMicrophoneEnabled ? "Mute" : "Unmute"}</span></div>
+ <div className="room-control"><button className="room-control-button" aria-label={isCameraEnabled ? "Stop video" : "Start video"} aria-pressed={isCameraEnabled} disabled={!!pending || allowed?.videoPublish === false && !isCameraEnabled} onClick={() => void media("video")}>{isCameraEnabled ? <Video /> : <VideoOff className="text-destructive" />}</button><span>{isCameraEnabled ? "Stop video" : "Start video"}</span></div>
+ <div className="room-control"><button className="room-control-button" aria-label="Share screen" aria-pressed={isScreenShareEnabled} disabled={!!pending || allowed?.screenSharePublish === false && !isScreenShareEnabled} onClick={() => void media("screen")}><MonitorUp /></button><span>Share</span></div>
+ <Dialog open={leaveOpen} onOpenChange={value => {
+        if (!leaving) setLeaveOpen(value);
+      }}><div className="room-control"><DialogTrigger asChild><button aria-label="Leave conference" className="room-leave-button"><PhoneOff /></button></DialogTrigger><span>Leave</span></div><DialogContent><DialogHeader><DialogTitle>Leave this call?</DialogTitle><DialogDescription>Other participants can continue their conversation after you leave.</DialogDescription></DialogHeader>{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<DialogFooter><Button variant="outline" disabled={leaving} onClick={() => setLeaveOpen(false)}>Stay in call</Button><Button variant="destructive" disabled={leaving} onClick={() => void leave()}>{leaving ? "Leaving?" : "Leave call"}</Button></DialogFooter></DialogContent></Dialog>
+ <div className="room-control"><button className="room-control-button" aria-label="Open participants" aria-pressed={isSidebarOpen && sidebarPanel === "people"} onClick={() => onOpenPanel("people")}><Users /></button><span>People</span></div>
+ <div className="room-control"><button className="room-control-button" aria-label="Open chat" aria-pressed={isSidebarOpen && sidebarPanel === "chat"} onClick={() => onOpenPanel("chat")}><MessageCircle /></button><span>Chat</span></div>
+ {conferenceId && <RoomEngagementControls conferenceId={conferenceId} />}{moreControls}
+ </div></footer>;
 }

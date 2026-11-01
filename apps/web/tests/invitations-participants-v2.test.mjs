@@ -46,6 +46,24 @@ test("waiting-room operations use conference-scoped backend routes and payloads"
   assert.equal(response.providerEnforcement, "PENDING_PROVIDER_CONTROL");
 });
 
+test("recording operations use conference-scoped routes and backend request fields", async () => {
+  const { artifacts, requests } = services();
+  await artifacts.startRecording("conference/1", { layout: "SPEAKER", idempotencyKey: "request-1" });
+  await artifacts.listRecordings("conference/1");
+  await artifacts.getRecording("conference/1", "recording/1");
+  await artifacts.stopRecording("conference/1", "recording/1");
+  assert.deepEqual(requests.map(request => [request.method, request.url]), [
+    ["post", "/conferences/conference%2F1/recordings"],
+    ["get", "/conferences/conference%2F1/recordings"],
+    ["get", "/conferences/conference%2F1/recordings/recording%2F1"],
+    ["post", "/conferences/conference%2F1/recordings/recording%2F1/stop"],
+  ]);
+  assert.deepEqual(JSON.parse(requests[0].data), { layout: "SPEAKER", idempotencyKey: "request-1" });
+  const types = readFileSync(new URL("../src/types/v2/index.ts", import.meta.url), "utf8");
+  assert.match(types, /providerDispatch:\s*"DISPATCHED"\s*\|\s*"PENDING_RETRY"\s*\|\s*"NOT_REQUIRED"/);
+  assert.match(types, /"REQUESTED"[\s\S]*"RECORDING"[\s\S]*"STOPPING"[\s\S]*"PROCESSING"/);
+});
+
 test("organization and realtime services use the documented V2 routes", async () => {
   const { organizations, realtime, requests } = services();
   await organizations.mine();
@@ -98,6 +116,17 @@ test("participant moderation excludes self, owner and equal/higher roles; policy
   assert.equal(authority.meetingAllows("VIEWER", "participant.remove", { overrides: { VIEWER: { "participant.remove": true } } }), false);
 });
 
+test("recording controls follow backend role and artifact-list permission defaults", () => {
+  assert.equal(authority.meetingAllows("OWNER", "recording.start"), true);
+  assert.equal(authority.meetingAllows("HOST", "recording.stop"), true);
+  assert.equal(authority.meetingAllows("MODERATOR", "recording.start"), true);
+  assert.equal(authority.meetingAllows("CO_HOST", "recording.start"), false);
+  assert.equal(authority.meetingAllows("CO_HOST", "recording.start", { overrides: { CO_HOST: { "recording.start": true } } }), true);
+  assert.equal(authority.meetingAllows("PRESENTER", "recording.stop", { overrides: { PRESENTER: { "recording.stop": true } } }), false);
+  assert.equal(authority.meetingAllows("CO_HOST", "artifact.list"), true);
+  assert.equal(authority.meetingAllows("MODERATOR", "artifact.list"), false);
+});
+
 test("invitation drafts validate limits and emit only backend fields", () => {
   const draft = { role: "PARTICIPANT", conferenceId: "c", email: " Person@Example.com ", hours: "24", limit: "2", ownerUserId: "forged", token: "forged" };
   assert.deepEqual(plain(authority.invitationInput(draft)), { role: "PARTICIPANT", conferenceId: "c", inviteeEmail: "person@example.com", expiresInHours: 24, useLimit: 2 });
@@ -122,6 +151,7 @@ function services() {
     requests,
     invitations: load("../src/services/v2/invitations.service.ts", dependencies).invitationsService,
     participants: load("../src/services/v2/participants.service.ts", dependencies).participantsService,
+    artifacts: load("../src/services/v2/artifacts.service.ts", dependencies).artifactsService,
     organizations: load("../src/services/v2/organizations.service.ts", dependencies).organizationsService,
     realtime: load("../src/services/v2/realtime.service.ts", dependencies).realtimeService,
   };

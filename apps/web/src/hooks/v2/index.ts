@@ -30,6 +30,9 @@ export * from "./useEngagement";
 
 // Artifacts (recordings, transcription, consent, intelligence)
 export * from "./useArtifacts";
+export * from "./useProfilePolicy";
+export * from "./useRegistrations";
+export * from "./useQuality";
 
 // Realtime (WebSocket)
 export * from "./useRealtime";

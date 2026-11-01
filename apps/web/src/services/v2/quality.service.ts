@@ -16,7 +16,7 @@ export const qualityService = {
    */
   submitSamples: async (conferenceId: string, data: QualitySampleBatch) => {
     const response = await apiV2.post<QualityIngestResponse>(
-      `/conferences/${conferenceId}/quality/samples`,
+      `/conferences/${encodeURIComponent(conferenceId)}/quality/samples`,
       data,
     );
     return response.data;
@@ -27,7 +27,7 @@ export const qualityService = {
    */
   getQuality: async (conferenceId: string) => {
     const response = await apiV2.get<ConferenceQualityView>(
-      `/conferences/${conferenceId}/quality`,
+      `/conferences/${encodeURIComponent(conferenceId)}/quality`,
     );
     return response.data;
   },

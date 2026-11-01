@@ -169,7 +169,15 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
   const isLoadingMeeting = loadingSpace || (!!selectedId && selected.isLoading);
   const isError = spaceError || (!!selectedId && (selected.isError || (!selected.isLoading && !validSelection)));
   const preJoin = usePreJoin(resolveData?.conference?.id || "");
-  const consentRequirements = preJoin.data?.consentRequirements ?? [];
+  const consentRequirements = useMemo(
+    () => preJoin.data?.consentRequirements ?? [],
+    [preJoin.data?.consentRequirements],
+  );
+  const grantedConsents = useMemo(
+    () => consentRequirements.filter(item => consents[item.consentType])
+      .map(item => ({ type: item.consentType, version: item.consentVersion })),
+    [consentRequirements, consents],
+  );
 
   // Join conference mutation (V2 API)
   const joinMutation = useJoinConference();
@@ -253,6 +261,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
       participant_session_id: v2Response.participantSession?.id,
       conference_role: v2Response.participant.role,
       permissions: v2Response.permissions,
+      media_context: v2Response.mediaContext,
       is_guest: !cookieStore.getAccessToken(),
       join_token: rtcCredential,
       livekit_url: v2Response.rtc.url,
@@ -285,7 +294,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
             passcode: passcode || undefined,
             invitationToken: invitationToken || undefined,
             previousSessionId: previousSession.current,
-            consents: Object.entries(consents).map(([consentType, granted]) => ({ consentType: consentType as ConsentKind, granted: !!granted })),
+            consents: grantedConsents,
           },
         });
         if (epoch !== pollingEpoch.current) {
@@ -317,7 +326,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
         pollingBusy.current = false;
       }
     }, 3000); // Check every 3 seconds
-  }, [resolveData?.conference?.id, displayName, passcode, invitationToken, consents, joinMutation, onJoin, isCameraOn, isMicOn, mapV2JoinToLegacy]);
+  }, [resolveData?.conference?.id, displayName, passcode, invitationToken, grantedConsents, joinMutation, onJoin, isCameraOn, isMicOn, mapV2JoinToLegacy]);
 
   const handleJoin = async () => {
     setError("");
@@ -342,7 +351,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
           passcode: passcode || undefined,
           invitationToken: invitationToken || undefined,
           previousSessionId: previousSession.current,
-          consents: Object.entries(consents).map(([consentType, granted]) => ({ consentType: consentType as ConsentKind, granted: !!granted })),
+          consents: grantedConsents,
         },
       });
 
@@ -447,6 +456,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
               </span>
             )}
           </div>
+          {(resolveData.meetingSpace.meetingType === "WEBINAR" || resolveData.meetingSpace.meetingType === "TOWN_HALL") && <Link className="mt-2 inline-block text-sm text-primary underline" href={`/register/${encodeURIComponent(resolveData.meetingSpace.meetingCode)}${resolveData.conference?.id ? `?conferenceId=${encodeURIComponent(resolveData.conference.id)}` : ""}`}>Register for this event</Link>}
         </div>
 
         {/* Camera Preview */}

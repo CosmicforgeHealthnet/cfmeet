@@ -42,7 +42,7 @@ export const artifactsService = {
    */
   startRecording: async (conferenceId: string, data?: StartRecordingRequest) => {
     const response = await apiV2.post<RecordingResponse>(
-      `/conferences/${conferenceId}/recordings`,
+      `/conferences/${encodeURIComponent(conferenceId)}/recordings`,
       data ?? {},
     );
     return response.data;
@@ -53,7 +53,7 @@ export const artifactsService = {
    */
   listRecordings: async (conferenceId: string) => {
     const response = await apiV2.get<RecordingListResponse>(
-      `/conferences/${conferenceId}/recordings`,
+      `/conferences/${encodeURIComponent(conferenceId)}/recordings`,
     );
     return response.data;
   },
@@ -63,7 +63,7 @@ export const artifactsService = {
    */
   getRecording: async (conferenceId: string, recordingId: string) => {
     const response = await apiV2.get<ArtifactView>(
-      `/conferences/${conferenceId}/recordings/${recordingId}`,
+      `/conferences/${encodeURIComponent(conferenceId)}/recordings/${encodeURIComponent(recordingId)}`,
     );
     return response.data;
   },
@@ -73,7 +73,7 @@ export const artifactsService = {
    */
   stopRecording: async (conferenceId: string, recordingId: string) => {
     const response = await apiV2.post<RecordingResponse>(
-      `/conferences/${conferenceId}/recordings/${recordingId}/stop`,
+      `/conferences/${encodeURIComponent(conferenceId)}/recordings/${encodeURIComponent(recordingId)}/stop`,
     );
     return response.data;
   },
@@ -87,7 +87,7 @@ export const artifactsService = {
    */
   listArtifacts: async (conferenceId: string, query?: ArtifactListQuery) => {
     const response = await apiV2.get<ArtifactListResponse>(
-      `/conferences/${conferenceId}/artifacts`,
+      `/conferences/${encodeURIComponent(conferenceId)}/artifacts`,
       { params: query },
     );
     return response.data;
@@ -98,7 +98,7 @@ export const artifactsService = {
    */
   getArtifact: async (conferenceId: string, artifactId: string) => {
     const response = await apiV2.get<ArtifactView>(
-      `/conferences/${conferenceId}/artifacts/${artifactId}`,
+      `/conferences/${encodeURIComponent(conferenceId)}/artifacts/${encodeURIComponent(artifactId)}`,
     );
     return response.data;
   },
@@ -108,7 +108,7 @@ export const artifactsService = {
    */
   getArtifactAccess: async (conferenceId: string, artifactId: string) => {
     const response = await apiV2.post<ArtifactAccess>(
-      `/conferences/${conferenceId}/artifacts/${artifactId}/access`,
+      `/conferences/${encodeURIComponent(conferenceId)}/artifacts/${encodeURIComponent(artifactId)}/access`,
     );
     return response.data;
   },
@@ -118,7 +118,7 @@ export const artifactsService = {
    */
   deleteArtifact: async (conferenceId: string, artifactId: string) => {
     const response = await apiV2.delete<ArtifactView>(
-      `/conferences/${conferenceId}/artifacts/${artifactId}`,
+      `/conferences/${encodeURIComponent(conferenceId)}/artifacts/${encodeURIComponent(artifactId)}`,
     );
     return response.data;
   },
@@ -128,7 +128,7 @@ export const artifactsService = {
    */
   getAttendance: async (conferenceId: string) => {
     const response = await apiV2.get<AttendanceReport>(
-      `/conferences/${conferenceId}/attendance`,
+      `/conferences/${encodeURIComponent(conferenceId)}/attendance`,
     );
     return response.data;
   },
@@ -138,7 +138,7 @@ export const artifactsService = {
    */
   generateReport: async (conferenceId: string, data: GenerateReportRequest) => {
     const response = await apiV2.post<ArtifactView>(
-      `/conferences/${conferenceId}/artifacts/reports`,
+      `/conferences/${encodeURIComponent(conferenceId)}/artifacts/reports`,
       data,
     );
     return response.data;
@@ -153,7 +153,7 @@ export const artifactsService = {
    */
   getConsentRequirements: async (conferenceId: string) => {
     const response = await apiV2.get<ConsentRequirementsResponse>(
-      `/conferences/${conferenceId}/consents/requirements`,
+      `/conferences/${encodeURIComponent(conferenceId)}/consents/requirements`,
     );
     return response.data;
   },
@@ -163,7 +163,7 @@ export const artifactsService = {
    */
   recordConsents: async (conferenceId: string, data: RecordConsentRequest) => {
     const response = await apiV2.post<ConsentRequirementsResponse>(
-      `/conferences/${conferenceId}/consents`,
+      `/conferences/${encodeURIComponent(conferenceId)}/consents`,
       data,
     );
     return response.data;
@@ -174,7 +174,7 @@ export const artifactsService = {
    */
   withdrawConsent: async (conferenceId: string, consentType: ConsentKind) => {
     const response = await apiV2.post<WithdrawalResponse>(
-      `/conferences/${conferenceId}/consents/${consentType}/withdraw`,
+      `/conferences/${encodeURIComponent(conferenceId)}/consents/${encodeURIComponent(consentType)}/withdraw`,
     );
     return response.data;
   },
@@ -191,7 +191,7 @@ export const artifactsService = {
     data?: StartTranscriptionRequest,
   ) => {
     const response = await apiV2.post<TranscriptionJobView>(
-      `/conferences/${conferenceId}/transcription`,
+      `/conferences/${encodeURIComponent(conferenceId)}/transcription`,
       data ?? {},
     );
     return response.data;
@@ -202,7 +202,7 @@ export const artifactsService = {
    */
   stopTranscription: async (conferenceId: string, jobId: string) => {
     const response = await apiV2.post<TranscriptionJobView>(
-      `/conferences/${conferenceId}/transcription/${jobId}/stop`,
+      `/conferences/${encodeURIComponent(conferenceId)}/transcription/${encodeURIComponent(jobId)}/stop`,
     );
     return response.data;
   },
@@ -212,7 +212,7 @@ export const artifactsService = {
    */
   listTranscripts: async (conferenceId: string) => {
     const response = await apiV2.get<TranscriptionJobListResponse>(
-      `/conferences/${conferenceId}/transcripts`,
+      `/conferences/${encodeURIComponent(conferenceId)}/transcripts`,
     );
     return response.data;
   },
@@ -226,7 +226,7 @@ export const artifactsService = {
     query?: TranscriptQuery,
   ) => {
     const response = await apiV2.get<TranscriptView>(
-      `/conferences/${conferenceId}/transcripts/${artifactId}`,
+      `/conferences/${encodeURIComponent(conferenceId)}/transcripts/${encodeURIComponent(artifactId)}`,
       { params: query },
     );
     return response.data;
@@ -241,7 +241,7 @@ export const artifactsService = {
     data: TranslateRequest,
   ) => {
     const response = await apiV2.post<TranslationResponse>(
-      `/conferences/${conferenceId}/transcripts/${artifactId}/translations`,
+      `/conferences/${encodeURIComponent(conferenceId)}/transcripts/${encodeURIComponent(artifactId)}/translations`,
       data,
     );
     return response.data;
@@ -256,7 +256,7 @@ export const artifactsService = {
    */
   requestIntelligence: async (conferenceId: string, data: IntelligenceRequest) => {
     const response = await apiV2.post<ArtifactView>(
-      `/conferences/${conferenceId}/intelligence/requests`,
+      `/conferences/${encodeURIComponent(conferenceId)}/intelligence/requests`,
       data,
     );
     return response.data;
