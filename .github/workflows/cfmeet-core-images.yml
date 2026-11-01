@@ -1,0 +1,69 @@
+name: Build CF Meet core service images
+
+# Build-only workflow. Never deploys, migrates, starts containers, changes VPS
+# configuration, or publishes production ingress. Core-service cutover is
+# separately authorized after isolated database, trust, and health validation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cfmeet-core-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build ${{ matrix.service }} image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [platform-access, messaging, calling]
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve immutable image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "ref=ghcr.io/${owner}/cfmeet-${{ matrix.service }}:${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish from service-specific Dockerfile
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./services/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          provenance: true
+
+      - name: Record immutable published reference
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          echo "Published ${IMAGE_REF}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Deployment is deliberately disabled; do not activate until service databases, signed trust bundles, keys, health checks and rollback have been prepared." >> "${GITHUB_STEP_SUMMARY}"
