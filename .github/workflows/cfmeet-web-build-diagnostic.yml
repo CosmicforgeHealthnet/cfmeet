@@ -1,0 +1,39 @@
+name: Diagnose CF Meet web build
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-web-build-diagnostic.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  build:
+    name: Diagnose Next.js production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install exact dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Type-check web application
+        run: npx tsc --noEmit
+      - name: Build Next.js
+        env:
+          NEXT_PUBLIC_API_URL: https://api.cfmeet.com/api/v1
+          NEXT_PUBLIC_CALLING_API_URL: https://api.cfmeet.com
+          CALLING_API_URL: https://api.cfmeet.com
+          CALLING_PLATFORM_CREDENTIAL: "test-placeholder-not-a-real-credential"
+          CALLING_TENANT_ID: d92576b3-b0cb-4f53-921b-9cebc10b63c9
+          CALLING_APPLICATION_ID: b89bab3f-f0c1-4444-90de-9fa73be3a40a
+          CALLING_ENVIRONMENT_ID: 8e1af752-3148-47c2-bc5f-80bd003afab6
+        run: npm run build
