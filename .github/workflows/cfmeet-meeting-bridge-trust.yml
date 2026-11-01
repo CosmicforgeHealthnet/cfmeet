@@ -1,0 +1,107 @@
+name: Prepare CF Meet production messaging service trust
+
+# Adds receiver-authoritative permissions for the existing Meeting Service.
+# Does not restart Meeting or enable customer Calling/telecom.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-meeting-bridge-trust.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-meeting-bridge-trust
+  cancel-in-progress: false
+jobs:
+  establish-trust:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 16
+    steps:
+      - name: Set up SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Create Meeting identity and configure private receiver trust
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          S=/opt/cfmeet-core/secrets
+          MEETING_KEY="$S/meeting-service-auth.pem"
+          P="$S/platform-access-trust.json"
+          M="$S/messaging-trust.json"
+          test -s "$P" && test -s "$M"
+          for c in cfmeet-platform-access cfmeet-messaging; do
+            test "$(docker inspect -f '{{.State.Running}}' "$c")" = true
+          done
+          if test ! -s "$MEETING_KEY"; then
+            openssl genpkey -algorithm Ed25519 -out "$MEETING_KEY" >/dev/null 2>&1
+          fi
+          chmod 0400 "$MEETING_KEY"
+          # Idempotent backups are created before any modifications.
+          cp -p "$P" "$S/platform-access-trust.pre-meeting.json"
+          cp -p "$M" "$S/messaging-trust.pre-meeting.json"
+          python3 - "$MEETING_KEY" "$P" "$M" <<'PY'
+          import base64,json,os,pathlib,subprocess,sys
+          key,p,m=map(pathlib.Path,sys.argv[1:])
+          pub=subprocess.check_output(['openssl','pkey','-in',str(key),'-pubout','-outform','DER'])
+          assert len(pub)==44 and pub[:12].hex()=='302a300506032b6570032100'
+          jwk={'kty':'OKP','crv':'Ed25519','kid':'meeting-service-production-1',
+               'x':base64.urlsafe_b64encode(pub[12:]).decode().rstrip('=')}
+          for path,receiver,perms in [
+            (p,'cfmeet.platform-access',['platform-principal.ensure']),
+            (m,'cfmeet.messaging',['messaging-application.delegate','messaging-meeting.sync'])
+          ]:
+            d=json.loads(path.read_text())
+            assert d['receiver']==receiver and d['runtime_environment']=='production'
+            issuers=[x for x in d['trusted_issuers'] if x['issuer']!='cfmeet.meeting-service']
+            issuers.append({'issuer':'cfmeet.meeting-service','audience':receiver,
+                  'runtime_environment':'production','keys':[jwk],'permissions':perms})
+            d['trusted_issuers']=issuers
+            tmp=path.with_suffix('.new')
+            tmp.write_text(json.dumps(d,sort_keys=True)+'\n')
+            os.chown(tmp,10001,10001)
+            os.chmod(tmp,0o400)
+            os.replace(tmp,path)
+          PY
+          recover() {
+            cp -p "$S/platform-access-trust.pre-meeting.json" "$P"
+            cp -p "$S/messaging-trust.pre-meeting.json" "$M"
+            docker restart cfmeet-platform-access cfmeet-messaging >/dev/null || true
+          }
+          trap recover ERR
+          docker restart cfmeet-platform-access cfmeet-messaging >/dev/null
+          for path in 8443/ready 8444/ready; do
+            port="$(printf %s "$path" | cut -d/ -f1)"
+            endpoint="$(printf %s "$path" | cut -d/ -f2)"
+            ok=0
+            for i in $(seq 1 25); do
+              if docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+                -fsS --max-time 6 "https://api.cfmeet.com:$port/$endpoint" >/dev/null 2>&1; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            test "$ok" = 1 || { echo "Receiver not ready at $port"; exit 1; }
+          done
+          trap - ERR
+          echo "MEETING_SERVICE_KEY: ON_VPS_ONLY"
+          echo "PLATFORM_ACCESS_TRUST: MEETING_PRINCIPAL_ENSURE"
+          echo "MESSAGING_TRUST: MEETING_DELEGATE_AND_SYNC"
+          echo "MEETING_CONTAINER: UNCHANGED"
+          echo "PSTN: DISABLED"
+          REMOTE
