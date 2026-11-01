@@ -1,0 +1,60 @@
+name: Check CF Meet active LiveKit sessions
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-livekit-rooms-preflight.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 9
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Read-only list active rooms
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          docker inspect cfmeet-production-backend --format '{{range .Config.Env}}{{println .}}{{end}}' | python3 -c '
+          import sys,base64,hashlib,hmac,json,time,urllib.request
+          env={}
+          for line in sys.stdin:
+              if "=" in line:
+                  k,v=line.rstrip("\n").split("=",1)
+                  if k in ("LIVEKIT_API_KEY","LIVEKIT_API_SECRET"): env[k]=v
+          key=env.get("LIVEKIT_API_KEY")
+          secret=env.get("LIVEKIT_API_SECRET")
+          if not key or not secret: raise SystemExit("No existing Meeting LiveKit credentials; refusing restart")
+          b64=lambda x:base64.urlsafe_b64encode(x).rstrip(b"=").decode()
+          now=int(time.time())
+          header=b64(json.dumps({"alg":"HS256","typ":"JWT"},separators=(",",":")).encode())
+          payload=b64(json.dumps({"iss":key,"iat":now,"nbf":now-1,"exp":now+60,"sub":"cfmeet-livekit-readonly-inventory","video":{"roomList":True}},separators=(",",":")).encode())
+          body=header+"."+payload
+          signature=b64(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest())
+          request=urllib.request.Request("http://127.0.0.1:7880/twirp/livekit.RoomService/ListRooms",
+              data=b"{}",method="POST",headers={"Authorization":"Bearer "+body+"."+signature,"Content-Type":"application/json"})
+          with urllib.request.urlopen(request,timeout=8) as response:
+              data=json.load(response)
+          rooms=data.get("rooms",[])
+          if not isinstance(rooms,list): raise SystemExit("Invalid LiveKit room listing")
+          print("ACTIVE_ROOMS:",len(rooms))
+          print("CONNECTED_PARTICIPANTS:",sum(int(r.get("numParticipants",r.get("num_participants",0))) for r in rooms))
+          print("READONLY_ROOM_LIST: verified")
+          '
+          REMOTE
