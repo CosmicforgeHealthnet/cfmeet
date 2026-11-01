@@ -1,0 +1,84 @@
+name: Stage CF Meet core images on Contabo
+
+# Images only. This workflow never starts/restarts containers, modifies databases,
+# changes runtime environment variables, configures ingress or enables calling.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cfmeet-core-stage-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-stage-images
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: Verify and stage three immutable core images
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_SHA: 884776b0757109d4ccb84ad25ada7c1a0f5af336
+    steps:
+      - name: Configure SSH and verify target
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VPS_HOST}" && test -n "${VPS_USER}" && test -n "${VPS_SSH_KEY}"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "${VPS_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Match existing production release bootstrap; replace with a pinned
+          # host-key secret before allowing write-capable service deployment.
+          ssh-keyscan -T 7 -H "${VPS_HOST}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 \
+            "${VPS_USER}@${VPS_HOST}" 'test -d /opt/cfmeet-production/source && docker image ls --format "{{.Repository}}" >/dev/null'
+
+      - name: Login to GHCR (runner only; credentials never sent to VPS)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Transfer and verify images without deploying
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          free_kb="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" "df -Pk / | awk 'NR==2{print \\$4}'")"
+          if ! [[ "${free_kb}" =~ ^[0-9]+$ ]] || (( free_kb < 10485760 )); then
+            echo "::error::Staging stopped: less than 10 GiB free or disk capacity unknown."
+            exit 1
+          fi
+          for svc in platform-access messaging calling; do
+            image="ghcr.io/cosmicforgehealthnet/cfmeet-${svc}:${IMAGE_SHA}"
+            echo "::group::Stage ${svc}"
+            docker pull "${image}"
+            # Image is transferred via SSH, avoiding long-lived GHCR tokens on VPS.
+            docker save "${image}" | gzip -1 | \
+              ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+                "${VPS_USER}@${VPS_HOST}" 'gzip -dc | docker load'
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "${VPS_USER}@${VPS_HOST}" \
+              "docker image inspect --format '{{.Id}}' '${image}' >/dev/null"
+            echo "Verified image on VPS: ${image}"
+            echo "::endgroup::"
+          done
+          echo "All three images transferred and verified. No containers started or replaced."
