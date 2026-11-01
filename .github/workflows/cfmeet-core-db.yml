@@ -1,0 +1,122 @@
+name: Prepare isolated CF Meet core databases
+
+# Creates a dedicated CF Meet core PostgreSQL container and three separate
+# databases. Existing Meeting, Karryam, and Admin databases are not touched.
+# Does not start Calling, Messaging, or Platform Access or change ingress.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-core-db.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-db
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Private DB and least-privilege roles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Set up SSH
+        env:
+          VPS_HOST: \${{ secrets.VPS_HOST }}
+          VPS_USER: \${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: \${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Provision only a dedicated private DB
+        env:
+          VPS_HOST: \${{ secrets.VPS_HOST }}
+          VPS_USER: \${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core
+          SECRETS="$ROOT/secrets"
+          NETWORK=cfmeet-core-private
+          DB_CONTAINER=cfmeet-core-db
+          mkdir -p "$SECRETS"
+          chmod 0700 "$ROOT" "$SECRETS"
+          if test ! -s "$SECRETS/postgres.password"; then
+            openssl rand -hex 32 > "$SECRETS/postgres.password"
+          fi
+          # Password file is mounted directly into only the PostgreSQL container.
+          # Its parent directory is root-only on the host.
+          chmod 0444 "$SECRETS/postgres.password"
+          docker network inspect "$NETWORK" >/dev/null 2>&1 ||
+            docker network create --internal "$NETWORK" >/dev/null
+          docker volume inspect cfmeet-core-postgres-data >/dev/null 2>&1 ||
+            docker volume create cfmeet-core-postgres-data >/dev/null
+          if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
+            docker run -d --name "$DB_CONTAINER" --restart unless-stopped \
+              --network "$NETWORK" \
+              --mount type=volume,src=cfmeet-core-postgres-data,dst=/var/lib/postgresql/data \
+              --mount type=bind,src="$SECRETS/postgres.password",dst=/run/secrets/postgres.password,readonly \
+              -e POSTGRES_USER=postgres -e POSTGRES_DB=postgres \
+              -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres.password \
+              postgres:16-alpine >/dev/null
+          fi
+          ready=0
+          for attempt in $(seq 1 40); do
+            if docker exec -u postgres "$DB_CONTAINER" pg_isready -q -U postgres -d postgres; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = 1 || { echo "New core database not ready"; exit 1; }
+
+          for svc in platform-access messaging calling; do
+            role="$(printf %s "$svc" | tr '-' '_')"
+            db="cfmeet_$role"
+            migrator="$role"_migrator
+            for kind in migrator runtime; do
+              pwfile="$SECRETS/$role-$kind.password"
+              if test ! -s "$pwfile"; then openssl rand -hex 32 > "$pwfile"; fi
+              chmod 0400 "$pwfile"
+            done
+            migrator_password="$(cat "$SECRETS/$role-migrator.password")"
+            runtime_password="$(cat "$SECRETS/$role-runtime.password")"
+            docker exec -i -u postgres "$DB_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U postgres -d postgres <<SQL
+          SELECT format('CREATE ROLE %I LOGIN NOINHERIT', '$migrator') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$migrator') \gexec
+          SELECT format('CREATE ROLE %I LOGIN NOINHERIT', '$role') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$role') \gexec
+          SELECT format('ALTER ROLE %I PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS', '$migrator', '$migrator_password') \gexec
+          SELECT format('ALTER ROLE %I PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS', '$role', '$runtime_password') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', '$db', '$migrator') WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$db') \gexec
+          SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', '$db') \gexec
+          SELECT format('GRANT CONNECT ON DATABASE %I TO %I', '$db', '$role') \gexec
+          SQL
+            unset migrator_password runtime_password
+            docker exec -i -u postgres "$DB_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U postgres -d "$db" <<SQL
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          SELECT format('GRANT USAGE ON SCHEMA public TO %I', '$role') \gexec
+          SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', '$role') \gexec
+          SELECT format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %I', '$role') \gexec
+          SELECT format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', '$role') \gexec
+          SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', '$migrator', '$role') \gexec
+          SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I', '$migrator', '$role') \gexec
+          SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO %I', '$migrator', '$role') \gexec
+          SQL
+            echo "CREATED_PRIVATE_DB: $db"
+          done
+          test "$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$DB_CONTAINER")" = 'null' ||
+            test "$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$DB_CONTAINER")" = '{}' ||
+            { echo "Unexpected database host port publication"; exit 1; }
+          echo "CORE_DATABASE_READY: yes"
+          echo "EXISTING_APPLICATIONS_CHANGED: no"
+          REMOTE
