@@ -116,5 +116,33 @@ jobs:
               openssl x509 -in "$f" -noout -ext subjectAltName 2>/dev/null | tail -n +2 || true
             fi
           done
+          echo '---- Core production container status and host-port exposure ----'
+          for c in cfmeet-core-db cfmeet-platform-access cfmeet-messaging cfmeet-calling cfmeet-core-tls; do
+            if docker container inspect "$c" >/dev/null 2>&1; then
+              state="$(docker inspect --format '{{.State.Running}}' "$c")"
+              ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$c")"
+              if test "$ports" = 'null' || test "$ports" = '{}'; then
+                echo "CORE_CONTAINER_$c: running=$state public_ports=none"
+              else
+                echo "CORE_CONTAINER_$c: running=$state public_ports=UNEXPECTED"
+                exit 1
+              fi
+            else
+              echo "CORE_CONTAINER_$c: missing"
+              exit 1
+            fi
+          done
+          echo '---- Verify signed-TLS private service health ----'
+          for p in 8443 8444 8445; do
+            health=/ready
+            if test "$p" = 8445; then health=/health; fi
+            if docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+              -fsS --max-time 6 "https://api.cfmeet.com:$p$health" >/dev/null; then
+              echo "CORE_TLS_PORT_$p: VERIFIED"
+            else
+              echo "CORE_TLS_PORT_$p: FAILED"
+              exit 1
+            fi
+          done
           echo '===== PREFLIGHT DONE: NO CHANGES MADE ====='
           REMOTE
