@@ -50,8 +50,8 @@ jobs:
           NET=cfmeet-core-private
           IMAGE=ghcr.io/cosmicforgehealthnet/cfmeet-platform-access:884776b0757109d4ccb84ad25ada7c1a0f5af336
           CONTAINER=cfmeet-platform-access
-          test -d "$SECRETS" && test -s "$SECRETS/platform_access_migrator.password" &&
-            test -s "$SECRETS/platform_access_runtime.password" &&
+          test -d "$SECRETS" && test -s "$SECRETS/platform_access-migrator.password" &&
+            test -s "$SECRETS/platform_access-runtime.password" &&
             docker image inspect "$IMAGE" >/dev/null &&
             docker network inspect "$NET" >/dev/null &&
             docker container inspect cfmeet-core-db >/dev/null
@@ -75,8 +75,8 @@ jobs:
           chmod 0400 "$AUTH_KEY" "$TRUST" "$PEPPER"
 
           DB_HOST=cfmeet-core-db
-          PW_MIGRATOR="$(cat "$SECRETS/platform_access_migrator.password")"
-          PW_RUNTIME="$(cat "$SECRETS/platform_access_runtime.password")"
+          PW_MIGRATOR="$(cat "$SECRETS/platform_access-migrator.password")"
+          PW_RUNTIME="$(cat "$SECRETS/platform_access-runtime.password")"
           RUNTIME_ENV="$ROOT/platform-access.runtime.env"
           cat > "$RUNTIME_ENV" <<ENV
           DATABASE_URL=postgres://platform_access:$PW_RUNTIME@$DB_HOST:5432/cfmeet_platform_access
