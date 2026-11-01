@@ -1,0 +1,143 @@
+name: Install private CF Meet core HTTPS routing
+
+# Dedicated container-network TLS proxy with no host/public ports.
+# Uses the existing api.cfmeet.com certificate through two read-only
+# bind mounts. Does not change Nginx on the host or existing apps.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-core-private-tls.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-private-tls
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: Private TLS proxy and certificate verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    environment: production
+    steps:
+      - name: Prepare SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Start internal-only TLS proxy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          NET=cfmeet-core-private
+          CONTAINER=cfmeet-core-tls
+          PROXY_DIR=/opt/cfmeet-core/tls-proxy
+          CERT="$(readlink -f /etc/letsencrypt/live/api.cfmeet.com/fullchain.pem)"
+          KEY="$(readlink -f /etc/letsencrypt/live/api.cfmeet.com/privkey.pem)"
+          test -r "$CERT" && test -r "$KEY"
+          docker network inspect "$NET" >/dev/null
+          mkdir -p "$PROXY_DIR"
+          chmod 0700 "$PROXY_DIR"
+          cat > "$PROXY_DIR/nginx.conf" <<'NGINX'
+          worker_processes 1;
+          error_log /dev/stderr warn;
+          events { worker_connections 1024; }
+          http {
+            resolver 127.0.0.11 valid=10s ipv6=off;
+            access_log off;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_certificate /etc/nginx/tls/fullchain.pem;
+            ssl_certificate_key /etc/nginx/tls/privkey.pem;
+            ssl_session_cache shared:SSL:10m;
+
+            server {
+              listen 8443 ssl;
+              server_name api.cfmeet.com;
+              location / {
+                set $peer cfmeet-platform-access:8094;
+                proxy_pass http://$peer$request_uri;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+            }
+            server {
+              listen 8444 ssl;
+              server_name api.cfmeet.com;
+              location / {
+                set $peer cfmeet-messaging:8097;
+                proxy_pass http://$peer$request_uri;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_read_timeout 3600;
+              }
+            }
+            server {
+              listen 8445 ssl;
+              server_name api.cfmeet.com;
+              location / {
+                set $peer cfmeet-calling:8090;
+                proxy_pass http://$peer$request_uri;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_read_timeout 3600;
+              }
+            }
+          }
+          NGINX
+          chmod 0600 "$PROXY_DIR/nginx.conf"
+          docker pull nginx:stable-alpine >/dev/null
+          if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+            test "$(docker inspect --format '{{.State.Running}}' "$CONTAINER")" = true ||
+              { echo 'Existing private TLS proxy stopped; manual inspection required'; exit 1; }
+          else
+            docker run -d --name "$CONTAINER" --restart unless-stopped \
+              --network "$NET" --network-alias api.cfmeet.com \
+              --mount type=bind,src="$PROXY_DIR/nginx.conf",dst=/etc/nginx/nginx.conf,readonly \
+              --mount type=bind,src="$CERT",dst=/etc/nginx/tls/fullchain.pem,readonly \
+              --mount type=bind,src="$KEY",dst=/etc/nginx/tls/privkey.pem,readonly \
+              nginx:stable-alpine >/dev/null
+          fi
+          ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$CONTAINER")"
+          test "$ports" = 'null' || test "$ports" = '{}' ||
+            { echo 'Refusing published TLS proxy port'; exit 1; }
+          docker pull curlimages/curl:8.12.1 >/dev/null
+          ok=0
+          for i in $(seq 1 20); do
+            if docker run --rm --network "$NET" curlimages/curl:8.12.1 \
+              --fail --silent --show-error --max-time 5 https://api.cfmeet.com:8443/ready >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" = 1 || { echo 'Internal HTTPS verification failed'; exit 1; }
+          echo "PRIVATE_PLATFORM_ACCESS_HTTPS: verified"
+          echo "PRIVATE_MESSAGING_URL: https://api.cfmeet.com:8444 (not yet deployed)"
+          echo "PRIVATE_CALLING_URL: https://api.cfmeet.com:8445 (not yet deployed)"
+          echo "PUBLIC_HOST_PORTS: none"
+          echo "EXISTING_NGINX_MODIFIED: no"
+          REMOTE
