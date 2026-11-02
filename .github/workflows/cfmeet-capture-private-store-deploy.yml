@@ -100,7 +100,7 @@ jobs:
             docker run --rm --user 0:0 --network cfmeet-core-private \
               -e "MC_HOST_local=$MC_HOST" \
               --mount "type=bind,src=$BASE/storage,dst=/config,readonly" \
-              minio/mc:latest "$@"
+              quay.io/minio/mc:latest "$@"
           }
           mc mb --ignore-existing "local/$BUCKET" >/dev/null
           mc anonymous set none "local/$BUCKET" >/dev/null
@@ -117,8 +117,8 @@ jobs:
           ]}
           POLICY
           chmod 0400 "$BASE/storage/"*.json
-          mc admin policy create local cfmeet-calling-objectstore /config/calling-policy.json >/dev/null
-          mc admin policy create local cfmeet-calling-egress-upload /config/egress-policy.json >/dev/null
+          mc admin policy create local cfmeet-calling-objectstore /config/calling-policy.json >/dev/null || mc admin policy info local cfmeet-calling-objectstore >/dev/null
+          mc admin policy create local cfmeet-calling-egress-upload /config/egress-policy.json >/dev/null || mc admin policy info local cfmeet-calling-egress-upload >/dev/null
           mc admin user add local "$(cat "$SECRET/minio-service-access-key")" "$(cat "$SECRET/calling-artifact-store-secret")" >/dev/null
           mc admin policy attach local cfmeet-calling-objectstore --user "$(cat "$SECRET/minio-service-access-key")" >/dev/null
           mc admin user add local "$(cat "$SECRET/minio-egress-access-key")" "$(cat "$SECRET/minio-egress-secret")" >/dev/null
