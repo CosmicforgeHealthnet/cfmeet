@@ -175,7 +175,7 @@ def provision(sha, run_id):
               'minio-service-access-key', 'calling-artifact-store-secret',
               'calling-livekit-api-key', 'calling-livekit-api-secret'):
         assert secret(n), 'Required existing credential missing'
-    evidence_dir = ROOT / 'production-evidence' / run_id
+    evidence_dir = ROOT / 'production-evidence' / (run_id+'-'+str(time.time_ns()))
     evidence_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
     for n in ('cfmeet-calling', 'lk-server', 'cfmeet-calling-redis', 'cfmeet-calling-artifacts'):
         write_private(evidence_dir / (n+'.inspect.json'), json.dumps(inspect(n)))
@@ -266,7 +266,8 @@ def provision(sha, run_id):
     }
     capture_path = ROOT / 'calling-capture.production.env'
     if capture_path.exists():
-        assert capture_path.read_text() == ''.join(k+'='+v+'\n' for k,v in capture_env.items()), 'Existing capture env differs; preserved'
+        existing = dict(line.split('=',1) for line in capture_path.read_text().splitlines() if '=' in line)
+        assert all(existing.get(k)==v for k,v in capture_env.items()), 'Existing capture env differs; preserved'
     else:
         write_private(capture_path, ''.join(k+'='+v+'\n' for k,v in capture_env.items()))
     # Environment file is a deployment input; its presence is never treated as runtime proof.
@@ -278,6 +279,70 @@ def provision(sha, run_id):
     write_private(ROOT / 'calling-production-evidence.json', json.dumps(record, indent=2))
     regression()
     print(json.dumps(record))
+
+
+def secure_storage_ingress(run_id):
+    identity()
+    store = inspect('cfmeet-calling-artifacts')
+    assert not store['HostConfig']['PortBindings']
+    ip = store['NetworkSettings']['Networks'][NET]['IPAddress']
+    import ipaddress
+    assert ipaddress.ip_address(ip).is_private
+    site = Path('/etc/nginx/sites-enabled/api.cfmeet.com').resolve()
+    assert site == Path('/etc/nginx/sites-available/api.cfmeet.com')
+    text = site.read_text()
+    existing_include = 'include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
+    assert text.count(existing_include) == 1 and 'listen 443 ssl' in text
+    routes = Path('/etc/nginx/snippets/cfmeet-calling-routes.conf')
+    previous = routes.read_text()
+    snippet = Path('/etc/nginx/snippets/cfmeet-calling-artifacts.conf')
+    contents = ('# Signed read-only S3 path; never log bearer query signatures.\n'
+        'location ^~ /cfmeet-calling-artifacts/ {\n'
+        '    limit_except GET HEAD { deny all; }\n'
+        '    access_log off;\n'
+        '    proxy_buffering off;\n'
+        '    proxy_set_header Host $http_host;\n'
+        '    proxy_set_header X-Forwarded-Proto https;\n'
+        '    add_header Cache-Control "private, no-store" always;\n'
+        '    proxy_pass http://'+ip+':9000;\n}\n')
+    old_snippet = snippet.read_text() if snippet.exists() else None
+    include = 'include /etc/nginx/snippets/cfmeet-calling-artifacts.conf;'
+    backup = ROOT/'production-evidence'/('storage-ingress-'+run_id)
+    backup.mkdir(parents=True,exist_ok=False,mode=0o700)
+    write_private(backup/'calling-routes.before',previous)
+    if old_snippet is not None:
+        write_private(backup/'calling-artifacts.before',old_snippet)
+    try:
+        write_private(snippet,contents)
+        if include not in previous:
+            routes.write_text(previous.rstrip()+'\n'+include+'\n')
+        run('nginx','-t')
+        run('systemctl','reload','nginx')
+        try:
+            urllib.request.urlopen('https://api.cfmeet.com/cfmeet-calling-artifacts/unsigned-probe',timeout=15)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403, 'Anonymous storage access must be denied'
+        else:
+            raise AssertionError('Unsigned storage access was permitted')
+        regression()
+        capture_path = ROOT/'calling-capture.production.env'
+        assert capture_path.exists()
+        capture_text = capture_path.read_text()
+        public = 'CALLING_ARTIFACT_STORAGE_PUBLIC_ENDPOINT=https://api.cfmeet.com\n'
+        if 'CALLING_ARTIFACT_STORAGE_PUBLIC_ENDPOINT=' not in capture_text:
+            write_private(capture_path,capture_text+public)
+        else:
+            assert public in capture_text
+    except Exception:
+        routes.write_text(previous)
+        if old_snippet is not None:
+            write_private(snippet,old_snippet)
+        elif snippet.exists():
+            snippet.unlink()
+        run('nginx','-t')
+        run('systemctl','reload','nginx')
+        raise
+    print('STORAGE_HTTPS: read-only private-bucket route installed; anonymous GET denied; no new ports')
 
 
 def validate_acceptance(evidence, now, images):
@@ -367,7 +432,7 @@ def clone_payload(c, overrides):
     return payload
 
 
-def recreate_calling(overrides):
+def recreate_calling(overrides, require_acceptance=True):
     c = inspect('cfmeet-calling')
     if all(env_of(c).get(k) == v for k,v in overrides.items()):
         regression()
@@ -399,21 +464,42 @@ def recreate_calling(overrides):
         assert deployed['Config']['Entrypoint'] == c['Config']['Entrypoint']
         assert not deployed['HostConfig']['PortBindings']
         # Re-run real acceptance after activation; failure restores original container.
-        verify(str(int(time.time())))
-        latest = json.loads((ROOT/'calling-production-evidence.json').read_text())
-        validate_acceptance(latest, int(time.time()),
-            {n:inspect(n)['Image'] for n in ('lk-server',EGRESS,'cfmeet-calling','cfmeet-calling-artifacts')})
+        if require_acceptance:
+            verify(str(int(time.time())))
+            latest = json.loads((ROOT/'calling-production-evidence.json').read_text())
+            validate_acceptance(latest, int(time.time()),
+                {n:inspect(n)['Image'] for n in ('lk-server',EGRESS,'cfmeet-calling','cfmeet-calling-artifacts')})
     except Exception:
         rollback_calling()
         raise
-    print('CALLING_ACTIVATED: runtime flags/mounts/networks verified; rollback retained '+backup)
+    print('CALLING_RUNTIME_UPDATED: flags/mounts/networks verified; rollback retained '+backup)
+
+
+def configure_capture():
+    identity()
+    c = inspect('cfmeet-calling')
+    old_env = env_of(c)
+    assert old_env.get('CALLING_NEW_CALLS_ENABLED','false') == 'false'
+    assert old_env.get('VOICEMAIL_ENABLED','false') == 'false'
+    assert old_env.get('CALL_RECORDING_ENABLED','false') == 'false'
+    capture = dict(line.split('=',1) for line in (ROOT/'calling-capture.production.env').read_text().splitlines())
+    assert set(capture).issubset({'CALLING_CAPTURE_PROVIDER','CALLING_CAPTURE_STAGING_PREFIX',
+        'CALLING_ARTIFACT_STORAGE_ENDPOINT','CALLING_ARTIFACT_STORAGE_PUBLIC_ENDPOINT',
+        'CALLING_ARTIFACT_STORAGE_REGION','CALLING_ARTIFACT_STORAGE_BUCKET',
+        'CALLING_ARTIFACT_STORAGE_ACCESS_KEY_ID','CALLING_ARTIFACT_STORAGE_SECRET_ACCESS_KEY_FILE',
+        'CALLING_ARTIFACT_STORAGE_PATH_STYLE','CALLING_ARTIFACT_STORAGE_SERVER_SIDE_ENCRYPTION'})
+    # Capture settings are installed with all existing activation switches preserved.
+    recreate_calling(capture,require_acceptance=False)
+    deployed = env_of(inspect('cfmeet-calling'))
+    assert all(deployed.get(k)==v for k,v in old_env.items() if k in SAFE_ENV and k not in capture)
+    print('CAPTURE_RUNTIME_CONFIGURED: feature flags preserved; capture not production-certified')
 
 
 def rollback_calling():
     record = json.loads((ROOT/'calling-activation-rollback.json').read_text())
     backup = record['container']
     assert backup.startswith('cfmeet-calling-rollback-')
-    inspect(backup)
+    assert inspect(backup)['Id'] == record['original']['Id'], 'Rollback identity mismatch'
     # Retain failed replacement too; no deletion of original/rollback containers.
     if subprocess.run(['docker','inspect','cfmeet-calling'], capture_output=True).returncode == 0:
         run('docker','stop','--time','15','cfmeet-calling')
@@ -488,10 +574,14 @@ if __name__ == '__main__':
         elif operation == 'activate':
             activate()
         elif operation == 'rollback':
-            identity()
+            assert inspect('cfmeet-production-backend')['State']['Running']
             rollback_calling()
         elif operation == 'verify':
             verify(run_id)
+        elif operation == 'storage-ingress':
+            secure_storage_ingress(run_id)
+        elif operation == 'configure-capture':
+            configure_capture()
         else:
             raise RuntimeError('Operation not yet implemented; activation requires real acceptance evidence')
     except Exception as exc:
