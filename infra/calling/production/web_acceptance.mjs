@@ -82,6 +82,9 @@ try {
   report.failure_message=String(error.message).split('\n')[0].slice(0,200);
   report.alerts=[];
   for(const page of pages) {try{report.alerts.push(...await page.getByRole('alert').allTextContents());}catch{}}
+  report.pages=[];
+  for(const page of pages) {try{report.pages.push({origin:new URL(page.url()).origin,path:new URL(page.url()).pathname,
+    title:await page.title(),text:(await page.locator('body').innerText()).slice(0,700)});}catch{}}
   process.exitCode=1;
 } finally {
   for(const call of calls) {

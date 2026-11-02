@@ -13,9 +13,11 @@
 
 import axios from "axios";
 import { cookieStore, storageStore } from "@/store";
+import { callingOrigin } from "@/lib/calling/origin.mjs";
 
 export const CALLING_BASE_URL =
-  process.env.NEXT_PUBLIC_CALLING_API_URL || "http://localhost:8090";
+  callingOrigin(process.env.NEXT_PUBLIC_CALLING_API_URL, process.env.NEXT_PUBLIC_API_URL,
+    process.env.NODE_ENV === "production");
 
 export const callingApi = axios.create({
   baseURL: "/api/calling",
