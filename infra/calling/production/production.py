@@ -790,6 +790,17 @@ if __name__ == '__main__':
         elif operation == 'test-enterprise':
             import api_acceptance
             api_acceptance.run(run_id)
+        elif operation == 'release-backend':
+            import api_acceptance
+            failures=[]
+            for feature in ('enterprise','recording','voicemail'):
+                try:api_acceptance.run(run_id+'-'+feature,feature)
+                except Exception as error:
+                    failures.append(feature)
+                    print('FEATURE_ACCEPTANCE_FAILED:',feature,type(error).__name__)
+            print(json.dumps({'backend_compatibility':api_acceptance.compatibility()}))
+            regression()
+            assert not failures,'Backend acceptance incomplete: '+', '.join(failures)
         elif operation in ('test-recording','test-voicemail'):
             import api_acceptance
             api_acceptance.run(run_id,operation.removeprefix('test-'))

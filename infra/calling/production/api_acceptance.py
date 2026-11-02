@@ -7,6 +7,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
+import sys
 import production as p
 import app_acceptance
 
@@ -110,7 +111,13 @@ def run(run_id,feature='enterprise'):
         capture_output=True,text=True,timeout=900)
     p.write_private(root/'execution.private.log',result.stdout+'\n'+result.stderr)
     report=root/'api-result.json'
-    if report.exists(): print(report.read_text())
+    if report.exists():
+        record=json.loads(report.read_text())
+        record.update(git_sha=sys.argv[2],feature=feature,workflow_run_id=run_id,
+            images={n:p.inspect(n)['Image'] for n in ('cfmeet-calling','lk-server',p.EGRESS,'cfmeet-calling-artifacts')},
+            effective_flags={k:p.env_of(p.inspect('cfmeet-calling')).get(k,'false') for k in sorted(p.SAFE_ENV) if k.endswith('_ENABLED')},
+            offserver_backups='POSTPONED_BY_OWNER')
+        p.write_private(report,json.dumps(record,indent=2));print(report.read_text())
     if result.returncode:
         if p.inspect('cfmeet-calling')['Id']!=old_id:p.rollback_calling()
         raise RuntimeError('Production '+feature+' acceptance failed; changed feature activation rolled back')
