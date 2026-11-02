@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, complete-safe-infrastructure, provision, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [inspect, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
 

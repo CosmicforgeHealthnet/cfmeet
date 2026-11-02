@@ -160,6 +160,8 @@ async def main():
                 item = next(x for x in response.get('items',[]) if x.get('egress_id',x.get('egressId'))==eid)
                 if item.get('status') in ('EGRESS_COMPLETE',3):
                     break
+                RESULT['last_egress_status'] = item.get('status')
+                RESULT['last_egress_error_code'] = item.get('error_code',item.get('errorCode'))
                 assert item.get('status') not in ('EGRESS_FAILED','EGRESS_ABORTED',4,5), 'Egress capture failed'
                 await asyncio.sleep(2)
             else:

@@ -235,6 +235,7 @@ def provision(sha, run_id):
     print('LIVEKIT_REDIS: authenticated connectivity PASS; previous keys/config preserved')
     egress_config = dict(api_key=secret('calling-livekit-api-key'),
         api_secret=secret('calling-livekit-api-secret'), ws_url='wss://api.cfmeet.com:8446',
+        enable_room_composite_sdk_source=True, disallow_local_storage=True,
         health_port=9091, prometheus_port=9092, logging={'level':'info'}, redis=desired,
         storage={'s3':dict(access_key=secret('minio-egress-access-key'), secret=secret('minio-egress-secret'),
             region='us-east-1', endpoint='http://cfmeet-calling-artifacts:9000',
@@ -256,6 +257,7 @@ def provision(sha, run_id):
         run('docker','run','-d','--name',EGRESS,'--restart','unless-stopped',
             '--network',NET,'--memory','2g','--cpus','2','--shm-size','256m',
             '--tmpfs',f'/tmp:rw,nosuid,size=512m,uid={uid},gid={gid}',
+            '--tmpfs',f'/home/egress/tmp:rw,nosuid,size=512m,uid={uid},gid={gid}',
             '--log-opt','max-size=10m','--log-opt','max-file=3',
             '--health-cmd','curl -fsS --max-time 5 http://127.0.0.1:9091/ || exit 1',
             '--health-interval','30s','--health-timeout','8s','--health-retries','3',
@@ -575,6 +577,58 @@ def configure_capture():
     print('CAPTURE_RUNTIME_CONFIGURED: feature flags preserved; capture not production-certified')
 
 
+def harden_egress(run_id):
+    import yaml
+    identity()
+    active = lk_request('Egress/ListEgress',{'active':True},secret('calling-livekit-api-key'),
+        secret('calling-livekit-api-secret'),{'roomRecord':True}).get('items',[])
+    assert not active, 'Egress has active jobs; safe replacement deferred'
+    c = inspect(EGRESS)
+    config_path = ROOT/'egress'/'production.yaml'
+    original = config_path.read_text()
+    config = yaml.safe_load(original)
+    config.update(enable_room_composite_sdk_source=True,disallow_local_storage=True)
+    uid = int(run('docker','run','--rm','--network','none','--entrypoint','id',c['Image'],'-u'))
+    gid = int(run('docker','run','--rm','--network','none','--entrypoint','id',c['Image'],'-g'))
+    payload = copy.deepcopy(c['Config'])
+    payload['Image'] = c['Image']
+    payload['HostConfig'] = copy.deepcopy(c['HostConfig'])
+    payload['HostConfig'].setdefault('Tmpfs',{})['/home/egress/tmp'] = f'rw,nosuid,size=512m,uid={uid},gid={gid}'
+    payload['NetworkingConfig'] = {'EndpointsConfig':{n:{} for n in c['NetworkSettings']['Networks']}}
+    backup = EGRESS+'-rollback-'+run_id
+    saved = ROOT/'production-evidence'/('egress-hardening-'+run_id)
+    saved.mkdir(parents=True,exist_ok=False,mode=0o700)
+    write_private(saved/'egress.before.yaml',original)
+    write_private(saved/'container.before.json',json.dumps(c))
+    run('docker','rename',EGRESS,backup)
+    try:
+        run('docker','stop','--time','30',backup)
+        config_path.write_text(json.dumps(config))
+        docker_api('POST','/containers/create?name='+EGRESS,payload)
+        docker_api('POST','/containers/'+EGRESS+'/start')
+        for _ in range(30):
+            try:
+                run('docker','run','--rm','--network',NET,'curlimages/curl:8.12.1',
+                    '-fsS','--max-time','5','http://'+EGRESS+':9091/')
+                redis_ping_from(EGRESS)
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            raise RuntimeError('Hardened Egress readiness failed')
+        assert not inspect(EGRESS)['HostConfig']['PortBindings']
+    except Exception:
+        config_path.write_text(original)
+        if subprocess.run(['docker','inspect',EGRESS],capture_output=True).returncode==0:
+            run('docker','stop','--time','10',EGRESS)
+            run('docker','rename',EGRESS,EGRESS+'-failed-'+run_id)
+        run('docker','rename',backup,EGRESS)
+        run('docker','start',EGRESS)
+        raise
+    regression()
+    print('EGRESS_HARDENED: bounded actual temporary directory; audio composite SDK source; original retained '+backup)
+
+
 def rollback_calling():
     record = json.loads((ROOT/'calling-activation-rollback.json').read_text())
     backup = record['container']
@@ -642,7 +696,7 @@ def verify(run_id):
         try:
             run('docker','run','--rm','--network','none','--user','10001:10001',
                 '--memory','128m','--cpus','0.5','--entrypoint','ffmpeg',
-                '--mount',f'type=bind,src={out},dst=/result',inspect(EGRESS)['Image'],
+                '--mount',f'type=bind,src={out},dst=/result',probe_image,
                 '-v','error','-i','/result/'+kind+'.ogg','-ac','1','-ar','48000',
                 '-f','s16le','/result/'+kind+'.pcm')
             import array
@@ -729,6 +783,9 @@ if __name__ == '__main__':
             secure_storage_ingress(run_id)
         elif operation == 'configure-capture':
             configure_capture()
+            verify(run_id)
+        elif operation == 'harden-egress':
+            harden_egress(run_id)
             verify(run_id)
         else:
             raise RuntimeError('Operation not yet implemented; activation requires real acceptance evidence')
