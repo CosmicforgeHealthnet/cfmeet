@@ -76,6 +76,7 @@ def run(run_id,feature='enterprise'):
     result=subprocess.run(['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','bridge','--memory','768m','--cpus','1',
         '--tmpfs','/tmp:rw,nosuid,size=256m,uid=10001,gid=10001','--mount',f'type=bind,src={root},dst=/result',
         '--mount',f'type=bind,src={source}/api_client.py,dst=/api_client.py,readonly',
+        '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',
         '--mount',f'type=bind,src={source}/capture_scenarios.py,dst=/capture_scenarios.py,readonly',tag,'python','/api_client.py',feature],
         capture_output=True,text=True,timeout=900)
     p.write_private(root/'execution.private.log',result.stdout+'\n'+result.stderr)

@@ -17,6 +17,31 @@ CALLS=[]; DEVICES=[]; SOCKETS=[]; ROOMS=[]; TASKS=[]
 TERMINAL=('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED')
 
 
+class MediaClient:
+    def __init__(self,process):self.process=process;self.closed=False
+
+    @classmethod
+    async def start(cls):
+        log=open('/result/rtc-'+uuid.uuid4().hex+'.private.log','wb')
+        process=await asyncio.create_subprocess_exec(sys.executable,'/rtc_client.py',stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,stderr=log)
+        log.close();return cls(process)
+
+    async def cmd(self,command,**body):
+        self.process.stdin.write((json.dumps({'cmd':command,**body})+'\n').encode());await self.process.stdin.drain()
+        line=await asyncio.wait_for(self.process.stdout.readline(),35)
+        assert line,'RTC client stopped unexpectedly'
+        return json.loads(line)
+
+    async def disconnect(self):
+        if self.closed:return
+        try:await self.cmd('quit')
+        finally:
+            try:await asyncio.wait_for(self.process.wait(),8)
+            except asyncio.TimeoutError:self.process.kill();await self.process.wait()
+            self.closed=True
+
+
 async def request(method,path,body=None,token=None,expected=(200,201)):
     REPORT['last_request']={'method':method,'path':path}
     def send():
@@ -73,49 +98,22 @@ async def join(call,index,video=False):
     view=await call_view(call)
     session=next(s for s in view['sessions'] if s['endpointId']==DEVICES[index]['endpointId'] and s['state']!='ENDED')
     credential=await request('POST','/v1/calling/sessions/'+session['sessionId']+'/media-credentials',{},token=DEVICES[index]['token'])
-    room=rtc.Room();ROOMS.append(room)
-    await asyncio.wait_for(room.connect(credential['url'],credential['token']),25)
+    REPORT['join_index']=index
+    room=await MediaClient.start();ROOMS.append(room)
+    assert (await room.cmd('connect',url=credential['url'],token=credential['token'])).get('ok'), 'Real client media join failed'
     return room,session['sessionId']
 
 
 async def publish(room,video=False):
     # Wait for Calling's server-side admission, never inject provider events or grants.
-    for _ in range(40):
-        if room.local_participant.permissions.can_publish:break
-        await asyncio.sleep(.5)
-    else:raise AssertionError('Calling did not admit media permissions after real join')
-    source=rtc.AudioSource(48000,1);track=rtc.LocalAudioTrack.create_audio_track('controlled-tone',source)
-    await asyncio.wait_for(room.local_participant.publish_track(track,rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)),12)
-    async def feed():
-        n=0
-        while True:
-            frame=rtc.AudioFrame.create(48000,1,480)
-            for i in range(480):frame.data[i]=int(6000*math.sin(2*math.pi*440*(n*480+i)/48000))
-            await source.capture_frame(frame);n+=1;await asyncio.sleep(.01)
-    TASKS.append(asyncio.create_task(feed()))
+    assert (await room.cmd('wait_permission',publish=True,timeout=15)).get('ok'), 'Calling did not admit media permissions after real join'
+    assert (await room.cmd('publish',kind='audio')).get('ok'), 'Authorized microphone publishing failed'
     if video:
-        source_v=rtc.VideoSource(64,64)
-        track_v=rtc.LocalVideoTrack.create_video_track('controlled-video',source_v)
-        await asyncio.wait_for(room.local_participant.publish_track(track_v,rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA)),12)
-        async def frames():
-            while True:
-                source_v.capture_frame(rtc.VideoFrame(64,64,rtc.VideoBufferType.RGBA,bytearray([0,80,160,255])*4096));await asyncio.sleep(.1)
-        TASKS.append(asyncio.create_task(frames()))
+        assert (await room.cmd('publish',kind='video')).get('ok'), 'Authorized camera publishing failed'
 
 
 async def received_media(room,video=False):
-    for _ in range(30):
-        tracks=[t.track for participant in room.remote_participants.values() for t in participant.track_publications.values() if t.track]
-        selected=next((t for t in tracks if t.kind==(rtc.TrackKind.KIND_VIDEO if video else rtc.TrackKind.KIND_AUDIO)),None)
-        if selected:break
-        await asyncio.sleep(.5)
-    else:raise AssertionError('Remote media track not received')
-    stream=rtc.VideoStream(selected) if video else rtc.AudioStream(selected)
-    try:
-        event=await asyncio.wait_for(stream.__anext__(),12)
-        if video:assert event.frame.width>0 and event.frame.height>0
-        else:assert max(abs(int(v)) for v in event.frame.data)>100
-    finally:await stream.aclose()
+    assert (await room.cmd('verify_received',kind='video' if video else 'audio',timeout=12)).get('ok'), 'Remote playable media not received'
 
 
 async def connected(call,kind='VOICE',target=None):
@@ -130,7 +128,6 @@ async def connected(call,kind='VOICE',target=None):
         await asyncio.sleep(.5)
     else:raise AssertionError('Real media call did not become CONNECTED')
     await asyncio.sleep(2)
-    assert any(p.track for r in (a,b) for p0 in r.remote_participants.values() for p in p0.track_publications.values())
     await received_media(a);await received_media(b)
     if kind=='VIDEO':await received_media(a,True);await received_media(b,True)
     return a,b
@@ -163,9 +160,10 @@ async def main():
             REPORT['checks'][kind.lower()+'_real_media']='PASS'
             if kind=='VOICE':
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
+                assert (await a.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke microphone publishing'
                 for _ in range(30):
                     view=await call_view(call)
-                    if not a.local_participant.permissions.can_publish and sum(s['state']=='CONNECTED' for s in view['sessions'])>=2:break
+                    if sum(s['state']=='CONNECTED' for s in view['sessions'])>=2:break
                     await asyncio.sleep(.5)
                 else:raise AssertionError('Held media did not settle with two connected sessions')
                 await command(call,'resume');assert (await call_view(call))['state']=='CONNECTED'
@@ -184,7 +182,8 @@ async def main():
         call=await dial(targets=PEOPLE[1:]);await answer(call,1);await answer(call,2)
         group_rooms=[]
         for index in range(3):
-            room,_=await join(call,index);await publish(room);group_rooms.append(room)
+            room,_=await join(call,index);group_rooms.append(room)
+        for room in group_rooms:await publish(room)
         for room in group_rooms:await received_media(room)
         assert len((await call_view(call))['participants'])==3
         REPORT['checks']['group_real_media']='PASS';await finish(call)
