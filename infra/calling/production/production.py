@@ -634,6 +634,26 @@ def verify(run_id):
     result['timestamp'] = int(time.time())
     result['backup_destination_configured'] = bool(list(ROOT.glob('*backup*.env')))
     result['activation'] = 'BLOCKED_PENDING_FULL_PRODUCTION_ACCEPTANCE'
+    for name,path in (('calling_public_authorization','/v1/calls'),
+            ('signaling_public_authorization','/v1/calling/signaling'),
+            ('messaging_public_authorization','/api/v2/messaging/me')):
+        try:
+            urllib.request.urlopen('https://api.cfmeet.com'+path,timeout=15)
+        except urllib.error.HTTPError as exc:
+            result['checks'][name] = 'PASS' if exc.code==401 else 'FAIL'
+        except Exception:
+            result['checks'][name] = 'FAIL'
+        else:
+            result['checks'][name] = 'FAIL'
+    try:
+        with urllib.request.urlopen('https://api.cfmeet.com/api-docs/calling.json',timeout=15) as response:
+            paths = json.load(response)['paths']
+        assert paths and any('enterprise' in p for p in paths)
+        assert not any(p.startswith(('/internal/','/v1/internal/')) for p in paths)
+        result['checks']['public_calling_enterprise_swagger'] = 'PASS'
+        result['public_calling_path_count'] = len(paths)
+    except Exception:
+        result['checks']['public_calling_enterprise_swagger'] = 'FAIL'
     write_private(out/'verification.json',json.dumps(result,indent=2))
     print(json.dumps(result))
     audit()

@@ -78,6 +78,33 @@ async def main():
     rooms = [rtc.Room(),rtc.Room()]
     tasks, egress_ids, objects = [], [], []
     try:
+        # Storage security is evaluated even when a subsequent media step cannot run.
+        plain = 'capture-staging/'+ROOM+'-storage-probe'
+        encrypted = 'capture-staging/'+ROOM+'-encrypted'
+        objects.extend((plain,encrypted))
+        code,_,_ = await asyncio.to_thread(s3,'PUT',plain,b'controlled storage probe')
+        assert code==200, 'Application storage identity could not upload'
+        code,body,_ = await asyncio.to_thread(s3,'GET',plain)
+        assert code==200 and body==b'controlled storage probe'
+        RESULT['checks']['application_storage_identity'] = 'PASS'
+        code,_,_ = await asyncio.to_thread(s3,'GET',plain,b'',True)
+        assert code==403
+        RESULT['checks']['egress_read_denied'] = 'PASS'
+        outside = 'production-probe-denied/'+ROOM
+        try:
+            code,_,_ = await asyncio.to_thread(s3,'PUT',outside,b'denied',True)
+            assert code==403, 'Egress permission escaped staging prefix'
+            RESULT['checks']['egress_outside_prefix_denied'] = 'PASS'
+        finally:
+            await asyncio.to_thread(s3,'DELETE',outside)
+        code,body,headers = await asyncio.to_thread(s3,'PUT',encrypted,b'controlled encryption probe',False,True)
+        RESULT['checks']['encryption_at_rest'] = 'PASS' if code==200 and headers.get('X-Amz-Server-Side-Encryption',headers.get('x-amz-server-side-encryption'))=='AES256' else 'FAIL'
+        if code!=200:
+            import re
+            error = re.search(b'<Code>([^<]+)</Code>',body)
+            RESULT['encryption_error_code'] = error[1].decode() if error else str(code)
+        code,body,_ = await asyncio.to_thread(s3,'GET',plain,b'',False,False,True)
+        RESULT['checks']['signed_https_storage_path'] = 'PASS' if code==200 and body==b'controlled storage probe' else 'FAIL'
         for i, room in enumerate(rooms):
             await asyncio.wait_for(room.connect('wss://api.cfmeet.com:8446',token('probe-'+str(i),
                 dict(roomJoin=True,room=ROOM,canPublish=True,canSubscribe=True))),30)
@@ -125,26 +152,6 @@ async def main():
             assert code==200 and len(audio)>5000 and audio.startswith(b'OggS') and b'OpusHead' in audio[:256]
             (OUT/(kind+'.ogg')).write_bytes(audio)
             RESULT['checks'][kind+'_egress_audio_object'] = 'PASS'
-        outside = 'production-probe-denied/'+ROOM
-        try:
-            code,_,_ = await asyncio.to_thread(s3,'PUT',outside,b'denied',True)
-            assert code==403, 'Egress permission escaped staging prefix'
-            RESULT['checks']['egress_outside_prefix_denied'] = 'PASS'
-        finally:
-            await asyncio.to_thread(s3,'DELETE',outside)
-        code,_,_ = await asyncio.to_thread(s3,'GET',objects[0],b'',True)
-        assert code==403
-        RESULT['checks']['egress_read_denied'] = 'PASS'
-        code,body,headers = await asyncio.to_thread(s3,'PUT','capture-staging/'+ROOM+'-encrypted',b'controlled encryption probe',False,True)
-        objects.append('capture-staging/'+ROOM+'-encrypted')
-        RESULT['checks']['encryption_at_rest'] = 'PASS' if code==200 and headers.get('X-Amz-Server-Side-Encryption',headers.get('x-amz-server-side-encryption'))=='AES256' else 'FAIL'
-        # Record only stable server error code; never raw URLs, signatures or credentials.
-        if code!=200:
-            import re
-            error = re.search(b'<Code>([^<]+)</Code>',body)
-            RESULT['encryption_error_code'] = error[1].decode() if error else str(code)
-        code,_,_ = await asyncio.to_thread(s3,'GET',objects[0],b'',False,False,True)
-        RESULT['checks']['signed_https_storage_path'] = 'PASS' if code==200 else 'FAIL'
     except Exception as exc:
         RESULT['error_type'] = type(exc).__name__
         raise
