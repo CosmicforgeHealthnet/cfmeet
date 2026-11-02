@@ -789,6 +789,9 @@ if __name__ == '__main__':
         elif operation == 'test-enterprise':
             import api_acceptance
             api_acceptance.run(run_id)
+        elif operation in ('test-recording','test-voicemail'):
+            import api_acceptance
+            api_acceptance.run(run_id,operation.removeprefix('test-'))
         elif operation == 'encrypt-storage':
             import storage_encryption
             storage_encryption.migrate(run_id)

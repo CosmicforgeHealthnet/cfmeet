@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, test-app, test-enterprise, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [inspect, test-app, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
 

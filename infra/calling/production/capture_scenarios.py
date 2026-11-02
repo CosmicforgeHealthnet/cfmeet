@@ -1,0 +1,100 @@
+"""Real capture through Calling decisions, production Egress and encrypted storage."""
+import asyncio
+import array
+from pathlib import Path
+import subprocess
+import urllib.request
+import uuid
+
+
+async def download_and_decode(api,access,name):
+    assert access['url'].startswith('https://api.cfmeet.com/') and 'capture-staging' not in access['url']
+    def download():
+        with urllib.request.urlopen(access['url'],timeout=20) as response:return response.read()
+    audio=await asyncio.to_thread(download)
+    assert audio.startswith(b'OggS') and len(audio)>5000
+    path=Path('/result')/(name+'.ogg');path.write_bytes(audio)
+    decode=await asyncio.to_thread(subprocess.run,['ffmpeg','-v','error','-y','-i',str(path),'-ac','1','-ar','48000','-f','s16le',str(path.with_suffix('.pcm'))],capture_output=True)
+    assert decode.returncode==0
+    pcm=array.array('h',path.with_suffix('.pcm').read_bytes())
+    assert len(pcm)>=3*48000 and sum(int(x)**2 for x in pcm)/len(pcm)>100**2
+
+
+async def recording(a):
+    a.REPORT['phase']='recording_policy'
+    suffix=''.join(chr(97+int(x,16)) for x in uuid.uuid4().hex[:10])
+    await a.request('POST','/v1/enterprise/recording-policies',dict(name='Acceptance recording '+suffix,mode='MANUAL_ALLOWED',
+        noticeRequired=True,consentParticipants='ALL_PARTICIPANTS',jurisdictionRef='controlled-production-acceptance',
+        retentionDays=1,maxRecordingSeconds=60,isDefault=True))
+    call=await a.dial();rooms=await a.connected(call)
+    a.REPORT['phase']='recording_consent'
+    await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[0]},expected=(403,))
+    a.REPORT['checks']['recording_without_consent_denied']='PASS'
+    for i in (0,1):
+        await a.request('POST','/v1/calls/'+call+'/recording-consent',{'endpointId':a.DEVICES[i]['endpointId'],'decision':'GRANTED'})
+    await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[2]},expected=(403,404))
+    a.REPORT['checks']['recording_nonparticipant_denied']='PASS'
+    result=await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[0]})
+    recording=result['recording']['recordingId']
+    a.REPORT['phase']='recording_real_capture';await asyncio.sleep(10)
+    await a.request('POST','/v1/calls/'+call+'/recordings/'+recording+'/stop',{'principalId':a.PEOPLE[0]})
+    path='/v1/enterprise/recordings/'+recording
+    for _ in range(90):
+        view=await a.request('GET',path+'?principalId='+a.PEOPLE[0])
+        if view['state']=='READY':break
+        assert view['state'] not in ('FAILED','DELETED'), 'Recording finalization failed'
+        await asyncio.sleep(1)
+    else:raise AssertionError('Recording did not become READY')
+    access=await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]})
+    await download_and_decode(a,access,'recording');a.REPORT['checks']['recording_encrypted_real_media_playback']='PASS'
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[2]},expected=(404,))
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},token=a.CTX['other']['token'],expected=(404,))
+    a.REPORT['checks']['recording_cross_user_and_tenant_denied']='PASS'
+    audit=await a.request('GET',path+'/access-audit');assert audit['data']
+    a.REPORT['checks']['recording_access_audited']='PASS'
+    await a.request('DELETE',path+'?expectedVersion='+str(view['version'])+'&principalId='+a.PEOPLE[0])
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,409))
+    a.REPORT['checks']['recording_delete_revokes_access']='PASS'
+    await a.finish(call)
+    for room in rooms:await room.disconnect()
+
+
+async def voicemail(a):
+    a.REPORT['phase']='voicemail_mailbox'
+    mailbox=await a.request('POST','/v1/enterprise/voicemail/mailboxes',{'owner':{'type':'PRINCIPAL','id':a.PEOPLE[1]},
+        'displayLabel':'Acceptance voicemail','maxMessageSeconds':30,'retentionDays':1})
+    await a.request('POST','/v1/enterprise/forwarding-rules',{'principalId':a.PEOPLE[1],'condition':'NO_ANSWER',
+        'destination':{'type':'VOICEMAIL','id':mailbox['mailboxId']}})
+    number=str(100000+int(uuid.uuid4().hex[:8],16)%800000)
+    await a.request('POST','/v1/enterprise/extensions',{'extensionNumber':number,'displayLabel':'Acceptance voicemail route',
+        'destination':{'type':'PRINCIPAL','id':a.PEOPLE[1]}})
+    call=await a.dial(extension=number)
+    room,_=await a.join(call,0);await a.publish(room)
+    a.REPORT['phase']='voicemail_unanswered_to_capture'
+    message=None
+    for _ in range(100):
+        values=await a.request('GET','/v1/enterprise/voicemail/messages?mailboxId='+mailbox['mailboxId']+'&principalId='+a.PEOPLE[1])
+        message=next((m for m in values['data'] if m['callId']==call),None)
+        if message:break
+        await asyncio.sleep(1)
+    assert message, 'Unanswered call never entered voicemail'
+    await asyncio.sleep(10)
+    view=await a.call_view(call)
+    if view['state'] not in a.TERMINAL:await a.finish(call)
+    path='/v1/enterprise/voicemail/messages/'+message['messageId']
+    for _ in range(90):
+        view=await a.request('GET',path+'?principalId='+a.PEOPLE[1])
+        if view['state']=='READY':break
+        assert view['state'] not in ('FAILED','DELETED'), 'Voicemail finalization failed'
+        await asyncio.sleep(1)
+    else:raise AssertionError('Voicemail did not become READY')
+    access=await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]})
+    await download_and_decode(a,access,'voicemail');a.REPORT['checks']['voicemail_real_audio_lifecycle']='PASS'
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,))
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]},token=a.CTX['other']['token'],expected=(404,))
+    a.REPORT['checks']['voicemail_owner_and_tenant_isolation']='PASS'
+    marked=await a.request('POST',path+'/read-state',{'principalId':a.PEOPLE[1],'expectedVersion':view['version'],'readState':'READ'})
+    await a.request('DELETE',path+'?expectedVersion='+str(marked['version'])+'&principalId='+a.PEOPLE[1])
+    await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]},expected=(404,409))
+    a.REPORT['checks']['voicemail_read_delete_access_revocation']='PASS'
+    await room.disconnect()

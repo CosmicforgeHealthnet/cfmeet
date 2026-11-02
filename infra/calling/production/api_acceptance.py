@@ -51,14 +51,21 @@ def context():
     p.write_private(file,json.dumps(value));return value
 
 
-def run(run_id):
+def run(run_id,feature='enterprise'):
     p.identity(); value=context()
     # Enabling an independent carrier-free feature never depends on postponed backups.
     active=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-U','postgres','-d','cfmeet_calling',
         '-c',"SELECT count(*) FROM calls WHERE current_state NOT IN ('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED')")
     assert active=='0', 'Active calls exist; runtime restart safely deferred'
     before=p.env_of(p.inspect('cfmeet-calling'))
-    p.recreate_calling({'ENTERPRISE_CALLING_ENABLED':'true'},require_acceptance=False)
+    overrides={'enterprise':{'ENTERPRISE_CALLING_ENABLED':'true'},'recording':{'CALL_RECORDING_ENABLED':'true'},
+        'voicemail':{'VOICEMAIL_ENABLED':'true','ENTERPRISE_CALLING_ENABLED':'true'}}[feature]
+    old_id=p.inspect('cfmeet-calling')['Id']
+    if feature!='enterprise':
+        p.run('docker','exec','cfmeet-calling','/app/platform_admin','--operator','cfmeet-production-acceptance',
+            'enterprise-capabilities','set','--tenant','cfmeet-calling-acceptance','--application','suite','--environment','production',
+            '--capability','manage-routing','--capability','manage-voicemail','--capability','manage-recording')
+    p.recreate_calling(overrides,require_acceptance=False)
     root=p.ROOT/'production-evidence'/('api-'+run_id);root.mkdir(parents=True,exist_ok=False,mode=0o700);os.chown(root,10001,10001)
     private=root/'context.private.json';p.write_private(private,json.dumps(value));os.chown(private,10001,10001)
     source=Path(__file__).parent
@@ -68,12 +75,13 @@ def run(run_id):
     p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
     result=subprocess.run(['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','bridge','--memory','768m','--cpus','1',
         '--tmpfs','/tmp:rw,nosuid,size=256m,uid=10001,gid=10001','--mount',f'type=bind,src={root},dst=/result',
-        '--mount',f'type=bind,src={source}/api_client.py,dst=/api_client.py,readonly',tag,'python','/api_client.py'],
+        '--mount',f'type=bind,src={source}/api_client.py,dst=/api_client.py,readonly',
+        '--mount',f'type=bind,src={source}/capture_scenarios.py,dst=/capture_scenarios.py,readonly',tag,'python','/api_client.py',feature],
         capture_output=True,text=True,timeout=900)
     p.write_private(root/'execution.private.log',result.stdout+'\n'+result.stderr)
     report=root/'api-result.json'
     if report.exists(): print(report.read_text())
     if result.returncode:
-        p.rollback_calling()
-        raise RuntimeError('Production API acceptance failed; Enterprise activation rolled back')
-    p.regression();print('ENTERPRISE_CALLING: enabled after production API acceptance')
+        if p.inspect('cfmeet-calling')['Id']!=old_id:p.rollback_calling()
+        raise RuntimeError('Production '+feature+' acceptance failed; changed feature activation rolled back')
+    p.regression();print(feature.upper()+': enabled after production API acceptance')

@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import sys
 from livekit import rtc
 from websockets.asyncio.client import connect
 
@@ -152,6 +153,10 @@ async def main():
                     await asyncio.sleep(20);await socket.send(json.dumps({'type':'ping'}))
             TASKS.append(asyncio.create_task(heartbeat(ws)))
         REPORT['checks']['authorized_endpoint_signaling']='PASS'
+        if len(sys.argv)>1 and sys.argv[1] in ('recording','voicemail'):
+            import capture_scenarios
+            await getattr(capture_scenarios,sys.argv[1])(sys.modules[__name__])
+            return
         for kind in ('VOICE','VIDEO'):
             REPORT['phase']=kind.lower()
             call=await dial(kind);a,b=await connected(call,kind)
