@@ -30,7 +30,14 @@ def sql(query):
 
 def context():
     file=p.SECRETS/'calling-api-acceptance.json'
-    if file.exists(): return json.loads(file.read_text())
+    if file.exists():
+        value=json.loads(file.read_text())
+        if 'restrictedToken' not in value:
+            credential=admin('credential','create','--tenant','cfmeet-calling-acceptance','--application','suite',
+                '--environment','production','--service-account','acceptance','--expires-in-days','1',
+                '--scope','calls.read','--label','Controlled scope denial acceptance')
+            value['restrictedToken']=credential['secret'];p.write_private(file,json.dumps(value))
+        return value
     users=app_acceptance.accounts()
     tenants=['cfmeet-calling-acceptance','cfmeet-calling-isolation']
     records=[]
@@ -52,7 +59,7 @@ def context():
         records.append(dict(token=credential['secret'],principals=[x['id'] for x in principals],
             tenantId=principals[0]['tenantId'],applicationId=principals[0]['applicationId'],environmentId=principals[0]['environmentId']))
     value={'actors':records[0],'other':records[1]}
-    p.write_private(file,json.dumps(value));return value
+    p.write_private(file,json.dumps(value));return context()
 
 
 def compatibility():

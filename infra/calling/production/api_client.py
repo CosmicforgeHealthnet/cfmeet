@@ -120,6 +120,10 @@ async def received_media(room,video=False):
 async def connected(call,kind='VOICE',target=None):
     REPORT['step']='answer'
     await answer(call,1)
+    view=await call_view(call)
+    other_session=next(s for s in view['sessions'] if s['endpointId']==DEVICES[1]['endpointId'] and s['state']!='ENDED')
+    await request('POST','/v1/calling/sessions/'+other_session['sessionId']+'/media-credentials',{},token=DEVICES[0]['token'],expected=(404,))
+    REPORT['checks']['cross_endpoint_media_credentials_denied']='PASS'
     REPORT['step']='caller_media_join';a,_=await join(call,0,kind=='VIDEO')
     REPORT['step']='recipient_media_join';b,_=await join(call,1,kind=='VIDEO')
     REPORT['step']='publish'
@@ -260,6 +264,10 @@ async def main():
             REPORT['checks'][label]='PASS';await finish(call);await a.disconnect();await b.disconnect()
         await request('GET','/v1/enterprise/extensions/'+extension['extensionId'],token=CTX['other']['token'],expected=(404,))
         REPORT['checks']['enterprise_tenant_isolation']='PASS'
+        await request('GET','/v1/enterprise/extensions/'+extension['extensionId'],token=CTX['restrictedToken'],expected=(403,))
+        await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+8),displayLabel='Forbidden scope',
+            destination={'type':'PRINCIPAL','id':PEOPLE[1]}),token=CTX['restrictedToken'],expected=(403,))
+        REPORT['checks']['enterprise_read_write_scope_denial']='PASS'
     except Exception as error:
         REPORT['failure_request']=REPORT.get('last_request')
         REPORT['error_type']=type(error).__name__
