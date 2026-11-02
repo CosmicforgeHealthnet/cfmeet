@@ -52,7 +52,12 @@ jobs:
             exit 1
           }
           if grep -Fq 'location ^~ /v1/enterprise/' "$SNIPPET"; then
-            echo 'ENTERPRISE_ROUTE: ALREADY_PRESENT'
+            nginx -t >/dev/null
+            status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+              --resolve api.cfmeet.com:443:127.0.0.1 \
+              https://api.cfmeet.com/v1/enterprise/extensions)"
+            test "$status" = 401 || { echo "Existing enterprise route not authenticated: $status"; exit 1; }
+            echo 'ENTERPRISE_ROUTE: ALREADY_PRESENT_AND_VERIFIED'
             exit 0
           fi
           if test -e "$BAK"; then
@@ -84,6 +89,12 @@ jobs:
           trap rollback ERR
           nginx -t >/dev/null
           systemctl reload nginx
+          # Nginx reload is asynchronous: wait for the new worker to serve this route.
+          for attempt in $(seq 1 15); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 --resolve api.cfmeet.com:443:127.0.0.1 https://api.cfmeet.com/v1/enterprise/extensions)"
+            if test "$status" = 401; then break; fi
+            sleep 1
+          done
           status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
             --resolve api.cfmeet.com:443:127.0.0.1 \
             https://api.cfmeet.com/v1/enterprise/extensions)"
