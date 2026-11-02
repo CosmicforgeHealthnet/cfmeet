@@ -1,0 +1,86 @@
+name: CF Meet Calling production activation preflight
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-activation-preflight.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Verify live frontend and public API responses
+        run: |
+          set -euo pipefail
+          echo '=== PUBLIC FRONTEND AND API SMOKE ==='
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/dashboard/calls)"
+          case "$code" in 200|307|308) echo "CALLING_WEB_ROUTE: $code";; *) echo "CALLING_WEB_ROUTE: unexpected $code"; exit 1;; esac
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/api/calling/identity)"
+          test "$code" = 401 || { echo "CALLING_BFF_ANONYMOUS: unexpected $code"; exit 1; }
+          echo "CALLING_BFF_ANONYMOUS: 401"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/api/v2/messaging/me)"
+          test "$code" = 401 || { echo "MEETING_IDENTITY_ANONYMOUS: unexpected $code"; exit 1; }
+          echo "MEETING_IDENTITY_ANONYMOUS: 401"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calls)"
+          test "$code" = 401 || { echo "CALLING_API_ANONYMOUS: unexpected $code"; exit 1; }
+          echo "CALLING_API_ANONYMOUS: 401"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calling/signaling)"
+          test "$code" = 401 || { echo "SIGNALING_ANONYMOUS: unexpected $code"; exit 1; }
+          echo "SIGNALING_ANONYMOUS: 401"
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Verify Calling media, identity, and preserved Meetings state
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          for service in cfmeet-production-backend cfmeet-platform-access cfmeet-messaging cfmeet-calling lk-server; do
+            test "$(docker inspect -f '{{.State.Running}}' "$service")" = true
+            echo "RUNNING: $service"
+          done
+          test "$(docker inspect -f '{{json .HostConfig.PortBindings}}' cfmeet-calling)" = 'null'
+          docker inspect cfmeet-calling --format '{{range .Config.Env}}{{println .}}{{end}}' |
+            awk -F= '
+              $1=="CALLING_MEDIA_PROVIDER" { media=$2 }
+              $1=="CALLING_NEW_CALLS_ENABLED" { new_calls=$2 }
+              $1=="CALLING_APP_CALLING_ENABLED" { app_calls=$2 }
+              $1=="CALLING_PUBLIC_OUTBOUND_ENABLED" { outbound=$2 }
+              $1=="CALLING_PUBLIC_INBOUND_ENABLED" { inbound=$2 }
+              END {
+                print "MEDIA_PROVIDER=" media
+                print "NEW_CALLS=" new_calls
+                print "APP_CALLING=" app_calls
+                print "PUBLIC_OUTBOUND=" (outbound?outbound:"default_false")
+                print "PUBLIC_INBOUND=" (inbound?inbound:"default_false")
+                if (media!="livekit" || new_calls!="false" || app_calls!="true" ||
+                    outbound=="true" || inbound=="true") exit 1
+              }
+            '
+          for p in 8443 8444 8445 8446; do
+            endpoint=/ready
+            if test "$p" = 8445; then endpoint=/health; fi
+            if test "$p" = 8446; then endpoint=/; fi
+            docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+              -sS --max-time 8 "https://api.cfmeet.com:$p$endpoint" >/dev/null
+            echo "PRIVATE_TLS_$p: ok"
+          done
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          echo "MEETINGS_HEALTH: 200"
+          REMOTE
