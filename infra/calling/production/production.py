@@ -338,7 +338,7 @@ def secure_storage_ingress(run_id):
         try:
             urllib.request.urlopen('https://api.cfmeet.com/cfmeet-calling-artifacts/unsigned-probe',timeout=15)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403, 'Anonymous storage access must be denied'
+            assert exc.code == 403, 'Anonymous storage access must be denied; received HTTP '+str(exc.code)
         else:
             raise AssertionError('Unsigned storage access was permitted')
         regression()
@@ -372,11 +372,14 @@ def configure_storage_operations():
     assert mc.is_file(), 'Existing verified MinIO CLI missing'
     env = dict(os.environ, MC_HOST_capture='http://'+secret('minio-admin-user')+':'+
         secret('minio-admin-password')+'@'+ip+':9000')
-    def command(*args):
+    def command(*args, allow_no_lifecycle=False):
         response = subprocess.run([str(mc),*args],env=env,capture_output=True,text=True)
+        if allow_no_lifecycle and response.returncode and any(x in response.stdout+response.stderr
+                for x in ('NoSuchLifecycleConfiguration','No lifecycle configuration')):
+            return ''
         assert response.returncode==0, 'MinIO lifecycle operation failed'
         return response.stdout
-    rules = command('ilm','rule','ls','--json','capture/cfmeet-calling-artifacts')
+    rules = command('ilm','rule','ls','--json','capture/cfmeet-calling-artifacts',allow_no_lifecycle=True)
     if 'cfmeet-capture-staging-cleanup' not in rules:
         command('ilm','rule','add','--id','cfmeet-capture-staging-cleanup','--prefix','capture-staging/',
             '--expire-days','1','capture/cfmeet-calling-artifacts')
