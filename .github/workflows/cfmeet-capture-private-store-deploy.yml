@@ -120,7 +120,7 @@ jobs:
           POLICY
           cat > "$BASE/storage/egress-policy.json" <<'POLICY'
           {"Version":"2012-10-17","Statement":[
-            {"Effect":"Allow","Action":["s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts"],"Condition":{"StringLike":{"s3:prefix":["capture-staging/*"]}}},
+            {"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts"],"Condition":{"StringLike":{"s3:prefix":["capture-staging/*"]}}},
             {"Effect":"Allow","Action":["s3:PutObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts/capture-staging/*"]}
           ]}
           POLICY
