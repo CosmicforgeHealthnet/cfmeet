@@ -198,7 +198,7 @@ async def main():
         assert view['state']=='NO_ANSWER', 'Unanswered call did not terminate as NO_ANSWER'
         history=await request('GET','/v1/calls?principalId='+PEOPLE[1]+'&missed=true&limit=100')
         entry=next(x for x in history['data'] if x['callId']==call)
-        assert entry['participation']['missed'] and entry['participation']['direction']=='INCOMING'
+        assert entry['participation']['missed'] and entry['participation']['direction']=='INBOUND'
         REPORT['checks']['missed_calls_and_principal_history']='PASS'
         REPORT['phase']='group_call'
         call=await dial(targets=PEOPLE[1:]);await answer(call,1);await answer(call,2)

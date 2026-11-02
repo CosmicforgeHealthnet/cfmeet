@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import production as p
+import api_acceptance
 
 
 class ActivationSafety(unittest.TestCase):
@@ -93,6 +94,34 @@ class RuntimePreservation(unittest.TestCase):
                 container['HostConfig']['PortBindings']={'8090/tcp':[{'HostPort':'8090'}]}
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 p.clone_payload(container,{})
+
+
+class IsolatedAcceptanceSafety(unittest.TestCase):
+    def fixture(self):
+        return {'actors':{k:'11111111-1111-4111-8111-111111111111'
+            for k in ('tenantId','applicationId','environmentId')}}, {
+            'kind':'recording','artifactId':'22222222-2222-4222-8222-222222222222',
+            'callId':'33333333-3333-4333-8333-333333333333'}
+
+    def test_retention_acceleration_rejects_injected_identifier_without_database_access(self):
+        value,request=self.fixture();request['artifactId']="'; UPDATE calls SET current_state='ENDED';"
+        with patch.object(p,'run') as execute,self.assertRaises(ValueError):
+            api_acceptance.expire_fixture(value,request)
+        execute.assert_not_called()
+
+    def test_retention_acceleration_refuses_any_other_tenant(self):
+        value,request=self.fixture()
+        with patch.object(api_acceptance,'sql',return_value='different-tenant'),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.expire_fixture(value,request)
+        execute.assert_not_called()
+
+    def test_unexpected_probe_failure_restores_changed_runtime(self):
+        with patch.object(p,'inspect',side_effect=[{'Id':'original'},{'Id':'replacement'}]), \
+            patch.object(api_acceptance,'_run',side_effect=TimeoutError), \
+            patch.object(Path,'read_text',return_value=json.dumps({'original':{'Id':'original'}})), \
+            patch.object(p,'rollback_calling') as rollback:
+            with self.assertRaises(TimeoutError):api_acceptance.run('controlled-run','recording')
+        rollback.assert_called_once()
 
 
 if __name__ == '__main__':

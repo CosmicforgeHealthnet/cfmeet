@@ -1,6 +1,7 @@
 """Real capture through Calling decisions, production Egress and encrypted storage."""
 import asyncio
 import array
+import json
 from datetime import datetime
 from pathlib import Path
 import subprocess
@@ -31,6 +32,24 @@ async def deleted_object(access):
         if await asyncio.to_thread(status) in (403,404):return
         await asyncio.sleep(1)
     raise AssertionError('Deleted media remained readable through its original signed URL')
+
+
+async def retention_expiry(a,kind,call,path,view,principal):
+    access=await a.request('POST',path+'/media-access',{'principalId':principal})
+    await download_and_decode(a,access,kind+'-retention')
+    # Ask the host controller to advance only this isolated fixture's deadline.
+    # This tests the real worker, without waiting a day or changing a global policy.
+    pending=Path('/result/retention-request.tmp')
+    pending.write_text(json.dumps({'kind':kind,'artifactId':view.get('recordingId',view.get('messageId')),'callId':call}))
+    pending.replace('/result/retention-request.json')
+    for _ in range(90):
+        current=await a.request('GET',path+'?principalId='+principal)
+        if current['state']=='DELETED':break
+        await asyncio.sleep(1)
+    else:raise AssertionError('Production retention worker did not delete the expired fixture')
+    await a.request('POST',path+'/media-access',{'principalId':principal},expected=(404,409))
+    await deleted_object(access)
+    a.REPORT['checks'][kind+'_retention_worker_and_object_deletion']='PASS'
 
 
 async def recording(a):
@@ -82,6 +101,18 @@ async def recording(a):
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,409))
     a.REPORT['checks']['recording_delete_revokes_access']='PASS'
     await deleted_object(access);a.REPORT['checks']['recording_physical_object_deleted']='PASS'
+    a.REPORT['phase']='recording_retention_worker'
+    result=await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[0]})
+    retained=result['recording']['recordingId'];await asyncio.sleep(10)
+    await a.request('POST','/v1/calls/'+call+'/recordings/'+retained+'/stop',{'principalId':a.PEOPLE[0]})
+    retained_path='/v1/enterprise/recordings/'+retained
+    for _ in range(90):
+        retained_view=await a.request('GET',retained_path+'?principalId='+a.PEOPLE[0])
+        if retained_view['state']=='READY':break
+        assert retained_view['state'] not in ('FAILED','DELETED')
+        await asyncio.sleep(1)
+    else:raise AssertionError('Retention recording not READY')
+    await retention_expiry(a,'recording',call,retained_path,retained_view,a.PEOPLE[0])
     await a.finish(call)
     for room in rooms:await room.disconnect()
 
@@ -128,3 +159,21 @@ async def voicemail(a):
     a.REPORT['checks']['voicemail_read_delete_access_revocation']='PASS'
     await deleted_object(access);a.REPORT['checks']['voicemail_physical_object_deleted']='PASS'
     await room.disconnect()
+    a.REPORT['phase']='voicemail_retention_worker'
+    call=await a.dial(extension=number);room,_=await a.join(call,0);await a.publish(room)
+    for _ in range(100):
+        values=await a.request('GET','/v1/enterprise/voicemail/messages?mailboxId='+mailbox['mailboxId']+'&principalId='+a.PEOPLE[1])
+        retained=next((m for m in values['messages'] if m['callId']==call),None)
+        if retained:break
+        await asyncio.sleep(1)
+    assert retained,'Retention voicemail was not captured'
+    await asyncio.sleep(10)
+    if (await a.call_view(call))['state'] not in a.TERMINAL:await a.finish(call)
+    retained_path='/v1/enterprise/voicemail/messages/'+retained['messageId']
+    for _ in range(90):
+        retained_view=await a.request('GET',retained_path+'?principalId='+a.PEOPLE[1])
+        if retained_view['state']=='READY':break
+        assert retained_view['state'] not in ('FAILED','DELETED')
+        await asyncio.sleep(1)
+    else:raise AssertionError('Retention voicemail not READY')
+    await retention_expiry(a,'voicemail',call,retained_path,retained_view,a.PEOPLE[1]);await room.disconnect()

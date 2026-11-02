@@ -7,6 +7,10 @@ Production operations are serialized; read-only inventory can run independently.
 | Operation | Effect |
 | --- | --- |
 | `inspect` | Verify CF Meet host identity, inspect actual Docker runtime, count LiveKit participants, report configuration key names and safe flags. |
+| `release-backend` | Run production API and real-media acceptance for Enterprise, recording and voicemail independently, followed by identity/Messaging/Contacts/Meetings compatibility. Retain each passing feature; restore only a failed changed feature. No frontend access or off-server-backup gate. |
+| `test-enterprise`, `test-recording`, `test-voicemail` | Repeat one feature's production acceptance through the existing workflow. Controlled accounts, tenant resources and evidence stay isolated. |
+| `compatibility` | Authenticate native CF Meet accounts and verify identity, Messaging relay, private Contacts directory and Meetings APIs plus anonymous denial. |
+| `encrypt-storage` | Preserve the installed MinIO image, migrate a stopped data snapshot to native SSE-S3, verify encrypted writes and recovery-key restart/decryption, promote with rollback retained, then run infrastructure verification. |
 | `provision` | Back up LiveKit and runtime inspection privately; integrate existing authenticated Redis only with no active participants; preserve keys/media settings; deploy pinned private Egress; generate capture environment. |
 | `harden-egress` | Replace Egress only when it has no active jobs, bound its real working directory, use the supported SDK audio-composite source, retain rollback and run verification. |
 | `storage-ingress` | Add a read-only HTTPS bucket route to existing CF Meet nginx, require storage authorization, disable query-signature access logging, configure temporary-object expiry and capacity journal checks. |
@@ -56,6 +60,45 @@ an owner-only mounted 256-bit KMS key. The same-host recovery copy is tested by 
 a separate container against encrypted data and retrieving an encrypted probe object.
 Neither this recovery test nor the retained original data constitutes off-server backup.
 Do not substitute CI fixtures or put production keys/backups in Actions artifacts.
+
+The backend acceptance driver uses real CF Meet accounts, endpoint credentials,
+WebSocket signaling and separate real WebRTC client processes. Calling decides provider
+admission and publishing permissions. No provider events, grants or call states are
+injected. Capture tests require server-issued notice, each participant's consent,
+non-silent decoded media, ownership and tenant isolation, audited playback, explicit
+deletion and revocation of the original signed URL.
+
+Retention tests first check the configured one-day deadline. A second real captured
+artifact then has **only its own isolated fixture deadline** moved into the past by
+the host controller. The unmodified production worker must perform the retention
+transition and physical deletion. The controller validates UUIDs and the dedicated
+acceptance tenant, and restricts the update to a READY artifact, exact call and full
+tenant/application/environment scope. It changes no global clock, customer policy,
+call state or storage object. This is accelerated expiry testing, not a claim that
+24 hours elapsed. Probe failures/timeouts restore changed feature activation.
+
+## Native key recovery
+
+The installed MinIO release supports `MINIO_KMS_SECRET_KEY_FILE`. The running store
+mounts `/opt/cfmeet-core/secrets/calling-minio-kms` read-only at
+`/run/secrets/calling-minio-kms`. The recovery copy is
+`/opt/cfmeet-core/key-recovery/calling-minio-kms`. Both contain the same key ID and
+256-bit key, are owned by UID 10001 with mode 0400, and have private parent directories.
+Only the storage container receives this key; Egress and application credentials
+cannot read it. Never print its contents or place it in Git, Docker environment
+values, Actions artifacts or application logs.
+
+If the primary file is lost or damaged, stop the storage container, preserve the
+damaged file privately, restore the recovery copy at the exact existing host mount
+source with the same owner/mode, then restart the existing container and validate an
+authorized encrypted-object read. Preserve the key ID and bytes: generating a new
+key does not recover existing encrypted objects. The migration's recovery test used
+a separate stopped/restarted container against the encrypted data with the recovery
+copy and successfully decrypted the probe. The migration result in the private
+`production-evidence/kms-<run-id>/result.json` identifies the active data directory,
+retained original container/data and key paths. Rollback to pre-encryption data is
+not recovery for recordings created after migration. Loss of both copies or of the
+VPS remains a disaster-recovery risk while owner-postponed off-server backups are absent.
 
 ## Focused checks
 

@@ -8,6 +8,7 @@ import time
 import urllib.request
 import urllib.error
 import sys
+import uuid
 import production as p
 import app_acceptance
 
@@ -81,6 +82,26 @@ def compatibility():
         'meetings_authenticated_api':'PASS','anonymous_backend_access_denied':'PASS'}
 
 
+def expire_fixture(value,request):
+    """Accelerate only a READY artifact of the isolated acceptance tenant.
+
+    The production worker must perform the real audited retention transition and
+    storage deletion. No customer policy, clock, state or object key is changed.
+    """
+    table={'recording':'call_recordings','voicemail':'voicemail_messages'}[request['kind']]
+    actor=value['actors']
+    ids={k:str(uuid.UUID(actor[k])) for k in ('tenantId','applicationId','environmentId')}
+    artifact=str(uuid.UUID(request['artifactId']));call=str(uuid.UUID(request['callId']))
+    assert sql("SELECT id FROM platform_tenants WHERE slug='cfmeet-calling-acceptance'")==ids['tenantId']
+    query=(f"UPDATE {table} SET retention_until=now()-interval '1 second' WHERE id='{artifact}' AND call_id='{call}' "
+        f"AND tenant_id='{ids['tenantId']}' AND application_id='{ids['applicationId']}' "
+        f"AND environment_id='{ids['environmentId']}' AND state='READY' RETURNING id")
+    changed=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-v','ON_ERROR_STOP=1',
+        '-U','postgres','-d','cfmeet_calling','-c',query)
+    assert changed==artifact,'Retention acceleration refused outside the READY isolated fixture'
+    print('RETENTION_FIXTURE: isolated artifact deadline accelerated; production worker remains authoritative')
+
+
 def run(run_id,feature='enterprise'):
     original=p.inspect('cfmeet-calling')['Id']
     try:
@@ -115,13 +136,26 @@ def _run(run_id,feature='enterprise'):
     base=json.loads(p.run('docker','image','inspect','python:3.12-slim'))[0]['RepoDigests'][0]
     tag='cfmeet-calling-api-probe:'+hashlib.sha256((source/'Probe.Dockerfile').read_bytes()+base.encode()).hexdigest()[:20]
     p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
-    result=subprocess.run(['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','bridge','--memory','768m','--cpus','1',
+    command=['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','bridge','--memory','768m','--cpus','1',
         '--tmpfs','/tmp:rw,nosuid,size=256m,uid=10001,gid=10001','--mount',f'type=bind,src={root},dst=/result',
         '--mount',f'type=bind,src={source}/api_client.py,dst=/api_client.py,readonly',
         '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',
-        '--mount',f'type=bind,src={source}/capture_scenarios.py,dst=/capture_scenarios.py,readonly',tag,'python','/api_client.py',feature],
-        capture_output=True,text=True,timeout=900)
-    p.write_private(root/'execution.private.log',result.stdout+'\n'+result.stderr)
+        '--mount',f'type=bind,src={source}/capture_scenarios.py,dst=/capture_scenarios.py,readonly',tag,'python','/api_client.py',feature]
+    with (root/'execution.private.log').open('w') as log:
+        process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
+        deadline=time.monotonic()+900
+        try:
+            while process.poll() is None:
+                pending=root/'retention-request.json'
+                if pending.exists():
+                    expire_fixture(value,json.loads(pending.read_text()))
+                    pending.rename(root/'retention-request.handled.json')
+                assert time.monotonic()<deadline,'Production acceptance timed out'
+                time.sleep(.25)
+        finally:
+            if process.poll() is None:
+                subprocess.run(['docker','stop','--time','10','cfmeet-calling-api-probe'],capture_output=True,timeout=25)
+                process.wait(timeout=15)
     report=root/'api-result.json'
     if report.exists():
         record=json.loads(report.read_text())
@@ -130,7 +164,7 @@ def _run(run_id,feature='enterprise'):
             effective_flags={k:p.env_of(p.inspect('cfmeet-calling')).get(k,'false') for k in sorted(p.SAFE_ENV) if k.endswith('_ENABLED')},
             offserver_backups='POSTPONED_BY_OWNER')
         p.write_private(report,json.dumps(record,indent=2));print(report.read_text())
-    if result.returncode:
+    if process.returncode:
         if p.inspect('cfmeet-calling')['Id']!=old_id:p.rollback_calling()
         raise RuntimeError('Production '+feature+' acceptance failed; changed feature activation rolled back')
     p.regression();print(feature.upper()+': enabled after production API acceptance')
