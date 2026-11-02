@@ -243,13 +243,15 @@ def provision(sha, run_id):
     egress_path = ROOT / 'egress' / 'production.yaml'
     run('docker', 'pull', 'livekit/egress:v1.10.0')
     pinned = json.loads(run('docker','image','inspect','livekit/egress:v1.10.0'))[0]['RepoDigests'][0]
+    pinned_id = json.loads(run('docker','image','inspect',pinned))[0]['Id']
     uid = int(run('docker','run','--rm','--network','none','--entrypoint','id',pinned,'-u'))
     gid = int(run('docker','run','--rm','--network','none','--entrypoint','id',pinned,'-g'))
     if subprocess.run(['docker','container','inspect',EGRESS], capture_output=True).returncode == 0:
         assert egress_path.exists() and yaml.safe_load(egress_path.read_text()) == egress_config, 'Existing Egress differs; preserved'
-        assert inspect(EGRESS)['Config']['Image'] == pinned, 'Existing Egress image differs; preserved'
+        assert inspect(EGRESS)['Image'] == pinned_id, 'Existing Egress image differs; preserved'
         os.chown(egress_path,uid,gid)
-        run('docker','restart',EGRESS)
+        if not inspect(EGRESS)['State']['Running']:
+            run('docker','restart',EGRESS)
     else:
         write_private(egress_path, json.dumps(egress_config))
         # Resolve the pinned image's actual egress uid; base images can already own uid 1000.
