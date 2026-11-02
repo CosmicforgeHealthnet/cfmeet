@@ -170,7 +170,11 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
   const isError = spaceError || (!!selectedId && (selected.isError || (!selected.isLoading && !validSelection)));
   const preJoin = usePreJoin(resolveData?.conference?.id || "");
   const consentRequirements = useMemo(
-    () => preJoin.data?.consentRequirements ?? [],
+    () => Array.isArray(preJoin.data?.consentRequirements)
+      ? preJoin.data.consentRequirements.filter(
+          (item) => item && typeof item.consentType === "string",
+        )
+      : [],
     [preJoin.data?.consentRequirements],
   );
   const grantedConsents = useMemo(
