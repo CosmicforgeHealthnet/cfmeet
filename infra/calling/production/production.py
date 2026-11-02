@@ -619,6 +619,11 @@ if __name__ == '__main__':
         operation, sha, run_id = sys.argv[1:]
         if operation == 'inspect':
             audit()
+        elif operation == 'complete-safe-infrastructure':
+            provision(sha, run_id)
+            secure_storage_ingress(run_id)
+            configure_capture()
+            verify(run_id)
         elif operation == 'provision':
             provision(sha, run_id)
         elif operation == 'activate':
