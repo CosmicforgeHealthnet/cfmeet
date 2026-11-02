@@ -1,0 +1,89 @@
+name: Deploy private CF Meet capture Redis
+
+# Creates only private Redis for eventual LiveKit Egress.
+# Does not restart LiveKit, Calling or Meetings, and does not enable flags.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-capture-redis-deploy.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+concurrency:
+  group: cfmeet-capture-redis-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 14
+    steps:
+      - name: Prepare SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Deploy isolated password-authenticated Redis
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core
+          SECRET="$ROOT/secrets/calling-capture-redis-password"
+          NAME=cfmeet-calling-redis
+          docker network inspect cfmeet-core-private >/dev/null
+          for service in cfmeet-production-backend cfmeet-calling lk-server; do
+            test "$(docker inspect -f '{{.State.Running}}' "$service")" = true
+          done
+          curl -fsS --max-time 7 http://127.0.0.1:18081/health >/dev/null
+          if docker container inspect "$NAME" >/dev/null 2>&1; then
+            echo 'Redis container already exists: no replacement or secret change'
+            test "$(docker inspect -f '{{.State.Running}}' "$NAME")" = true
+            test -s "$SECRET"
+          else
+            mkdir -p "$ROOT/secrets"
+            if test ! -e "$SECRET"; then
+              openssl rand -hex 40 > "$SECRET"
+            fi
+            test -s "$SECRET"
+            chown 10001:10001 "$SECRET"
+            chmod 0400 "$SECRET"
+            # Password is loaded inside Redis; never appears in Docker command metadata.
+            docker run -d --name "$NAME" --restart unless-stopped \
+              --network cfmeet-core-private --user 10001:10001 \
+              --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+              --memory 256m --cpus 0.5 \
+              --mount "type=bind,src=$SECRET,dst=/run/secrets/redis-password,readonly" \
+              redis:7.4-alpine sh -ec \
+                'exec redis-server --bind 0.0.0.0 --save "" --appendonly no --maxmemory 128mb --maxmemory-policy noeviction --requirepass "$(cat /run/secrets/redis-password)"' >/dev/null
+          fi
+          ok=0
+          for i in $(seq 1 25); do
+            if docker exec -e "REDISCLI_AUTH=$(cat "$SECRET")" "$NAME" redis-cli ping 2>/dev/null | grep -qx PONG; then ok=1; break; fi
+            sleep 2
+          done
+          test "$ok" = 1 || {
+            echo 'Capture Redis failed readiness; leaving Calling and Meetings untouched.'
+            docker logs --tail=20 "$NAME" 2>&1 | sed -E 's/(requirepass[[:space:]]+).*/\1[redacted]/'
+            exit 1
+          }
+          bindings="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$NAME")"
+          test "$bindings" = null || test "$bindings" = '{}'
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          echo 'CAPTURE_REDIS: RUNNING_AUTHENTICATED'
+          echo 'PUBLIC_REDIS_PORTS: NONE'
+          echo 'LIVEKIT_AND_MEETINGS: NOT_RESTARTED'
+          echo 'CALLING_FEATURE_FLAGS: UNCHANGED'
+          REMOTE
