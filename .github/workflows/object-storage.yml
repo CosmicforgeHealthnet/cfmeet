@@ -78,3 +78,5 @@ jobs:
           if grep -q "SKIPPED" "$RUNNER_TEMP/os.log"; then
             echo "::error::the live object-storage test was skipped"; exit 1
           fi
+
+# Production readiness recertification requested 2026-11-02; same executable gates, no weakened assertions.
