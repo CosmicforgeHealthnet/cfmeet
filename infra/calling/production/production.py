@@ -342,6 +342,12 @@ def secure_storage_ingress(run_id):
     mc = str(ROOT/'storage'/'mc')
     put = subprocess.run([mc,'pipe','ingress_app/cfmeet-calling-artifacts/'+probe_key],
         env=mc_env,input='controlled non-sensitive ingress probe',capture_output=True,text=True)
+    if put.returncode:
+        diagnostic=(put.stdout+' '+put.stderr)[-1500:]
+        for name in ('minio-service-access-key','calling-artifact-store-secret','minio-admin-user','minio-admin-password'):
+            diagnostic=diagnostic.replace(secret(name),'[redacted]')
+        diagnostic=re.sub(r'https?://\S+','[endpoint]',diagnostic)
+        print('INGRESS_STORAGE_PROBE_ERROR:',diagnostic)
     assert put.returncode==0, 'Storage service identity could not upload ingress probe'
     try:
         write_private(snippet,contents)
