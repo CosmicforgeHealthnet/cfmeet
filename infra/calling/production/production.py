@@ -119,6 +119,11 @@ def audit():
     print(json.dumps({'nginx_sites': [str(p) for p in Path('/etc/nginx/sites-enabled').glob('*')],
                       'cfmeet_backup_files': [str(p) for p in ROOT.glob('**/*backup*.env')],
                       'ffprobe_available': bool(shutil.which('ffprobe'))}))
+    for p in Path('/etc/nginx/sites-enabled').glob('*'):
+        if p.is_file() and 'cfmeet' in p.read_text():
+            print(json.dumps({'nginx_cfmeet_site':str(p.resolve()),'routing_lines':[
+                line.strip() for line in p.read_text().splitlines()
+                if re.match(r'\s*(server_name|listen|location|include|proxy_pass)\s',line)]}))
     c = inspect('lk-server')
     print(json.dumps({'livekit_command': c['Config']['Cmd'],
                       'livekit_entrypoint': c['Config']['Entrypoint']}))
@@ -152,10 +157,11 @@ def redis_ping_from(container):
     c = inspect(container)
     assert NET in c['NetworkSettings']['Networks']
     # Redis CLI runs in the exact target network namespace, not merely another bridge member.
-    run('docker', 'run', '--rm', '--network', 'container:'+container,
+    result = run('docker', 'run', '--rm', '--network', 'container:'+container,
         '--mount', f'type=bind,src={SECRETS}/calling-capture-redis-password,dst=/run/password,readonly',
         'redis:7.4-alpine', 'sh', '-ec',
         'REDISCLI_AUTH="$(cat /run/password)" redis-cli -h cfmeet-calling-redis ping')
+    assert result == 'PONG', 'Redis authentication failed'
 
 
 def provision(sha, run_id):
@@ -224,7 +230,7 @@ def provision(sha, run_id):
     else:
         write_private(egress_path, json.dumps(egress_config))
         # The image runs as egress (uid 1000). Configuration remains owner-only.
-        egress_path.chown(1000, 1000) if hasattr(egress_path, 'chown') else os.chown(egress_path, 1000, 1000)
+        os.chown(egress_path, 1000, 1000)
         run('docker', 'pull', 'livekit/egress:v1.10.0')
         pinned = json.loads(run('docker','image','inspect','livekit/egress:v1.10.0'))[0]['RepoDigests'][0]
         run('docker','run','-d','--name',EGRESS,'--restart','unless-stopped',
@@ -288,7 +294,176 @@ def activate():
     evidence = json.loads((ROOT/'calling-production-evidence.json').read_text())
     images = {n:inspect(n)['Image'] for n in ('lk-server',EGRESS,'cfmeet-calling','cfmeet-calling-artifacts')}
     validate_acceptance(evidence, int(time.time()), images)
-    raise RuntimeError('Runtime activation requires completed client acceptance and reviewed clone transaction')
+    identity()
+    regression()
+    capture = dict(line.split('=',1) for line in (ROOT/'calling-capture.production.env').read_text().splitlines())
+    capture.update({k:'true' for k in ('CALLING_NEW_CALLS_ENABLED','CALLING_APP_CALLING_ENABLED',
+        'ENTERPRISE_CALLING_ENABLED','VOICEMAIL_ENABLED','CALL_RECORDING_ENABLED')})
+    capture.update({k:'false' for k in ('CALLING_PUBLIC_OUTBOUND_ENABLED','CALLING_PUBLIC_INBOUND_ENABLED',
+        'CALLING_CALLBACK_RELAY_ENABLED','CALLING_SYNTHETIC_INTERCONNECT_ENABLED')})
+    recreate_calling(capture)
+
+
+class DockerConnection(http.client.HTTPConnection):
+    def __init__(self):
+        super().__init__('localhost', timeout=90)
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect('/var/run/docker.sock')
+
+
+def docker_api(method, path, payload=None):
+    conn = DockerConnection()
+    try:
+        conn.request(method, '/v1.45'+path,
+            body=json.dumps(payload).encode() if payload is not None else None,
+            headers={'Content-Type':'application/json'})
+        response = conn.getresponse()
+        data = response.read()
+        assert response.status < 300, 'Docker transaction rejected'
+        return json.loads(data) if data else None
+    finally:
+        conn.close()
+
+
+def clone_payload(c, overrides):
+    payload = copy.deepcopy(c['Config'])
+    payload['Image'] = c['Image']  # immutable running image; do not resolve a moving tag
+    env = env_of(c)
+    env.update(overrides)
+    payload['Env'] = [k+'='+v for k,v in env.items()]
+    host = copy.deepcopy(c['HostConfig'])
+    assert not host.get('AutoRemove'), 'Auto-removal incompatible with rollback'
+    assert not host.get('PortBindings'), 'Calling must remain private'
+    # Persist all original mounts, restart, resources, security and startup settings.
+    destination = '/run/secrets/calling-artifact-store-secret'
+    existing = [m for m in c['Mounts'] if m['Destination'] == destination]
+    if not existing:
+        host.setdefault('Mounts', []).append(dict(Type='bind',
+            Source=str(SECRETS/'calling-artifact-store-secret'), Target=destination, ReadOnly=True))
+    else:
+        assert len(existing) == 1 and not existing[0]['RW']
+        assert existing[0]['Source'] == str(SECRETS/'calling-artifact-store-secret')
+    payload['HostConfig'] = host
+    endpoints = {}
+    for name, ep in c['NetworkSettings']['Networks'].items():
+        assert not ep.get('IPAMConfig'), 'Static-IP topology requires explicit migration; preserved'
+        endpoints[name] = {k:copy.deepcopy(ep[k]) for k in ('Aliases','Links','DriverOpts') if ep.get(k)}
+        if 'Aliases' in endpoints[name]:
+            endpoints[name]['Aliases'] = [a for a in endpoints[name]['Aliases'] if a not in (c['Id'],c['Id'][:12])]
+    payload['NetworkingConfig'] = {'EndpointsConfig':endpoints}
+    return payload
+
+
+def recreate_calling(overrides):
+    c = inspect('cfmeet-calling')
+    if all(env_of(c).get(k) == v for k,v in overrides.items()):
+        regression()
+        print('CALLING_RUNTIME: already configured')
+        return
+    payload = clone_payload(c, overrides)
+    backup = 'cfmeet-calling-rollback-'+str(int(time.time()))
+    write_private(ROOT/'calling-activation-rollback.json', json.dumps({'container':backup,'original':c}))
+    # Rename before stopping; never delete a previous rollback container.
+    run('docker','rename','cfmeet-calling',backup)
+    try:
+        run('docker','stop','--time','30',backup)
+        docker_api('POST','/containers/create?name=cfmeet-calling',payload)
+        docker_api('POST','/containers/cfmeet-calling/start')
+        for _ in range(30):
+            try:
+                regression()
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            raise RuntimeError('Calling activation readiness failed')
+        deployed = inspect('cfmeet-calling')
+        assert all(env_of(deployed).get(k) == v for k,v in overrides.items())
+        assert set(deployed['NetworkSettings']['Networks']) == set(c['NetworkSettings']['Networks'])
+        assert all(any(x['Source']==m['Source'] and x['Destination']==m['Destination'] and x['RW']==m['RW']
+            for x in deployed['Mounts']) for m in c['Mounts'])
+        assert deployed['Config']['Cmd'] == c['Config']['Cmd']
+        assert deployed['Config']['Entrypoint'] == c['Config']['Entrypoint']
+        assert not deployed['HostConfig']['PortBindings']
+        # Re-run real acceptance after activation; failure restores original container.
+        verify(str(int(time.time())))
+        latest = json.loads((ROOT/'calling-production-evidence.json').read_text())
+        validate_acceptance(latest, int(time.time()),
+            {n:inspect(n)['Image'] for n in ('lk-server',EGRESS,'cfmeet-calling','cfmeet-calling-artifacts')})
+    except Exception:
+        rollback_calling()
+        raise
+    print('CALLING_ACTIVATED: runtime flags/mounts/networks verified; rollback retained '+backup)
+
+
+def rollback_calling():
+    record = json.loads((ROOT/'calling-activation-rollback.json').read_text())
+    backup = record['container']
+    assert backup.startswith('cfmeet-calling-rollback-')
+    inspect(backup)
+    # Retain failed replacement too; no deletion of original/rollback containers.
+    if subprocess.run(['docker','inspect','cfmeet-calling'], capture_output=True).returncode == 0:
+        run('docker','stop','--time','15','cfmeet-calling')
+        run('docker','rename','cfmeet-calling','cfmeet-calling-failed-'+str(int(time.time())))
+    run('docker','rename',backup,'cfmeet-calling')
+    run('docker','start','cfmeet-calling')
+    regression()
+    print('CALLING_ROLLBACK: original container restored')
+
+
+def verify(run_id):
+    identity()
+    regression()
+    redis_ping_from('lk-server')
+    redis_ping_from(EGRESS)
+    out = ROOT/'production-evidence'/('verify-'+run_id)
+    out.mkdir(parents=True, exist_ok=False, mode=0o700)
+    os.chown(out,10001,10001)
+    # Only the probe's explicit, existing service credentials enter this disposable client.
+    command = ['docker','run','--rm','--name','cfmeet-production-media-probe',
+        '--network',NET,'--user','10001:10001','--read-only','--memory','768m','--cpus','1',
+        '--tmpfs','/tmp:rw,nosuid,size=512m,uid=10001,gid=10001',
+        '--mount',f'type=bind,src={out},dst=/result',
+        '--mount',f'type=bind,src={Path(__file__).with_name("media_probe.py")},dst=/probe.py,readonly']
+    for name in ('calling-livekit-api-key','calling-livekit-api-secret','minio-service-access-key',
+                 'calling-artifact-store-secret','minio-egress-access-key','minio-egress-secret'):
+        command += ['--mount',f'type=bind,src={SECRETS/name},dst=/run/secrets/{name},readonly']
+    command += ['python:3.12-slim','sh','-ec',
+        'pip install --disable-pip-version-check --no-cache-dir --quiet --target /tmp/deps livekit==1.1.20 && PYTHONPATH=/tmp/deps python /probe.py']
+    probe = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    result_path = out/'media-result.json'
+    result = json.loads(result_path.read_text()) if result_path.exists() else {
+        'error_type':'PROBE_DID_NOT_PRODUCE_RESULTS','checks':{}}
+    if probe.returncode:
+        # SDK log messages may include connection tokens; only return stable error summaries.
+        print('MEDIA_PROBE: incomplete; inspect restricted evidence on VPS')
+    for kind in ('track','composite'):
+        audio = out/(kind+'.ogg')
+        if not audio.exists():
+            continue
+        try:
+            run('docker','run','--rm','--network','none','--user','10001:10001',
+                '--memory','128m','--cpus','0.5','--entrypoint','ffmpeg',
+                '--mount',f'type=bind,src={out},dst=/result',inspect(EGRESS)['Image'],
+                '-v','error','-i','/result/'+kind+'.ogg','-ac','1','-ar','48000',
+                '-f','s16le','/result/'+kind+'.pcm')
+            import array
+            pcm = array.array('h',(out/(kind+'.pcm')).read_bytes())
+            assert len(pcm)>=3*48000 and sum(int(x)**2 for x in pcm)/len(pcm)>100**2
+            result['checks'][kind+'_decoded_nonsilent_audio'] = 'PASS'
+        except Exception:
+            result['checks'][kind+'_decoded_nonsilent_audio'] = 'FAIL'
+    result['git_sha'] = sys.argv[2]
+    result['timestamp'] = int(time.time())
+    result['backup_destination_configured'] = bool(list(ROOT.glob('*backup*.env')))
+    result['activation'] = 'BLOCKED_PENDING_FULL_PRODUCTION_ACCEPTANCE'
+    write_private(out/'verification.json',json.dumps(result,indent=2))
+    print(json.dumps(result))
+    audit()
+    regression()
+    assert probe.returncode==0, 'Real media infrastructure probe failed'
 
 
 if __name__ == '__main__':
@@ -301,9 +476,15 @@ if __name__ == '__main__':
             provision(sha, run_id)
         elif operation == 'activate':
             activate()
+        elif operation == 'rollback':
+            identity()
+            rollback_calling()
+        elif operation == 'verify':
+            verify(run_id)
         else:
             raise RuntimeError('Operation not yet implemented; activation requires real acceptance evidence')
     except Exception as exc:
         # Avoid exception details from network libraries leaking signed URLs.
-        print('PRODUCTION_OPERATION_FAILED:', type(exc).__name__)
+        print('PRODUCTION_OPERATION_FAILED:', type(exc).__name__,
+              str(exc) if isinstance(exc, (AssertionError, RuntimeError)) else '')
         sys.exit(1)
