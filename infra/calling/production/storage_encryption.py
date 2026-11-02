@@ -111,6 +111,7 @@ def migrate(run_id):
         p.run('docker','rename',NAME,backup); swapped=True
         p.run('docker','stop','--time','30',backup)
         p.run('docker','rename',candidate,NAME)
+        ready(NAME)
         p.secure_storage_ingress(run_id); p.regression()
     except Exception:
         if swapped:

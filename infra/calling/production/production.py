@@ -340,8 +340,12 @@ def secure_storage_ingress(run_id):
     mc_env = dict(os.environ, MC_HOST_ingress_app='http://'+secret('minio-service-access-key')+':'+
         secret('calling-artifact-store-secret')+'@'+ip+':9000')
     mc = str(ROOT/'storage'/'mc')
-    put = subprocess.run([mc,'pipe','ingress_app/cfmeet-calling-artifacts/'+probe_key],
-        env=mc_env,input='controlled non-sensitive ingress probe',capture_output=True,text=True)
+    for _ in range(15):
+        put = subprocess.run([mc,'pipe','ingress_app/cfmeet-calling-artifacts/'+probe_key],
+            env=mc_env,input='controlled non-sensitive ingress probe',capture_output=True,text=True)
+        if put.returncode==0:
+            break
+        time.sleep(2)
     if put.returncode:
         diagnostic=(put.stdout+' '+put.stderr)[-1500:]
         for name in ('minio-service-access-key','calling-artifact-store-secret','minio-admin-user','minio-admin-password'):
