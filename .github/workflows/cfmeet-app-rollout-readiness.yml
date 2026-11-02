@@ -87,3 +87,5 @@ jobs:
           echo 'NO_FLAGS_CHANGED: true'
           echo 'FULL_PRODUCTION_APP_E2E: NOT_CERTIFIED_BY_THIS_CHECK'
           REMOTE
+
+# Post-cutover runtime verification: check effective app-only flags after successful beta activation.
