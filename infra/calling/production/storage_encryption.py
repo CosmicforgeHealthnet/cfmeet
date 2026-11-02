@@ -94,6 +94,7 @@ def migrate(run_id):
         mc(candidate,'pipe','kms/'+NAME+'/'+probe,data='controlled encrypted recovery probe',admin=False)
         assert 'AES256' in mc(candidate,'stat','--json','kms/'+NAME+'/'+probe,admin=False)
         assert mc(candidate,'cat','kms/'+NAME+'/'+probe,admin=False)=='controlled encrypted recovery probe'
+        print('KMS_ENCRYPTED_UPLOAD_DOWNLOAD: PASS')
         p.run('docker','stop','--time','30',candidate)
         restore=copy.deepcopy(payload)
         for mount in restore['HostConfig']['Mounts']:
@@ -104,6 +105,7 @@ def migrate(run_id):
         try:
             ready(recovery_name)
             assert mc(recovery_name,'cat','kms/'+NAME+'/'+probe,admin=False)=='controlled encrypted recovery probe'
+            print('KMS_RECOVERY_KEY_RESTART_AND_DECRYPT: PASS')
         finally:
             p.run('docker','stop','--time','20',recovery_name)
         p.run('docker','start',candidate); ready(candidate)
@@ -112,6 +114,7 @@ def migrate(run_id):
         p.run('docker','stop','--time','30',backup)
         p.run('docker','rename',candidate,NAME)
         ready(NAME)
+        print('KMS_CUTOVER: updating authenticated public ingress')
         p.secure_storage_ingress(run_id); p.regression()
     except Exception:
         if swapped:

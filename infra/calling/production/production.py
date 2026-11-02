@@ -368,6 +368,9 @@ def secure_storage_ingress(run_id):
                 if last_code==403:
                     break
                 time.sleep(2)  # nginx reload is asynchronous; old workers may still answer
+            except (urllib.error.URLError,TimeoutError):
+                last_code='network-timeout-during-origin-handover'
+                time.sleep(2)
             else:
                 raise AssertionError('Unsigned storage access was permitted')
         else:
