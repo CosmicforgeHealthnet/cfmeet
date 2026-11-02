@@ -95,12 +95,21 @@ jobs:
           test "$bindings" = null || test "$bindings" = '{}'
           USER="$(cat "$SECRET/minio-admin-user")"
           PASS="$(cat "$SECRET/minio-admin-password")"
-          MC_HOST="http://$USER:$PASS@cfmeet-calling-artifacts:9000"
+          IP="$(docker inspect --format '{{with index .NetworkSettings.Networks "cfmeet-core-private"}}{{.IPAddress}}{{end}}' "$STORE")"
+          test -n "$IP"
+          MC_HOST="http://$USER:$PASS@$IP:9000"
+          # Docker Hub and Quay no longer publish a public mc:latest.
+          # Fetch the official CLI and require its published SHA-256 checksum.
+          if test ! -x "$BASE/storage/mc"; then
+            curl -fLSs --retry 2 --max-time 80 -o "$BASE/storage/mc" \
+              https://dl.min.io/client/mc/release/linux-amd64/mc
+            curl -fLSs --retry 2 --max-time 30 -o "$BASE/storage/mc.sha256sum" \
+              https://dl.min.io/client/mc/release/linux-amd64/mc.sha256sum
+            (cd "$BASE/storage"; sha256sum --check mc.sha256sum)
+            chmod 0500 "$BASE/storage/mc"
+          fi
           mc() {
-            docker run --rm --user 0:0 --network cfmeet-core-private \
-              -e "MC_HOST_local=$MC_HOST" \
-              --mount "type=bind,src=$BASE/storage,dst=/config,readonly" \
-              quay.io/minio/mc:latest "$@"
+            MC_HOST_local="$MC_HOST" "$BASE/storage/mc" "$@"
           }
           mc mb --ignore-existing "local/$BUCKET" >/dev/null
           mc anonymous set none "local/$BUCKET" >/dev/null
@@ -117,8 +126,8 @@ jobs:
           ]}
           POLICY
           chmod 0400 "$BASE/storage/"*.json
-          mc admin policy create local cfmeet-calling-objectstore /config/calling-policy.json >/dev/null || mc admin policy info local cfmeet-calling-objectstore >/dev/null
-          mc admin policy create local cfmeet-calling-egress-upload /config/egress-policy.json >/dev/null || mc admin policy info local cfmeet-calling-egress-upload >/dev/null
+          mc admin policy create local cfmeet-calling-objectstore $BASE/storage/calling-policy.json >/dev/null || mc admin policy info local cfmeet-calling-objectstore >/dev/null
+          mc admin policy create local cfmeet-calling-egress-upload $BASE/storage/egress-policy.json >/dev/null || mc admin policy info local cfmeet-calling-egress-upload >/dev/null
           mc admin user add local "$(cat "$SECRET/minio-service-access-key")" "$(cat "$SECRET/calling-artifact-store-secret")" >/dev/null
           mc admin policy attach local cfmeet-calling-objectstore --user "$(cat "$SECRET/minio-service-access-key")" >/dev/null
           mc admin user add local "$(cat "$SECRET/minio-egress-access-key")" "$(cat "$SECRET/minio-egress-secret")" >/dev/null
