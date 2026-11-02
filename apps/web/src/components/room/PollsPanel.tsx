@@ -37,8 +37,8 @@ export default function PollsPanel({ conferenceId, isHost, onClose }: PollsPanel
       {polls.isError && <div className="p-3"><RequestError error={polls.error} retry={() => void polls.refetch()} /></div>}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {polls.isLoading && <p role="status" className="text-sm text-muted-foreground">Loading polls…</p>}
-        {polls.data?.polls.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No polls have been created.</p>}
-        {polls.data?.polls.map((poll) => (
+        {polls.data?.polls?.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No polls have been created.</p>}
+        {(polls.data?.polls ?? []).map((poll) => (
           <PollCard
             key={poll.id}
             poll={poll}
@@ -92,7 +92,7 @@ function PollCard({ poll, conferenceId, isHost, expanded, onToggle }: {
     {expanded && <div className="mt-3 space-y-3">
       {transitionError && <RequestError error={transitionError} />}
       {results.isError && <RequestError error={results.error} />}
-      {poll.questions.map((question) => <PollQuestionCard
+      {(poll.questions ?? []).map((question) => <PollQuestionCard
         key={question.id}
         poll={poll}
         question={question}
@@ -150,7 +150,7 @@ function PollQuestionCard({ poll, question, result, responseCount, conferenceId,
   return <div className="rounded-lg bg-muted/40 p-3">
     <h5 className="font-medium">{question.prompt}</h5>
     {isChoice && <div className="mt-2 space-y-1.5">
-      {question.options.map((option, index) => {
+      {(question.options ?? []).map((option, index) => {
         const selected = selectedIds.includes(option.id);
         const count = result?.optionCounts?.[option.id] ?? 0;
         const percent = responseCount ? (count / responseCount) * 100 : 0;
@@ -172,7 +172,7 @@ function PollQuestionCard({ poll, question, result, responseCount, conferenceId,
       <Button key={value} type="button" size="sm" variant={rating === value ? "default" : "outline"} disabled={hasResponded || poll.status !== "OPEN"} onClick={() => setRating(value)}>{value}</Button>)}</div>}
     {showResults && result?.ratingDistribution && <p className="mt-2 text-xs text-muted-foreground">Average: {result.ratingAverage?.toFixed(1) ?? "—"}</p>}
     {showResults && result?.texts?.map((item, index) => <p key={`${item.text}-${index}`} className="mt-2 rounded bg-background p-2 text-sm">{item.text}</p>)}
-    {showResults && question.type === "RANKING" && result?.averagePositions && Object.entries(result.averagePositions).map(([id, average]) => <p key={id} className="text-xs text-muted-foreground">{question.options.find((item) => item.id === id)?.label}: average rank {average.toFixed(1)}</p>)}
+    {showResults && question.type === "RANKING" && result?.averagePositions && Object.entries(result.averagePositions).map(([id, average]) => <p key={id} className="text-xs text-muted-foreground">{question.options?.find((item) => item.id === id)?.label}: average rank {average.toFixed(1)}</p>)}
     {poll.status === "OPEN" && !hasResponded && <Button className="mt-3 w-full" size="sm" onClick={submitAnswer} disabled={!isAnswered || submit.isPending}>
       {submit.isPending ? "Submitting…" : "Submit response"}
     </Button>}
