@@ -346,8 +346,8 @@ function VideoGridContent({ layout }: { layout: "grid" | "comfortable" }) {
     { onlySubscribed: false },
   );
 
-  const hasScreenShare = screenShareTracks.length > 0;
-  const baseLayout = getGridLayout(cameraTracks.length, isMobile);
+  const hasScreenShare = (screenShareTracks ?? []).length > 0;
+  const baseLayout = getGridLayout((cameraTracks ?? []).length, isMobile);
   const cols = layout === "comfortable" ? Math.min(2, baseLayout.cols) : baseLayout.cols;
   const rows = Math.ceil(cameraTracks.length / cols);
 
@@ -372,7 +372,7 @@ function VideoGridContent({ layout }: { layout: "grid" | "comfortable" }) {
               gridTemplateRows: `repeat(${screenShareParticipantLayout.rows}, minmax(130px, 1fr))`,
             }}
           >
-            {cameraTracks.map((track) => (
+            {(cameraTracks ?? []).map((track) => (
               <ParticipantTile key={track.participant.sid} trackRef={track} className="rounded-lg overflow-hidden w-full h-full room-tile min-h-32">
                 <CustomTileContent />
               </ParticipantTile>
@@ -392,7 +392,7 @@ function VideoGridContent({ layout }: { layout: "grid" | "comfortable" }) {
           gridTemplateRows: `repeat(${rows}, minmax(150px, 1fr))`,
         }}
       >
-        {cameraTracks.map((track) => (
+        {(cameraTracks ?? []).map((track) => (
           <ParticipantTile key={track.participant.sid} trackRef={track} className="rounded-lg overflow-hidden w-full h-full room-tile">
             <CustomTileContent />
           </ParticipantTile>
@@ -537,5 +537,5 @@ function RoomTools({ onOpenPanel, conferenceId }: { conferenceId: string; onOpen
  const canRecord = meetingAllows(role, "artifact.list", space.data?.rolePolicy) || (space.data?.recordingPolicy !== "DISABLED" && (meetingAllows(role, "recording.start", space.data?.rolePolicy) || meetingAllows(role, "recording.stop", space.data?.rolePolicy)));
  const { resolvedTheme, setTheme } = useTheme();
  const { devices, activeDeviceId, setActiveMediaDevice } = useMediaDeviceSelect({ kind: "audiooutput" });
- return <div className="space-y-4"><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{([{ panel: "breakouts", label: "Breakout rooms", icon: GitFork }, { panel: "polls", label: "Polls", icon: ChartNoAxesColumn }, { panel: "qa", label: "Q&A", icon: CircleHelp }, { panel: "recordings", label: "Recordings", icon: Clapperboard }] as const).filter(item => item.panel === "recordings" ? canRecord : item.panel === "polls" ? collaboration.data?.policy.pollsEnabled !== false : item.panel === "qa" ? collaboration.data?.policy.qnaEnabled !== false : collaboration.data?.policy.maxBreakouts !== 0).map(({ panel, label, icon: Icon }) => <DialogClose asChild key={panel}><button key={panel} onClick={() => onOpenPanel(panel)} className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm hover:bg-muted"><Icon className="size-4 text-primary" />{label}</button></DialogClose>)}<button className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm hover:bg-muted" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>{resolvedTheme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}Appearance</button></div><label className="flex items-center gap-2 text-sm"><Volume2 className="size-4" />Speaker<select aria-label="Audio output" className="min-w-0 flex-1 rounded-lg border border-border bg-card p-2" value={activeDeviceId} onChange={event => void setActiveMediaDevice(event.target.value)}>{devices.map(device => <option key={device.deviceId} value={device.deviceId}>{device.label || "Default speaker"}</option>)}</select></label></div>;
+ return <div className="space-y-4"><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{([{ panel: "breakouts", label: "Breakout rooms", icon: GitFork }, { panel: "polls", label: "Polls", icon: ChartNoAxesColumn }, { panel: "qa", label: "Q&A", icon: CircleHelp }, { panel: "recordings", label: "Recordings", icon: Clapperboard }] as const).filter(item => item.panel === "recordings" ? canRecord : item.panel === "polls" ? collaboration.data?.policy.pollsEnabled !== false : item.panel === "qa" ? collaboration.data?.policy.qnaEnabled !== false : collaboration.data?.policy.maxBreakouts !== 0).map(({ panel, label, icon: Icon }) => <DialogClose asChild key={panel}><button key={panel} onClick={() => onOpenPanel(panel)} className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm hover:bg-muted"><Icon className="size-4 text-primary" />{label}</button></DialogClose>)}<button className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm hover:bg-muted" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>{resolvedTheme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}Appearance</button></div><label className="flex items-center gap-2 text-sm"><Volume2 className="size-4" />Speaker<select aria-label="Audio output" className="min-w-0 flex-1 rounded-lg border border-border bg-card p-2" value={activeDeviceId} onChange={event => void setActiveMediaDevice(event.target.value)}>{(devices ?? []).map(device => <option key={device.deviceId} value={device.deviceId}>{device.label || "Default speaker"}</option>)}</select></label></div>;
 }
