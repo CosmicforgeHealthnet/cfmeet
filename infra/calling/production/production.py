@@ -404,9 +404,10 @@ def configure_storage_operations():
         assert response.returncode==0, 'MinIO lifecycle operation failed'
         return response.stdout
     rules = command('ilm','rule','ls','--json','capture/cfmeet-calling-artifacts',allow_no_lifecycle=True)
-    if 'cfmeet-capture-staging-cleanup' not in rules:
-        command('ilm','rule','add','--id','cfmeet-capture-staging-cleanup','--prefix','capture-staging/',
+    if 'capture-staging/' not in rules:
+        command('ilm','rule','add','--prefix','capture-staging/',
             '--expire-days','1','capture/cfmeet-calling-artifacts')
+    assert 'capture-staging/' in command('ilm','rule','ls','--json','capture/cfmeet-calling-artifacts')
     monitor = ROOT/'storage'/'monitor-capacity.py'
     write_private(monitor, '''import json, shutil, sys\nfrom pathlib import Path\nusage=shutil.disk_usage('/var/lib/cfmeet-artifacts')\nfree_gib=round(usage.free/1024**3,2)\npercent=round(100*usage.used/usage.total,1)\nstatus='ALERT' if free_gib<25 or percent>=85 else 'OK'\nprint(json.dumps(dict(service='cfmeet-calling-artifacts',status=status,free_gib=free_gib,used_percent=percent)))\nsys.exit(1 if status=='ALERT' else 0)\n''')
     write_private(Path('/etc/systemd/system/cfmeet-capture-capacity.service'),
@@ -638,6 +639,8 @@ def verify(run_id):
     audit()
     regression()
     assert probe.returncode==0, 'Real media infrastructure probe failed'
+    failed = [name for name,value in result['checks'].items() if value != 'PASS']
+    assert not failed, 'Production infrastructure checks failed: '+', '.join(failed)
 
 
 if __name__ == '__main__':
@@ -664,6 +667,7 @@ if __name__ == '__main__':
             secure_storage_ingress(run_id)
         elif operation == 'configure-capture':
             configure_capture()
+            verify(run_id)
         else:
             raise RuntimeError('Operation not yet implemented; activation requires real acceptance evidence')
     except Exception as exc:
