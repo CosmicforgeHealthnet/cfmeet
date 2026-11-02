@@ -1,0 +1,105 @@
+name: Publish protected CF Meet enterprise customer routes
+
+# Adds only /v1/enterprise/ to the existing Calling customer reverse proxy.
+# No feature flags, database changes, raw secrets, or Meeting container restart.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-enterprise-public-ingress.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  ingress:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Setup SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Add authenticated enterprise API path with rollback
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          SNIPPET=/etc/nginx/snippets/cfmeet-calling-routes.conf
+          BAK=/opt/cfmeet-core/ingress/cfmeet-calling-routes.pre-enterprise.conf
+          SITE=/etc/nginx/sites-enabled/api.cfmeet.com
+          test -s "$SNIPPET" && test -s "$SITE"
+          grep -Fq 'include /etc/nginx/snippets/cfmeet-calling-routes.conf' "$SITE"
+          curl -fsS --max-time 8 http://127.0.0.1:18090/health >/dev/null
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          # Confirm Calling understands this route BEFORE changing public ingress.
+          status="$(curl -s -o /dev/null -w '%{http_code}' \
+            --max-time 8 http://127.0.0.1:18090/v1/enterprise/extensions)"
+          test "$status" = 401 || {
+            echo "Unexpected private enterprise authorization response: $status"
+            exit 1
+          }
+          if grep -Fq 'location ^~ /v1/enterprise/' "$SNIPPET"; then
+            echo 'ENTERPRISE_ROUTE: ALREADY_PRESENT'
+            exit 0
+          fi
+          if test -e "$BAK"; then
+            echo 'Existing enterprise routing rollback file, refusing to overwrite'
+            exit 1
+          fi
+          cp -p "$SNIPPET" "$BAK"
+          cat >> "$SNIPPET" <<'NGINX'
+          # Customer-facing enterprise APIs only. Calling applies Platform Access
+          # scope, tenant isolation and request-specific consent on every route.
+          location ^~ /v1/enterprise/ {
+            client_max_body_size 64k;
+            limit_except GET POST PUT PATCH DELETE { deny all; }
+            proxy_pass http://127.0.0.1:18090;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_read_timeout 60;
+          }
+          NGINX
+          rollback() {
+            rc=$?
+            trap - ERR
+            cp -p "$BAK" "$SNIPPET"
+            nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+            echo 'ENTERPRISE_INGRESS_ROLLED_BACK: yes'
+            exit "$rc"
+          }
+          trap rollback ERR
+          nginx -t >/dev/null
+          systemctl reload nginx
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+            --resolve api.cfmeet.com:443:127.0.0.1 \
+            https://api.cfmeet.com/v1/enterprise/extensions)"
+          test "$status" = 401 || { echo "Enterprise public auth regression: $status"; exit 1; }
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+            --resolve api.cfmeet.com:443:127.0.0.1 \
+            https://api.cfmeet.com/v1/enterprise/voicemail/mailboxes)"
+          test "$status" = 401 || { echo "Voicemail public auth regression: $status"; exit 1; }
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+            --resolve api.cfmeet.com:443:127.0.0.1 \
+            https://api.cfmeet.com/v1/calls)"
+          test "$status" = 401 || { echo "Calling API auth regression: $status"; exit 1; }
+          trap - ERR
+          echo 'ENTERPRISE_PUBLIC_ROUTES: AUTHENTICATED_ONLY'
+          echo 'ENTERPRISE_ANONYMOUS: HTTP_401'
+          echo 'MEETINGS_API: HEALTHY'
+          echo 'VOICEMAIL_AND_RECORDING_FLAGS: UNCHANGED'
+          REMOTE
