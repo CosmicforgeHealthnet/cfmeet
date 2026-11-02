@@ -288,6 +288,17 @@ def validate_acceptance(evidence, now, images):
     assert all(evidence['acceptance'].get(name) == 'PASS' for name in REQUIRED), 'Required acceptance incomplete'
     assert re.fullmatch('[a-f0-9]{40}', evidence['git_sha'])
     assert evidence.get('rollback_reference'), 'Rollback reference missing'
+    receipts = evidence.get('receipts', {})
+    for name in REQUIRED:
+        receipt = receipts.get(name, {})
+        path = Path(receipt.get('path', ''))
+        assert path.is_absolute() and path.is_relative_to(ROOT/'production-evidence'), 'Acceptance receipt outside protected evidence directory'
+        assert path.is_file() and not path.is_symlink(), 'Missing production acceptance receipt'
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == receipt.get('sha256'), 'Production acceptance receipt changed'
+        result = json.loads(path.read_text())
+        assert result.get('scenario') == name and result.get('result') == 'PASS'
+        assert result.get('git_sha') == evidence['git_sha'] and result.get('images') == images
+        assert result.get('started_at') and result.get('finished_at') and result.get('assertions'), 'Receipt lacks test execution details'
 
 
 def activate():
