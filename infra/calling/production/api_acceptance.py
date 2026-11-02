@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import urllib.request
+import urllib.error
 import production as p
 import app_acceptance
 
@@ -51,6 +53,33 @@ def context():
     p.write_private(file,json.dumps(value));return value
 
 
+def compatibility():
+    users=app_acceptance.accounts()
+    token=app_acceptance.api('login',{'email':users[0]['email'],'password':users[0]['password']})['access_token']
+    def fetch(path,body=None,authorized=True,expected=200):
+        headers={'Content-Type':'application/json'}
+        if authorized:headers['Authorization']='Bearer '+token
+        req=urllib.request.Request('https://api.cfmeet.com'+path,headers=headers,
+            data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(req,timeout=20) as response:status=response.status;value=json.load(response)
+        except urllib.error.HTTPError as error:status=error.code;value={}
+        assert status==expected,'Compatibility check failed: '+path+' HTTP '+str(status)
+        return value
+    fetch('/api/v1/users/me')
+    identity=fetch('/api/v2/messaging/me')
+    assert all(identity.get(k) for k in ('principalId','tenantId','applicationId','environmentId'))
+    directory=fetch('/api/v2/messaging/directory')
+    assert isinstance(directory['people'],list)
+    fetch('/api/v2/messaging/directory/resolve',{'userIds':[users[1]['userId']]},expected=404)
+    fetch('/api/v2/messaging/conversations')
+    fetch('/api/v1/meetings/')
+    for path in ('/api/v2/messaging/me','/api/v1/meetings/'):
+        fetch(path,authorized=False,expected=401)
+    return {'native_identity':'PASS','messaging_authenticated_api':'PASS','contacts_directory_isolation':'PASS',
+        'meetings_authenticated_api':'PASS','anonymous_backend_access_denied':'PASS'}
+
+
 def run(run_id,feature='enterprise'):
     p.identity(); value=context()
     # Enabling an independent carrier-free feature never depends on postponed backups.
@@ -85,4 +114,5 @@ def run(run_id,feature='enterprise'):
     if result.returncode:
         if p.inspect('cfmeet-calling')['Id']!=old_id:p.rollback_calling()
         raise RuntimeError('Production '+feature+' acceptance failed; changed feature activation rolled back')
+    print(json.dumps({'backend_compatibility':compatibility()}))
     p.regression();print(feature.upper()+': enabled after production API acceptance')

@@ -783,9 +783,10 @@ if __name__ == '__main__':
         operation, sha, run_id = sys.argv[1:]
         if operation == 'inspect':
             audit()
-        elif operation == 'test-app':
-            import app_acceptance
-            app_acceptance.run(run_id)
+        elif operation == 'compatibility':
+            import api_acceptance
+            print(json.dumps({'backend_compatibility':api_acceptance.compatibility()}))
+            regression()
         elif operation == 'test-enterprise':
             import api_acceptance
             api_acceptance.run(run_id)

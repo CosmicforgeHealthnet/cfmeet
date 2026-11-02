@@ -199,6 +199,30 @@ async def main():
         await request('PUT','/v1/enterprise/queues/'+queue['queueId']+'/members',{'expectedVersion':queue['version'],'members':[{'principalId':PEOPLE[1]}]})
         for offset,kind,id in [(1,'RING_GROUP',group['ringGroupId']),(2,'QUEUE',queue['queueId'])]:
             await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+offset),displayLabel='Acceptance route',destination={'type':kind,'id':id}))
+        await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+3),displayLabel='Acceptance transfer',destination={'type':'PRINCIPAL','id':PEOPLE[2]}))
+        flow=await request('POST','/v1/enterprise/ivr-flows',{'name':'Acceptance IVR '+suffix})
+        graph={'startNode':'menu','nodes':[
+            {'id':'menu','kind':'MENU','prompt':{'builtin':'MENU'},'inputTimeoutSeconds':20,'maxRetries':1,
+             'options':[{'digit':'1','next':'route'}],'onInvalid':'bye','onTimeout':'bye'},
+            {'id':'route','kind':'ROUTE_EXTENSION','extensionId':extension['extensionId']},
+            {'id':'bye','kind':'HANGUP','prompt':{'builtin':'GOODBYE'}}]}
+        await request('POST','/v1/enterprise/ivr-flows/'+flow['ivrFlowId']+'/versions',{'graph':graph})
+        await request('PUT','/v1/enterprise/ivr-flows/'+flow['ivrFlowId']+'/activation',{'expectedVersion':flow['version'],'versionNumber':1})
+        await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+4),displayLabel='Acceptance IVR route',destination={'type':'IVR','id':flow['ivrFlowId']}))
+        REPORT['phase']='ivr_routing';call=await dial(extension=str(number+4));await asyncio.sleep(3)
+        await request('POST','/v1/calls/'+call+'/ivr/input',{'endpointId':DEVICES[0]['endpointId'],'digit':'1'})
+        a,b=await connected(call);REPORT['checks']['ivr_keypad_to_extension_real_media']='PASS'
+        await finish(call);await a.disconnect();await b.disconnect()
+        REPORT['phase']='internal_transfer';call=await dial(extension=str(number));a,b=await connected(call)
+        view=await call_view(call);participant=next(x['participantId'] for x in view['participants'] if x['principalId']==PEOPLE[1])
+        await command(call,'transfer',{'transferringParticipantId':participant,'targetExtension':str(number+3)})
+        await answer(call,2);c,_=await join(call,2);await publish(c);await received_media(c)
+        for _ in range(30):
+            if (await call_view(call))['state']=='CONNECTED':break
+            await asyncio.sleep(.5)
+        else:raise AssertionError('Transfer did not return to CONNECTED')
+        REPORT['checks']['internal_transfer_real_media']='PASS';await finish(call)
+        for room in (a,b,c):await room.disconnect()
         for offset,label in [(0,'extensions'),(1,'ring_groups'),(2,'queues')]:
             REPORT['phase']=label;call=await dial(extension=str(number+offset));a,b=await connected(call)
             REPORT['checks'][label]='PASS';await finish(call);await a.disconnect();await b.disconnect()
