@@ -18,8 +18,6 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from livekit import rtc
-
 S = Path('/run/secrets')
 OUT = Path('/result')
 BUCKET = 'cfmeet-calling-artifacts'
@@ -75,7 +73,7 @@ def s3(method, key, data=b'', egress=False, encryption=False, public=False):
 
 
 async def main():
-    rooms = [rtc.Room(),rtc.Room()]
+    rooms = []
     tasks, egress_ids, objects = [], [], []
     try:
         # Storage security is evaluated even when a subsequent media step cannot run.
@@ -105,6 +103,8 @@ async def main():
             RESULT['encryption_error_code'] = error[1].decode() if error else str(code)
         code,body,_ = await asyncio.to_thread(s3,'GET',plain,b'',False,False,True)
         RESULT['checks']['signed_https_storage_path'] = 'PASS' if code==200 and body==b'controlled storage probe' else 'FAIL'
+        from livekit import rtc
+        rooms = [rtc.Room(),rtc.Room()]
         for i, room in enumerate(rooms):
             await asyncio.wait_for(room.connect('wss://api.cfmeet.com:8446',token('probe-'+str(i),
                 dict(roomJoin=True,room=ROOM,canPublish=True,canSubscribe=True))),30)

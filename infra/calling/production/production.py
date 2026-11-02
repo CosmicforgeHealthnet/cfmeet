@@ -596,6 +596,16 @@ def verify(run_id):
     out = ROOT/'production-evidence'/('verify-'+run_id)
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
     os.chown(out,10001,10001)
+    # Install SDK dependencies at image-build time, outside the private production
+    # network. The actual test client needs no package-index access or extra network.
+    run('docker','pull','python:3.12-slim')
+    python_image = json.loads(run('docker','image','inspect','python:3.12-slim'))[0]['RepoDigests'][0]
+    dockerfile = Path(__file__).with_name('Probe.Dockerfile')
+    image_hash = hashlib.sha256(dockerfile.read_bytes()+python_image.encode()).hexdigest()[:20]
+    probe_image = 'cfmeet-calling-media-probe:'+image_hash
+    if subprocess.run(['docker','image','inspect',probe_image],capture_output=True).returncode:
+        run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+python_image,
+            '-f',str(dockerfile),'-t',probe_image,str(dockerfile.parent))
     # Only the probe's explicit, existing service credentials enter this disposable client.
     command = ['docker','run','--rm','--name','cfmeet-production-media-probe',
         '--network',NET,'--user','10001:10001','--read-only','--memory','768m','--cpus','1',
@@ -605,9 +615,12 @@ def verify(run_id):
     for name in ('calling-livekit-api-key','calling-livekit-api-secret','minio-service-access-key',
                  'calling-artifact-store-secret','minio-egress-access-key','minio-egress-secret'):
         command += ['--mount',f'type=bind,src={SECRETS/name},dst=/run/secrets/{name},readonly']
-    command += ['python:3.12-slim','sh','-ec',
-        'pip install --disable-pip-version-check --no-cache-dir --quiet --target /tmp/deps livekit==1.1.20 && PYTHONPATH=/tmp/deps python /probe.py']
-    probe = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    command += [probe_image,'python','/probe.py']
+    try:
+        probe = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        run('docker','stop','--time','10','cfmeet-production-media-probe')
+        probe = subprocess.CompletedProcess(command,124,'','Probe timeout')
     write_private(out/'probe-execution.private.log',probe.stdout+'\n'+probe.stderr)
     result_path = out/'media-result.json'
     result = json.loads(result_path.read_text()) if result_path.exists() else {
