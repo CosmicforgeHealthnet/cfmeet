@@ -1,0 +1,133 @@
+name: Deploy CF Meet private capture object store (dark)
+
+# New independent private MinIO only. No user capture or feature switches.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-capture-private-store-deploy.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-capture-private-store
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Prepare SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Provision isolated private storage and separate scoped credentials
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          BASE=/opt/cfmeet-core
+          SECRET="$BASE/secrets"
+          STORE=cfmeet-calling-artifacts
+          BUCKET=cfmeet-calling-artifacts
+          DIR=/var/lib/cfmeet-artifacts
+          docker network inspect cfmeet-core-private >/dev/null
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-calling)" = true
+          curl -fsS --max-time 7 http://127.0.0.1:18081/health >/dev/null
+          free_gb="$(df -BG / | awk 'NR==2{gsub(/G/,"",$4);print $4}')"
+          test "$free_gb" -ge 25
+          mkdir -p "$SECRET" "$DIR" "$BASE/storage"
+          chmod 0700 "$BASE/storage"
+          for item in minio-admin-user minio-service-access-key minio-egress-access-key; do
+            test -e "$SECRET/$item" && continue
+            case "$item" in
+              minio-admin-user) echo cfmeet-capture-admin > "$SECRET/$item";;
+              minio-service-access-key) echo cfmeet-capture-app > "$SECRET/$item";;
+              minio-egress-access-key) echo cfmeet-capture-egress > "$SECRET/$item";;
+            esac
+          done
+          for item in minio-admin-password calling-artifact-store-secret minio-egress-secret; do
+            test -e "$SECRET/$item" || openssl rand -hex 40 > "$SECRET/$item"
+          done
+          for item in minio-admin-user minio-service-access-key minio-egress-access-key minio-admin-password calling-artifact-store-secret minio-egress-secret; do
+            test -s "$SECRET/$item"
+            chown 10001:10001 "$SECRET/$item"
+            chmod 0400 "$SECRET/$item"
+          done
+          chown 10001:10001 "$DIR"
+          chmod 0700 "$DIR"
+          if docker container inspect "$STORE" >/dev/null 2>&1; then
+            test "$(docker inspect -f '{{.State.Running}}' "$STORE")" = true
+            echo 'OBJECT_STORE: EXISTING_CONTAINER_PRESERVED'
+          else
+            docker run -d --name "$STORE" --restart unless-stopped \
+              --network cfmeet-core-private --user 10001:10001 \
+              --memory 1g --cpus 1.0 \
+              -e MINIO_ROOT_USER_FILE=/run/secrets/minio-root-user \
+              -e MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio-root-password \
+              --mount "type=bind,src=$SECRET/minio-admin-user,dst=/run/secrets/minio-root-user,readonly" \
+              --mount "type=bind,src=$SECRET/minio-admin-password,dst=/run/secrets/minio-root-password,readonly" \
+              --mount "type=bind,src=$DIR,dst=/data" \
+              pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+              server /data --address :9000 --console-address :9001 >/dev/null
+          fi
+          ready=0
+          for _ in $(seq 1 45); do
+            if docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+              -fsS --max-time 4 http://cfmeet-calling-artifacts:9000/minio/health/live >/dev/null 2>&1; then ready=1;break;fi
+            test "$(docker inspect -f '{{.State.Running}}' "$STORE")" = true || { echo 'OBJECT_STORE_EXITED';exit 1; }
+            sleep 2
+          done
+          test "$ready" = 1
+          bindings="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$STORE")"
+          test "$bindings" = null || test "$bindings" = '{}'
+          USER="$(cat "$SECRET/minio-admin-user")"
+          PASS="$(cat "$SECRET/minio-admin-password")"
+          MC_HOST="http://$USER:$PASS@cfmeet-calling-artifacts:9000"
+          mc() {
+            docker run --rm --user 0:0 --network cfmeet-core-private \
+              -e "MC_HOST_local=$MC_HOST" \
+              --mount "type=bind,src=$BASE/storage,dst=/config,readonly" \
+              minio/mc:latest "$@"
+          }
+          mc mb --ignore-existing "local/$BUCKET" >/dev/null
+          mc anonymous set none "local/$BUCKET" >/dev/null
+          cat > "$BASE/storage/calling-policy.json" <<'POLICY'
+          {"Version":"2012-10-17","Statement":[
+            {"Effect":"Allow","Action":["s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts"]},
+            {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts/*"]}
+          ]}
+          POLICY
+          cat > "$BASE/storage/egress-policy.json" <<'POLICY'
+          {"Version":"2012-10-17","Statement":[
+            {"Effect":"Allow","Action":["s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts"],"Condition":{"StringLike":{"s3:prefix":["capture-staging/*"]}}},
+            {"Effect":"Allow","Action":["s3:PutObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::cfmeet-calling-artifacts/capture-staging/*"]}
+          ]}
+          POLICY
+          chmod 0400 "$BASE/storage/"*.json
+          mc admin policy create local cfmeet-calling-objectstore /config/calling-policy.json >/dev/null
+          mc admin policy create local cfmeet-calling-egress-upload /config/egress-policy.json >/dev/null
+          mc admin user add local "$(cat "$SECRET/minio-service-access-key")" "$(cat "$SECRET/calling-artifact-store-secret")" >/dev/null
+          mc admin policy attach local cfmeet-calling-objectstore --user "$(cat "$SECRET/minio-service-access-key")" >/dev/null
+          mc admin user add local "$(cat "$SECRET/minio-egress-access-key")" "$(cat "$SECRET/minio-egress-secret")" >/dev/null
+          mc admin policy attach local cfmeet-calling-egress-upload --user "$(cat "$SECRET/minio-egress-access-key")" >/dev/null
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          echo 'CAPTURE_PRIVATE_STORAGE: RUNNING'
+          echo 'S3_BUCKET: PRIVATE'
+          echo 'CALLING_AND_EGRESS_ACCOUNTS: PROVISIONED'
+          echo 'PUBLIC_STORAGE_PORTS: NONE'
+          echo 'USER_CAPTURE: NOT_ENABLED'
+          echo 'PENDING: signed HTTPS downloads, encryption-at-rest, offsite backup'
+          REMOTE
