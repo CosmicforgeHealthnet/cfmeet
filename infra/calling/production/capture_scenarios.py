@@ -16,10 +16,9 @@ async def download_and_decode(api,access,name):
         with urllib.request.urlopen(access['url'],timeout=20) as response:return response.read()
     audio=await asyncio.to_thread(download)
     assert audio.startswith(b'OggS') and len(audio)>5000
-    path=Path('/result')/(name+'.ogg');path.write_bytes(audio)
-    decode=await asyncio.to_thread(subprocess.run,['ffmpeg','-v','error','-y','-i',str(path),'-ac','1','-ar','48000','-f','s16le',str(path.with_suffix('.pcm'))],capture_output=True)
+    decode=await asyncio.to_thread(subprocess.run,['ffmpeg','-v','error','-i','pipe:0','-ac','1','-ar','48000','-f','s16le','pipe:1'],input=audio,capture_output=True)
     assert decode.returncode==0
-    pcm=array.array('h',path.with_suffix('.pcm').read_bytes())
+    pcm=array.array('h',decode.stdout)
     assert len(pcm)>=3*48000 and sum(int(x)**2 for x in pcm)/len(pcm)>100**2
 
 

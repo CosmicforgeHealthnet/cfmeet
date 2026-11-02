@@ -82,8 +82,8 @@ def compatibility():
     assert isinstance(directory['people'],list)
     fetch('/api/v2/messaging/directory/resolve',{'userIds':[users[1]['userId']]},expected=404)
     fetch('/api/v2/messaging/relay/v1/conversations')
-    fetch('/api/v1/meetings/')
-    for path in ('/api/v2/messaging/me','/api/v1/meetings/'):
+    fetch('/api/v1/meetings')
+    for path in ('/api/v2/messaging/me','/api/v1/meetings'):
         fetch(path,authorized=False,expected=401)
     return {'native_identity':'PASS','messaging_authenticated_api':'PASS','contacts_directory_isolation':'PASS',
         'meetings_authenticated_api':'PASS','anonymous_backend_access_denied':'PASS'}
