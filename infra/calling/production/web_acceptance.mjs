@@ -18,6 +18,14 @@ try {
   for(let i=0;i<2;i++) {
     const context=await browser.newContext({permissions:['microphone','camera']});contexts.push(context);
     const page=await context.newPage();pages.push(page);page.setDefaultTimeout(25000);
+    page.on('response',async response=>{
+      const path=new URL(response.url()).pathname;
+      if(path.startsWith('/api/calling')&&response.status()>=400) {
+        let code='NON_JSON';try{code=(await response.json()).error?.code||'UNKNOWN';}catch{}
+        (report.failed_requests??=[]).push({path,status:response.status(),code});
+      }
+    });
+    page.on('websocket',socket=>socket.on('socketerror',()=>{report.signaling_socket_error=true;}));
     page.on('response',async response=>{if(response.url().includes('/auth/login')&&response.ok()) {
       const value=await response.json();tokens[i]=value.access_token;
     }});
@@ -31,6 +39,7 @@ try {
     const identity=await request(i,'/api/calling/identity');
     report.checks['account_'+i+'_web_identity']=identity.status===200?'PASS':'FAIL';
     if(identity.status!==200) {report.failure_code=identity.body.error?.code;throw new Error('Real account Calling identity failed');}
+    report.phase='account_'+i+'_endpoint_and_signaling';
     await page.getByRole('button',{name:'Enable this browser',exact:true}).click();
     await page.getByText('Ready to receive calls',{exact:true}).waitFor();
   }
@@ -71,6 +80,8 @@ try {
 } catch(error) {
   report.error_type=error.name;
   report.failure_message=String(error.message).split('\n')[0].slice(0,200);
+  report.alerts=[];
+  for(const page of pages) {try{report.alerts.push(...await page.getByRole('alert').allTextContents());}catch{}}
   process.exitCode=1;
 } finally {
   for(const call of calls) {
