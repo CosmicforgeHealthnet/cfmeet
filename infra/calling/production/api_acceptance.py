@@ -73,7 +73,7 @@ def compatibility():
     directory=fetch('/api/v2/messaging/directory')
     assert isinstance(directory['people'],list)
     fetch('/api/v2/messaging/directory/resolve',{'userIds':[users[1]['userId']]},expected=404)
-    fetch('/api/v2/messaging/conversations')
+    fetch('/api/v2/messaging/relay/conversations')
     fetch('/api/v1/meetings/')
     for path in ('/api/v2/messaging/me','/api/v1/meetings/'):
         fetch(path,authorized=False,expected=401)
@@ -82,6 +82,18 @@ def compatibility():
 
 
 def run(run_id,feature='enterprise'):
+    original=p.inspect('cfmeet-calling')['Id']
+    try:
+        _run(run_id,feature)
+    except BaseException:
+        if p.inspect('cfmeet-calling')['Id']!=original:
+            journal=json.loads((p.ROOT/'calling-activation-rollback.json').read_text())
+            if journal['original']['Id']==original:
+                p.rollback_calling()
+        raise
+
+
+def _run(run_id,feature='enterprise'):
     p.identity(); value=context()
     # Enabling an independent carrier-free feature never depends on postponed backups.
     active=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-U','postgres','-d','cfmeet_calling',
@@ -121,5 +133,4 @@ def run(run_id,feature='enterprise'):
     if result.returncode:
         if p.inspect('cfmeet-calling')['Id']!=old_id:p.rollback_calling()
         raise RuntimeError('Production '+feature+' acceptance failed; changed feature activation rolled back')
-    print(json.dumps({'backend_compatibility':compatibility()}))
     p.regression();print(feature.upper()+': enabled after production API acceptance')

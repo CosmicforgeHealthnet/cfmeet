@@ -100,6 +100,7 @@ async def join(call,index,video=False):
     credential=await request('POST','/v1/calling/sessions/'+session['sessionId']+'/media-credentials',{},token=DEVICES[index]['token'])
     REPORT['join_index']=index
     room=await MediaClient.start();ROOMS.append(room)
+    room.url=credential['url']
     assert (await room.cmd('connect',url=credential['url'],token=credential['token'])).get('ok'), 'Real client media join failed'
     return room,session['sessionId']
 
@@ -159,6 +160,8 @@ async def main():
             call=await dial(kind);a,b=await connected(call,kind)
             REPORT['checks'][kind.lower()+'_real_media']='PASS'
             if kind=='VOICE':
+                assert not (await a.cmd('publish',kind='video')).get('ok'), 'Voice call admitted an unauthorized camera track'
+                REPORT['checks']['voice_camera_publish_denied']='PASS'
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
                 assert (await a.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke microphone publishing'
                 for _ in range(30):
@@ -168,6 +171,15 @@ async def main():
                 else:raise AssertionError('Held media did not settle with two connected sessions')
                 await command(call,'resume');assert (await call_view(call))['state']=='CONNECTED'
                 REPORT['checks']['hold_resume']='PASS'
+                assert (await a.cmd('wait_permission',publish=True,timeout=15)).get('ok')
+                refreshed=await b.cmd('wait_refreshed',publish=True,timeout=30)
+                assert refreshed.get('ok'), 'No current server-refreshed reconnect token'
+                gateway=b.url
+                await b.disconnect();await asyncio.sleep(2)
+                b=await MediaClient.start();ROOMS.append(b)
+                assert (await b.cmd('connect',url=gateway,token=refreshed['token'])).get('ok'), 'Current session reconnect refused'
+                await publish(b);await received_media(a);await received_media(b)
+                REPORT['checks']['real_media_reconnection']='PASS'
             await finish(call)
             await a.disconnect();await b.disconnect()
             REPORT['checks'][kind.lower()+'_end']='PASS'
@@ -178,6 +190,16 @@ async def main():
         assert (await call_view(call))['state']=='DECLINED';REPORT['checks']['incoming_decline']='PASS'
         call=await dial();await command(call,'cancel');assert (await call_view(call))['state']=='CANCELLED'
         REPORT['checks']['cancel']='PASS'
+        REPORT['phase']='missed_call_history';call=await dial()
+        for _ in range(100):
+            view=await call_view(call)
+            if view['state'] in TERMINAL:break
+            await asyncio.sleep(1)
+        assert view['state']=='NO_ANSWER', 'Unanswered call did not terminate as NO_ANSWER'
+        history=await request('GET','/v1/calls?principalId='+PEOPLE[1]+'&missed=true&limit=100')
+        entry=next(x for x in history['data'] if x['callId']==call)
+        assert entry['participation']['missed'] and entry['participation']['direction']=='INCOMING'
+        REPORT['checks']['missed_calls_and_principal_history']='PASS'
         REPORT['phase']='group_call'
         call=await dial(targets=PEOPLE[1:]);await answer(call,1);await answer(call,2)
         group_rooms=[]
@@ -207,6 +229,7 @@ async def main():
             {'id':'route','kind':'ROUTE_EXTENSION','extensionId':extension['extensionId']},
             {'id':'bye','kind':'HANGUP','prompt':{'builtin':'GOODBYE'}}]}
         await request('POST','/v1/enterprise/ivr-flows/'+flow['ivrFlowId']+'/versions',{'graph':graph})
+        flow=await request('GET','/v1/enterprise/ivr-flows/'+flow['ivrFlowId'])
         await request('PUT','/v1/enterprise/ivr-flows/'+flow['ivrFlowId']+'/activation',{'expectedVersion':flow['version'],'versionNumber':1})
         await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+4),displayLabel='Acceptance IVR route',destination={'type':'IVR','id':flow['ivrFlowId']}))
         REPORT['phase']='ivr_routing';call=await dial(extension=str(number+4));await asyncio.sleep(3)

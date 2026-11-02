@@ -1,9 +1,11 @@
 """Real capture through Calling decisions, production Egress and encrypted storage."""
 import asyncio
 import array
+from datetime import datetime
 from pathlib import Path
 import subprocess
 import urllib.request
+import urllib.error
 import uuid
 
 
@@ -20,22 +22,44 @@ async def download_and_decode(api,access,name):
     assert len(pcm)>=3*48000 and sum(int(x)**2 for x in pcm)/len(pcm)>100**2
 
 
+async def deleted_object(access):
+    def status():
+        try:
+            with urllib.request.urlopen(access['url'],timeout=15) as response:return response.status
+        except urllib.error.HTTPError as error:return error.code
+    for _ in range(60):
+        if await asyncio.to_thread(status) in (403,404):return
+        await asyncio.sleep(1)
+    raise AssertionError('Deleted media remained readable through its original signed URL')
+
+
 async def recording(a):
     a.REPORT['phase']='recording_policy'
     suffix=''.join(chr(97+int(x,16)) for x in uuid.uuid4().hex[:10])
     await a.request('POST','/v1/enterprise/recording-policies',dict(name='Acceptance recording '+suffix,mode='MANUAL_ALLOWED',
         noticeRequired=True,consentParticipants='ALL_PARTICIPANTS',jurisdictionRef='controlled-production-acceptance',
         retentionDays=1,maxRecordingSeconds=60,isDefault=True))
-    call=await a.dial();rooms=await a.connected(call)
+    number=str(100000+int(uuid.uuid4().hex[:8],16)%800000)
+    await a.request('POST','/v1/enterprise/extensions',{'extensionNumber':number,'displayLabel':'Acceptance recording route',
+        'destination':{'type':'PRINCIPAL','id':a.PEOPLE[1]}})
+    call=await a.dial(extension=number);rooms=await a.connected(call)
     a.REPORT['phase']='recording_consent'
     await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[0]},expected=(403,))
     a.REPORT['checks']['recording_without_consent_denied']='PASS'
+    decisions=await a.request('GET','/v1/calls/'+call+'/recording-authorizations')
+    assert decisions['authorizations'][-1]['reason']=='CONSENT_MISSING'
     for i in (0,1):
         await a.request('POST','/v1/calls/'+call+'/recording-consent',{'endpointId':a.DEVICES[i]['endpointId'],'decision':'GRANTED'})
     await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[2]},expected=(403,404))
     a.REPORT['checks']['recording_nonparticipant_denied']='PASS'
     result=await a.request('POST','/v1/calls/'+call+'/recordings',{'principalId':a.PEOPLE[0]})
     recording=result['recording']['recordingId']
+    decisions=await a.request('GET','/v1/calls/'+call+'/recording-authorizations')
+    allowed=decisions['authorizations'][-1]
+    assert allowed['decision']=='ALLOWED' and allowed['notice']['required']
+    assert len(allowed['notice']['deliveries'])==2
+    assert all(p['decision']=='GRANTED' for p in allowed['consent']['participants'])
+    a.REPORT['checks']['server_notice_and_participant_consent_evidence']='PASS'
     a.REPORT['phase']='recording_real_capture';await asyncio.sleep(10)
     await a.request('POST','/v1/calls/'+call+'/recordings/'+recording+'/stop',{'principalId':a.PEOPLE[0]})
     path='/v1/enterprise/recordings/'+recording
@@ -45,16 +69,19 @@ async def recording(a):
         assert view['state'] not in ('FAILED','DELETED'), 'Recording finalization failed'
         await asyncio.sleep(1)
     else:raise AssertionError('Recording did not become READY')
+    assert datetime.fromisoformat(view['retentionUntil'].replace('Z','+00:00'))>datetime.fromisoformat(view['readyAt'].replace('Z','+00:00'))
+    a.REPORT['checks']['recording_retention_deadline']='PASS'
     access=await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]})
     await download_and_decode(a,access,'recording');a.REPORT['checks']['recording_encrypted_real_media_playback']='PASS'
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[2]},expected=(404,))
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},token=a.CTX['other']['token'],expected=(404,))
     a.REPORT['checks']['recording_cross_user_and_tenant_denied']='PASS'
-    audit=await a.request('GET',path+'/access-audit');assert audit['data']
+    audit=await a.request('GET',path+'/access-audit');assert audit['records']
     a.REPORT['checks']['recording_access_audited']='PASS'
     await a.request('DELETE',path+'?expectedVersion='+str(view['version'])+'&principalId='+a.PEOPLE[0])
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,409))
     a.REPORT['checks']['recording_delete_revokes_access']='PASS'
+    await deleted_object(access);a.REPORT['checks']['recording_physical_object_deleted']='PASS'
     await a.finish(call)
     for room in rooms:await room.disconnect()
 
@@ -74,7 +101,7 @@ async def voicemail(a):
     message=None
     for _ in range(100):
         values=await a.request('GET','/v1/enterprise/voicemail/messages?mailboxId='+mailbox['mailboxId']+'&principalId='+a.PEOPLE[1])
-        message=next((m for m in values['data'] if m['callId']==call),None)
+        message=next((m for m in values['messages'] if m['callId']==call),None)
         if message:break
         await asyncio.sleep(1)
     assert message, 'Unanswered call never entered voicemail'
@@ -88,6 +115,8 @@ async def voicemail(a):
         assert view['state'] not in ('FAILED','DELETED'), 'Voicemail finalization failed'
         await asyncio.sleep(1)
     else:raise AssertionError('Voicemail did not become READY')
+    assert datetime.fromisoformat(view['retentionUntil'].replace('Z','+00:00'))>datetime.fromisoformat(view['readyAt'].replace('Z','+00:00'))
+    a.REPORT['checks']['voicemail_retention_deadline']='PASS'
     access=await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]})
     await download_and_decode(a,access,'voicemail');a.REPORT['checks']['voicemail_real_audio_lifecycle']='PASS'
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,))
@@ -97,4 +126,5 @@ async def voicemail(a):
     await a.request('DELETE',path+'?expectedVersion='+str(marked['version'])+'&principalId='+a.PEOPLE[1])
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]},expected=(404,409))
     a.REPORT['checks']['voicemail_read_delete_access_revocation']='PASS'
+    await deleted_object(access);a.REPORT['checks']['voicemail_physical_object_deleted']='PASS'
     await room.disconnect()
