@@ -785,6 +785,9 @@ if __name__ == '__main__':
         elif operation == 'test-app':
             import app_acceptance
             app_acceptance.run(run_id)
+        elif operation == 'test-enterprise':
+            import api_acceptance
+            api_acceptance.run(run_id)
         elif operation == 'encrypt-storage':
             import storage_encryption
             storage_encryption.migrate(run_id)
