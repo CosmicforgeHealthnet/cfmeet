@@ -439,13 +439,15 @@ def validate_acceptance(evidence, now, images):
     for name in REQUIRED:
         receipt = receipts.get(name, {})
         path = Path(receipt.get('path', ''))
-        assert path.is_absolute() and path.is_relative_to(ROOT/'production-evidence'), 'Acceptance receipt outside protected evidence directory'
+        assert path.is_absolute() and path.resolve().is_relative_to((ROOT/'production-evidence').resolve()), 'Acceptance receipt outside protected evidence directory'
         assert path.is_file() and not path.is_symlink(), 'Missing production acceptance receipt'
         assert hashlib.sha256(path.read_bytes()).hexdigest() == receipt.get('sha256'), 'Production acceptance receipt changed'
         result = json.loads(path.read_text())
         assert result.get('scenario') == name and result.get('result') == 'PASS'
         assert result.get('git_sha') == evidence['git_sha'] and result.get('images') == images
         assert result.get('started_at') and result.get('finished_at') and result.get('assertions'), 'Receipt lacks test execution details'
+        assert result['started_at'] <= result['finished_at'] <= evidence['timestamp']
+        assert 0 <= now-result['finished_at'] <= 86400, 'Production acceptance receipt expired'
 
 
 def activate():

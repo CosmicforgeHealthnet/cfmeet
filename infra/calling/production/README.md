@@ -8,6 +8,7 @@ Production operations are serialized; read-only inventory can run independently.
 | --- | --- |
 | `inspect` | Verify CF Meet host identity, inspect actual Docker runtime, count LiveKit participants, report configuration key names and safe flags. |
 | `provision` | Back up LiveKit and runtime inspection privately; integrate existing authenticated Redis only with no active participants; preserve keys/media settings; deploy pinned private Egress; generate capture environment. |
+| `harden-egress` | Replace Egress only when it has no active jobs, bound its real working directory, use the supported SDK audio-composite source, retain rollback and run verification. |
 | `storage-ingress` | Add a read-only HTTPS bucket route to existing CF Meet nginx, require storage authorization, disable query-signature access logging, configure temporary-object expiry and capacity journal checks. |
 | `configure-capture` | Install capture settings and mounted storage secret in a clone of the existing Calling container. Preserve feature switches, networks, mounts, startup and host configuration. Retain original for rollback. |
 | `verify` | Run two synthetic WebRTC clients and real track/composite Egress against production, retrieve/decode audio, check storage permission boundaries, SSE, HTTPS, cleanup and service readiness. This is infrastructure testing, not application acceptance. |
@@ -20,7 +21,7 @@ is updated through its existing file inode because the container bind-mounts tha
 Configuration is restored automatically if restart checks fail.
 
 Egress uses `livekit/egress:v1.10.0`, resolved to a digest at deployment, 2 CPUs,
-2 GiB RAM, bounded `/tmp` and shared memory, rotating logs, a restart policy, and a
+2 GiB RAM, bounded `/tmp`, `/home/egress/tmp` and shared memory, rotating logs, a restart policy, and a
 private health check. This is a bounded audio-capture deployment, not a capacity
 certification for general video/composite workloads. Its storage identity may only
 write the `capture-staging/` prefix. The image's actual UID owns its private config.
@@ -60,3 +61,7 @@ blocked. Do not substitute CI fixtures or store production backups in Actions ar
 The workflow runs these checks before using production SSH. They cover fail-closed
 acceptance and preservation of runtime configuration; they do not certify application
 calls, consent, tenant isolation, or backup restoration.
+
+The probe image installs the pinned SDK and FFmpeg during its build, before entering
+the private production network. The runtime client has no need for package-index
+access. Client-facing signed HTTPS downloads are checked outside that namespace.
