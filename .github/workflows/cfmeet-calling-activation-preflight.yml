@@ -18,18 +18,18 @@ jobs:
         run: |
           set -euo pipefail
           echo '=== PUBLIC FRONTEND AND API SMOKE ==='
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/dashboard/calls)"
+          code="$(curl -LsS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/dashboard/calls)"
           case "$code" in 200|307|308) echo "CALLING_WEB_ROUTE: $code";; *) echo "CALLING_WEB_ROUTE: unexpected $code"; exit 1;; esac
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/api/calling/identity)"
+          code="$(curl -LsS -o /dev/null -w '%{http_code}' --max-time 12 https://cfmeet.com/api/calling/identity)"
           test "$code" = 401 || { echo "CALLING_BFF_ANONYMOUS: unexpected $code"; exit 1; }
           echo "CALLING_BFF_ANONYMOUS: 401"
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/api/v2/messaging/me)"
+          code="$(curl -LsS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/api/v2/messaging/me)"
           test "$code" = 401 || { echo "MEETING_IDENTITY_ANONYMOUS: unexpected $code"; exit 1; }
           echo "MEETING_IDENTITY_ANONYMOUS: 401"
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calls)"
+          code="$(curl -LsS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calls)"
           test "$code" = 401 || { echo "CALLING_API_ANONYMOUS: unexpected $code"; exit 1; }
           echo "CALLING_API_ANONYMOUS: 401"
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calling/signaling)"
+          code="$(curl -LsS -o /dev/null -w '%{http_code}' --max-time 12 https://api.cfmeet.com/v1/calling/signaling)"
           test "$code" = 401 || { echo "SIGNALING_ANONYMOUS: unexpected $code"; exit 1; }
           echo "SIGNALING_ANONYMOUS: 401"
       - name: Configure SSH
