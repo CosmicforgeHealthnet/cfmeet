@@ -72,6 +72,22 @@ def s3(method, key, data=b'', egress=False, encryption=False, public=False):
         return e.code,e.read(),dict(e.headers)
 
 
+def signed_download_url(key):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    date,stamp = now.strftime('%Y%m%d'),now.strftime('%Y%m%dT%H%M%SZ')
+    scope = date+'/us-east-1/s3/aws4_request'
+    path = '/'+BUCKET+'/'+urllib.parse.quote(key,safe='/')
+    params = {'X-Amz-Algorithm':'AWS4-HMAC-SHA256','X-Amz-Credential':read('minio-service-access-key')+'/'+scope,
+        'X-Amz-Date':stamp,'X-Amz-Expires':'30','X-Amz-SignedHeaders':'host'}
+    query = '&'.join(urllib.parse.quote(k,safe='')+'='+urllib.parse.quote(v,safe='') for k,v in sorted(params.items()))
+    canonical = 'GET\n'+path+'\n'+query+'\nhost:api.cfmeet.com\n\nhost\nUNSIGNED-PAYLOAD'
+    text = 'AWS4-HMAC-SHA256\n'+stamp+'\n'+scope+'\n'+hashlib.sha256(canonical.encode()).hexdigest()
+    signing = ('AWS4'+read('calling-artifact-store-secret')).encode()
+    for part in (date,'us-east-1','s3','aws4_request'):
+        signing = hmac.new(signing,part.encode(),hashlib.sha256).digest()
+    return 'https://api.cfmeet.com'+path+'?'+query+'&X-Amz-Signature='+hmac.new(signing,text.encode(),hashlib.sha256).hexdigest()
+
+
 async def main():
     rooms = []
     tasks, egress_ids, objects = [], [], []
@@ -101,8 +117,7 @@ async def main():
             import re
             error = re.search(b'<Code>([^<]+)</Code>',body)
             RESULT['encryption_error_code'] = error[1].decode() if error else str(code)
-        code,body,_ = await asyncio.to_thread(s3,'GET',plain,b'',False,False,True)
-        RESULT['checks']['signed_https_storage_path'] = 'PASS' if code==200 and body==b'controlled storage probe' else 'FAIL'
+        RESULT['phase'] = 'media_join'
         from livekit import rtc
         rooms = [rtc.Room(),rtc.Room()]
         for i, room in enumerate(rooms):
@@ -126,6 +141,7 @@ async def main():
         assert any(p.track for p in rooms[1].remote_participants.values() for p in p.track_publications.values()), 'Remote audio subscription missing'
         RESULT['checks']['two_client_audio_subscription'] = 'PASS'
         for kind in ('track','composite'):
+            RESULT['phase'] = kind+'_egress'
             key = 'capture-staging/'+ROOM+'-'+kind+'.ogg'
             objects.append(key)
             if kind == 'track':
@@ -154,6 +170,8 @@ async def main():
             RESULT['checks'][kind+'_egress_audio_object'] = 'PASS'
     except Exception as exc:
         RESULT['error_type'] = type(exc).__name__
+        if isinstance(exc,urllib.error.URLError):
+            RESULT['network_error_type'] = type(exc.reason).__name__
         raise
     finally:
         for eid in egress_ids:

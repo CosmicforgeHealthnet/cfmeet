@@ -99,6 +99,8 @@ def audit():
             entrypoint_present=bool(cfg['Entrypoint']), command_present=bool(cfg['Cmd']),
             healthcheck_present=bool(cfg.get('Healthcheck')),
             environment_names=sorted(env_of(c)),
+            effective_feature_flags={k:env_of(c).get(k,'false') for k in sorted(SAFE_ENV)
+                if k.endswith('_ENABLED')} if name=='cfmeet-calling' else {},
             flags={k: v for k, v in env_of(c).items() if k in SAFE_ENV})))
         if name == EGRESS:
             logs = run('docker','logs','--tail','30',EGRESS)
@@ -653,6 +655,27 @@ def verify(run_id):
     result['timestamp'] = int(time.time())
     result['backup_destination_configured'] = bool(list(ROOT.glob('*backup*.env')))
     result['activation'] = 'BLOCKED_PENDING_FULL_PRODUCTION_ACCEPTANCE'
+    # Exercise the external download as a client, outside the private media namespace.
+    # The signed URL stays in memory and is never logged.
+    import media_probe
+    media_probe.S = SECRETS
+    key = 'capture-staging/production-https-verify-'+run_id
+    ip = inspect('cfmeet-calling-artifacts')['NetworkSettings']['Networks'][NET]['IPAddress']
+    mc_env = dict(os.environ, MC_HOST_verify='http://'+secret('minio-service-access-key')+':'+
+        secret('calling-artifact-store-secret')+'@'+ip+':9000')
+    mc = str(ROOT/'storage'/'mc')
+    try:
+        put = subprocess.run([mc,'pipe','verify/cfmeet-calling-artifacts/'+key],env=mc_env,
+            input='controlled HTTPS download probe',capture_output=True,text=True)
+        assert put.returncode==0
+        with urllib.request.urlopen(media_probe.signed_download_url(key),timeout=15) as response:
+            assert response.read()==b'controlled HTTPS download probe'
+        result['checks']['signed_https_client_download'] = 'PASS'
+    except Exception:
+        result['checks']['signed_https_client_download'] = 'FAIL'
+    finally:
+        delete = subprocess.run([mc,'rm','verify/cfmeet-calling-artifacts/'+key],env=mc_env,capture_output=True)
+        result['checks']['https_probe_cleanup'] = 'PASS' if delete.returncode==0 else 'FAIL'
     for name,path in (('calling_public_authorization','/v1/calls'),
             ('signaling_public_authorization','/v1/calling/signaling'),
             ('messaging_public_authorization','/api/v2/messaging/me')):
