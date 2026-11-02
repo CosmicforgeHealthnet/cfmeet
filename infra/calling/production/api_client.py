@@ -160,16 +160,23 @@ async def main():
             call=await dial(kind);a,b=await connected(call,kind)
             REPORT['checks'][kind.lower()+'_real_media']='PASS'
             if kind=='VOICE':
-                assert not (await a.cmd('publish',kind='video')).get('ok'), 'Voice call admitted an unauthorized camera track'
-                REPORT['checks']['voice_camera_publish_denied']='PASS'
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
                 assert (await a.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke microphone publishing'
+                assert (await b.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke recipient publishing'
                 for _ in range(30):
                     view=await call_view(call)
                     if sum(s['state']=='CONNECTED' for s in view['sessions'])>=2:break
                     await asyncio.sleep(.5)
                 else:raise AssertionError('Held media did not settle with two connected sessions')
-                await command(call,'resume');assert (await call_view(call))['state']=='CONNECTED'
+                for attempt in range(20):
+                    view=await call_view(call)
+                    resumed=await request('POST','/v1/calls/'+call+'/resume',{'expectedVersion':view['version']},expected=(200,422))
+                    if resumed.get('error',{}).get('code')=='CALL_EVIDENCE_REQUIRED':
+                        await asyncio.sleep(.5);continue
+                    assert 'error' not in resumed,'Resume was refused'
+                    break
+                assert (await call_view(call))['state']=='CONNECTED'
+                REPORT['resume_evidence_retries']=attempt
                 REPORT['checks']['hold_resume']='PASS'
                 assert (await a.cmd('wait_permission',publish=True,timeout=15)).get('ok')
                 refreshed=await b.cmd('wait_refreshed',publish=True,timeout=30)
@@ -180,6 +187,8 @@ async def main():
                 assert (await b.cmd('connect',url=gateway,token=refreshed['token'])).get('ok'), 'Current session reconnect refused'
                 await publish(b);await received_media(a);await received_media(b)
                 REPORT['checks']['real_media_reconnection']='PASS'
+                assert not (await a.cmd('publish',kind='video')).get('ok'), 'Voice call admitted an unauthorized camera track'
+                REPORT['checks']['voice_camera_publish_denied']='PASS'
             await finish(call)
             await a.disconnect();await b.disconnect()
             REPORT['checks'][kind.lower()+'_end']='PASS'

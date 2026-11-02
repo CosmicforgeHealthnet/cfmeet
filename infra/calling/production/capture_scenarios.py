@@ -119,10 +119,17 @@ async def recording(a):
 
 async def voicemail(a):
     a.REPORT['phase']='voicemail_mailbox'
-    mailbox=await a.request('POST','/v1/enterprise/voicemail/mailboxes',{'owner':{'type':'PRINCIPAL','id':a.PEOPLE[1]},
-        'displayLabel':'Acceptance voicemail','maxMessageSeconds':30,'retentionDays':1})
-    await a.request('POST','/v1/enterprise/forwarding-rules',{'principalId':a.PEOPLE[1],'condition':'NO_ANSWER',
-        'destination':{'type':'VOICEMAIL','id':mailbox['mailboxId']}})
+    mailboxes=await a.request('GET','/v1/enterprise/voicemail/mailboxes?limit=100')
+    mailbox=next((m for m in mailboxes['mailboxes'] if m['owner']=={'type':'PRINCIPAL','id':a.PEOPLE[1]} and m['status']=='ACTIVE'),None)
+    if mailbox is None:
+        mailbox=await a.request('POST','/v1/enterprise/voicemail/mailboxes',{'owner':{'type':'PRINCIPAL','id':a.PEOPLE[1]},
+            'displayLabel':'Acceptance voicemail','maxMessageSeconds':30,'retentionDays':1})
+    rules=await a.request('GET','/v1/enterprise/forwarding-rules?limit=100')
+    rule=next((r for r in rules['forwardingRules'] if r['principalId']==a.PEOPLE[1] and r['condition']=='NO_ANSWER' and r['status']=='ACTIVE'),None)
+    if rule is None:
+        await a.request('POST','/v1/enterprise/forwarding-rules',{'principalId':a.PEOPLE[1],'condition':'NO_ANSWER',
+            'destination':{'type':'VOICEMAIL','id':mailbox['mailboxId']}})
+    else:assert rule['destination']=={'type':'VOICEMAIL','id':mailbox['mailboxId']}
     number=str(100000+int(uuid.uuid4().hex[:8],16)%800000)
     await a.request('POST','/v1/enterprise/extensions',{'extensionNumber':number,'displayLabel':'Acceptance voicemail route',
         'destination':{'type':'PRINCIPAL','id':a.PEOPLE[1]}})

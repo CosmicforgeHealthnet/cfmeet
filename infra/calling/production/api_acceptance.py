@@ -74,7 +74,7 @@ def compatibility():
     directory=fetch('/api/v2/messaging/directory')
     assert isinstance(directory['people'],list)
     fetch('/api/v2/messaging/directory/resolve',{'userIds':[users[1]['userId']]},expected=404)
-    fetch('/api/v2/messaging/relay/conversations')
+    fetch('/api/v2/messaging/relay/v1/conversations')
     fetch('/api/v1/meetings/')
     for path in ('/api/v2/messaging/me','/api/v1/meetings/'):
         fetch(path,authorized=False,expected=401)
@@ -93,7 +93,7 @@ def expire_fixture(value,request):
     ids={k:str(uuid.UUID(actor[k])) for k in ('tenantId','applicationId','environmentId')}
     artifact=str(uuid.UUID(request['artifactId']));call=str(uuid.UUID(request['callId']))
     assert sql("SELECT id FROM platform_tenants WHERE slug='cfmeet-calling-acceptance'")==ids['tenantId']
-    query=(f"UPDATE {table} SET retention_until=now()-interval '1 second' WHERE id='{artifact}' AND call_id='{call}' "
+    query=(f"UPDATE {table} SET retention_until=now()-interval '1 second',version=version+1,updated_at=GREATEST(updated_at,now()) WHERE id='{artifact}' AND call_id='{call}' "
         f"AND tenant_id='{ids['tenantId']}' AND application_id='{ids['applicationId']}' "
         f"AND environment_id='{ids['environmentId']}' AND state='READY' RETURNING id")
     changed=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-v','ON_ERROR_STOP=1',
