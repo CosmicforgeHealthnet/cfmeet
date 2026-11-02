@@ -102,6 +102,21 @@ async def publish(room,video=False):
         TASKS.append(asyncio.create_task(frames()))
 
 
+async def received_media(room,video=False):
+    for _ in range(30):
+        tracks=[t.track for participant in room.remote_participants.values() for t in participant.track_publications.values() if t.track]
+        selected=next((t for t in tracks if t.kind==(rtc.TrackKind.KIND_VIDEO if video else rtc.TrackKind.KIND_AUDIO)),None)
+        if selected:break
+        await asyncio.sleep(.5)
+    else:raise AssertionError('Remote media track not received')
+    stream=rtc.VideoStream(selected) if video else rtc.AudioStream(selected)
+    try:
+        event=await asyncio.wait_for(stream.__anext__(),12)
+        if video:assert event.frame.width>0 and event.frame.height>0
+        else:assert max(abs(int(v)) for v in event.frame.data)>100
+    finally:await stream.aclose()
+
+
 async def connected(call,kind='VOICE',target=None):
     REPORT['step']='answer'
     await answer(call,1)
@@ -115,6 +130,8 @@ async def connected(call,kind='VOICE',target=None):
     else:raise AssertionError('Real media call did not become CONNECTED')
     await asyncio.sleep(2)
     assert any(p.track for r in (a,b) for p0 in r.remote_participants.values() for p in p0.track_publications.values())
+    await received_media(a);await received_media(b)
+    if kind=='VIDEO':await received_media(a,True);await received_media(b,True)
     return a,b
 
 
@@ -141,11 +158,32 @@ async def main():
             REPORT['checks'][kind.lower()+'_real_media']='PASS'
             if kind=='VOICE':
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
+                for _ in range(30):
+                    view=await call_view(call)
+                    if not a.local_participant.permissions.can_publish and sum(s['state']=='CONNECTED' for s in view['sessions'])>=2:break
+                    await asyncio.sleep(.5)
+                else:raise AssertionError('Held media did not settle with two connected sessions')
                 await command(call,'resume');assert (await call_view(call))['state']=='CONNECTED'
                 REPORT['checks']['hold_resume']='PASS'
             await finish(call)
             await a.disconnect();await b.disconnect()
             REPORT['checks'][kind.lower()+'_end']='PASS'
+        REPORT['phase']='invitations_cancel_decline'
+        call=await dial();view=await call_view(call)
+        invitation=next(x for x in view['invitations'] if x['endpointId']==DEVICES[1]['endpointId'] and x['status']=='RINGING')
+        await request('POST','/v1/calling/invitations/'+invitation['invitationId']+'/decline',{'expectedVersion':view['version']},token=DEVICES[1]['token'])
+        assert (await call_view(call))['state']=='DECLINED';REPORT['checks']['incoming_decline']='PASS'
+        call=await dial();await command(call,'cancel');assert (await call_view(call))['state']=='CANCELLED'
+        REPORT['checks']['cancel']='PASS'
+        REPORT['phase']='group_call'
+        call=await dial(targets=PEOPLE[1:]);await answer(call,1);await answer(call,2)
+        group_rooms=[]
+        for index in range(3):
+            room,_=await join(call,index);await publish(room);group_rooms.append(room)
+        for room in group_rooms:await received_media(room)
+        assert len((await call_view(call))['participants'])==3
+        REPORT['checks']['group_real_media']='PASS';await finish(call)
+        for room in group_rooms:await room.disconnect()
         REPORT['phase']='enterprise_configuration'
         number=100000+int(uuid.uuid4().hex[:8],16)%800000
         suffix=''.join(chr(97+int(x,16)) for x in uuid.uuid4().hex[:12])
@@ -163,6 +201,7 @@ async def main():
         await request('GET','/v1/enterprise/extensions/'+extension['extensionId'],token=CTX['other']['token'],expected=(404,))
         REPORT['checks']['enterprise_tenant_isolation']='PASS'
     except Exception as error:
+        REPORT['failure_request']=REPORT.get('last_request')
         REPORT['error_type']=type(error).__name__
         REPORT['failure_message']=str(error)[:200] if isinstance(error,AssertionError) else ''
         raise
