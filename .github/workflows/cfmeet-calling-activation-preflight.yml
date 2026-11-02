@@ -55,7 +55,8 @@ jobs:
             test "$(docker inspect -f '{{.State.Running}}' "$service")" = true
             echo "RUNNING: $service"
           done
-          test "$(docker inspect -f '{{json .HostConfig.PortBindings}}' cfmeet-calling)" = 'null'
+          bindings="$(docker inspect -f '{{json .HostConfig.PortBindings}}' cfmeet-calling)"
+          test "$bindings" = 'null' || test "$bindings" = '{}'
           docker inspect cfmeet-calling --format '{{range .Config.Env}}{{println .}}{{end}}' |
             awk -F= '
               $1=="CALLING_MEDIA_PROVIDER" { media=$2 }
