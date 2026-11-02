@@ -41,11 +41,14 @@ const SWAGGER_UI_HTML: &str = r#"<!doctype html>
     html { box-sizing: border-box; overflow-y: scroll; }
     *, *::before, *::after { box-sizing: inherit; }
     body { margin: 0; background: #fafafa; }
+    .swagger-ui .topbar { display: none; }
+    .try-out { display: block !important; }
   </style>
 </head>
 <body>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
   <script>
     window.onload = () => {
       window.ui = SwaggerUIBundle({
@@ -54,11 +57,32 @@ const SWAGGER_UI_HTML: &str = r#"<!doctype html>
         displayRequestDuration: true,
         filter: true,
         persistAuthorization: true,
+        tryItOutEnabled: true,
+        supportedSubmitMethods: ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'],
         urls: [
           { url: '/api-docs/calling/openapi.json', name: 'Calling' },
           { url: '/api-docs/privacy-relay/openapi.json', name: 'Privacy Relay' }
         ],
-        'urls.primaryName': 'Calling'
+        'urls.primaryName': 'Calling',
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout",
+        requestInterceptor: (req) => {
+          const url = typeof req.url === 'string' ? req.url : '';
+          if (url.startsWith('http://localhost:') || url.startsWith('http://127.0.0.1:')) {
+            req.headers = req.headers || {};
+            req.headers.Origin = window.location.origin;
+          }
+          return req;
+        },
+        onComplete: () => {
+          console.log('Swagger UI loaded - Try it out is enabled');
+        }
       });
     };
   </script>
@@ -154,10 +178,11 @@ fn public_calling_document() -> Value {
     document["info"]["description"] = json!(
         "Public CF Meet Calling API for direct app calling, ringing and device signaling,          call control and history, enterprise calling, recordings/voicemail, customer          webhooks, usage/limits and abuse controls. Internal service, provider and          telephony execution endpoints are intentionally excluded."
     );
-    document["servers"] = json!([{
-        "url": "/",
-        "description": "Current CF Meet public API host"
-    }]);
+    document["servers"] = json!([
+        {"url": "http://localhost:8090", "description": "Local Calling backend (development)"},
+        {"url": "http://127.0.0.1:8090", "description": "Local Calling backend (IPv4 development)"},
+        {"url": "/", "description": "Current CF Meet public API host"}
+    ]);
     document["tags"] = json!([
         {"name": "Calling", "description": "Create, list and inspect direct calls."},
         {"name": "Call Control", "description": "Accept, decline, cancel, end, hold, resume and transfer calls."},
@@ -190,10 +215,11 @@ fn public_privacy_relay_document() -> Value {
     document["info"]["description"] = json!(
         "Public Privacy Relay API for Communication Contexts, relay sessions, Contact          Vault access, verification and privacy-safe evidence. Raw private contact values          are accepted only by the explicitly authorized Contact Vault write flow and are          never returned by the API."
     );
-    document["servers"] = json!([{
-        "url": "/",
-        "description": "Current CF Meet public API host"
-    }]);
+    document["servers"] = json!([
+        {"url": "http://localhost:8090", "description": "Local Calling backend (development)"},
+        {"url": "http://127.0.0.1:8090", "description": "Local Calling backend (IPv4 development)"},
+        {"url": "/", "description": "Current CF Meet public API host"}
+    ]);
     document["tags"] = json!([
         {"name": "Privacy Relay", "description": "Communication Context and relay-session lifecycle."},
         {"name": "Contact Vault", "description": "Protected-contact grants, creation, metadata and verification."},

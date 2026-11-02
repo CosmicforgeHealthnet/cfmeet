@@ -4,52 +4,88 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Video, Calendar, Copy, Check, Plus } from "lucide-react";
+import { Video, Copy, Check, Plus, Loader2 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { useSpaces } from "@/hooks/v2/useSpaces";
+import { useCreateInstantMeeting, useSpaces } from "@/hooks/v2/useSpaces";
 import type { MeetingSpaceResponse } from "@/types/v2";
 import { formatDateForDisplay } from "@/utils/timezone";
 import { getErrorMessage } from "@/utils/error";
 import JoinMeetingInput from "@/components/layout/JoinMeetingInput";
 
 export default function DashboardContent() {
+  const router = useRouter();
+  const createInstantMeeting = useCreateInstantMeeting();
+  const [instantMeetingError, setInstantMeetingError] = useState("");
   const { data: spacesData, isLoading, error: spacesError } = useSpaces();
   const spaces = (spacesData?.items ?? []).filter((space) => space.status === "ACTIVE");
 
+  const handleInstantMeeting = async () => {
+    if (createInstantMeeting.isPending) return;
+
+    setInstantMeetingError("");
+    try {
+      const { meetingSpace } = await createInstantMeeting.mutateAsync({});
+      router.push(`/${encodeURIComponent(meetingSpace.meetingCode)}`);
+    } catch (error) {
+      setInstantMeetingError(
+        getErrorMessage(error, "Could not start an instant meeting."),
+      );
+    }
+  };
+
   return (
-    <div className="px-4 py-6 sm:px-6 sm:py-8 md:p-10 font-inter overflow-hidden">
-      <div className="mt-8 grid gap-4 sm:mt-14 sm:grid-cols-2 md:mt-20">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 md:px-10 md:py-10 font-inter overflow-hidden">
+      <div className="mt-8 grid gap-4 sm:mt-14 sm:grid-cols-2 md:mt-20 md:gap-6">
         <Link
           href="/dashboard/meetings/new"
-          className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 text-center transition-colors hover:border-primary/50 hover:bg-muted/30"
+          className="group flex min-h-[220px] w-full min-w-0 flex-col items-center justify-center gap-4 rounded-2xl border border-border bg-card p-5 text-center transition-all duration-200 hover:border-primary/60 hover:bg-muted/30"
         >
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg sm:h-20 sm:w-20">
-            <Video className="h-7 w-7 text-white sm:h-8 sm:w-8" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 shadow-inner sm:h-20 sm:w-20">
+            <Video className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
           </div>
-          <span className="font-semibold text-sm sm:text-base">Create meeting space</span>
-          <span className="max-w-xs text-xs text-muted-foreground sm:text-sm">
-            Set up reusable meeting details, access policies, members, and recurrence.
-          </span>
+          <div className="space-y-2">
+            <span className="block text-center text-lg font-semibold tracking-tight text-foreground sm:text-xl">Create meeting space</span>
+            <span className="block max-w-xs text-center text-xs leading-relaxed text-muted-foreground sm:text-sm">
+              Set up reusable meeting details, access policies, members, and recurrence.
+            </span>
+          </div>
         </Link>
 
-        <Link
-          href="/dashboard/conferences"
-          className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-5 text-center transition-colors hover:border-primary/50 hover:bg-muted/30"
+        <button
+          type="button"
+          onClick={() => void handleInstantMeeting()}
+          disabled={createInstantMeeting.isPending}
+          aria-busy={createInstantMeeting.isPending}
+          className="group flex min-h-[220px] w-full min-w-0 flex-col items-center justify-center gap-4 rounded-2xl border border-border bg-card p-5 text-center transition-all duration-200 hover:border-primary/60 hover:bg-muted/30 disabled:cursor-wait disabled:opacity-70"
         >
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sidebar shadow sm:h-20 sm:w-20">
-            <Calendar className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-sidebar shadow-sm sm:h-20 sm:w-20">
+            {createInstantMeeting.isPending ? (
+              <Loader2 className="h-7 w-7 animate-spin text-primary sm:h-8 sm:w-8" />
+            ) : (
+              <Plus className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
+            )}
           </div>
-          <span className="font-semibold text-sm sm:text-base">Manage conferences</span>
-          <span className="max-w-xs text-xs text-muted-foreground sm:text-sm">
-            Schedule, prepare, start, and manage live or past conference sessions.
-          </span>
-        </Link>
+          <div className="space-y-2">
+            <span className="block text-center text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+              {createInstantMeeting.isPending ? "Starting meeting…" : "Instant Meeting"}
+            </span>
+            <span className="block max-w-xs text-center text-xs leading-relaxed text-muted-foreground sm:text-sm">
+              Start a live meeting now and invite others with its meeting link.
+            </span>
+          </div>
+        </button>
       </div>
 
+      {instantMeetingError && (
+        <p role="alert" className="mt-4 text-center text-sm text-destructive">
+          {instantMeetingError}
+        </p>
+      )}
+
       {/* Join input */}
-      <div className="flex justify-center mt-6 sm:mt-8 md:mt-10 px-2">
+      <div className="mt-6 flex justify-center px-2 sm:mt-8 md:mt-10">
         <JoinMeetingInput
-          className="mx-auto max-w-[280px] sm:max-w-[340px] md:max-w-[384px] gap-2 sm:gap-3"
+          className="mx-auto w-full max-w-[320px] gap-2 sm:max-w-[380px] sm:gap-3"
           inputClassName="h-10 sm:h-11 border-[var(--primary)] focus:ring-[var(--primary)4D]"
           buttonClassName="h-10 sm:h-11 px-5 sm:px-8"
         />

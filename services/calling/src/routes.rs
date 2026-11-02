@@ -24,12 +24,13 @@
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::{from_fn, from_fn_with_state},
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
+use tower_http::cors::CorsLayer;
 use sea_orm::ConnectionTrait;
 use serde_json::json;
 
@@ -65,6 +66,43 @@ pub fn internal_api() -> Router<AppState> {
         .merge(crate::webhooks::ownership_migration::internal_routes())
 }
 
+fn cors_layer() -> CorsLayer {
+    let localhost_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8090",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:8090",
+    ];
+
+    let origins = localhost_origins
+        .into_iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok())
+        .collect::<Vec<_>>();
+
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::PATCH,
+            Method::OPTIONS,
+            Method::HEAD,
+        ])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::CONTENT_TYPE,
+            header::ORIGIN,
+            header::ACCESS_CONTROL_REQUEST_METHOD,
+            header::ACCESS_CONTROL_REQUEST_HEADERS,
+        ])
+        .allow_credentials(true)
+}
+
 /// Builds the service router.
 pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppState>) -> Router {
     // `route_layer` on a router without routes is rejected by axum; with no protected
@@ -91,7 +129,8 @@ pub fn app(state: AppState, protected: Router<AppState>, internal: Router<AppSta
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
-        .layer(from_fn(request_id_middleware));
+        .layer(from_fn(request_id_middleware))
+        .layer(cors_layer());
 
     let internal = Router::new()
         .nest(

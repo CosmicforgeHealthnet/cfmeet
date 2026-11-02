@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { useSpaces } from "@/hooks/v2/useSpaces";
-import { conferenceKeys } from "@/hooks/v2/useConferences";
-import { conferencesService } from "@/services/v2/conferences.service";
+import { conferenceListQueryOptions } from "@/hooks/v2/useConferences";
 import { conferencePermission } from "@/lib/meeting-scheduling";
 import { Button } from "@/components/ui/button";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
@@ -21,10 +20,9 @@ export default function ConferencesContent() {
   const items = spaces.data?.items || [];
   const space = items.find(item => item.id === selected);
   // The backend lists conferences per member space; preserve each query's own cache and errors.
-  const queries = useQueries({ queries: items.map(item => ({
-    queryKey: conferenceKeys.list(item.id), queryFn: () => conferencesService.list(item.id),
-    enabled: !selected, refetchInterval: 5000,
-  })) });
+  const queries = useQueries({
+    queries: items.map(item => conferenceListQueryOptions(item.id, undefined, !selected)),
+  });
   const rows = queries.flatMap((query, index) => (query.data?.items || []).map(conference => ({ conference, space: items[index] })));
   rows.sort((a, b) => (b.conference.scheduledStartAt || b.conference.startedAt || "").localeCompare(a.conference.scheduledStartAt || a.conference.startedAt || ""));
   return <div className="space-y-6 px-4 py-6 sm:p-8 md:p-10"><header><h1 className="text-2xl font-bold">Conferences</h1><p className="mt-1 text-sm text-muted-foreground">Scheduled, live and past sessions. Each conference has its own participants, admission and lifecycle.</p></header>

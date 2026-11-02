@@ -4,12 +4,75 @@ export const runtime = "nodejs";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Context = { params: Promise<{ path: string[] }> };
 
+/** Check if calling dev mode is enabled */
+function isDevMode(): boolean {
+  return process.env.CALLING_DEV_MODE === "true";
+}
+
+/** Generate mock responses for dev mode when calling service is unavailable */
+function devModeResponse(route: string, method: string, identity: { principalId: string }): Response | null {
+  const json = (data: unknown) => Response.json(data, { headers: { "Cache-Control": "no-store" } });
+
+  // Endpoints - empty list in dev mode
+  if (route === "v1/calling/endpoints" && method === "GET") {
+    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+  }
+
+  // Calls - empty history in dev mode
+  if (route === "v1/calls" && method === "GET") {
+    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+  }
+
+  // Blocks - empty list in dev mode
+  if (route === "v1/blocks" && method === "GET") {
+    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+  }
+
+  // Forwarding rules - empty list in dev mode
+  if (route === "v1/enterprise/forwarding-rules" && method === "GET") {
+    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+  }
+
+  // Voicemail mailboxes - empty list in dev mode
+  if (route === "v1/enterprise/voicemail/mailboxes" && method === "GET") {
+    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+  }
+
+  // Calling limits - mock data in dev mode
+  if (route === "v1/calling/limits" && method === "GET") {
+    return json({
+      data: [
+        { limitId: "dev-limit-1", name: "Monthly Minutes", unit: "MINUTES", quota: 1000, consumed: 0, status: "OK", periodStart: new Date().toISOString(), periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() },
+      ],
+      pagination: { cursor: null, hasMore: false },
+    });
+  }
+
+  // Calling usage - empty data in dev mode
+  if (route === "v1/calling/usage" && method === "GET") {
+    return json({
+      data: [],
+      aggregation: { totalMinutes: 0, totalCalls: 0, totalCost: 0 },
+      pagination: { cursor: null, hasMore: false },
+    });
+  }
+
+  return null;
+}
+
 async function handle(request: Request, context: Context) {
   try {
     const identity = await callingIdentity(request);
     const { path } = await context.params;
     if (request.method === "GET" && path.join("/") === "identity") {
       return Response.json(identity, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    // Dev mode: return mock responses without calling the backend
+    if (isDevMode()) {
+      const route = path.join("/");
+      const mockResponse = devModeResponse(route, request.method, identity);
+      if (mockResponse) return mockResponse;
     }
     const method = request.method;
     const url = new URL(request.url);

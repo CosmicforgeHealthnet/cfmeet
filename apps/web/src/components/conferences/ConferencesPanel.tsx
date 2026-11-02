@@ -31,7 +31,7 @@ export default function ConferencesPanel({ space }: { space: MeetingSpaceRespons
     }
     return scheduledWindow(start, end);
   };
-  return <section className="space-y-4">
+  return <section id="conferences" className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{space.title || space.meetingCode} — conferences</h2><p className="text-sm text-muted-foreground">Each session has its own lifecycle. Dates below use {timezone}.</p></div>
       {canManage && <ActionDialog label="Schedule occurrence" description={`Create one conference occurrence. Leave both dates blank for an unscheduled occurrence, or enter a start and optional end in ${timezone}.`} submit={async () => { await create.mutateAsync(scheduleOccurrence()); setStart(""); setEnd(""); }}><Field label="Start (optional)" type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /><Field label="End (optional)" type="datetime-local" min={start || undefined} disabled={!start} value={end} onChange={e => setEnd(e.target.value)} /></ActionDialog>}
     </div>
@@ -52,7 +52,7 @@ export function ConferenceRow({ conference: c, space, canManage }: { conference:
     <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-medium">{c.scheduledStartAt ? new Date(c.scheduledStartAt).toLocaleString() : "Unscheduled conference"}</p><p className="text-xs text-muted-foreground break-all">{c.id} · {c.kind || "Conference"}{c.isException ? " · Exception" : ""}</p>{c.scheduledEndAt && <p className="text-sm text-muted-foreground">Until {new Date(c.scheduledEndAt).toLocaleString()}</p>}</div><span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">{c.status}{c.isLocked ? " · Locked" : ""}</span></div>
     {c.status === "ENDING" && <p className="text-sm text-muted-foreground">Admission has stopped. Waiting for the media provider to confirm termination.</p>}
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="outline" asChild><Link href={`/dashboard/conferences/${c.id}`}>Details &amp; participants</Link></Button>
+      <Button size="sm" variant="outline" asChild><Link href={`/dashboard/meetings/${space.id}/conferences/${c.id}`}>Details &amp; participants</Link></Button>
       {space.status === "ACTIVE" && joinable(c.status) && <Button size="sm" asChild><Link href={`/${space.meetingCode}?conference=${encodeURIComponent(c.id)}`}>Join occurrence</Link></Button>}
       {mutable && canManage && unstarted(c.status) && <>
         {(c.status === "CREATED" || c.status === "PREPARING") && <ActionDialog label="Prepare" description="Prepare the provider room. The conference moves to WAITING after confirmation." submit={() => prepare.mutateAsync(c.id)} />}

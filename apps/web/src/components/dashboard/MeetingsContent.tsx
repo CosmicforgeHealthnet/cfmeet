@@ -277,7 +277,6 @@ function SpaceCard({
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
           <Button size="sm" variant="outline" onClick={() => router.push(`/dashboard/meetings/${space.id}`)}>Manage</Button>
           <MeetingSpaceActions space={space} />
-          <Button size="sm" variant="outline" onClick={() => router.push(`/dashboard/conferences?space=${space.id}`)}>Conferences</Button>
         </div>
       </div>
     </div>

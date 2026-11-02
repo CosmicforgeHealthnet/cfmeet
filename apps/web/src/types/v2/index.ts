@@ -96,7 +96,8 @@ export type ArtifactType =
   | "MEETING_SUMMARY"
   | "ATTENDANCE_REPORT"
   | "POLL_REPORT"
-  | "CHAT_EXPORT";
+  | "CHAT_EXPORT"
+  | "INTELLIGENCE_OUTPUT";
 
 export type ArtifactStatus =
   | "REQUESTED"
@@ -1158,7 +1159,7 @@ export interface AttendanceReport {
 }
 
 export interface GenerateReportRequest {
-  artifactType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT";
+  artifactType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT" | "INTELLIGENCE_OUTPUT";
 }
 
 // ---------------------------------------------------------------------------

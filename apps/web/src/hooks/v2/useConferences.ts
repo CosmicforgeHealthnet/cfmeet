@@ -19,7 +19,7 @@ export const conferenceKeys = {
   all: ["v2", "conferences"] as const,
   lists: () => [...conferenceKeys.all, "list"] as const,
   list: (spaceId: string, query?: ListConferencesQuery) =>
-    [...conferenceKeys.lists(), spaceId, query] as const,
+    [...conferenceKeys.lists(), spaceId, query ?? {}] as const,
   details: () => [...conferenceKeys.all, "detail"] as const,
   detail: (id: string) => [...conferenceKeys.details(), id] as const,
   preJoin: (id: string) => [...conferenceKeys.detail(id), "pre-join"] as const,
@@ -32,14 +32,21 @@ export const conferenceKeys = {
 /**
  * List conferences for a meeting space
  */
-export function useConferences(spaceId: string, query?: ListConferencesQuery) {
-  return useQuery({
+export function conferenceListQueryOptions(
+  spaceId: string,
+  query?: ListConferencesQuery,
+  enabled = true,
+) {
+  return {
     queryKey: conferenceKeys.list(spaceId, query),
     queryFn: () => conferencesService.list(spaceId, query),
-    enabled: !!spaceId,
+    enabled: enabled && !!spaceId,
     staleTime: 1000 * 30,
-    refetchInterval: 5000,
-  });
+  };
+}
+
+export function useConferences(spaceId: string, query?: ListConferencesQuery) {
+  return useQuery(conferenceListQueryOptions(spaceId, query));
 }
 
 /**
@@ -83,7 +90,6 @@ export function useCreateConference(spaceId: string) {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
       queryClient.invalidateQueries({ queryKey: spaceKeys.detail(spaceId) });
     },
   });
@@ -170,7 +176,6 @@ export function useEndConference() {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
-      queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
     },
   });
 }
@@ -188,7 +193,6 @@ export function useCancelConference() {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(data.conference.id), data.conference);
-      queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
     },
   });
 }
@@ -207,7 +211,6 @@ export function useRescheduleConference(id: string) {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(conferenceKeys.detail(id), data.conference);
-      queryClient.invalidateQueries({ queryKey: conferenceKeys.lists() });
     },
   });
 }

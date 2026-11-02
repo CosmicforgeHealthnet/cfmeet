@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 const tabs = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Meetings", href: "/dashboard/meetings" },
-  { label: "Conferences", href: "/dashboard/conferences" },
 ];
 
 export default function DashboardTabs() {

@@ -10,14 +10,17 @@ import ParticipantsPanel from "./ParticipantsPanel";
 import ConferenceRecordingsPanel from "./ConferenceRecordingsPanel";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 
-export default function ConferenceWorkspace({ id }: { id: string }) {
+export default function ConferenceWorkspace({ id, spaceId }: { id: string; spaceId: string }) {
   const conference = useConference(id);
-  const space = useSpace(conference.data?.meetingSpaceId || "");
-  return <div className="space-y-6 px-4 py-6 sm:p-8 md:p-10"><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" asChild><Link href="/dashboard/conferences">Back to conferences</Link></Button>{conference.data && <Button variant="outline" size="sm" asChild><Link href={`/dashboard/meetings/${conference.data.meetingSpaceId}`}>Meeting settings &amp; members</Link></Button>}</div><h1 className="text-2xl font-bold">Conference details</h1>
+  const space = useSpace(spaceId);
+  const belongsToSpace = conference.data?.meetingSpaceId === spaceId;
+  return <div className="space-y-6 px-4 py-6 sm:p-8 md:p-10"><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" asChild><Link href={`/dashboard/meetings/${spaceId}#conferences`}>Back to meeting</Link></Button></div><h1 className="text-2xl font-bold">Conference details</h1>
     {conference.isLoading && <p role="status">Loading conference…</p>}
     {conference.isError && <RequestError error={conference.error} retry={() => void conference.refetch()} />}
+    {space.isLoading && <p role="status">Loading meeting space…</p>}
     {space.isError && <RequestError error={space.error} retry={() => void space.refetch()} />}
-    {conference.data && <>{space.data ? <ConferenceRow conference={conference.data} space={space.data} canManage={conferencePermission(space.data, "start")} /> : <p>{conference.data.status}</p>}
+    {conference.data && !belongsToSpace && <p role="alert" className="text-sm text-destructive">This conference does not belong to the selected meeting.</p>}
+    {conference.data && belongsToSpace && space.data && <><ConferenceRow conference={conference.data} space={space.data} canManage={conferencePermission(space.data, "start")} />
       {conference.data.view === "FULL" ? <>
         <ParticipantsPanel conferenceId={id} spaceRole={space.data?.viewerRole} policy={space.data?.rolePolicy} />
         <ConferenceRecordingsPanel

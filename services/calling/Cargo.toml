@@ -62,6 +62,7 @@ async-trait = "0.1"
 # the media server over a WebSocket client (rustls, webpki roots; wss outside loopback).
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tower-http = { version = "0.5", features = ["cors"] }
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }

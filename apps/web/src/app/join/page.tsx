@@ -41,10 +41,10 @@ export default function JoinPage() {
             <p className="text-sm text-muted-foreground">
               Want to create a meeting?{" "}
               <Link
-                href="/dashboard/conferences"
+                href="/dashboard/meetings/new"
                 className="text-primary hover:underline font-medium"
               >
-                Schedule one
+                Create one
               </Link>
             </p>
           </div>
