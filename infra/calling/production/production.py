@@ -127,6 +127,14 @@ def audit():
     c = inspect('lk-server')
     print(json.dumps({'livekit_command': c['Config']['Cmd'],
                       'livekit_entrypoint': c['Config']['Entrypoint']}))
+    processes = run('ps','-eo','etimes,comm,args').splitlines()
+    operations = []
+    for line in processes:
+        parts = line.split(None,2)
+        if len(parts)==3 and parts[1]=='docker':
+            operations.append({'elapsed_seconds':int(parts[0]),
+                'kind':'egress_image_pull' if parts[2].startswith('docker pull livekit/egress:') else 'docker_operation'})
+    print(json.dumps({'in_progress_docker_operations':operations}))
 
 
 def write_private(path, data):
@@ -343,6 +351,39 @@ def secure_storage_ingress(run_id):
         run('systemctl','reload','nginx')
         raise
     print('STORAGE_HTTPS: read-only private-bucket route installed; anonymous GET denied; no new ports')
+    configure_storage_operations()
+
+
+def configure_storage_operations():
+    # Retention of final recordings remains owned by Calling's database-backed worker.
+    # Bucket lifecycle only sweeps abandoned temporary uploads, never final artifacts.
+    store = inspect('cfmeet-calling-artifacts')
+    ip = store['NetworkSettings']['Networks'][NET]['IPAddress']
+    mc = ROOT/'storage'/'mc'
+    assert mc.is_file(), 'Existing verified MinIO CLI missing'
+    env = dict(os.environ, MC_HOST_capture='http://'+secret('minio-admin-user')+':'+
+        secret('minio-admin-password')+'@'+ip+':9000')
+    def command(*args):
+        response = subprocess.run([str(mc),*args],env=env,capture_output=True,text=True)
+        assert response.returncode==0, 'MinIO lifecycle operation failed'
+        return response.stdout
+    rules = command('ilm','rule','ls','--json','capture/cfmeet-calling-artifacts')
+    if 'cfmeet-capture-staging-cleanup' not in rules:
+        command('ilm','rule','add','--id','cfmeet-capture-staging-cleanup','--prefix','capture-staging/',
+            '--expire-days','1','capture/cfmeet-calling-artifacts')
+    monitor = ROOT/'storage'/'monitor-capacity.py'
+    write_private(monitor, '''import json, shutil, sys\nfrom pathlib import Path\nusage=shutil.disk_usage('/var/lib/cfmeet-artifacts')\nfree_gib=round(usage.free/1024**3,2)\npercent=round(100*usage.used/usage.total,1)\nstatus='ALERT' if free_gib<25 or percent>=85 else 'OK'\nprint(json.dumps(dict(service='cfmeet-calling-artifacts',status=status,free_gib=free_gib,used_percent=percent)))\nsys.exit(1 if status=='ALERT' else 0)\n''')
+    write_private(Path('/etc/systemd/system/cfmeet-capture-capacity.service'),
+        '[Unit]\nDescription=CF Meet private capture capacity check\n[Service]\nType=oneshot\n'
+        'ExecStart=/usr/bin/python3 '+str(monitor)+'\nNoNewPrivileges=true\nProtectSystem=strict\n'
+        'ProtectHome=true\nPrivateTmp=true\nMemoryMax=64M\nCPUQuota=10%\n')
+    write_private(Path('/etc/systemd/system/cfmeet-capture-capacity.timer'),
+        '[Unit]\nDescription=Check CF Meet capture capacity every five minutes\n[Timer]\n'
+        'OnBootSec=2min\nOnUnitActiveSec=5min\nPersistent=true\n[Install]\nWantedBy=timers.target\n')
+    run('systemctl','daemon-reload')
+    run('systemctl','enable','--now','cfmeet-capture-capacity.timer')
+    run('systemctl','start','cfmeet-capture-capacity.service')
+    print('STORAGE_OPERATIONS: staging expiry 1 day; five-minute capacity journal checks enabled')
 
 
 def validate_acceptance(evidence, now, images):
