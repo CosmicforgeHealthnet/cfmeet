@@ -1,5 +1,9 @@
 import copy
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 import production as p
 
@@ -32,6 +36,22 @@ class ActivationSafety(unittest.TestCase):
             evidence = self.evidence()
             evidence['acceptance'][name] = 'NOT_RUN'
             with self.subTest(name=name), self.assertRaises(AssertionError):
+                p.validate_acceptance(evidence,1001,evidence['images'])
+
+    def test_real_receipt_hashes_are_required_and_tampering_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(p,'ROOT',Path(directory)):
+            base = Path(directory)/'production-evidence'
+            base.mkdir()
+            evidence = self.evidence()
+            evidence['receipts'] = {}
+            for name in p.REQUIRED:
+                path = base/(name+'.json')
+                path.write_text(json.dumps(dict(scenario=name,result='PASS',git_sha=evidence['git_sha'],
+                    images=evidence['images'],started_at=900,finished_at=999,assertions=['controlled test assertion'])))
+                evidence['receipts'][name] = dict(path=str(path),sha256=p.hashlib.sha256(path.read_bytes()).hexdigest())
+            p.validate_acceptance(evidence,1001,evidence['images'])
+            path.write_text('{}')
+            with self.assertRaises(AssertionError):
                 p.validate_acceptance(evidence,1001,evidence['images'])
 
 
