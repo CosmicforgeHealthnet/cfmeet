@@ -149,3 +149,5 @@ jobs:
         run: |
           docker ps -a --format '{{.Names}} {{.Status}}' |
             grep -E '^calling-capture-' || true
+
+# Re-run after preserving >=3s real recording invariant with 9s microphone window.
