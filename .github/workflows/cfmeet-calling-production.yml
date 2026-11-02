@@ -1,0 +1,55 @@
+name: CF Meet Calling production infrastructure and acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [inspect, provision, verify, activate, rollback]
+        default: inspect
+        required: true
+
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-calling-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Execute versioned production operation
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "python3 '$remote/production.py' '$OPERATION' '$GITHUB_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: calling-production-${{ github.run_id }}
+          path: production-result.log
+          if-no-files-found: ignore
