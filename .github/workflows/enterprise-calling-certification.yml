@@ -216,3 +216,5 @@ jobs:
           cargo test --locked --test enterprise_load -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/load.log"
           grep -q "test result: ok. 4 passed" "$RUNNER_TEMP/load.log"
           grep -o "LOAD .*" "$RUNNER_TEMP/load.log"
+
+# Production readiness recertification requested 2026-11-02; same executable gates, no weakened assertions.
