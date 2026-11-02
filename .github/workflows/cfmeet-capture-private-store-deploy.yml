@@ -101,11 +101,10 @@ jobs:
           # Docker Hub and Quay no longer publish a public mc:latest.
           # Fetch the official CLI and require its published SHA-256 checksum.
           if test ! -x "$BASE/storage/mc"; then
-            curl -fLSs --retry 2 --max-time 80 -o "$BASE/storage/mc" \
-              https://dl.min.io/client/mc/release/linux-amd64/mc
-            curl -fLSs --retry 2 --max-time 30 -o "$BASE/storage/mc.sha256sum" \
-              https://dl.min.io/client/mc/release/linux-amd64/mc.sha256sum
-            (cd "$BASE/storage"; sha256sum --check mc.sha256sum)
+            curl -fLSs --retry 2 --max-time 100 -o "$BASE/storage/mc" \
+              https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-amd64.RELEASE.2025-08-13T08-35-41Z
+            printf '%s  %s\n' \
+              01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 "$BASE/storage/mc" | sha256sum --check --status
             chmod 0500 "$BASE/storage/mc"
           fi
           mc() {
