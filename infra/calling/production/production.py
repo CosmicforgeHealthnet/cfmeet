@@ -99,6 +99,11 @@ def audit():
             healthcheck_present=bool(cfg.get('Healthcheck')),
             environment_names=sorted(env_of(c)),
             flags={k: v for k, v in env_of(c).items() if k in SAFE_ENV})))
+        if name == EGRESS:
+            logs = run('docker','logs','--tail','30',EGRESS)
+            print(json.dumps({'egress_user':cfg['User'],'exit_code':c['State']['ExitCode'],
+                'error_classes':[needle for needle in ('permission denied','read-only file system',
+                    'connection refused','no such file','failed to','error') if needle in logs.lower()]}))
     meeting = env_of(inspect('cfmeet-production-backend'))
     rooms = lk_request('RoomService/ListRooms', {}, meeting['LIVEKIT_API_KEY'],
         meeting['LIVEKIT_API_SECRET'], {'roomList': True}).get('rooms', [])
@@ -232,18 +237,22 @@ def provision(sha, run_id):
             region='us-east-1', endpoint='http://cfmeet-calling-artifacts:9000',
             bucket='cfmeet-calling-artifacts', force_path_style=True)})
     egress_path = ROOT / 'egress' / 'production.yaml'
+    run('docker', 'pull', 'livekit/egress:v1.10.0')
+    pinned = json.loads(run('docker','image','inspect','livekit/egress:v1.10.0'))[0]['RepoDigests'][0]
+    uid = int(run('docker','run','--rm','--network','none','--entrypoint','id',pinned,'-u'))
+    gid = int(run('docker','run','--rm','--network','none','--entrypoint','id',pinned,'-g'))
     if subprocess.run(['docker','container','inspect',EGRESS], capture_output=True).returncode == 0:
         assert egress_path.exists() and yaml.safe_load(egress_path.read_text()) == egress_config, 'Existing Egress differs; preserved'
-        assert inspect(EGRESS)['State']['Running']
+        assert inspect(EGRESS)['Config']['Image'] == pinned, 'Existing Egress image differs; preserved'
+        os.chown(egress_path,uid,gid)
+        run('docker','restart',EGRESS)
     else:
         write_private(egress_path, json.dumps(egress_config))
-        # The image runs as egress (uid 1000). Configuration remains owner-only.
-        os.chown(egress_path, 1000, 1000)
-        run('docker', 'pull', 'livekit/egress:v1.10.0')
-        pinned = json.loads(run('docker','image','inspect','livekit/egress:v1.10.0'))[0]['RepoDigests'][0]
+        # Resolve the pinned image's actual egress uid; base images can already own uid 1000.
+        os.chown(egress_path,uid,gid)
         run('docker','run','-d','--name',EGRESS,'--restart','unless-stopped',
             '--network',NET,'--memory','2g','--cpus','2','--shm-size','256m',
-            '--tmpfs','/tmp:rw,nosuid,size=512m,uid=1000,gid=1000',
+            '--tmpfs',f'/tmp:rw,nosuid,size=512m,uid={uid},gid={gid}',
             '--log-opt','max-size=10m','--log-opt','max-file=3',
             '--health-cmd','curl -fsS --max-time 5 http://127.0.0.1:9091/ || exit 1',
             '--health-interval','30s','--health-timeout','8s','--health-retries','3',
