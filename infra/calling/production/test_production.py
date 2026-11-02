@@ -118,6 +118,8 @@ class IsolatedAcceptanceSafety(unittest.TestCase):
     def test_unexpected_probe_failure_restores_changed_runtime(self):
         with patch.object(p,'inspect',side_effect=[{'Id':'original'},{'Id':'replacement'}]), \
             patch.object(api_acceptance,'_run',side_effect=TimeoutError), \
+            patch.object(api_acceptance,'context',return_value={}), \
+            patch.object(api_acceptance,'cleanup_fixture_calls'), \
             patch.object(Path,'read_text',return_value=json.dumps({'original':{'Id':'original'}})), \
             patch.object(p,'rollback_calling') as rollback:
             with self.assertRaises(TimeoutError):api_acceptance.run('controlled-run','recording')

@@ -109,20 +109,51 @@ def expire_fixture(value,request):
     print('RETENTION_FIXTURE: isolated artifact deadline accelerated; production worker remains authoritative')
 
 
+def cleanup_fixture_calls(value):
+    """End abandoned controlled calls through the API, never through SQL state updates."""
+    actor=value['actors'];ids={k:str(uuid.UUID(actor[k])) for k in ('tenantId','applicationId','environmentId')}
+    assert sql("SELECT id FROM platform_tenants WHERE slug='cfmeet-calling-acceptance'")==ids['tenantId']
+    query=(f"SELECT id FROM calls WHERE tenant_id='{ids['tenantId']}' AND application_id='{ids['applicationId']}' "
+        f"AND environment_id='{ids['environmentId']}' AND current_state NOT IN ('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED')")
+    def fetch(path,body=None):
+        req=urllib.request.Request('https://api.cfmeet.com'+path,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={'Authorization':'Bearer '+actor['token'],'Content-Type':'application/json','Idempotency-Key':str(uuid.uuid4())})
+        try:
+            with urllib.request.urlopen(req,timeout=20) as response:return response.status,json.load(response)
+        except urllib.error.HTTPError as error:return error.code,{}
+    for _ in range(40):
+        calls=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-v','ON_ERROR_STOP=1',
+            '-U','postgres','-d','cfmeet_calling','-c',query).splitlines()
+        if not calls:return
+        for call in calls:
+            call=str(uuid.UUID(call));status,view=fetch('/v1/calls/'+call)
+            assert status==200,'Controlled call cleanup could not read its own call'
+            if view['state']=='ENDING':continue
+            verb='end' if view['state'] in ('CONNECTED','HELD','ANSWERED','TRANSFERRING') else 'cancel'
+            status,_=fetch('/v1/calls/'+call+'/'+verb,{'expectedVersion':view['version']})
+            assert status in (200,409),'Controlled call cleanup was refused'
+        time.sleep(.5)
+    raise AssertionError('Abandoned controlled calls did not terminate')
+
+
 def run(run_id,feature='enterprise'):
     original=p.inspect('cfmeet-calling')['Id']
     try:
         _run(run_id,feature)
     except BaseException:
-        if p.inspect('cfmeet-calling')['Id']!=original:
-            journal=json.loads((p.ROOT/'calling-activation-rollback.json').read_text())
-            if journal['original']['Id']==original:
-                p.rollback_calling()
+        try:cleanup_fixture_calls(context())
+        finally:
+            if p.inspect('cfmeet-calling')['Id']!=original:
+                journal=json.loads((p.ROOT/'calling-activation-rollback.json').read_text())
+                if journal['original']['Id']==original:
+                    p.rollback_calling()
         raise
 
 
 def _run(run_id,feature='enterprise'):
     p.identity(); value=context()
+    cleanup_fixture_calls(value)
     # Enabling an independent carrier-free feature never depends on postponed backups.
     active=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-U','postgres','-d','cfmeet_calling',
         '-c',"SELECT count(*) FROM calls WHERE current_state NOT IN ('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED')")

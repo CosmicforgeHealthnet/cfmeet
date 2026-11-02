@@ -164,6 +164,14 @@ async def main():
             call=await dial(kind);a,b=await connected(call,kind)
             REPORT['checks'][kind.lower()+'_real_media']='PASS'
             if kind=='VOICE':
+                refreshed=await b.cmd('wait_refreshed',publish=True,timeout=30)
+                assert refreshed.get('ok'), 'No current server-refreshed reconnect token'
+                current=await b.cmd('token');gateway=b.url
+                await b.disconnect();await asyncio.sleep(2)
+                b=await MediaClient.start();ROOMS.append(b)
+                assert (await b.cmd('connect',url=gateway,token=current['token'])).get('ok'), 'Current session reconnect refused'
+                await publish(b);await received_media(a);await received_media(b)
+                REPORT['checks']['real_media_reconnection']='PASS'
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
                 assert (await a.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke microphone publishing'
                 assert (await b.cmd('wait_permission',publish=False,timeout=10)).get('ok'), 'Hold did not revoke recipient publishing'
@@ -183,14 +191,6 @@ async def main():
                 REPORT['resume_evidence_retries']=attempt
                 REPORT['checks']['hold_resume']='PASS'
                 assert (await a.cmd('wait_permission',publish=True,timeout=15)).get('ok')
-                refreshed=await b.cmd('wait_refreshed',publish=True,timeout=30)
-                assert refreshed.get('ok'), 'No current server-refreshed reconnect token'
-                gateway=b.url
-                await b.disconnect();await asyncio.sleep(2)
-                b=await MediaClient.start();ROOMS.append(b)
-                assert (await b.cmd('connect',url=gateway,token=refreshed['token'])).get('ok'), 'Current session reconnect refused'
-                await publish(b);await received_media(a);await received_media(b)
-                REPORT['checks']['real_media_reconnection']='PASS'
                 assert not (await a.cmd('publish',kind='video')).get('ok'), 'Voice call admitted an unauthorized camera track'
                 REPORT['checks']['voice_camera_publish_denied']='PASS'
             await finish(call)
