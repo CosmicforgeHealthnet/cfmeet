@@ -58,3 +58,5 @@ jobs:
           done
           echo '=== ENTERPRISE API AUDIT DONE; NO CHANGES MADE ==='
           REMOTE
+
+# Recheck live enterprise routing after Nginx reload, 2026-11-02.
