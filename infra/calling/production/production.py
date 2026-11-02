@@ -769,6 +769,10 @@ if __name__ == '__main__':
         operation, sha, run_id = sys.argv[1:]
         if operation == 'inspect':
             audit()
+        elif operation == 'encrypt-storage':
+            import storage_encryption
+            storage_encryption.migrate(run_id)
+            verify(run_id)
         elif operation == 'complete-safe-infrastructure':
             provision(sha, run_id)
             secure_storage_ingress(run_id)
