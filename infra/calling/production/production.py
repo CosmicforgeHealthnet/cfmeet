@@ -779,6 +779,9 @@ if __name__ == '__main__':
         operation, sha, run_id = sys.argv[1:]
         if operation == 'inspect':
             audit()
+        elif operation == 'test-app':
+            import app_acceptance
+            app_acceptance.run(run_id)
         elif operation == 'encrypt-storage':
             import storage_encryption
             storage_encryption.migrate(run_id)
