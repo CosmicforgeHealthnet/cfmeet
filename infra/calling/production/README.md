@@ -50,9 +50,12 @@ timestamps, Git SHA and image IDs. Empty files and PASS labels without receipts 
 The infrastructure probe cannot generate application certification receipts or close
 Calling. No compatibility marker is created by these scripts.
 
-If production lacks an off-server backup destination/credentials or a managed encryption
-key and recovery arrangement, record those missing prerequisites and keep activation
-blocked. Do not substitute CI fixtures or store production backups in Actions artifacts.
+The owner postponed off-server backups on 2 November 2026. Record disaster recovery as
+outstanding; it does not block independently tested features. Native MinIO SSE-S3 uses
+an owner-only mounted 256-bit KMS key. The same-host recovery copy is tested by restarting
+a separate container against encrypted data and retrieving an encrypted probe object.
+Neither this recovery test nor the retained original data constitutes off-server backup.
+Do not substitute CI fixtures or put production keys/backups in Actions artifacts.
 
 ## Focused checks
 

@@ -17,6 +17,7 @@ TERMINAL=('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED')
 
 
 async def request(method,path,body=None,token=None,expected=(200,201)):
+    REPORT['last_request']={'method':method,'path':path}
     def send():
         req=urllib.request.Request('https://api.cfmeet.com'+path,method=method,
             data=json.dumps(body).encode() if body is not None else None,
@@ -46,6 +47,14 @@ async def dial(kind='VOICE',targets=None,extension=None):
     body=dict(kind=kind,initiatorPrincipalId=PEOPLE[0],initiatorEndpointId=DEVICES[0]['endpointId'])
     body.update({'targetExtension':extension} if extension else {'targetPrincipalIds':targets or [PEOPLE[1]]})
     value=await request('POST','/v1/calls',body);call=value['call']['callId'];CALLS.append(call);return call
+
+
+async def finish(call):
+    await command(call,'end')
+    for _ in range(35):
+        if (await call_view(call))['state'] in TERMINAL:return
+        await asyncio.sleep(.5)
+    raise AssertionError('Call cleanup did not reach a terminal state')
 
 
 async def answer(call,index=1):
@@ -94,8 +103,11 @@ async def publish(room,video=False):
 
 
 async def connected(call,kind='VOICE',target=None):
+    REPORT['step']='answer'
     await answer(call,1)
-    a,_=await join(call,0,kind=='VIDEO');b,_=await join(call,1,kind=='VIDEO')
+    REPORT['step']='caller_media_join';a,_=await join(call,0,kind=='VIDEO')
+    REPORT['step']='recipient_media_join';b,_=await join(call,1,kind=='VIDEO')
+    REPORT['step']='publish'
     await publish(a,kind=='VIDEO');await publish(b,kind=='VIDEO')
     for _ in range(30):
         if (await call_view(call))['state']=='CONNECTED':break
@@ -118,6 +130,10 @@ async def main():
             async def drain(socket):
                 async for _ in socket:pass
             TASKS.append(asyncio.create_task(drain(ws)))
+            async def heartbeat(socket):
+                while True:
+                    await asyncio.sleep(20);await socket.send(json.dumps({'type':'ping'}))
+            TASKS.append(asyncio.create_task(heartbeat(ws)))
         REPORT['checks']['authorized_endpoint_signaling']='PASS'
         for kind in ('VOICE','VIDEO'):
             REPORT['phase']=kind.lower()
@@ -127,21 +143,23 @@ async def main():
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
                 await command(call,'resume');assert (await call_view(call))['state']=='CONNECTED'
                 REPORT['checks']['hold_resume']='PASS'
-            await command(call,'end');assert (await call_view(call))['state'] in ('ENDING','ENDED')
+            await finish(call)
             await a.disconnect();await b.disconnect()
             REPORT['checks'][kind.lower()+'_end']='PASS'
         REPORT['phase']='enterprise_configuration'
-        extension=await request('POST','/v1/enterprise/extensions',dict(extensionNumber='985101',displayLabel='Acceptance alpha',destination={'type':'PRINCIPAL','id':PEOPLE[1]}))
-        group=await request('POST','/v1/enterprise/ring-groups',dict(name='Acceptance ring group',strategy='SIMULTANEOUS',memberRingSeconds=10,groupTimeoutSeconds=20))
+        number=100000+int(uuid.uuid4().hex[:8],16)%800000
+        suffix=''.join(chr(97+int(x,16)) for x in uuid.uuid4().hex[:12])
+        extension=await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number),displayLabel='Acceptance alpha',destination={'type':'PRINCIPAL','id':PEOPLE[1]}))
+        group=await request('POST','/v1/enterprise/ring-groups',dict(name='Acceptance ring group '+suffix,strategy='SIMULTANEOUS',memberRingSeconds=10,groupTimeoutSeconds=20))
         await request('PUT','/v1/enterprise/ring-groups/'+group['ringGroupId']+'/members',
             {'expectedVersion':group['version'],'members':[{'type':'PRINCIPAL','id':PEOPLE[1]},{'type':'PRINCIPAL','id':PEOPLE[2]}]})
-        queue=await request('POST','/v1/enterprise/queues',dict(name='Acceptance queue',maxWaitSeconds=30,offerTimeoutSeconds=10,capacity=5))
+        queue=await request('POST','/v1/enterprise/queues',dict(name='Acceptance queue '+suffix,maxWaitSeconds=60,offerTimeoutSeconds=20,capacity=5))
         await request('PUT','/v1/enterprise/queues/'+queue['queueId']+'/members',{'expectedVersion':queue['version'],'members':[{'principalId':PEOPLE[1]}]})
-        for number,kind,id in [('985102','RING_GROUP',group['ringGroupId']),('985103','QUEUE',queue['queueId'])]:
-            await request('POST','/v1/enterprise/extensions',dict(extensionNumber=number,displayLabel='Acceptance route',destination={'type':kind,'id':id}))
-        for number,label in [('985101','extensions'),('985102','ring_groups'),('985103','queues')]:
-            REPORT['phase']=label;call=await dial(extension=number);a,b=await connected(call)
-            REPORT['checks'][label]='PASS';await command(call,'end');await a.disconnect();await b.disconnect()
+        for offset,kind,id in [(1,'RING_GROUP',group['ringGroupId']),(2,'QUEUE',queue['queueId'])]:
+            await request('POST','/v1/enterprise/extensions',dict(extensionNumber=str(number+offset),displayLabel='Acceptance route',destination={'type':kind,'id':id}))
+        for offset,label in [(0,'extensions'),(1,'ring_groups'),(2,'queues')]:
+            REPORT['phase']=label;call=await dial(extension=str(number+offset));a,b=await connected(call)
+            REPORT['checks'][label]='PASS';await finish(call);await a.disconnect();await b.disconnect()
         await request('GET','/v1/enterprise/extensions/'+extension['extensionId'],token=CTX['other']['token'],expected=(404,))
         REPORT['checks']['enterprise_tenant_isolation']='PASS'
     except Exception as error:

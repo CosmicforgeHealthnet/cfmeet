@@ -26,7 +26,8 @@ REQUIRED = ('voice', 'video', 'invitations_accept_decline_cancel', 'termination_
     'transfers_hold_resume', 'ivr', 'tenant_isolation', 'voicemail_lifecycle',
     'recording_consent_authorization', 'recording_lifecycle', 'https_retrieval_isolation',
     'retention_deletion', 'staging_cleanup', 'encryption_at_rest',
-    'offserver_encrypted_backup_restore', 'meetings_media', 'messaging', 'public_swagger')
+    'meetings_media', 'messaging', 'public_swagger')
+POSTPONED_BY_OWNER = ('offserver_encrypted_backup_restore',)
 SAFE_ENV = {
     'CALLING_NEW_CALLS_ENABLED', 'CALLING_APP_CALLING_ENABLED',
     'ENTERPRISE_CALLING_ENABLED', 'VOICEMAIL_ENABLED', 'CALL_RECORDING_ENABLED',
