@@ -608,12 +608,18 @@ def verify(run_id):
     command += ['python:3.12-slim','sh','-ec',
         'pip install --disable-pip-version-check --no-cache-dir --quiet --target /tmp/deps livekit==1.1.20 && PYTHONPATH=/tmp/deps python /probe.py']
     probe = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    write_private(out/'probe-execution.private.log',probe.stdout+'\n'+probe.stderr)
     result_path = out/'media-result.json'
     result = json.loads(result_path.read_text()) if result_path.exists() else {
         'error_type':'PROBE_DID_NOT_PRODUCE_RESULTS','checks':{}}
     if probe.returncode:
         # SDK log messages may include connection tokens; only return stable error summaries.
         print('MEDIA_PROBE: incomplete; inspect restricted evidence on VPS')
+        logs = probe.stdout+'\n'+probe.stderr
+        print(json.dumps({'probe_exit_code':probe.returncode,'probe_error_classes':[
+            x for x in ('Permission denied','No matching distribution','ModuleNotFoundError',
+                'ImportError','OSError','libstdc++.so.6','libglib-2.0','Read-only file system',
+                'ConnectionError','Traceback') if x in logs]}))
     for kind in ('track','composite'):
         audio = out/(kind+'.ogg')
         if not audio.exists():
