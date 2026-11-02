@@ -90,7 +90,8 @@ def audit():
             print(json.dumps({'service': name, 'state': 'absent'}))
             continue
         h, cfg = c['HostConfig'], c['Config']
-        print(json.dumps(dict(service=name, state=c['State']['Status'], image=cfg['Image'],
+        print(json.dumps(dict(service=name, state=c['State']['Status'],
+            health=c['State'].get('Health',{}).get('Status','not_configured'), image=cfg['Image'],
             image_id=c['Image'], network_mode=h['NetworkMode'],
             networks=list(c['NetworkSettings']['Networks']), ports=h['PortBindings'],
             memory=h['Memory'], nano_cpus=h['NanoCpus'], restart=h['RestartPolicy'],
@@ -329,18 +330,37 @@ def secure_storage_ingress(run_id):
     write_private(backup/'calling-routes.before',previous)
     if old_snippet is not None:
         write_private(backup/'calling-artifacts.before',old_snippet)
+    probe_key = 'capture-staging/production-ingress-'+run_id
+    mc_env = dict(os.environ, MC_HOST_ingress_app='http://'+secret('minio-service-access-key')+':'+
+        secret('calling-artifact-store-secret')+'@'+ip+':9000')
+    mc = str(ROOT/'storage'/'mc')
+    put = subprocess.run([mc,'pipe','ingress_app/cfmeet-calling-artifacts/'+probe_key],
+        env=mc_env,input='controlled non-sensitive ingress probe',capture_output=True,text=True)
+    assert put.returncode==0, 'Storage service identity could not upload ingress probe'
     try:
         write_private(snippet,contents)
         if include not in previous:
             routes.write_text(previous.rstrip()+'\n'+include+'\n')
         run('nginx','-t')
         run('systemctl','reload','nginx')
-        try:
-            urllib.request.urlopen('https://api.cfmeet.com/cfmeet-calling-artifacts/unsigned-probe',timeout=15)
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 403, 'Anonymous storage access must be denied; received HTTP '+str(exc.code)
+        last_code = None
+        for _ in range(15):
+            try:
+                urllib.request.urlopen('https://api.cfmeet.com/cfmeet-calling-artifacts/'+probe_key,timeout=15)
+            except urllib.error.HTTPError as exc:
+                last_code = exc.code
+                if last_code==403:
+                    break
+                time.sleep(2)  # nginx reload is asynchronous; old workers may still answer
+            else:
+                raise AssertionError('Unsigned storage access was permitted')
         else:
-            raise AssertionError('Unsigned storage access was permitted')
+            raise AssertionError('Anonymous known-object probe expected 403; received '+str(last_code))
+        public_env = dict(mc_env, MC_HOST_ingress_public='https://'+secret('minio-service-access-key')+':'+
+            secret('calling-artifact-store-secret')+'@api.cfmeet.com')
+        signed = subprocess.run([mc,'cat','ingress_public/cfmeet-calling-artifacts/'+probe_key],
+            env=public_env,capture_output=True,text=True)
+        assert signed.returncode==0 and signed.stdout=='controlled non-sensitive ingress probe', 'Signed HTTPS read failed'
         regression()
         capture_path = ROOT/'calling-capture.production.env'
         assert capture_path.exists()
@@ -359,6 +379,10 @@ def secure_storage_ingress(run_id):
         run('nginx','-t')
         run('systemctl','reload','nginx')
         raise
+    finally:
+        cleanup = subprocess.run([mc,'rm','ingress_app/cfmeet-calling-artifacts/'+probe_key],
+            env=mc_env,capture_output=True,text=True)
+        assert cleanup.returncode==0, 'Controlled ingress probe cleanup failed'
     print('STORAGE_HTTPS: read-only private-bucket route installed; anonymous GET denied; no new ports')
     configure_storage_operations()
 
