@@ -385,7 +385,7 @@ fn error_code_enumerations_equal_the_rust_codes() {
         .map(|c| c.as_str())
         .collect();
     assert_eq!(
-        public.iter().copied().collect::<BTreeSet<_>>(),
+        public.iter().map(|v|v.to_string()).collect::<BTreeSet<_>>(),
         string_enum(CALLING_HTTP, "/components/schemas/ErrorCode/enum")
             .into_iter()
             .collect::<BTreeSet<_>>()

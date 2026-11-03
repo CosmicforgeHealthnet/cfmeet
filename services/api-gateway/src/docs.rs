@@ -43,6 +43,11 @@ pub const DOCS: &[(&str, &str, &str)] = &[
     ("meetings", "Meetings", public_doc!("meetings")),
     ("calling", "Calling", public_doc!("calling")),
     (
+        "communications",
+        "Communications",
+        public_doc!("communications"),
+    ),
+    (
         "privacy-relay",
         "Privacy Relay",
         public_doc!("privacy-relay"),
