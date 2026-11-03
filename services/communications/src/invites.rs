@@ -43,6 +43,9 @@ impl State {
             serde_json::from_value(body.clone()).map_err(|_| Error::Validation)?;
         request.validate()?;
         let txn = self.store.begin().await?;
+        // Serialize token issuance with owner privacy changes and public-ID rotation.
+        // Otherwise a token inserted after their revocation sweep could survive it.
+        self.store.profile(&txn, p.scope(), p.id, true).await?;
         let operation = if qr { "qr.create" } else { "invites.create" };
         if let Some(v) = self
             .store

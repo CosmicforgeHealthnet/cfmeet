@@ -78,12 +78,16 @@ def grant(bundle,issuer,key,permissions):
 def prepare_trust():
     WORK.mkdir(exist_ok=True,mode=0o700)
     keyfile=WORK/'communications.pem'
+    recovery=p.ROOT/'key-recovery'/'communications'
+    initialized=(WORK/'cfmeet_comm_production_hub.database.private.json').exists() or (WORK/'production-evidence.json').exists()
+    for name in ('communications.pem','invite-digest.key'):
+        if not (WORK/name).exists() and (recovery/name).exists():save(WORK/name,(recovery/name).read_text(),True)
+        assert (WORK/name).exists() or not initialized,'Existing Communications keys require recovery; refusing silent regeneration'
     if not keyfile.exists():
         p.run('openssl','genpkey','-algorithm','ED25519','-out',str(keyfile))
         os.chmod(keyfile,0o400);os.chown(keyfile,10001,10001)
     if not (WORK/'invite-digest.key').exists():save(WORK/'invite-digest.key',secrets.token_hex(32),True)
     # A same-host recovery copy is protected, and explicitly not disaster recovery.
-    recovery=p.ROOT/'key-recovery'/'communications'
     recovery.mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ('communications.pem','invite-digest.key'):
         if not (recovery/name).exists():p.write_private(recovery/name,(WORK/name).read_text())
@@ -340,11 +344,11 @@ def rollback():
         if name in names:
             try:p.run('docker','stop','--time','20',name)
             except RuntimeError:pass
-            p.run('docker','rename',name,name+'-communications-failed-'+record['runId'])
+            p.run('docker','rename',name,name+'-communications-failed-'+record['runId']+'-'+str(time.time_ns()))
         p.run('docker','rename',previous,name);p.run('docker','start',name)
-    if record.get('newHub'):
-        try:p.run('docker','stop','--time','20','cfmeet-communications')
-        except RuntimeError:pass
+    if record.get('newHub') and 'cfmeet-communications' in names:
+        p.run('docker','stop','--time','20','cfmeet-communications')
+        p.run('docker','rename','cfmeet-communications','cfmeet-communications-rolled-back-'+record['runId']+'-'+str(time.time_ns()))
     p.regression()
     print('COMMUNICATIONS_ROLLBACK: original runtime configuration and containers restored; additive tables retained',flush=True)
 

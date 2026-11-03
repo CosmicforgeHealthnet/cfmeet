@@ -775,3 +775,44 @@ async fn retention_expires_pending_pairs_and_preserves_identity_and_undelivered_
     assert!(result["count"].as_i64().unwrap() > 0);
     h.close().await;
 }
+
+#[tokio::test]
+async fn concurrent_invitation_creation_cannot_survive_disabling_and_reenabling_invites() {
+    let h = Harness::new().await;
+    let reader = h.profile(&h.account()).await;
+    for _ in 0..4 {
+        let owner = h.profile(&h.account()).await;
+        let disabled = Privacy {
+            invitation_permissions: communications::model::InvitationPermission::Disabled,
+            ..Privacy::default()
+        };
+        let (created, changed) = tokio::join!(
+            h.state.create_invite(
+                &owner,
+                json!({"purpose":"CONNECT","expiresInSeconds":600,"maxUses":1}),
+                Uuid::new_v4(),
+                false
+            ),
+            h.state.set_privacy(
+                &owner,
+                json!({"expectedVersion":1,"privacy":disabled}),
+                Uuid::new_v4()
+            )
+        );
+        changed.unwrap();
+        h.state
+            .set_privacy(
+                &owner,
+                json!({"expectedVersion":2,"privacy":Privacy::default()}),
+                Uuid::new_v4(),
+            )
+            .await
+            .unwrap();
+        match created {
+            Ok(invite)=>not_found(h.state.resolve_invite(&h.scope,&reader,json!({"purpose":"CONNECT","token":invite["payload"].as_str().unwrap().rsplit('/').next().unwrap()}),Uuid::new_v4()).await),
+            Err(Error::Forbidden)=>{},
+            Err(error)=>panic!("unexpected creation result: {error}"),
+        }
+    }
+    h.close().await;
+}
