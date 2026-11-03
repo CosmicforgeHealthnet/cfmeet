@@ -149,6 +149,11 @@ async def connected(call,kind='VOICE',target=None):
 async def main():
     try:
         for principal in PEOPLE:
+            existing=await request('GET','/v1/calling/endpoints?principalId='+principal)
+            for endpoint in existing['data']:
+                if endpoint['status']=='ACTIVE' and endpoint['endpointKey'].startswith('production-api-'):
+                    await request('DELETE','/v1/calling/endpoints/'+endpoint['endpointId'])
+                    REPORT['retired_abandoned_test_endpoints']=REPORT.get('retired_abandoned_test_endpoints',0)+1
             device=await request('POST','/v1/calling/endpoints',dict(principalId=principal,endpointKey='production-api-'+uuid.uuid4().hex,
                 endpointKind='WEB',capabilities={'audio':True,'video':True}))
             token=await request('POST','/v1/calling/signaling-credentials',dict(principalId=principal,endpointId=device['endpointId']))
@@ -265,7 +270,7 @@ async def main():
         REPORT['phase']='internal_transfer';call=await dial(extension=str(number));a,b=await connected(call)
         view=await call_view(call);participant=next(x['participantId'] for x in view['participants'] if x['principalId']==PEOPLE[1])
         await command(call,'transfer',{'transferringParticipantId':participant,'targetExtension':str(number+3)})
-        await answer(call,2);c,_=await join(call,2);await publish(c);await received_media(c)
+        await answer(call,2);c,_=await join(call,2);await publish(c);await received_media(c);await received_media(a)
         for _ in range(30):
             if (await call_view(call))['state']=='CONNECTED':break
             await asyncio.sleep(.5)
