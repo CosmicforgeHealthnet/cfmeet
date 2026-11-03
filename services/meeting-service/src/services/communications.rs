@@ -358,7 +358,7 @@ async fn account_status(
     let cutoff: Option<chrono::DateTime<chrono::Utc>> =
         row.try_get("", "credentials_not_before")?;
     Ok(Json(
-        json!({"active":!matches!(user.status,users::UserStatus::Inactive|users::UserStatus::Suspended),"version":version,"state":if user.status==users::UserStatus::Inactive {"DEACTIVATED"} else if user.status==users::UserStatus::Suspended {"SUSPENDED"} else {"ACTIVE"},"credentialsNotBefore":cutoff}),
+        json!({"active":user.role!=users::UserRole::Guest && !matches!(user.status,users::UserStatus::Inactive|users::UserStatus::Suspended),"version":version,"state":if user.status==users::UserStatus::Inactive {"DEACTIVATED"} else if user.status==users::UserStatus::Suspended {"SUSPENDED"} else {"ACTIVE"},"credentialsNotBefore":cutoff}),
     ))
 }
 #[derive(serde::Deserialize)]
@@ -379,7 +379,7 @@ async fn backfill(
             "limit must be 1-100",
         ));
     }
-    let records=state.db.query_all(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT id,username FROM users WHERE id>$1 AND status::text<>'inactive' ORDER BY id LIMIT $2",[body.cursor.unwrap_or(Uuid::nil()).into(),(body.limit as i64+1).into()])).await?;
+    let records=state.db.query_all(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT id,username FROM users WHERE id>$1 AND status::text NOT IN ('inactive','suspended') AND role::text<>'guest' ORDER BY id LIMIT $2",[body.cursor.unwrap_or(Uuid::nil()).into(),(body.limit as i64+1).into()])).await?;
     let more = records.len() > body.limit as usize;
     let mut accounts = Vec::new();
     let mut last = None;

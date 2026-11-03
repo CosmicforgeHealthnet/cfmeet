@@ -139,3 +139,24 @@ pub fn check_email_verification(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod communications_authentication_tests {
+    use super::*;
+    #[test]
+    fn refresh_preserves_credential_authentication_time_and_legacy_absence() {
+        let service = JwtService::new("test-only-authentication-time-fixture-0123456789".into());
+        let original = Utc::now().timestamp() - 1800;
+        let id = Uuid::new_v4();
+        let (access, refresh) = service
+            .refreshed_tokens(id, "user", Some(original))
+            .unwrap();
+        for token in [access, refresh] {
+            let claims = service.verify_token(&token).unwrap();
+            assert_eq!(claims.auth_time, Some(original));
+            assert!(claims.iat > original);
+        }
+        let (access, _) = service.refreshed_tokens(id, "user", None).unwrap();
+        assert_eq!(service.verify_token(&access).unwrap().auth_time, None);
+    }
+}

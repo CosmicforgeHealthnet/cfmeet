@@ -21,6 +21,7 @@
 
 pub mod db;
 pub mod keys;
+pub mod personal_stack;
 pub mod process;
 pub mod provision;
 pub mod receiver;

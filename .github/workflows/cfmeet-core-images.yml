@@ -57,6 +57,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish from service-specific Dockerfile
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -65,10 +66,16 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.ref }}
           provenance: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=core-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=core-${{ matrix.service }}
 
       - name: Record immutable published reference
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
+          echo "Digest ${{ steps.build.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "Published ${IMAGE_REF}" >> "${GITHUB_STEP_SUMMARY}"
           echo "Deployment is deliberately disabled; do not activate until service databases, signed trust bundles, keys, health checks and rollback have been prepared." >> "${GITHUB_STEP_SUMMARY}"
