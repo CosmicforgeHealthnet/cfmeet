@@ -1,0 +1,13 @@
+[package]
+name = "cf-communications-policy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cf-service-auth = { path = "../service-auth", features = ["client"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+thiserror = "2"
+

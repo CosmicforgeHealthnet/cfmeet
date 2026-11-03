@@ -347,6 +347,8 @@ pub(crate) async fn send_prelude(
     {
         return Err(Error::code(ErrorCode::DeliveryRefused));
     }
+    crate::communications::require_send(&state.db, state, ctx, &conversation, acting.principal_id)
+        .await?;
     Ok((conversation, member, effective))
 }
 

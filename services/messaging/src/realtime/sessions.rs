@@ -52,11 +52,12 @@ pub struct SessionRow {
     pub scopes: String,
     pub status: String,
     pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 
 const SESSION_COLUMNS: &str =
     "id, tenant_id, application_id, environment_id, environment_kind, service_account_id, \
-     principal_id, device_id, credential_id, scopes, status, expires_at";
+     principal_id, device_id, credential_id, scopes, status, expires_at, created_at";
 
 impl SessionRow {
     pub fn owner_scope(&self) -> Option<OwnerScope> {
@@ -75,6 +76,7 @@ impl SessionRow {
         Some(TrustedContext {
             scope: self.owner_scope()?,
             credential_id: self.credential_id,
+            personal_session_issued_at: Some(self.created_at.timestamp()),
             first_party: false,
             full_authority: true,
             scopes: self

@@ -965,6 +965,18 @@ impl Connection {
                 state,
                 last_seen_at,
             } => {
+                if crate::communications::require(
+                    &self.state,
+                    &self.ctx,
+                    cf_communications_policy::Action::Presence,
+                    self.session.principal_id,
+                    principal_id,
+                )
+                .await
+                .is_err()
+                {
+                    return Flow::Continue;
+                }
                 if self.subs.contains_key(&conversation_id) {
                     self.send(json!({
                         "type": "presence",

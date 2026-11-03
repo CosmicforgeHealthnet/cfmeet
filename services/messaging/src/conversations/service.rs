@@ -347,6 +347,16 @@ pub async fn create(
             }
         }
     }
+    if let Some(target) = counterpart {
+        crate::communications::require(
+            state,
+            ctx,
+            cf_communications_policy::Action::DirectConversation,
+            acting.principal_id,
+            target,
+        )
+        .await?;
+    }
     let now = state.now();
     let key = format!(
         "conversation-create:{}:{}",

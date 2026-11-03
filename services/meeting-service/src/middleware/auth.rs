@@ -86,7 +86,7 @@ pub async fn auth_middleware(
         .ok_or_else(|| ApiError::Unauthorized("User not found".to_string()))?;
 
     // Check if user account is active
-    if user.status == UserStatus::Inactive {
+    if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended) {
         return Err(ApiError::Forbidden(
             "Account has been deactivated".to_string(),
         ));

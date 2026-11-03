@@ -196,6 +196,8 @@ impl AppCallService {
             .await;
             return Err(CallError::TargetUnavailable);
         }
+        self.require_personal_create(ctx, initiator.id().as_uuid(), &target_ids)
+            .await?;
         let initiator_endpoint = self
             .endpoints
             .active_endpoint(scope, request.initiator, request.initiator_endpoint)

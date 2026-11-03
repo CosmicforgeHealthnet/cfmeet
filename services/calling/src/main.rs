@@ -465,6 +465,15 @@ async fn main() -> anyhow::Result<()> {
             abuse_controls,
         },
     );
+    let personal = cf_communications_policy::Scope::from_env()
+        .map_err(anyhow::Error::msg)?
+        .map(|scope| {
+            cf_communications_policy::PolicyClient::new(state.service_auth.client_arc(), scope)
+        });
+    if personal.is_some() && !calling_migration::communications_ready(&state.db).await? {
+        anyhow::bail!("Communications integration migration is required");
+    }
+    state = state.with_communications(personal);
     state.legacy_usage_retired = config.legacy_usage_retired;
     tracing::info!(
         legacy_usage_authority = if config.legacy_usage_retired {

@@ -8,6 +8,8 @@ edition = "2021"
 default-run = "backend"
 
 [dependencies]
+cf-communications-policy = { path = "../../packages/communications-policy" }
+
 migration = { path = "migration" }
 tokio = { version = "1.42.0", features = ["full"] }
 sea-orm = { version = "1.1.4", features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros" ] }

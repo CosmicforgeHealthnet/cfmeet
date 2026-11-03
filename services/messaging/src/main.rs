@@ -121,7 +121,14 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    let personal = cf_communications_policy::Scope::from_env()
+        .map_err(anyhow::Error::msg)?
+        .map(|scope| cf_communications_policy::PolicyClient::new(service_auth.client(), scope));
+    if personal.is_some() && !messaging_migration::communications_ready(&db).await? {
+        anyhow::bail!("Communications integration migration is required");
+    }
     let mut state = AppState::new(db.clone(), clock, authority, service_auth.clone())
+        .with_communications(personal)
         .with_principals(Arc::new(PlatformAccessPrincipals::new(
             service_auth.client(),
         )))

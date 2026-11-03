@@ -386,6 +386,21 @@ pub async fn add_in<C: ConnectionTrait>(
     now: DateTime<Utc>,
 ) -> Result<(u16, Value)> {
     require_admin(txn, conversation, admin).await?;
+    if conversation.context_class == "GROUP" {
+        let actor = admin
+            .principal_id()
+            .unwrap_or(conversation.owner_principal_id);
+        if actor != principal_id {
+            crate::communications::require(
+                st,
+                ctx,
+                cf_communications_policy::Action::GroupInvitation,
+                actor,
+                principal_id,
+            )
+            .await?;
+        }
+    }
     activate(
         txn,
         st,
@@ -1198,6 +1213,21 @@ pub async fn invite_in<C: ConnectionTrait>(
     now: DateTime<Utc>,
 ) -> Result<(u16, Value)> {
     require_admin(txn, conversation, admin).await?;
+    if conversation.context_class == "GROUP" {
+        let actor = admin
+            .principal_id()
+            .unwrap_or(conversation.owner_principal_id);
+        if actor != principal_id {
+            crate::communications::require(
+                st,
+                ctx,
+                cf_communications_policy::Action::GroupInvitation,
+                actor,
+                principal_id,
+            )
+            .await?;
+        }
+    }
     access::require_accepting(conversation, now)?;
     let class = ContextClass::parse(&conversation.context_class)
         .ok_or(Error::code(ErrorCode::InternalError))?;

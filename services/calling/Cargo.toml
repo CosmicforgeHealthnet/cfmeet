@@ -22,6 +22,7 @@ name = "platform_admin"
 path = "src/bin/platform_admin.rs"
 
 [dependencies]
+cf-communications-policy = { path = "../../packages/communications-policy" }
 calling-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }

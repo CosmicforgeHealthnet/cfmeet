@@ -85,6 +85,7 @@ pub struct SignalingClaims {
     pub endpoint_id: CallEndpointId,
     pub minted_by_service_account_id: ServiceAccountId,
     pub minted_by_credential_id: CredentialId,
+    pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -255,6 +256,7 @@ impl SignalingKeys {
             endpoint_id: CallEndpointId::from_uuid(endpoint),
             minted_by_service_account_id: ServiceAccountId::from_uuid(claims.sva),
             minted_by_credential_id: CredentialId::from_uuid(claims.crd),
+            issued_at: Utc.timestamp_opt(claims.iat, 0).single().ok_or(invalid)?,
             expires_at: Utc.timestamp_opt(claims.exp, 0).single().ok_or(invalid)?,
         })
     }

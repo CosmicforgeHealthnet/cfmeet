@@ -31,6 +31,10 @@ use crate::config::ConfigError;
 /// Base-URL variables for the internal services Calling may call.
 const TARGETS: &[(&str, &str)] = &[
     (
+        "CF_COMMUNICATIONS_BASE_URL",
+        cf_service_auth::services::COMMUNICATIONS,
+    ),
+    (
         "CF_PRIVACY_RELAY_BASE_URL",
         cf_service_auth::services::PRIVACY_RELAY,
     ),

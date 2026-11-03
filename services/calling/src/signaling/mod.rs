@@ -75,6 +75,10 @@ impl SignalingIdentity {
         self.claims.minted_by_credential_id
     }
 
+    pub fn issued_at(&self) -> DateTime<Utc> {
+        self.claims.issued_at
+    }
+
     pub fn expires_at(&self) -> DateTime<Utc> {
         self.claims.expires_at
     }

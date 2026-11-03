@@ -280,6 +280,21 @@ pub async fn snapshot(
         vec![session.environment_id.into(), ids.clone().into()],
     )
     .await?;
+    let mut permitted = std::collections::BTreeSet::new();
+    for principal in &ids {
+        if crate::communications::require(
+            state,
+            &ctx,
+            cf_communications_policy::Action::Presence,
+            session.principal_id,
+            *principal,
+        )
+        .await
+        .is_ok()
+        {
+            permitted.insert(*principal);
+        }
+    }
     let keys: Vec<String> = ids
         .iter()
         .map(|p| principal_key(session.environment_id, *p))
@@ -295,7 +310,7 @@ pub async fn snapshot(
         .zip(online)
         .map(|(p, on)| {
             let pref = prefs.iter().find(|x| x.principal_id == *p);
-            let hidden = pref.is_some_and(|x| x.visibility == "HIDDEN");
+            let hidden = !permitted.contains(p) || pref.is_some_and(|x| x.visibility == "HIDDEN");
             let last = pref
                 .filter(|x| policy.privacy.last_seen && x.share_last_seen && !hidden)
                 .and_then(|x| x.last_seen_at);

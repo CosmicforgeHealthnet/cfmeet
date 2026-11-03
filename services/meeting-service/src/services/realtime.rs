@@ -649,7 +649,10 @@ impl RealtimeService {
         let user = users::Entity::find_by_id(user_id)
             .one(&self.core.db)
             .await?
-            .filter(|u| u.status != UserStatus::Inactive && u.role != UserRole::Guest)
+            .filter(|u| {
+                !matches!(u.status, UserStatus::Inactive | UserStatus::Suspended)
+                    && u.role != UserRole::Guest
+            })
             .ok_or_else(|| {
                 ApiError::domain(ErrorCode::AuthenticationRequired, "Account is not active")
             })?;

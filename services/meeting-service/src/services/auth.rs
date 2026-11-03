@@ -10,6 +10,8 @@ pub struct Claims {
     pub role: String, // User role
     pub exp: i64,     // Expiration time
     pub iat: i64,     // Issued at
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_time: Option<i64>, // Credential authentication; never advanced by refresh.
 }
 
 pub struct JwtService {
@@ -28,14 +30,42 @@ impl JwtService {
     }
 
     pub fn generate_access_token(&self, user_id: Uuid, role: &str) -> ApiResult<String> {
-        self.generate_token(user_id, role, self.access_token_expiry)
+        self.generate_token(
+            user_id,
+            role,
+            self.access_token_expiry,
+            Some(Utc::now().timestamp()),
+        )
     }
 
     pub fn generate_refresh_token(&self, user_id: Uuid, role: &str) -> ApiResult<String> {
-        self.generate_token(user_id, role, self.refresh_token_expiry)
+        self.generate_token(
+            user_id,
+            role,
+            self.refresh_token_expiry,
+            Some(Utc::now().timestamp()),
+        )
     }
 
-    fn generate_token(&self, user_id: Uuid, role: &str, expiry: Duration) -> ApiResult<String> {
+    pub fn refreshed_tokens(
+        &self,
+        user_id: Uuid,
+        role: &str,
+        auth_time: Option<i64>,
+    ) -> ApiResult<(String, String)> {
+        Ok((
+            self.generate_token(user_id, role, self.access_token_expiry, auth_time)?,
+            self.generate_token(user_id, role, self.refresh_token_expiry, auth_time)?,
+        ))
+    }
+
+    fn generate_token(
+        &self,
+        user_id: Uuid,
+        role: &str,
+        expiry: Duration,
+        auth_time: Option<i64>,
+    ) -> ApiResult<String> {
         let now = Utc::now();
         let exp = (now + expiry).timestamp();
 
@@ -44,6 +74,7 @@ impl JwtService {
             role: role.to_string(),
             exp,
             iat: now.timestamp(),
+            auth_time,
         };
 
         encode(

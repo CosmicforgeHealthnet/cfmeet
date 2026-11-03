@@ -340,6 +340,7 @@ pub async fn send(
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
                 super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
+                crate::communications::require_send(txn,&st,&ctx,&conversation,acting.principal_id).await?;
                 // Serialize senders of this conversation's sequence before the retry check.
                 db::exec(
                     txn,
@@ -445,6 +446,7 @@ pub async fn edit(
                 let now = st.now();
                 let ring = st.managed_keys.as_deref().ok_or(Error::code(ErrorCode::FeatureDisabled))?;
                 super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
+                crate::communications::require_send(txn,&st,&ctx,&conversation,acting.principal_id).await?;
                 let row = load_message(txn, conversation.id, message_id, true)
                     .await?
                     .filter(|r| r.sequence >= member.visible_from_sequence)

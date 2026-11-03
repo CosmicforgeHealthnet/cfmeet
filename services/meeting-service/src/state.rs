@@ -13,6 +13,7 @@ use crate::services::{OtpService, RateLimiterService, RedisService, TokenBlackli
 
 #[derive(Clone)]
 pub struct AppState {
+    pub communications: Option<Arc<crate::services::communications::Bridge>>,
     pub db: DatabaseConnection,
     pub jwt_service: Arc<JwtService>,
     pub email_service: Arc<EmailService>,
@@ -79,6 +80,7 @@ impl AppState {
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
 
         Self {
+            communications: None,
             db,
             jwt_service: Arc::new(JwtService::new(app_config.jwt_secret.clone())),
             email_service: Arc::new(EmailService::new(redis.clone(), email_config)),

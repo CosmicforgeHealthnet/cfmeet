@@ -79,6 +79,11 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/api/v1/webhooks", webhooks::webhook_routes(state.clone()))
         .nest("/api/v1/admin", admin::admin_routes(state.clone()))
         .nest("/api/v2", v2::v2_routes(state.clone()))
+        .nest(
+            "/api/v2/communications",
+            crate::services::communications::public_routes(),
+        )
+        .merge(crate::services::communications::internal_routes())
         // Internal provider routes (signature / internal-token protected; Part E).
         .route(
             "/internal/rtc/livekit/webhook",

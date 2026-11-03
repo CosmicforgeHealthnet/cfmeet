@@ -423,6 +423,7 @@ dependencies = [
  "axum",
  "base64 0.21.7",
  "bcrypt",
+ "cf-communications-policy",
  "cf-messaging-crypto",
  "cf-service-auth",
  "cf-usage-facts",
@@ -671,6 +672,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
 dependencies = [
  "nom 7.1.3",
+]
+
+[[package]]
+name = "cf-communications-policy"
+version = "0.1.0"
+dependencies = [
+ "cf-service-auth",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "uuid",
 ]
 
 [[package]]

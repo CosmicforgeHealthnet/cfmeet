@@ -306,7 +306,9 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                 .ok_or_else(|| {
                     ApiError::domain(ErrorCode::AuthenticationRequired, "Account not found")
                 })?;
-            if user.status == UserStatus::Inactive || user.role == UserRole::Guest {
+            if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended)
+                || user.role == UserRole::Guest
+            {
                 return Err(ApiError::domain(
                     ErrorCode::AuthenticationRequired,
                     "Account is not active",
