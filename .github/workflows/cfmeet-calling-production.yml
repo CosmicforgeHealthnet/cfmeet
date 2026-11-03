@@ -87,6 +87,8 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/main ]]
           fi
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$IMAGE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$OPERATION" =~ ^[a-z][a-z-]{1,79}$ ]]
           remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
