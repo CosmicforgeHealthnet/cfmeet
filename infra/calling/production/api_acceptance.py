@@ -137,6 +137,17 @@ def cleanup_fixture_calls(value):
     raise AssertionError('Abandoned controlled calls did not terminate')
 
 
+def retire_abandoned_probe():
+    try:container=p.inspect('cfmeet-calling-api-probe')
+    except RuntimeError:return
+    assert container['Config']['Image'].startswith('cfmeet-calling-api-probe:')
+    root=Path(next(m['Source'] for m in container['Mounts'] if m['Destination']=='/result')).resolve()
+    assert root.parent==(p.ROOT/'production-evidence').resolve() and root.name.startswith('api-')
+    assert '/api_client.py' in container['Config']['Cmd']
+    p.run('docker','stop','--time','10','cfmeet-calling-api-probe')
+    print('ABANDONED_PROBE: verified isolated acceptance container stopped')
+
+
 def run(run_id,feature='enterprise'):
     original=p.inspect('cfmeet-calling')['Id']
     try:
@@ -153,6 +164,12 @@ def run(run_id,feature='enterprise'):
 
 def _run(run_id,feature='enterprise'):
     p.identity(); value=context()
+    retire_abandoned_probe()
+    # Surface only known-safe assertions left by an interrupted SSH session.
+    previous=sorted((p.ROOT/'production-evidence').glob('api-*/api-result.json'),key=lambda f:f.stat().st_mtime)[-1:]
+    for file in previous:
+        report=json.loads(file.read_text())
+        print('PREVIOUS_ACCEPTANCE:',json.dumps({k:report[k] for k in ('phase','checks','error_type','failure_message') if k in report}))
     cleanup_fixture_calls(value)
     # Enabling an independent carrier-free feature never depends on postponed backups.
     active=p.run('docker','exec','-u','postgres','cfmeet-core-db','psql','-XAtq','-U','postgres','-d','cfmeet_calling',
@@ -182,6 +199,7 @@ def _run(run_id,feature='enterprise'):
     with (root/'execution.private.log').open('w') as log:
         process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
         deadline=time.monotonic()+900
+        next_progress=time.monotonic()+30
         try:
             while process.poll() is None:
                 pending=root/'retention-request.json'
@@ -189,6 +207,9 @@ def _run(run_id,feature='enterprise'):
                     expire_fixture(value,json.loads(pending.read_text()))
                     pending.rename(root/'retention-request.handled.json')
                 assert time.monotonic()<deadline,'Production acceptance timed out'
+                if time.monotonic()>=next_progress:
+                    print('API_ACCEPTANCE_RUNNING:',feature,'real media/API assertions in progress',flush=True)
+                    next_progress=time.monotonic()+30
                 time.sleep(.25)
         finally:
             if process.poll() is None:

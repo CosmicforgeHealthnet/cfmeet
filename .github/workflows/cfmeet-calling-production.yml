@@ -47,9 +47,9 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
-          tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "python3 -u '$remote/production.py' '$OPERATION' '$GITHUB_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "python3 -u '$remote/production.py' '$OPERATION' '$GITHUB_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

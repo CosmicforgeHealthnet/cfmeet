@@ -726,7 +726,10 @@ def verify(run_id):
     result['git_sha'] = sys.argv[2]
     result['timestamp'] = int(time.time())
     result['backup_destination_configured'] = bool(list(ROOT.glob('*backup*.env')))
-    result['activation'] = 'BLOCKED_PENDING_FULL_PRODUCTION_ACCEPTANCE'
+    result['application_acceptance'] = 'SEPARATE_PRODUCTION_API_RECEIPTS'
+    result['offserver_backups'] = 'POSTPONED_BY_OWNER'
+    result['effective_feature_flags'] = {k:env_of(inspect('cfmeet-calling')).get(k,'false')
+        for k in sorted(SAFE_ENV) if k.endswith('_ENABLED')}
     # Exercise the external download as a client, outside the private media namespace.
     # The signed URL stays in memory and is never logged.
     import media_probe
