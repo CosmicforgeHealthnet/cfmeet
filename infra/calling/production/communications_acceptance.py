@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
+import select
 import sys
 import time
 import urllib.error
@@ -25,13 +27,29 @@ def execute(sha, run_id, scope, stage):
         urls={k:'https://api.cfmeet.com:'+str(v) for k,v in ports.items()})
     if not stage:context['urls']['meeting-service']='https://api.cfmeet.com'
     p.write_private(folder/'context.private.json',json.dumps(context))
+    os.chown(folder,10001,10001);os.chown(folder/'context.private.json',10001,10001)
+    source=Path(__file__).resolve().parent
+    base=json.loads(p.run('docker','image','inspect','python:3.12-slim'))[0]['RepoDigests'][0]
+    tag='cfmeet-calling-api-probe:'+__import__('hashlib').sha256((source/'Probe.Dockerfile').read_bytes()+base.encode()).hexdigest()[:20]
+    p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
     # The test client receives only fixture account credentials and a bounded
     # customer credential. No owner DB password or internal service key.
-    command=['docker','run','--rm','--network',p.NET,
+    command=['docker','run','--rm','--name','cfmeet-communications-client-'+run_id,'--network',p.NET,'--memory','768m','--cpus','1',
         '--mount',f'type=bind,src={folder},dst=/result',
         '--mount',f'type=bind,src={Path(__file__).resolve()},dst=/acceptance.py,readonly',
-        'python:3.12-slim','python','-u','/acceptance.py']
-    result=__import__('subprocess').run(command,capture_output=True,text=True)
+        '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',
+        tag,'python','-u','/acceptance.py']
+    with (folder/'execution.private.log').open('w') as log:
+        result=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
+        deadline=time.monotonic()+420;progress=time.monotonic()+30
+        try:
+            while result.poll() is None:
+                assert time.monotonic()<deadline,'Communications media acceptance timed out'
+                if time.monotonic()>=progress:
+                    print('COMMUNICATIONS_ACCEPTANCE_RUNNING: native identity, policy and real media assertions',flush=True);progress=time.monotonic()+30
+                time.sleep(.25)
+        finally:
+            if result.poll() is None:p.run('docker','stop','--time','10','cfmeet-communications-client-'+run_id);result.wait(timeout=20)
     report=json.loads((folder/'report.json').read_text()) if (folder/'report.json').exists() else {'checks':{},'failure':'client did not produce evidence'}
     report.update(sha=sha,workflowRunId=run_id,environment='isolated-vps-staging' if stage else 'production')
     report['images']={name:p.inspect(('cfmeet-comm-stage-'+name) if stage else release.OWNERS.get(name,'cfmeet-communications'))['Image'] for name in release.PORTS}
@@ -40,6 +58,25 @@ def execute(sha, run_id, scope, stage):
         raise RuntimeError('Communications backend acceptance failed; protected evidence retained on VPS')
     assert report['checks'] and all(x=='PASS' for x in report['checks'].values())
     return report
+
+
+class Rtc:
+    def __init__(self):
+        self.log=open('/result/rtc-'+uuid.uuid4().hex+'.private.log','w')
+        self.process=subprocess.Popen([sys.executable,'/rtc_client.py'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.log,text=True,bufsize=1)
+    def cmd(self,cmd,**body):
+        self.process.stdin.write(json.dumps({'cmd':cmd,**body})+'\n');self.process.stdin.flush()
+        assert select.select([self.process.stdout],[],[],40)[0],'RTC response timed out'
+        line=self.process.stdout.readline();assert line,'RTC worker stopped'
+        response=json.loads(line)
+        assert response.get('ok'),'RTC operation failed: '+cmd
+        return response
+    def close(self):
+        try:self.cmd('quit')
+        finally:
+            try:self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
+            self.log.close()
 
 
 class Journey:
@@ -118,10 +155,48 @@ class Journey:
         accepted=self.hub(b,path,'POST',body,key=key)
         assert accepted==self.hub(b,path,'POST',body,key=key)
 
+    def media_call(self,a,b,kind):
+        call=self.dial(a,b,kind)['call']['callId']
+        token=self.c['scope']['token'];path='/v1/calls/'+call
+        for _ in range(40):
+            offers=self.request('calling','/v1/calling/invitations',token=b['signaling'])['data']
+            invitation=next((x for x in offers if x['callId']==call and x['actionable']),None)
+            if invitation:break
+            time.sleep(.25)
+        else:raise AssertionError('Incoming ringing invitation missing')
+        self.request('calling','/v1/calling/invitations/'+invitation['invitationId']+'/accept','POST',{'expectedVersion':invitation['callVersion']},b['signaling'])
+        clients=[]
+        try:
+            current=self.request('calling',path,token=token)
+            sessions=[next(x for x in current['sessions'] if x['endpointId']==person['endpointId'] and x['state']!='ENDED') for person in (a,b)]
+            self.request('calling','/v1/calling/sessions/'+sessions[1]['sessionId']+'/media-credentials','POST',{},a['signaling'],expected=(404,))
+            for person,session in zip((a,b),sessions):
+                credentials=self.request('calling','/v1/calling/sessions/'+session['sessionId']+'/media-credentials','POST',{},person['signaling'])
+                client=Rtc();clients.append(client)
+                client.cmd('connect',url=credentials['url'],token=credentials['token'])
+            for client in clients:
+                client.cmd('wait_permission',publish=True,timeout=15)
+                client.cmd('publish',kind='audio')
+                if kind=='VIDEO':client.cmd('publish',kind='video')
+            for _ in range(40):
+                if self.request('calling',path,token=token)['state']=='CONNECTED':break
+                time.sleep(.25)
+            else:raise AssertionError('Native media call did not become CONNECTED')
+            for client in clients:
+                client.cmd('verify_received',kind='audio',timeout=12)
+                if kind=='VIDEO':client.cmd('verify_received',kind='video',timeout=12)
+        finally:
+            for client in clients:
+                try:client.close()
+                except Exception:pass
+            self.clean_call(call)
+
     def clean_call(self,call):
         token=self.c['scope']['token'];path='/v1/calls/'+call
         current=self.request('calling',path,token=token)
-        self.request('calling',path+'/cancel','POST',{'expectedVersion':current['version']},token)
+        verb='end' if current['state'] in ('ANSWERED','CONNECTED','HELD','TRANSFERRING') else 'cancel'
+        if current['state'] not in ('ENDED','CANCELLED','FAILED','NO_ANSWER','DECLINED','BUSY','ENDING'):
+            self.request('calling',path+'/'+verb,'POST',{'expectedVersion':current['version']},token)
         for _ in range(40):
             state=self.request('calling',path,token=token)['state']
             if state in ('CANCELLED','ENDED','FAILED','NO_ANSWER','DECLINED','BUSY'):return
@@ -148,6 +223,7 @@ class Journey:
             endpoint=self.request('calling','/v1/calling/endpoints','POST',{'principalId':a0['principalId'],
                 'endpointKey':'comm-'+uuid.uuid4().hex,'endpointKind':'WEB','capabilities':{'audio':True,'video':True}},self.c['scope']['token'],expected=(201,))
             a0['endpointId']=endpoint['endpointId']
+            a0['signaling']=self.request('calling','/v1/calling/signaling-credentials','POST',{'principalId':a0['principalId'],'endpointId':a0['endpointId']},self.c['scope']['token'],expected=(200,201))['token']
         # Fresh dedicated accounts must have no implicit personal permission.
         # Previously accepted production fixtures are removed through their API.
         contacts=self.hub(a,'/contacts')['data']
@@ -179,9 +255,8 @@ class Journey:
                 {'clientMessageId':str(uuid.uuid4()),'text':'Isolated Sections 4-7 backend acceptance'},self.c['scope']['token'],a['principalId'],(201,))
             self.done('canonical_direct_conversation_reuse_and_managed_test_message')
         for kind in ('VOICE','VIDEO'):
-            created=self.dial(a,b,kind);call=created['call']['callId']
-            self.clean_call(call)
-        self.done('voice_video_call_creation_authorization_and_provider_cleanup')
+            self.media_call(a,b,kind)
+        self.done('native_voice_video_ringing_accept_media_credentials_and_bidirectional_frames')
         contact=self.hub(a,'/contacts')['data'][0]
         self.hub(a,'/contacts/'+contact['contactId'],'PATCH',{'expectedVersion':contact['version'],'alias':'My saved contact','favorite':True})
         assert self.hub(b,'/contacts')['data'][0]['alias'] is None
@@ -212,7 +287,7 @@ class Journey:
         for contact in self.hub(a,'/contacts')['data']:
             if contact['cfMeetId']==b['cfMeetId']:self.hub(a,'/contacts/'+contact['contactId'],'DELETE')
         self.done('fixture_relationship_cleanup')
-        self.report['limitations']=['No new WebRTC media capture is certified by this HTTP journey.',
+        self.report['limitations']=['Real media uses controlled synthetic audio tones and video frames, not browser microphone or camera permissions.',
             'MANAGED messages are exercised only in the isolated TEST application; production MLS activation remains the next milestone.']
 
 
