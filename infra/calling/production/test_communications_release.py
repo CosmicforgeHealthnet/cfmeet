@@ -31,11 +31,14 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         self.assertEqual(candidate['User'],old['Config']['User'])
         self.assertEqual(set(candidate['NetworkingConfig']['EndpointsConfig']),set(old['NetworkSettings']['Networks']))
 
-    def test_external_backend_binding_and_static_ip_are_refused(self):
+    def test_external_backend_binding_is_refused_and_static_ip_is_preserved(self):
         old=self.original();old['HostConfig']['PortBindings']['8080/tcp'][0]['HostIp']='0.0.0.0'
         with self.assertRaises(AssertionError):release.clone(old,'name','sha256:new',{},False)
         old=self.original();old['NetworkSettings']['Networks']['private']['IPAMConfig']={'IPv4Address':'10.0.0.2'}
-        with self.assertRaises(AssertionError):release.clone(old,'name','sha256:new',{},False)
+        candidate=release.clone(old,'stage','sha256:new',{},True)
+        self.assertNotIn('IPAMConfig',candidate['NetworkingConfig']['EndpointsConfig']['private'])
+        production=release.clone(old,'name','sha256:new',{},False)
+        self.assertEqual(production['NetworkingConfig']['EndpointsConfig']['private']['IPAMConfig'],{'IPv4Address':'10.0.0.2'})
 
     def test_revision_label_must_match_immutable_source_sha(self):
         with self.assertRaises(AssertionError):release.image('calling','main')

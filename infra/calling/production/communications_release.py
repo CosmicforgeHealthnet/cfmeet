@@ -169,9 +169,13 @@ def clone(c,name,img,overrides,stage):
             assert all(x['HostIp'] in ('127.0.0.1','::1') for x in bindings),'Existing backend ingress must stay loopback'
     endpoints={}
     for net,ep in c['NetworkSettings']['Networks'].items():
-        assert not ep.get('IPAMConfig'),'Static IP deployment needs explicit preservation'
         aliases=[name] if stage else [a for a in ep.get('Aliases',[]) if a not in (c['Id'],c['Id'][:12])]
         endpoints[net]={'Aliases':aliases}
+        if not stage:
+            for option in ('IPAMConfig','Links','DriverOpts'):
+                if ep.get(option):endpoints[net][option]=copy.deepcopy(ep[option])
+        # Candidates deliberately request a different dynamic address; production
+        # retains the exact static address and options after stopping its predecessor.
     cfg['NetworkingConfig']={'EndpointsConfig':endpoints}
     return cfg
 
