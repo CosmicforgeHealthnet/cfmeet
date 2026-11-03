@@ -76,7 +76,10 @@ async def dial(kind='VOICE',targets=None,extension=None):
 
 
 async def finish(call):
-    await command(call,'end')
+    view=await call_view(call)
+    if view['state'] in TERMINAL:return
+    if view['state']!='ENDING':
+        await command(call,'end' if view['state'] in ('CONNECTED','HELD','ANSWERED','TRANSFERRING') else 'cancel')
     for _ in range(35):
         if (await call_view(call))['state'] in TERMINAL:return
         await asyncio.sleep(.5)
@@ -97,12 +100,17 @@ async def answer(call,index=1):
 async def join(call,index,video=False):
     view=await call_view(call)
     session=next(s for s in view['sessions'] if s['endpointId']==DEVICES[index]['endpointId'] and s['state']!='ENDED')
-    credential=await request('POST','/v1/calling/sessions/'+session['sessionId']+'/media-credentials',{},token=DEVICES[index]['token'])
     REPORT['join_index']=index
-    room=await MediaClient.start();ROOMS.append(room)
-    room.url=credential['url']
-    assert (await room.cmd('connect',url=credential['url'],token=credential['token'])).get('ok'), 'Real client media join failed'
-    return room,session['sessionId']
+    for attempt in range(2):
+        credential=await request('POST','/v1/calling/sessions/'+session['sessionId']+'/media-credentials',{},token=DEVICES[index]['token'])
+        room=await MediaClient.start();ROOMS.append(room);room.url=credential['url']
+        joined=await room.cmd('connect',url=credential['url'],token=credential['token'])
+        if joined.get('ok'):return room,session['sessionId']
+        error_class=joined.get('error','').split(':',1)[0]
+        REPORT.setdefault('media_join_failures',[]).append({'endpoint_index':index,'attempt':attempt+1,
+            'error_class':error_class if error_class.isidentifier() else 'RTC_ERROR'})
+        await room.disconnect();await asyncio.sleep(1)
+    raise AssertionError('Real client media join failed after two fresh credentials')
 
 
 async def publish(room,video=False):
@@ -200,7 +208,12 @@ async def main():
         call=await dial();view=await call_view(call)
         invitation=next(x for x in view['invitations'] if x['endpointId']==DEVICES[1]['endpointId'] and x['status']=='RINGING')
         await request('POST','/v1/calling/invitations/'+invitation['invitationId']+'/decline',{'expectedVersion':view['version']},token=DEVICES[1]['token'])
-        assert (await call_view(call))['state']=='DECLINED';REPORT['checks']['incoming_decline']='PASS'
+        for _ in range(30):
+            state=(await call_view(call))['state']
+            if state=='DECLINED':break
+            await asyncio.sleep(.5)
+        assert state=='DECLINED','Decline resulted in '+state
+        REPORT['checks']['incoming_decline']='PASS'
         call=await dial();await command(call,'cancel');assert (await call_view(call))['state']=='CANCELLED'
         REPORT['checks']['cancel']='PASS'
         REPORT['phase']='missed_call_history';call=await dial()

@@ -159,7 +159,7 @@ async def voicemail(a):
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[0]},expected=(404,))
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]},token=a.CTX['other']['token'],expected=(404,))
     a.REPORT['checks']['voicemail_owner_and_tenant_isolation']='PASS'
-    marked=await a.request('POST',path+'/read-state',{'principalId':a.PEOPLE[1],'expectedVersion':view['version'],'readState':'READ'})
+    marked=await a.request('PUT',path+'/read-state',{'principalId':a.PEOPLE[1],'expectedVersion':view['version'],'readState':'READ'})
     await a.request('DELETE',path+'?expectedVersion='+str(marked['version'])+'&principalId='+a.PEOPLE[1])
     await a.request('POST',path+'/media-access',{'principalId':a.PEOPLE[1]},expected=(404,409))
     a.REPORT['checks']['voicemail_read_delete_access_revocation']='PASS'
