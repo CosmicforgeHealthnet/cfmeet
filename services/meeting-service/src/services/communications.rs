@@ -341,7 +341,7 @@ async fn account_status(
     headers: HeaderMap,
     Json(body): Json<AccountStatus>,
 ) -> ApiResult<Json<Value>> {
-    internal_scope(&state, &headers)?;
+    let bridge = internal_scope(&state, &headers)?;
     let id = body
         .account_reference
         .strip_prefix("cfmeet-user:")
@@ -354,11 +354,15 @@ async fn account_status(
     };
     state.db.execute(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO account_communication_state(user_id,version) VALUES($1,1) ON CONFLICT DO NOTHING",[id.into()])).await?;
     let row=state.db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT version,credentials_not_before FROM account_communication_state WHERE user_id=$1",[id.into()])).await?.ok_or_else(unavailable)?;
+    let link=state.db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT principal_id FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1 AND environment_id=$2",[id.into(),bridge.scope.application_environment_id().into()])).await?;
+    let principal = link
+        .map(|r| r.try_get::<Uuid>("", "principal_id"))
+        .transpose()?;
     let version: i64 = row.try_get("", "version")?;
     let cutoff: Option<chrono::DateTime<chrono::Utc>> =
         row.try_get("", "credentials_not_before")?;
     Ok(Json(
-        json!({"active":user.role!=users::UserRole::Guest && !matches!(user.status,users::UserStatus::Inactive|users::UserStatus::Suspended),"version":version,"state":if user.status==users::UserStatus::Inactive {"DEACTIVATED"} else if user.status==users::UserStatus::Suspended {"SUSPENDED"} else {"ACTIVE"},"credentialsNotBefore":cutoff}),
+        json!({"active":user.role!=users::UserRole::Guest && !matches!(user.status,users::UserStatus::Inactive|users::UserStatus::Suspended),"version":version,"state":if user.status==users::UserStatus::Inactive {"DEACTIVATED"} else if user.status==users::UserStatus::Suspended {"SUSPENDED"} else {"ACTIVE"},"credentialsNotBefore":cutoff,"principalId":principal}),
     ))
 }
 #[derive(serde::Deserialize)]
@@ -372,7 +376,7 @@ async fn backfill(
     headers: HeaderMap,
     Json(body): Json<Backfill>,
 ) -> ApiResult<Json<Value>> {
-    internal_scope(&state, &headers)?;
+    let bridge = internal_scope(&state, &headers)?;
     if !(1..=100).contains(&body.limit) {
         return Err(ApiError::domain(
             ErrorCode::ValidationError,
@@ -386,7 +390,8 @@ async fn backfill(
     for record in records.into_iter().take(body.limit as usize) {
         let id: Uuid = record.try_get("", "id")?;
         let name: String = record.try_get("", "username")?;
-        accounts.push(json!({"accountReference":format!("cfmeet-user:{id}"),"displayName":name}));
+        let principal = bridge.principal(&state, id).await?;
+        accounts.push(json!({"accountReference":format!("cfmeet-user:{id}"),"displayName":name,"principalId":principal}));
         last = Some(id);
     }
     Ok(Json(

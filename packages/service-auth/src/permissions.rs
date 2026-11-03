@@ -638,7 +638,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformPrincipalEnsure,
         name: "platform-principal.ensure",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::COMMUNICATIONS, services::MEETING_SERVICE],
+        grantable_to: &[services::MEETING_SERVICE],
         sensitive: false,
         description: "Resolve or create the native-account / meeting-participant principal of a first-party backend's authenticated user in its delegated scope",
     },
@@ -1169,12 +1169,12 @@ mod tests {
                 ("messaging-request.forward", &[services::API_GATEWAY][..]),
             ]
         );
-        // Native account bootstrap is limited to Account and the scoped Hub backfill.
+        // Native account bootstrap remains owned by Account; Hub backfill reuses its bindings.
         assert_eq!(
             InternalPermission::PlatformPrincipalEnsure
                 .definition()
                 .grantable_to,
-            &[services::COMMUNICATIONS, services::MEETING_SERVICE]
+            &[services::MEETING_SERVICE]
         );
         let granted: Vec<_> = REGISTRY
             .iter()

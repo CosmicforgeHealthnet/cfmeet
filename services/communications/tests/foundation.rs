@@ -582,6 +582,20 @@ async fn account_events_are_idempotent_monotonic_and_payload_bound() {
         .await;
     assert_eq!(status, 200);
     assert_eq!(result["applied"], true);
+    let updated = h
+        .state
+        .store
+        .principal(&h.state.store.db, p.scope(), p.principal_id)
+        .await
+        .unwrap();
+    assert!(
+        updated.credentials_not_before.is_some(),
+        "suspension must revoke old credentials"
+    );
+    let projected: Value = one(&h.state.store.db,
+        "SELECT payload doc FROM communication_outbox WHERE event_type='communications.account.changed' LIMIT 1",
+        vec![]).await.unwrap().unwrap();
+    assert!(projected["credentialsNotBefore"].is_i64());
     let (_, duplicate) = h
         .http(&h.account_signer, path, event.clone(), h.scope.clone())
         .await;

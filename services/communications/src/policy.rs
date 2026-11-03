@@ -50,6 +50,7 @@ impl State {
     ) -> Result<bool> {
         let status = auth::account_status(self, scope, &p.account_reference).await?;
         Ok(status["active"] == true
+            && status["principalId"] == p.principal_id.to_string()
             && status["version"]
                 .as_i64()
                 .is_some_and(|v| v <= p.account_version))

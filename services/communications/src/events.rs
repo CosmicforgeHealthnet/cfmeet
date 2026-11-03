@@ -103,7 +103,9 @@ pub async fn account_event(
                     },
                 }
             };
-            execute(&txn,"UPDATE communication_profiles SET activation_state=$2,account_version=$3,credentials_not_before=CASE WHEN $4 THEN GREATEST(COALESCE(credentials_not_before,$5),$5) ELSE credentials_not_before END,suspended_at=CASE WHEN $2='SUSPENDED' THEN $5 ELSE suspended_at END,deactivated_at=CASE WHEN $2='DEACTIVATED' THEN $5 ELSE deactivated_at END,version=version+1,updated_at=now() WHERE id=$1",vec![p.id.into(),next.into(),event.source_version.into(),(event.kind==AccountEventKind::SessionRevoked).into(),event.occurred_at.into()]).await?;
+            let revoke_credentials = event.kind == AccountEventKind::SessionRevoked
+                || matches!(event.state, Activation::Suspended | Activation::Deactivated);
+            execute(&txn,"UPDATE communication_profiles SET activation_state=$2,account_version=$3,credentials_not_before=CASE WHEN $4 THEN GREATEST(COALESCE(credentials_not_before,$5),$5) ELSE credentials_not_before END,suspended_at=CASE WHEN $2='SUSPENDED' THEN $5 ELSE suspended_at END,deactivated_at=CASE WHEN $2='DEACTIVATED' THEN $5 ELSE deactivated_at END,version=version+1,updated_at=now() WHERE id=$1",vec![p.id.into(),next.into(),event.source_version.into(),revoke_credentials.into(),event.occurred_at.into()]).await?;
             s.store
                 .audit_system(
                     &txn,
@@ -113,7 +115,7 @@ pub async fn account_event(
                     json!({"kind":event.kind,"state":next,"sourceVersion":event.source_version}),
                 )
                 .await?;
-            s.store.event(&txn,&p,"communications.account.changed",p.id,p.version+1,json!({"principalId":p.principal_id,"state":next,"credentialsNotBefore":if event.kind==AccountEventKind::SessionRevoked {Some(event.occurred_at.timestamp())} else {None}})).await?;
+            s.store.event(&txn,&p,"communications.account.changed",p.id,p.version+1,json!({"principalId":p.principal_id,"state":next,"credentialsNotBefore":if revoke_credentials {Some(event.occurred_at.timestamp())} else {None}})).await?;
             applied = true;
         }
     }
@@ -225,23 +227,9 @@ pub async fn backfill(
             .as_str()
             .filter(|v| v.starts_with("cfmeet-user:"))
             .ok_or(Error::Unavailable)?;
-        let req = OutboundServiceRequest::new_operation(ServiceId::platform_access())
-            .with_delegated_context(scope.clone());
-        let response = s
-            .config
-            .client
-            .post_json(
-                &req,
-                "/internal/v1/principals/ensure",
-                &json!({"kind":"NATIVE_CF_USER","externalReference":reference}),
-            )
-            .await
-            .map_err(|_| Error::Unavailable)?;
-        if response.status() != 200 && response.status() != 201 {
-            return Err(Error::Unavailable);
-        }
-        let principal: Value = response.json().map_err(|_| Error::Unavailable)?;
-        let principal = uuid_field(&principal["principal"], "id")?;
+        // Account owns the mapping. It reuses its existing principal link and ensures
+        // missing native mappings through Platform Access; the Hub never replaces it.
+        let principal = uuid_field(account, "principalId")?;
         let txn = s.store.begin().await?;
         let profile = Uuid::new_v4();
         let mut values = vec![profile.into()];

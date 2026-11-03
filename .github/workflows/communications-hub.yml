@@ -103,6 +103,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: personal-communications-e2e
+          workspaces: |
+            services/platform-access -> ../../target
+            services/meeting-service -> ../../target
+            services/calling -> ../../target
+            services/messaging -> ../../target
+            services/communications -> ../../target
+            certification -> ../target
       - name: Start the existing loopback LiveKit certification configuration
         run: |
           docker run -d --name communications-livekit --network host \

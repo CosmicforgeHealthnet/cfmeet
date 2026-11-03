@@ -356,8 +356,13 @@ impl PersonalStack {
                 "messaging.managed.ring",
                 &format!(
                     "personal-1 {}\n",
-                    base64::engine::general_purpose::URL_SAFE_NO_PAD
-                        .encode([Uuid::new_v4().as_bytes(), Uuid::new_v4().as_bytes()].concat())
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+                        [
+                            Uuid::new_v4().as_bytes().as_slice(),
+                            Uuid::new_v4().as_bytes().as_slice()
+                        ]
+                        .concat()
+                    )
                 ),
             )?,
         ));

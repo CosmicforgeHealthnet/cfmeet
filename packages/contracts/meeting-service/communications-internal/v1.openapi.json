@@ -275,11 +275,16 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "principalId": {
+                  "type": "string",
+                  "format": "uuid"
                 }
               },
               "required": [
                 "accountReference",
-                "displayName"
+                "displayName",
+                "principalId"
               ]
             }
           },
@@ -337,6 +342,17 @@
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "principalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"

@@ -21,7 +21,7 @@ impl State {
         auth::validate_scope(self, scope).await?;
         auth::verify_principal(self, scope, a).await?;
         let status = auth::account_status(self, scope, &a.account_reference).await?;
-        if status["active"] != true {
+        if status["active"] != true || status["principalId"] != a.principal_id.to_string() {
             return Err(Error::Forbidden);
         }
         let account_version = status["version"]
@@ -248,6 +248,9 @@ impl State {
         let changed=execute(&txn,"UPDATE communication_privacy SET public_id_discoverable=$3,invitation_permissions=$4,contact_request_permissions=$5,incoming_call_policy=$6,direct_chat_policy=$7,public_profile_visibility=$8,presence_visibility=$9,version=version+1,updated_at=now() WHERE profile_id=$1 AND version=$2",values).await?;
         if changed != 1 {
             return Err(Error::Version);
+        }
+        if update.privacy.invitation_permissions == InvitationPermission::Disabled {
+            execute(&txn,"UPDATE communication_invites SET revoked_at=now(),version=version+1 WHERE owner_profile_id=$1 AND revoked_at IS NULL",vec![p.id.into()]).await?;
         }
         self.store
             .audit(

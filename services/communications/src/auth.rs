@@ -129,8 +129,10 @@ pub async fn principals_active(
 ) -> Result<bool> {
     let request = OutboundServiceRequest::new_operation(ServiceId::platform_access())
         .with_delegated_context(scope.clone());
+    let profiles: std::collections::BTreeMap<_, _> =
+        profiles.iter().map(|p| (p.principal_id, *p)).collect();
     let references: Vec<_> = profiles
-        .iter()
+        .values()
         .map(|p| json!({"principalId":p.principal_id}))
         .collect();
     let response = s
@@ -151,12 +153,11 @@ pub async fn principals_active(
         .as_array()
         .filter(|r| r.len() == profiles.len())
         .ok_or(Error::Unavailable)?;
-    Ok(profiles.iter().zip(results).all(|(p, r)| {
+    Ok(profiles.values().zip(results).all(|(p, r)| {
         r["outcome"] == "RESOLVED"
             && r["principal"]["id"] == p.principal_id.to_string()
             && r["principal"]["kind"] == "NATIVE_CF_USER"
             && r["principal"]["status"] == "ACTIVE"
-            && r["principal"]["externalReference"] == p.account_reference
     }))
 }
 pub async fn verify_principal(
@@ -197,7 +198,6 @@ pub async fn verify_principal(
     let p = principal.get("principal").unwrap_or(principal);
     if p["id"] != account.principal_id.to_string()
         || p["kind"] != "NATIVE_CF_USER"
-        || p["externalReference"] != account.account_reference
         || p["status"] != "ACTIVE"
     {
         return Err(Error::Forbidden);

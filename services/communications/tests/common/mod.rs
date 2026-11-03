@@ -79,7 +79,7 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             .find(|a| Some(a.reference.as_str()) == body["accountReference"].as_str())
         {
             Some(a) => {
-                json!({"active":a.active,"version":a.version,"credentialsNotBefore":a.cutoff})
+                json!({"active":a.active,"version":a.version,"credentialsNotBefore":a.cutoff,"principalId":a.principal})
             }
             None => json!({"active":false,"version":0}),
         },
@@ -165,11 +165,7 @@ impl Harness {
                 vec![(
                     ServiceId::communications(),
                     hub.public_jwk(),
-                    vec![
-                        "platform-identity.read",
-                        "platform-principal.resolve",
-                        "platform-principal.ensure",
-                    ],
+                    vec!["platform-identity.read", "platform-principal.resolve"],
                 )],
             ),
             verifier(
