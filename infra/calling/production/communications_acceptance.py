@@ -53,6 +53,7 @@ def execute(sha, run_id, scope, stage):
     report=json.loads((folder/'report.json').read_text()) if (folder/'report.json').exists() else {'checks':{},'failure':'client did not produce evidence'}
     report.update(sha=sha,workflowRunId=run_id,environment='isolated-vps-staging' if stage else 'production')
     report['images']={name:p.inspect(('cfmeet-comm-stage-'+name) if stage else release.OWNERS.get(name,'cfmeet-communications'))['Image'] for name in release.PORTS}
+    report['registryDigests']={name:json.loads(p.run('docker','image','inspect',ref))[0].get('RepoDigests',[]) for name,ref in report['images'].items()}
     if result.returncode:
         print(json.dumps(report),flush=True)
         raise RuntimeError('Communications backend acceptance failed; protected evidence retained on VPS')
