@@ -1,5 +1,7 @@
 # CF Meet Calling production completion report — 2 November 2026
 
+Historical snapshot. See the [3 November backend production report](calling-backend-production-2026-11-03.md) for the subsequent encryption fix, enabled features and completed API/media acceptance.
+
 **NOT CLOSED — specific production requirements remain.**
 
 Production infrastructure was changed and tested through the repository's existing

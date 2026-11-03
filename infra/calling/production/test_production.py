@@ -125,6 +125,18 @@ class IsolatedAcceptanceSafety(unittest.TestCase):
             with self.assertRaises(TimeoutError):api_acceptance.run('controlled-run','recording')
         rollback.assert_called_once()
 
+    def test_abandoned_probe_cleanup_refuses_an_unrelated_image(self):
+        with patch.object(p,'inspect',return_value={'Config':{'Image':'unrelated-service'}}),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.retire_abandoned_probe()
+        execute.assert_not_called()
+
+    def test_abandoned_probe_cleanup_refuses_a_customer_mount(self):
+        container={'Config':{'Image':'cfmeet-calling-api-probe:test','Cmd':['python','/api_client.py']},
+            'Mounts':[{'Source':'/customer-data','Destination':'/result'}]}
+        with patch.object(p,'inspect',return_value=container),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.retire_abandoned_probe()
+        execute.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
