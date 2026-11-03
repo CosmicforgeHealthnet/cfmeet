@@ -48,6 +48,7 @@ impl Sandbox {
         for service in [
             "api-gateway",
             "calling",
+            "communications",
             "developer-platform",
             "meeting-service",
             "messaging",

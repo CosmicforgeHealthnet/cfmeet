@@ -20,7 +20,7 @@ def inspect_runtime():
             configuration_names=sorted(env),
             personal_scope={k:v for k,v in env.items() if k in ('CFMEET_COMMUNICATION_TENANT_ID','CFMEET_COMMUNICATION_APPLICATION_ID','CFMEET_COMMUNICATION_ENVIRONMENT_ID','CFMEET_COMMUNICATION_ENVIRONMENT_KIND','CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')},
             flags={k:v for k,v in env.items() if k in p.SAFE_ENV})))
-    print(json.dumps({'configuration_files':[str(x) for x in p.ROOT.glob('*.env')], 'secret_file_names':[x.name for x in p.SECRETS.iterdir() if x.is_file()], 'container_names':p.run('docker','ps','--format','{{.Names}}').splitlines()}))
+    print(json.dumps({'configuration_files':[str(x) for x in p.ROOT.glob('*.env')], 'secret_file_names':[x.name for x in p.SECRETS.iterdir() if x.is_file()], 'container_names':[x for x in p.run('docker','ps','--format','{{.Names}}').splitlines() if x.startswith('cfmeet') or x=='cosmicforge-db']}))
     tls=p.inspect('cfmeet-core-tls')
     for m in tls['Mounts']:
         path=Path(m['Source'])
@@ -40,7 +40,7 @@ import re
 import secrets
 import subprocess
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlunsplit
 
 OWNERS = {'platform-access':'cfmeet-platform-access','meeting-service':'cfmeet-production-backend',
           'calling':'cfmeet-calling','messaging':'cfmeet-messaging'}
@@ -107,6 +107,11 @@ def prepare_trust():
         bundle['trusted_issuers']=[x for x in bundle['trusted_issuers'] if x['issuer']!='cfmeet.communications']
         grant(bundle,'cfmeet.communications',hubkey,perms[service])
         save(WORK/(service+'.trust.json'),json.dumps(bundle))
+    operator=WORK/'communications-operator.pem'
+    if not operator.exists():
+        p.run('openssl','genpkey','-algorithm','ED25519','-out',str(operator))
+        os.chmod(operator,0o400)
+    grant(hub,'cfmeet.operator-console',public_key(operator,'communications-operator-20261103'),['communications-backfill.run'])
     save(WORK/'communications.trust.json',json.dumps(hub))
 
 def image(service,sha):
@@ -135,14 +140,14 @@ def database(name):
     value={'runtime':f'postgres://{runtime}:{rp}@cfmeet-core-db:5432/{name}','migrator':f'postgres://{owner}:{mp}@cfmeet-core-db:5432/{name}'}
     p.write_private(config,json.dumps(value));return value
 
-def migrate(service,sha,url,feature_only=False):
+def migrate(service,sha,url,feature_only=False,network=None):
     binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-communications-migration'],
               'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration'],
               'communications':['communications-migration']}[service]
     if feature_only:binaries=binaries[-1:]
     path=env_file(WORK/(service+'.migration.private.env'),{'DATABASE_URL':url})
     for binary in binaries:
-        p.run('docker','run','--rm','--network',p.NET,'--env-file',str(path),'--entrypoint','/app/'+binary,image(service,sha),'up')
+        p.run('docker','run','--rm','--network',network or p.NET,'--env-file',str(path),'--entrypoint','/app/'+binary,image(service,sha),'up')
     path.unlink()
 
 def clone(c,name,img,overrides,stage):
@@ -207,6 +212,7 @@ def configured(service,sha,stage,scope,db=None):
             if not ring.exists():save(ring,'stage-1 '+base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')+'\n',True)
             cfg['Env'].append('MESSAGING_MANAGED_KEYRING_FILE=/run/communications/managed.ring')
             add_mount(cfg,ring,'/run/communications/managed.ring')
+    if stage:cfg.setdefault('Labels',{})['com.cfmeet.communications.candidate']='true'
     add_mount(cfg,WORK/(service+'.trust.json'),'/run/communications/trust.json')
     return name,cfg
 
@@ -238,7 +244,12 @@ def wait(name,service):
     raise RuntimeError('Communications candidate readiness failed: '+service)
 
 def start(name,cfg):
-    assert name not in p.run('docker','ps','-a','--format','{{.Names}}').splitlines(),'Existing candidate must be retained or explicitly reconciled'
+    if name in p.run('docker','ps','-a','--format','{{.Names}}').splitlines():
+        assert name.startswith('cfmeet-comm-stage-'),'Existing production container cannot be replaced by candidate creation'
+        old=p.inspect(name)
+        assert old['Config'].get('Labels',{}).get('com.cfmeet.communications.candidate')=='true','Unowned candidate name collision'
+        p.run('docker','stop','--time','20',name)
+        p.run('docker','rename',name,name+'-retired-'+str(time.time_ns()))
     p.docker_api('POST','/containers/create?name='+name,cfg);p.docker_api('POST','/containers/'+name+'/start')
 
 def stage_admin(sha,*args):
@@ -251,17 +262,19 @@ def stage_admin(sha,*args):
 def stage_scope(sha):
     file=WORK/'stage-context.private.json'
     if file.exists():return json.loads(file.read_text())
-    stage_admin(sha,'tenant','create','--slug','communications-stage','--name','Isolated Communications acceptance','--classification','first-party')
-    stage_admin(sha,'application','create','--tenant','communications-stage','--slug','personal','--name','Sections 4-7')
+    db='cfmeet_comm_stage_platform_access'
+    if db_sql(db,"SELECT count(*) FROM platform_tenants WHERE slug='communications-stage';")=='0':
+        stage_admin(sha,'tenant','create','--slug','communications-stage','--name','Isolated Communications acceptance','--classification','first-party')
+    if db_sql(db,"SELECT count(*) FROM platform_applications WHERE slug='personal';")=='0':
+        stage_admin(sha,'application','create','--tenant','communications-stage','--slug','personal','--name','Sections 4-7')
     args=['--tenant','communications-stage','--application','personal','--environment','test']
-    ev=stage_admin(sha,'environment','create',*args)
-    sa=stage_admin(sha,'service-account','create',*args,'--name','acceptance')
+    if db_sql(db,"SELECT count(*) FROM platform_environments WHERE kind='TEST';")=='0':stage_admin(sha,'environment','create',*args)
+    if db_sql(db,"SELECT count(*) FROM platform_service_accounts WHERE name='acceptance';")=='0':stage_admin(sha,'service-account','create',*args,'--name','acceptance')
     scopes=['calls.read','calls.write','messages.read','messages.send','conversations.create','conversations.manage']
     for scope in scopes:stage_admin(sha,'scope','grant','--tenant','communications-stage','--application','personal','--scope',scope,'--environment-kind','test')
     credential=stage_admin(sha,'credential','create',*args,'--service-account','acceptance','--expires-in-days','1',*[v for scope in scopes for v in ('--scope',scope)],'--label','Isolated Sections 4-7 acceptance')
-    # CLI views are typed owner responses, never consumer discovery data.
-    ev=ev.get('environment',ev);sa=sa.get('serviceAccount',sa)
-    value={'tenantId':str(ev['tenantId']),'applicationId':str(ev['applicationId']),'environmentId':str(ev['id']),'serviceAccountId':str(sa['id']),'kind':'TEST','token':credential['secret']}
+    value=json.loads(db_sql(db,"SELECT json_build_object('tenantId',s.tenant_id,'applicationId',s.application_id,'environmentId',s.environment_id,'serviceAccountId',s.id,'kind','TEST') FROM platform_service_accounts s WHERE s.name='acceptance';"))
+    value['token']=credential['secret']
     p.write_private(file,json.dumps(value));return value
 
 def stage_release(sha,run_id):
@@ -271,6 +284,7 @@ def stage_release(sha,run_id):
     # database is touched. Candidates are private and have no published ports.
     dbs={service:database('cfmeet_comm_stage_'+service.replace('-','_')) for service in PORTS}
     for service in PORTS:
+        print('COMMUNICATIONS_STAGE_MIGRATE:',service,flush=True)
         migrate(service,sha,dbs[service]['migrator'])
     empty={'tenantId':'','applicationId':'','environmentId':'','serviceAccountId':'','kind':'TEST'}
     name,cfg=configured('platform-access',sha,True,empty,dbs['platform-access']['runtime'])
@@ -285,7 +299,129 @@ def stage_release(sha,run_id):
     p.write_private(WORK/'staging-evidence.json',json.dumps(report,indent=2))
     print(json.dumps(report),flush=True)
 
+
+def prod_scope():
+    e=p.env_of(p.inspect(OWNERS['meeting-service']))
+    value={k.lower()+'Id':e['CFMEET_COMMUNICATION_'+k+'_ID'] for k in ('TENANT','APPLICATION','ENVIRONMENT')}
+    value['serviceAccountId']=e['CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID'];value['kind']=e['CFMEET_COMMUNICATION_ENVIRONMENT_KIND']
+    assert value['kind']=='PRODUCTION','Preserve the authoritative native production identity scope'
+    return value
+
+def feature_migrate(service,sha):
+    c=p.inspect(OWNERS[service]);e=p.env_of(c);url=e['DATABASE_URL']
+    network='container:'+OWNERS[service] if service=='meeting-service' else p.NET
+    if service!='meeting-service':
+        u=urlsplit(url);password=(p.SECRETS/(service+'-migrator.password')).read_text().strip()
+        url=urlunsplit((u.scheme,service+'_migrator:'+quote(password,safe='')+'@'+u.hostname+':'+str(u.port or 5432),u.path,u.query,''))
+    print('COMMUNICATIONS_ADDITIVE_MIGRATION:',service,flush=True)
+    migrate(service,sha,url,feature_only=True,network=network)
+
+def replace(name,cfg,record):
+    original=p.inspect(name)
+    assert original['State']['Running'],'Known running production container required'
+    previous=name+'-communications-rollback-'+record['runId']
+    record['replacements'].append(dict(name=name,previous=previous,original=original))
+    p.write_private(WORK/'rollback.private.json',json.dumps(record))
+    p.run('docker','rename',name,previous)
+    p.run('docker','stop','--time','30',previous)
+    start(name,cfg)
+
+def rollback():
+    record=json.loads((WORK/'rollback.private.json').read_text())
+    names=p.run('docker','ps','-a','--format','{{.Names}}').splitlines()
+    for entry in reversed(record['replacements']):
+        name,previous=entry['name'],entry['previous']
+        if previous not in names:continue # rename did not occur; original is intact
+        if name in names:
+            try:p.run('docker','stop','--time','20',name)
+            except RuntimeError:pass
+            p.run('docker','rename',name,name+'-communications-failed-'+record['runId'])
+        p.run('docker','rename',previous,name);p.run('docker','start',name)
+    if record.get('newHub'):
+        try:p.run('docker','stop','--time','20','cfmeet-communications')
+        except RuntimeError:pass
+    p.regression()
+    print('COMMUNICATIONS_ROLLBACK: original runtime configuration and containers restored; additive tables retained',flush=True)
+
+def credential(scope):
+    # Operator-only owner inspection resolves the existing native service account.
+    # The credential is scoped, expires in one day, and never reaches a client.
+    import api_acceptance
+    import uuid
+    sa=str(uuid.UUID(scope['serviceAccountId']))
+    query="SELECT json_build_object('tenant',t.slug,'application',a.slug,'account',s.name) FROM platform_service_accounts s JOIN platform_tenants t ON t.id=s.tenant_id JOIN platform_applications a ON a.id=s.application_id WHERE s.id='"+sa+"'"
+    refs=json.loads(api_acceptance.sql(query))
+    path=['--tenant',refs['tenant'],'--application',refs['application'],'--environment','production']
+    scopes=['calls.read','calls.write','messages.read','messages.send','conversations.create']
+    # Add only the personal Calling/Messaging scopes; no enterprise or telecom authority.
+    for scope in scopes:api_acceptance.admin('scope','grant','--tenant',refs['tenant'],'--application',refs['application'],'--scope',scope,'--environment-kind','production')
+    value=api_acceptance.admin('credential','create',*path,'--service-account',refs['account'],'--expires-in-days','1',
+        *[v for scope in scopes for v in ('--scope',scope)],'--label','Sections 4-7 native policy acceptance')
+    return value['secret']
+
+def release(sha,run_id):
+    p.identity()
+    evidence=json.loads((WORK/'staging-evidence.json').read_text())
+    assert evidence['sha']==sha and evidence['checks'] and all(v=='PASS' for v in evidence['checks'].values()),'Exact image staging acceptance has not passed'
+    for service in PORTS:
+        assert evidence['images'][service]==image(service,sha),'Staged image digest mismatch'
+    scope=prod_scope();prepare_trust();proxy_routes()
+    record=dict(sha=sha,runId=run_id,replacements=[],newHub=False)
+    # Only the three additive owner feature migrations and the new isolated Hub
+    # schema are applied. Existing base histories are deliberately untouched.
+    for service in ('meeting-service','calling','messaging'):feature_migrate(service,sha)
+    hubdb=database('cfmeet_comm_production_hub');migrate('communications',sha,hubdb['migrator'])
+    try:
+        name,cfg=configured('platform-access',sha,False,scope)
+        replace(name,cfg,record);wait(name,'platform-access')
+        name,cfg=configured('communications',sha,False,scope,hubdb['runtime'])
+        if name in p.run('docker','ps','-a','--format','{{.Names}}').splitlines():replace(name,cfg,record)
+        else:
+            record['newHub']=True;p.write_private(WORK/'rollback.private.json',json.dumps(record));start(name,cfg)
+        wait(name,'communications')
+        # Never stop Calling underneath an established customer call.
+        for attempt in range(30):
+            active=db_sql('cfmeet_calling',"SELECT count(*) FROM calls WHERE current_state NOT IN ('ENDED','DECLINED','BUSY','NO_ANSWER','FAILED','CANCELLED');")
+            if active=='0':break
+            if attempt%10==0:print('COMMUNICATIONS_WAIT: active Calling sessions retained',flush=True)
+            time.sleep(2)
+        else:raise RuntimeError('Active calls prevented safe Calling cutover')
+        for service in ('calling','messaging','meeting-service'):
+            name,cfg=configured(service,sha,False,scope)
+            replace(name,cfg,record);wait(name,service)
+        p.regression()
+        scope['token']=credential(scope)
+        import communications_acceptance
+        report=communications_acceptance.execute(sha,run_id,scope,stage=False)
+        # Existing enterprise, Messaging and Meetings API checks remain authoritative.
+        import api_acceptance
+        api_acceptance.run(run_id+'-communications-enterprise','enterprise')
+        report['checks']['existing_enterprise_calling_acceptance']='PASS'
+        report['checks']['existing_backend_compatibility']='PASS' if all(x=='PASS' for x in api_acceptance.compatibility().values()) else 'FAIL'
+        assert all(x=='PASS' for x in report['checks'].values())
+        report['runtimeFlags']={k:v for k,v in p.env_of(p.inspect('cfmeet-calling')).items() if k in p.SAFE_ENV}
+        p.write_private(WORK/'production-evidence.json',json.dumps(report,indent=2))
+        p.write_private(WORK/'production-context.private.json',json.dumps(scope))
+        print(json.dumps(report),flush=True)
+    except Exception:
+        rollback();raise
+
+def verify(sha,run_id):
+    report=json.loads((WORK/'production-evidence.json').read_text())
+    assert report['sha']==sha,'Requested source is not the recorded release'
+    for service in PORTS:
+        name=OWNERS.get(service,'cfmeet-communications');wait(name,service)
+        assert p.inspect(name)['Image']==report['images'][service],'Running image differs from accepted release'
+    import communications_acceptance
+    scope=json.loads((WORK/'production-context.private.json').read_text())
+    scope['token']=credential(scope)
+    report=communications_acceptance.execute(sha,run_id,scope,stage=False)
+    p.regression();print(json.dumps(report),flush=True)
+
 def run(operation, sha, run_id):
     if operation=='communications-inspect':inspect_runtime()
     elif operation=='communications-stage':stage_release(sha,run_id)
-    else:raise RuntimeError('Production Communications cutover awaits successful isolated acceptance')
+    elif operation=='communications-release':release(sha,run_id)
+    elif operation=='communications-verify':verify(sha,run_id)
+    elif operation=='communications-rollback':rollback()
+    else:raise RuntimeError('Unknown Communications release operation')

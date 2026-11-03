@@ -8,10 +8,14 @@ on:
         options: [communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
+      image_sha:
+        description: 'Existing immutable image source SHA; service code must match this workflow revision'
+        type: string
+        required: false
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: cfmeet-calling-production${{ inputs.operation == 'inspect' && '-inspect' || '' }}
+  group: ${{ startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect' && 'deploy-backend-production' || inputs.operation == 'inspect' && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
@@ -23,6 +27,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Check activation gates and runtime preservation
         run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
       - name: Configure existing production SSH access
@@ -48,15 +53,18 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          IMAGE_SHA: ${{ inputs.image_sha || github.sha }}
         run: |
           set -euo pipefail
+          [[ "$IMAGE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git diff --exit-code "$IMAGE_SHA" "$GITHUB_SHA" -- services packages/service-auth packages/communications-policy packages/contracts/bundled packages/contracts/openapi
           available=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "df -k --output=avail / | tail -n1")
           [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 5242880 ))
           for service in platform-access meeting-service calling messaging communications; do
-            image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cfmeet-$service:$GITHUB_SHA"
+            image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cfmeet-$service:$IMAGE_SHA"
             docker pull "$image"
             revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
-            [[ "$revision" == "$GITHUB_SHA" ]]
+            [[ "$revision" == "$IMAGE_SHA" ]]
             docker save "$image" | gzip -1 | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" 'gzip -dc | docker load'
           done
       - name: Execute versioned production operation
@@ -64,6 +72,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           OPERATION: ${{ inputs.operation }}
+          IMAGE_SHA: ${{ inputs.image_sha || github.sha }}
         run: |
           set -euo pipefail
           if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage ]]; then
@@ -76,7 +85,7 @@ jobs:
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
           tar -C infra/calling/production -cf - . | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "python3 -u '$remote/production.py' '$OPERATION' '$GITHUB_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" "python3 -u '$remote/production.py' '$OPERATION' '$IMAGE_SHA' '$GITHUB_RUN_ID'" | tee production-result.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
