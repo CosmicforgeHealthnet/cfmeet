@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
 
@@ -43,7 +43,11 @@ jobs:
           OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/main ]]
+          if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage ]]; then
+            [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/heads/staging ]]
+          else
+            [[ "$GITHUB_REF" == refs/heads/main ]]
+          fi
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py

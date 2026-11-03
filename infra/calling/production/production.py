@@ -784,7 +784,10 @@ if __name__ == '__main__':
     os.umask(0o077)
     try:
         operation, sha, run_id = sys.argv[1:]
-        if operation == 'inspect':
+        if operation.startswith('communications-'):
+            import communications_release
+            communications_release.run(operation, sha, run_id)
+        elif operation == 'inspect':
             audit()
         elif operation == 'compatibility':
             import api_acceptance
