@@ -352,7 +352,7 @@ impl PersonalStack {
             ),
             (
                 "CALLING_MEDIA_GATEWAY_URL".into(),
-                self.urls["calling"].replace("http://", "ws://") + "/v1/media/rtc",
+                self.urls["calling"].replace("http://", "ws://") + "/v1/calling/media",
             ),
             (
                 "CALLING_MEDIA_EDGE_SIGNING_KEY_FILE".into(),

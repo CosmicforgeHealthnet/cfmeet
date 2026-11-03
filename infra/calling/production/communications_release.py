@@ -220,7 +220,7 @@ def configured(service,sha,stage,scope,db=None):
                      CF_MESSAGING_BASE_URL='https://api.cfmeet.com:'+str(routes['messaging']))
             if stage:e.update(JWT_SECRET=secrets.token_hex(32),SMTP_HOST='',EMAIL_VERIFICATION_REQUIRED='false')
         if stage and service=='calling':
-            e.update(VOICEMAIL_ENABLED='false',CALL_RECORDING_ENABLED='false',CALLING_MEDIA_GATEWAY_URL='wss://api.cfmeet.com:'+str(routes['calling'])+'/v1/media/rtc')
+            e.update(VOICEMAIL_ENABLED='false',CALL_RECORDING_ENABLED='false',CALLING_MEDIA_GATEWAY_URL='wss://api.cfmeet.com:'+str(routes['calling'])+'/v1/calling/media')
         cfg=clone(p.inspect(OWNERS[service]),name,image(service,sha),e,stage)
         if stage and service=='messaging':
             ring=WORK/'stage-managed.ring'
