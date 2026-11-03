@@ -202,7 +202,7 @@ async fn event(
         || !e.kind.starts_with("communications.")
         || e.kind.len() > 80
     {
-        return Err(Error::validation("Invalid Communications event").into());
+        return Err(Error::validation("Invalid Communications event"));
     }
     let digest = {
         use sha2::{Digest, Sha256};
@@ -217,7 +217,7 @@ async fn event(
             .map_err(Error::from)?
             != digest
         {
-            return Err(Error::validation("Event identity conflict").into());
+            return Err(Error::validation("Event identity conflict"));
         }
     }
     if let (Some(principal), Some(cutoff)) = (

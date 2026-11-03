@@ -319,11 +319,20 @@ async fn the_served_contract_lists_exactly_the_implemented_routes() {
         .unwrap(),
     )
     .unwrap();
+    let communications: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/contracts/messaging/communications-internal/v1.openapi.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let normalized: Vec<String> = api["paths"]
         .as_object()
         .unwrap()
         .keys()
         .chain(internal["paths"].as_object().unwrap().keys())
+        .chain(communications["paths"].as_object().unwrap().keys())
         .map(|p| {
             p.split('/')
                 .map(|s| if s.starts_with('{') { "*" } else { s })

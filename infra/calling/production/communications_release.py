@@ -287,7 +287,10 @@ def stage_scope(sha):
     p.write_private(file,json.dumps(value));return value
 
 def stage_release(sha,run_id):
-    p.identity();prepare_trust();proxy_routes()
+    p.identity()
+    available=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
+    assert available>=3*1024*1024,'Less than 3 GiB available for isolated candidate services; existing production preserved'
+    prepare_trust();proxy_routes()
     for service in PORTS:image(service,sha)
     # Fresh databases and additive owner migrations are tested before a production
     # database is touched. Candidates are private and have no published ports.

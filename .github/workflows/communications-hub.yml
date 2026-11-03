@@ -9,6 +9,8 @@ on:
       - "services/meeting-service/**"
       - "packages/communications-policy/**"
       - "packages/service-auth/**"
+      - "certification/Cargo.toml"
+      - "certification/Cargo.lock"
       - "certification/src/personal_stack.rs"
       - "certification/tests/personal_communications.rs"
       - ".github/workflows/communications-hub.yml"
@@ -127,4 +129,4 @@ jobs:
             cargo build --manifest-path "services/$service/Cargo.toml" --workspace --bins --locked
           done
       - name: Real backend journey with isolated owner databases and signed service authentication
-        run: cargo test --manifest-path certification/Cargo.toml --locked --test personal_communications -- --nocapture
+        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture

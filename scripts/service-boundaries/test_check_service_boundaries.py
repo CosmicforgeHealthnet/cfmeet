@@ -371,7 +371,8 @@ class RealRepository(unittest.TestCase):
                                      # awaiting deletion; section 80: retention holds
                                      # and the retention audit (ADR 0030).
                                      "calling_orphan_objects", "calling_retention_holds",
-                                     "calling_retention_audit"}
+                                     "calling_retention_audit", "calling_communication_inbox",
+                                     "calling_communication_revocations"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

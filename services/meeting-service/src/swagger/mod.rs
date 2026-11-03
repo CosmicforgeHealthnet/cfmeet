@@ -1301,6 +1301,7 @@ mod tests {
             names,
             [
                 "Meetings",
+                "Communications",
                 "Calling",
                 "Numbering / DCNs",
                 "Privacy Relay",
