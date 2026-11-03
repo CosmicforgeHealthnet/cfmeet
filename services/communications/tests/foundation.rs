@@ -722,3 +722,56 @@ async fn request_attempts_are_durable_rate_limited_and_self_requests_are_rejecte
     ));
     h.close().await;
 }
+
+#[tokio::test]
+async fn existing_native_mapping_is_authoritative_and_another_valid_principal_cannot_impersonate_it(
+) {
+    let h = Harness::new().await;
+    let a = h.account();
+    let b = h.account();
+    let p = h.profile(&a).await;
+    assert_eq!(p.principal_id, a.principal_id);
+    let mut forged = a.clone();
+    forged.principal_id = b.principal_id;
+    assert!(matches!(
+        h.state.ensure_profile(&h.delegated(&forged), &forged).await,
+        Err(Error::Forbidden)
+    ));
+    assert_eq!(h.profile(&a).await.id, p.id);
+    h.close().await;
+}
+#[tokio::test]
+async fn retention_expires_pending_pairs_and_preserves_identity_and_undelivered_events() {
+    let h = Harness::new().await;
+    let a = h.profile(&h.account()).await;
+    let b = h.profile(&h.account()).await;
+    let request = h
+        .state
+        .send_request(
+            &h.scope,
+            &a,
+            json!({"cfMeetId":h.public_id(&b).await}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(request["requestId"].as_str().unwrap()).unwrap();
+    execute(&h.state.store.db,"UPDATE communication_contact_requests SET expires_at=now()-interval '1 second',version=version+1 WHERE id=$1",vec![id.into()]).await.unwrap();
+    h.state.maintain().await.unwrap();
+    h.state.maintain().await.unwrap();
+    let result:Value=one(&h.state.store.db,"SELECT jsonb_build_object('request',r.state,'connection',c.state) doc FROM communication_contact_requests r JOIN communication_connections c ON c.id=r.connection_id WHERE r.id=$1",vec![id.into()]).await.unwrap().unwrap();
+    assert_eq!(result["request"], "EXPIRED");
+    assert_eq!(result["connection"], "NONE");
+    assert_eq!(
+        h.state
+            .store
+            .principal(&h.state.store.db, a.scope(), a.principal_id)
+            .await
+            .unwrap()
+            .id,
+        a.id
+    );
+    let result:Value=one(&h.state.store.db,"SELECT jsonb_build_object('count',count(*)) doc FROM communication_outbox WHERE state='PENDING'",vec![]).await.unwrap().unwrap();
+    assert!(result["count"].as_i64().unwrap() > 0);
+    h.close().await;
+}

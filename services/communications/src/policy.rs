@@ -53,7 +53,7 @@ impl State {
             && status["principalId"] == p.principal_id.to_string()
             && status["version"]
                 .as_i64()
-                .is_some_and(|v| v <= p.account_version))
+                .is_some_and(|v| v == p.account_version))
     }
     pub async fn check_policy(
         &self,

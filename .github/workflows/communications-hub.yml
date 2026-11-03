@@ -103,6 +103,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: personal-communications-e2e
+          cache-on-failure: true
           workspaces: |
             services/platform-access -> ../../target
             services/meeting-service -> ../../target

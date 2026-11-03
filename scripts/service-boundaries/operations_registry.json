@@ -630,7 +630,7 @@
       "source": "src/events.rs",
       "entry": "maintain",
       "tests": [
-        "tests/foundation.rs::audit_and_authority_constraints_reject_mutation_and_cross_pair_aliases"
+        "tests/foundation.rs::retention_expires_pending_pairs_and_preserves_identity_and_undelivered_events"
       ]
     }
   ]

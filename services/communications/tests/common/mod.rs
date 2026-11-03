@@ -70,7 +70,7 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         "/internal/v1/principals/resolve" => {
             let results:Vec<_>=body["references"].as_array().unwrap().iter().map(|v| {
                 let id=v["principalId"].as_str().and_then(|v|Uuid::parse_str(v).ok());
-                match id.and_then(|i|accounts.get(&i)) {Some(a)=>json!({"outcome":"RESOLVED","principal":{"id":a.principal,"kind":"NATIVE_CF_USER","externalReference":a.reference,"status":"ACTIVE"}}),None=>json!({"outcome":"NOT_FOUND"})}
+                match id.and_then(|i|accounts.get(&i)) {Some(a)=>json!({"outcome":"RESOLVED","principal":{"id":a.principal,"kind":"NATIVE_CF_USER","externalReference":format!("legacy-native-{}",a.principal),"status":"ACTIVE"}}),None=>json!({"outcome":"NOT_FOUND"})}
             }).collect();
             json!({"results":results})
         }

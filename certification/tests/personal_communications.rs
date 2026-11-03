@@ -120,8 +120,8 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
     assert!(profile.get("email").is_none());
     // Test-only owner evidence. No service reads another service's database.
     let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
-    let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT principal_id FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1 AND environment_id=$2",[id.into(),s.customer.environment_id.into()])).await?.context("stable Account-owned mapping")?;
-    let principal = row.try_get("", "principal_id")?;
+    let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT principal_id::text FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1::uuid AND environment_id=$2::uuid",[id.to_string().into(),s.customer.environment_id.to_string().into()])).await?.context("stable Account-owned mapping")?;
+    let principal = Uuid::parse_str(&row.try_get::<String>("", "principal_id")?)?;
     db.close().await?;
     Ok(Account {
         id,
@@ -587,7 +587,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         401
     );
     let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
-    let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT version,credentials_not_before IS NOT NULL AS revoked FROM account_communication_state WHERE user_id=$1",[a.id.into()])).await?.context("durable Account revocation")?;
+    let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT version,credentials_not_before IS NOT NULL AS revoked FROM account_communication_state WHERE user_id=$1::uuid",[a.id.to_string().into()])).await?.context("durable Account revocation")?;
     assert!(row.try_get::<bool>("", "revoked")?);
     db.close().await?;
     // Keep the fixture login values private even on assertion failure.
