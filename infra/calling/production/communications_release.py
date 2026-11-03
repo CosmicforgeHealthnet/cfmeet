@@ -10,6 +10,7 @@ SERVICES = ('cfmeet-platform-access', 'cfmeet-production-backend', 'cfmeet-calli
 
 def inspect_runtime():
     p.identity()
+    print(json.dumps({'memory_available_kib':int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:'))),'disk_available_bytes':__import__('shutil').disk_usage(p.ROOT).free}))
     for name in SERVICES:
         c=p.inspect(name); env=p.env_of(c)
         db=urlsplit(env.get('DATABASE_URL',''))
