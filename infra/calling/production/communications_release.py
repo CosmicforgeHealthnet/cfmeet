@@ -249,7 +249,7 @@ def proxy_routes():
     assert not p.inspect('cfmeet-core-tls')['HostConfig']['PortBindings']
 
 def wait(name,service):
-    probe="import urllib.request; urllib.request.urlopen('http://"+name+':'+str(PORTS[service])+('/health' if service=='meeting-service' else '/ready')+"',timeout=3).read()"
+    probe="import urllib.request; urllib.request.urlopen('http://"+name+':'+str(PORTS[service])+('/health' if service in ('meeting-service','calling') else '/ready')+"',timeout=3).read()"
     for attempt in range(45):
         try:p.run('docker','run','--rm','--network',p.NET,'python:3.12-slim','python','-c',probe);return
         except RuntimeError:
