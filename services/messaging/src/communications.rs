@@ -74,6 +74,12 @@ pub async fn require_send<C: ConnectionTrait>(
     c: &ConversationRow,
     actor: Uuid,
 ) -> Result<()> {
+    let Some(client) = state.communications.as_ref() else {
+        return Ok(());
+    };
+    if !client.governs(scope(ctx)) {
+        return Ok(());
+    }
     if c.context_class == "GROUP" {
         // Membership remains Messaging-owned. A suspended personal account cannot
         // bypass its current activation state through a group message or edit.
@@ -82,7 +88,7 @@ pub async fn require_send<C: ConnectionTrait>(
     if c.context_class != "DIRECT" {
         return Ok(());
     }
-    let targets=crate::db::all::<PrincipalRow,_>(db,"SELECT principal_id FROM messaging_conversation_members WHERE conversation_id=$1 AND state='ACTIVE' AND principal_id<>$2",vec![c.id.into(),actor.into()]).await?;
+    let targets=crate::db::all::<PrincipalRow,_>(db,"SELECT principal_id FROM messaging_conversation_members WHERE conversation_id=$1 AND state IN ('ACTIVE','INVITED') AND principal_id<>$2",vec![c.id.into(),actor.into()]).await?;
     if targets.len() != 1 {
         return Err(Error::code(ErrorCode::DeliveryRefused));
     }
