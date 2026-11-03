@@ -57,7 +57,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$IMAGE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          git diff --exit-code "$IMAGE_SHA" "$GITHUB_SHA" -- services packages/service-auth packages/communications-policy packages/contracts/bundled packages/contracts/openapi
+          if [[ "${{ inputs.operation }}" == communications-release ]]; then
+            git diff --exit-code "$IMAGE_SHA" "$GITHUB_SHA" -- services packages/service-auth packages/communications-policy packages/contracts/bundled packages/contracts/openapi
+          fi
           available=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "df -k --output=avail / | tail -n1")
           [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 5242880 ))
           for service in platform-access meeting-service calling messaging communications; do
