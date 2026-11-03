@@ -74,6 +74,11 @@ pub async fn require_send<C: ConnectionTrait>(
     c: &ConversationRow,
     actor: Uuid,
 ) -> Result<()> {
+    if c.context_class == "GROUP" {
+        // Membership remains Messaging-owned. A suspended personal account cannot
+        // bypass its current activation state through a group message or edit.
+        return require(state, ctx, Action::PersonalActivity, actor, actor).await;
+    }
     if c.context_class != "DIRECT" {
         return Ok(());
     }

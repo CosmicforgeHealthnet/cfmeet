@@ -171,7 +171,12 @@ def clone(c,name,img,overrides,stage):
     return cfg
 
 def add_mount(cfg,source,target):
-    cfg['HostConfig'].setdefault('Mounts',[]).append(dict(Type='bind',Source=str(source),Target=target,ReadOnly=True))
+    existing=cfg['HostConfig'].setdefault('Mounts',[])
+    for item in existing:
+        if item.get('Target')==target:
+            assert item.get('Source')==str(source) and item.get('ReadOnly'), 'Unexpected existing feature mount'
+            return
+    existing.append(dict(Type='bind',Source=str(source),Target=target,ReadOnly=True))
 
 def configured(service,sha,stage,scope,db=None):
     name=('cfmeet-comm-stage-' if stage else 'cfmeet-')+service

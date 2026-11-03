@@ -143,7 +143,7 @@ class Journey:
         if self.c['stage']:
             policy=self.request('messaging','/v1/messaging/policy',token=self.c['scope']['token'])
             self.request('messaging','/v1/messaging/policy','PUT',{'expectedVersion':policy['version'],
-                'policy':{'contexts':{'DIRECT':{'allowedProfiles':['MANAGED','PRIVATE_E2EE'],'defaultProfile':'PRIVATE_E2EE'}}}},self.c['scope']['token'])
+                'policy':{'contexts':{'DIRECT':{'allowedProfiles':['MANAGED','PRIVATE_E2EE'],'defaultProfile':'PRIVATE_E2EE','requestsRequireAcceptance':False}}}},self.c['scope']['token'])
         for a0 in (a,b):
             endpoint=self.request('calling','/v1/calling/endpoints','POST',{'principalId':a0['principalId'],
                 'endpointKey':'comm-'+uuid.uuid4().hex,'endpointKind':'WEB','capabilities':{'audio':True,'video':True}},self.c['scope']['token'],expected=(201,))

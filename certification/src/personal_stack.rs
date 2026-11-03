@@ -24,6 +24,7 @@ pub struct PersonalStack {
     pub owner_urls: BTreeMap<String, String>,
     pub keys: ServiceKeys,
     pub customer: Customer,
+    pub legacy_accounts: Vec<Uuid>,
     pub http: reqwest::Client,
     pub dir: PathBuf,
     bin: PathBuf,
@@ -85,6 +86,7 @@ impl PersonalStack {
             owner_urls: BTreeMap::new(),
             keys,
             customer: blank,
+            legacy_accounts: Vec::new(),
             http,
             dir,
             bin,
@@ -194,8 +196,21 @@ impl PersonalStack {
             let owner = db::create(&self.admin, &db_name).await?;
             self.names.push(db_name.clone());
             db::migrate(&self.bin.join(base), &owner)?;
+            if name == "meeting-service" {
+                use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
+                let conn = Database::connect(&owner).await?;
+                for auth in ["local", "google"] {
+                    let id = Uuid::new_v4();
+                    conn.execute(Statement::from_sql_and_values(DbBackend::Postgres,
+                        "INSERT INTO users(id,username,email,auth_type,role,status) VALUES($1::uuid,$2,$3,$4::auth_type,'user','active')",
+                        [id.to_string().into(),format!("legacy_{auth}").into(),format!("legacy_{auth}@acceptance.invalid").into(),auth.into()])).await?;
+                    self.legacy_accounts.push(id);
+                }
+                conn.close().await?;
+            }
             if let Some(feature) = feature {
                 db::migrate(&self.bin.join(feature), &owner)?;
+                db::migrate(&self.bin.join(feature), &owner)?; // repeatable release invocation
             }
             let (role, runtime) = db::runtime_role(&self.admin, &db_name).await?;
             self.roles.push(role);

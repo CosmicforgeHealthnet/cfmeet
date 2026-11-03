@@ -292,12 +292,27 @@ async fn relay(
         .with_delegated_context(scope);
     let r = bridge
         .client
-        .post_json(&outbound, "/internal/v1/communications/dispatch", &request)
+        .exchange_json(
+            &outbound,
+            Method::POST,
+            "/internal/v1/communications/dispatch",
+            Some(&request),
+        )
         .await
         .map_err(|_| unavailable())?;
     let status = StatusCode::from_u16(r.status()).unwrap_or(StatusCode::BAD_GATEWAY);
     let value: Value = r.json().map_err(|_| unavailable())?;
+    if value["schemaVersion"] != 1 {
+        return Err(unavailable());
+    }
+    let retry_after = r.header("retry-after").and_then(|v| v.parse::<u32>().ok());
     let mut response = (status, Json(value)).into_response();
+    if let Some(seconds) = retry_after {
+        response.headers_mut().insert(
+            "retry-after",
+            HeaderValue::from_str(&seconds.to_string()).map_err(|_| unavailable())?,
+        );
+    }
     response
         .headers_mut()
         .insert("cache-control", HeaderValue::from_static("no-store"));

@@ -10,6 +10,7 @@ use cfmeet_certification::{
     personal_stack::PersonalStack,
     provision::{Operator, Resp},
 };
+use futures_util::FutureExt;
 use reqwest::Method;
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use serde_json::{json, Value};
@@ -198,12 +199,17 @@ async fn connected(s: &PersonalStack, a: &Account, b: &Account) -> anyhow::Resul
 async fn personal_identity_contacts_and_authoritative_policy_across_real_services(
 ) -> anyhow::Result<()> {
     let mut s = PersonalStack::start().await?;
-    let result = journey(&mut s).await;
-    if result.is_err() {
+    let result = std::panic::AssertUnwindSafe(journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
         s.dump_logs();
     }
     s.close().await;
-    result
+    match result {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     status(
@@ -221,7 +227,51 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         "consumer authentication",
     )
     .context("public ingress")?;
-    let (a, b) = tokio::try_join!(account(s), account(s))?;
+    let backfill_scope = DelegatedPlatformContext::new(
+        s.customer.tenant_id,
+        s.customer.application_id,
+        s.customer.environment_id,
+        ApplicationEnvironmentKind::Test,
+        s.customer.service_account_id,
+    );
+    for expected in [2, 0] {
+        let headers = s
+            .keys
+            .signer(services::OPERATOR_CONSOLE)
+            .sign(
+                &OutboundServiceRequest::new_operation(ServiceId::communications())
+                    .with_delegated_context(backfill_scope.clone()),
+            )?
+            .headers();
+        let result = Resp::from(
+            s.http
+                .post(format!(
+                    "{}/internal/v1/communications/backfill",
+                    s.urls["communications"]
+                ))
+                .headers(headers)
+                .json(&json!({"limit":100,"cursor":null}))
+                .send()
+                .await?,
+        )
+        .await;
+        let value = status(
+            result,
+            200,
+            "bounded backfill of existing local and Google accounts",
+        )?;
+        assert_eq!(value["created"], expected);
+    }
+    let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
+    for id in &s.legacy_accounts {
+        let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
+            "SELECT auth_type::text AS auth, status::text AS status FROM users WHERE id=$1::uuid",
+            [id.to_string().into()])).await?.context("pre-migration account remains present")?;
+        assert!(["local", "google"].contains(&row.try_get::<String>("", "auth")?.as_str()));
+        assert_eq!(row.try_get::<String>("", "status")?, "active");
+    }
+    db.close().await?;
+    let (mut a, b) = tokio::try_join!(account(s), account(s))?;
     assert_ne!(a.principal, b.principal);
     assert_ne!(a.public_id, b.public_id);
     let swagger = status(
@@ -290,7 +340,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     )?;
     // Explicit MANAGED TEST policy tests the existing canonical backend without
     // claiming MLS activation or changing the production personal security policy.
-    status(request(s,"messaging",Some(&s.customer.secret),None,Method::PUT,"/v1/messaging/policy",Some(json!({"expectedVersion":policy["version"],"policy":{"contexts":{"DIRECT":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"PRIVATE_E2EE"}}}}))).await?,200,"isolated managed test policy")?;
+    status(request(s,"messaging",Some(&s.customer.secret),None,Method::PUT,"/v1/messaging/policy",Some(json!({"expectedVersion":policy["version"],"policy":{"contexts":{"DIRECT":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"PRIVATE_E2EE","requestsRequireAcceptance":false},"GROUP":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"PRIVATE_E2EE"}}}}))).await?,200,"isolated managed test policy")?;
     let mut endpoints = Vec::new();
     for person in [&a, &b] {
         let r=status(request(s,"calling",Some(&s.customer.secret),None,Method::POST,"/v1/calling/endpoints",Some(json!({"principalId":person.principal,"endpointKey":format!("personal-{}",Uuid::new_v4()),"endpointKind":"WEB","capabilities":{"audio":true,"video":true}}))).await?,201,"canonical Calling endpoint")?;
@@ -537,6 +587,75 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .headers();
     let denied=Resp::from(s.http.post(format!("{}/internal/v1/communications/policy/check",s.urls["communications"])).headers(headers).json(&json!({"action":"DIRECT_CALL","actorPrincipalId":a.principal,"targetPrincipalId":b.principal,"credentialIssuedAt":null,"credentialPrincipalId":null})).send().await?).await;
     assert!(denied.status == 403 || denied.body["allowed"] == false);
+    let group = status(
+        request(
+            s,
+            "messaging",
+            Some(&s.customer.secret),
+            Some(a.principal),
+            Method::POST,
+            "/v1/conversations",
+            Some(json!({"contextClass":"GROUP","securityProfile":"MANAGED"})),
+        )
+        .await?,
+        201,
+        "active personal group creation",
+    )?;
+    let group_id = group["conversationId"].as_str().context("group id")?;
+    let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "UPDATE users SET status='suspended' WHERE id=$1::uuid",
+        [a.id.to_string().into()],
+    ))
+    .await?;
+    assert_eq!(request(s,"messaging",Some(&s.customer.secret),Some(a.principal),Method::POST,
+        &format!("/v1/conversations/{group_id}/messages"),Some(json!({"clientMessageId":Uuid::new_v4(),"text":"must be denied for suspended account"}))).await?.code(),Some("DELIVERY_REFUSED"));
+    assert_eq!(
+        create_call(s, &a, &b, endpoints[0], "VOICE").await?.code(),
+        Some("TARGET_UNAVAILABLE")
+    );
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "UPDATE users SET status='active' WHERE id=$1::uuid",
+        [a.id.to_string().into()],
+    ))
+    .await?;
+    db.close().await?;
+    assert_eq!(
+        hub(s, &a, Method::GET, "/me", None).await?.status,
+        401,
+        "old native session cannot reactivate after suspension"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let login = status(
+        request(
+            s,
+            "meeting-service",
+            None,
+            None,
+            Method::POST,
+            "/api/v1/auth/login",
+            Some(json!({"email":a.email,"password":a.password})),
+        )
+        .await?,
+        200,
+        "fresh authentication after suspension",
+    )?;
+    a.session = login["access_token"]
+        .as_str()
+        .context("new access token")?
+        .into();
+    a.refresh = login["refresh_token"]
+        .as_str()
+        .context("new refresh token")?
+        .into();
+    let resumed = status(
+        hub(s, &a, Method::GET, "/me", None).await?,
+        200,
+        "server-controlled reactivation with fresh credentials",
+    )?;
+    assert_eq!(resumed["cfMeetId"], rotated["cfMeetId"]);
     s.stop("communications").await;
     assert_eq!(
         create_call(s, &a, &b, endpoints[0], "VOICE").await?.status,
