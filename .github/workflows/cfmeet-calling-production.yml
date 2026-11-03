@@ -62,13 +62,17 @@ jobs:
           fi
           available=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "df -k --output=avail / | tail -n1")
           [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 5242880 ))
+          manifest="$RUNNER_TEMP/communications-image-manifest.json"
+          printf '{}' > "$manifest"
           for service in platform-access meeting-service calling messaging communications; do
             image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cfmeet-$service:$IMAGE_SHA"
             docker pull "$image"
             revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
             [[ "$revision" == "$IMAGE_SHA" ]]
+            docker image inspect "$image" | python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); v=json.loads(p.read_text()); m=json.load(sys.stdin)[0]; v[sys.argv[2]]={"imageId":m["Id"],"registryDigests":m.get("RepoDigests",[])}; p.write_text(json.dumps(v))' "$manifest" "$service"
             docker save "$image" | gzip -1 | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" 'gzip -dc | docker load'
           done
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/communications; cat > '/opt/cfmeet-core/communications/registry-$IMAGE_SHA.json'" < "$manifest"
       - name: Execute versioned production operation
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}

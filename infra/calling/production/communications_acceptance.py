@@ -54,6 +54,11 @@ def execute(sha, run_id, scope, stage):
     report.update(sha=sha,workflowRunId=run_id,environment='isolated-vps-staging' if stage else 'production')
     report['images']={name:p.inspect(('cfmeet-comm-stage-'+name) if stage else release.OWNERS.get(name,'cfmeet-communications'))['Image'] for name in release.PORTS}
     report['registryDigests']={name:json.loads(p.run('docker','image','inspect',ref))[0].get('RepoDigests',[]) for name,ref in report['images'].items()}
+    manifest=release.WORK/('registry-'+sha+'.json')
+    if manifest.exists():
+        provenance=json.loads(manifest.read_text())
+        assert all(provenance[name]['imageId']==ref for name,ref in report['images'].items()),'Transferred image identity differs from registry evidence'
+        report['registryDigests']={name:provenance[name]['registryDigests'] for name in report['images']}
     if result.returncode:
         print(json.dumps(report),flush=True)
         raise RuntimeError('Communications backend acceptance failed; protected evidence retained on VPS')
