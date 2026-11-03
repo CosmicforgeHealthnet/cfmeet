@@ -156,7 +156,8 @@ def migrate(service,sha,url,feature_only=False,network=None):
     path.unlink()
 
 def clone(c,name,img,overrides,stage):
-    cfg=copy.deepcopy(c['Config']);cfg['Image']=img;cfg['Hostname']=name
+    cfg=copy.deepcopy(c['Config']);cfg['Image']=img
+    if stage:cfg['Hostname']=name
     e=p.env_of(c);e.update(overrides);cfg['Env']=[k+'='+v for k,v in e.items()]
     cfg['HostConfig']=copy.deepcopy(c['HostConfig'])
     assert not cfg['HostConfig'].get('AutoRemove'),'Rollback requires persistent container'

@@ -62,14 +62,19 @@ def execute(sha, run_id, scope, stage):
 
 
 class Rtc:
-    def __init__(self):
+    def __init__(self,report):
+        self.report=report
         self.log=open('/result/rtc-'+uuid.uuid4().hex+'.private.log','w')
         self.process=subprocess.Popen([sys.executable,'/rtc_client.py'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.log,text=True,bufsize=1)
     def cmd(self,cmd,**body):
+        self.report['rtcStep']=cmd
         self.process.stdin.write(json.dumps({'cmd':cmd,**body})+'\n');self.process.stdin.flush()
         assert select.select([self.process.stdout],[],[],40)[0],'RTC response timed out'
         line=self.process.stdout.readline();assert line,'RTC worker stopped'
         response=json.loads(line)
+        if not response.get('ok'):
+            category=str(response.get('error','RTC_ERROR')).split(':',1)[0]
+            self.report['rtcFailureClass']=category if category.isidentifier() and len(category)<64 else 'RTC_ERROR'
         assert response.get('ok'),'RTC operation failed: '+cmd
         return response
     def close(self):
@@ -173,7 +178,7 @@ class Journey:
             self.request('calling','/v1/calling/sessions/'+sessions[1]['sessionId']+'/media-credentials','POST',{},a['signaling'],expected=(404,))
             for person,session in zip((a,b),sessions):
                 credentials=self.request('calling','/v1/calling/sessions/'+session['sessionId']+'/media-credentials','POST',{},person['signaling'])
-                client=Rtc();clients.append(client)
+                client=Rtc(self.report);clients.append(client)
                 client.cmd('connect',url=credentials['url'],token=credentials['token'])
             for client in clients:
                 client.cmd('wait_permission',publish=True,timeout=15)
@@ -299,5 +304,7 @@ if __name__=='__main__':
     try:journey.run()
     except Exception as error:
         failed=True;journey.report['failureType']=type(error).__name__
+        if isinstance(error,AssertionError) and str(error).startswith(('RTC operation failed:','RTC response timed out','RTC worker stopped','Incoming ringing invitation missing','Native media call did not become CONNECTED','Controlled call did not finish')):
+            journey.report['failure']=str(error)
     Path('/result/report.json').write_text(json.dumps(journey.report,indent=2))
     sys.exit(1 if failed else 0)
