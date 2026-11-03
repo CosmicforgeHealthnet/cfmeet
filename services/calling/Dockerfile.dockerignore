@@ -1,6 +1,7 @@
 # Build-context filter for services/calling/Dockerfile (context: repository root).
 # Everything is excluded except the directories the image is built from.
 *
+!packages/communications-policy
 !packages/service-auth
 !packages/usage-facts
 !packages/object-storage

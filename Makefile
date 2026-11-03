@@ -342,11 +342,11 @@ web: frontend ## Alias for `make frontend`
 dev: ## Start deps, then meeting service + web app together (Ctrl+C stops both)
 	./scripts/dev.sh
 
-test: backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test sms-gateway-test developer-platform-test api-gateway-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
+test: communications-test backend-test calling-test platform-access-test numbering-test privacy-relay-test telephony-test sms-gateway-test developer-platform-test api-gateway-test service-auth-test contracts-test contracts-validate service-boundaries secret-scan frontend-test ## Run all tests
 
-lint: backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint sms-gateway-lint developer-platform-lint api-gateway-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
+lint: communications-lint backend-lint calling-lint platform-access-lint numbering-lint privacy-relay-lint telephony-lint sms-gateway-lint developer-platform-lint api-gateway-lint service-auth-lint contracts-lint frontend-lint ## Run all linters
 
-build: backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build sms-gateway-build developer-platform-build api-gateway-build frontend-build ## Build all applications and services
+build: communications-build backend-build calling-build platform-access-build numbering-build privacy-relay-build telephony-build sms-gateway-build developer-platform-build api-gateway-build frontend-build ## Build all applications and services
 
 backend-test:
 	cd $(MEETING_SERVICE) && cargo test --workspace
@@ -370,3 +370,15 @@ frontend-lint: frontend-install
 
 frontend-build: frontend-install
 	cd $(WEB) && npm run build
+
+communications-test: ## PostgreSQL-backed personal Communications acceptance tests
+	cd services/communications && cargo test --workspace --locked
+
+communications-lint: ## Communications format and strict lint
+	cd services/communications && cargo fmt --all -- --check
+	cd services/communications && cargo clippy --all-targets --locked -- -D warnings
+
+communications-build: ## Independent Communications service and migration runner
+	cd services/communications && cargo build --workspace --locked
+
+.PHONY: communications-test communications-lint communications-build

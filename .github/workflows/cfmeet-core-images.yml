@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build-and-publish:
     name: Build ${{ matrix.service }} image
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [platform-access, messaging, calling]
+        service: [platform-access, messaging, calling, communications, meeting-service, api-gateway]
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v4

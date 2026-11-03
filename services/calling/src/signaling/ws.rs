@@ -98,6 +98,9 @@ pub async fn signaling(
 }
 
 async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSocket) {
+    if state.require_personal_signaling(&identity).await.is_err() {
+        return;
+    }
     let endpoint_id = identity.endpoint_id();
     let principal_id = identity.principal_id();
     let mut subscription = state.app.bus().subscribe(endpoint_id.as_uuid());
@@ -121,8 +124,10 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
     let expiry = tokio::time::sleep(until_expiry);
     tokio::pin!(expiry);
     let mut last_presence = Utc::now();
+    let mut policy_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tokio::select! {
+            _=policy_tick.tick()=> {if state.require_personal_signaling(&identity).await.is_err() {let _=socket.send(Message::Close(Some(CloseFrame{code:4401,reason:"communications authorization unavailable".into()}))).await;break;}},
             _ = &mut expiry => {
                 let _ = socket.send(Message::Close(Some(CloseFrame {
                     code: CLOSE_CREDENTIAL_EXPIRED,
@@ -132,6 +137,7 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
             }
             signal = subscription.recv() => {
                 let Some(signal) = signal else { break };
+                if state.require_personal_signaling(&identity).await.is_err() {break;}
                 let stamped = signals::for_target(signal, endpoint_id.as_uuid(), principal_id.as_uuid());
                 if socket.send(Message::Text(stamped.to_string())).await.is_err() {
                     break;

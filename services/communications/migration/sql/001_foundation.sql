@@ -125,7 +125,10 @@ CREATE TABLE communication_profile_reports (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), CHECK(reporter_profile_id<>target_profile_id)
 );
 CREATE FUNCTION communication_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION 'communications audit is append-only' USING ERRCODE='integrity_constraint_violation'; END; $$;
+BEGIN
+ IF TG_OP='DELETE' AND OLD.created_at<now()-interval '365 days' THEN RETURN OLD; END IF;
+ RAISE EXCEPTION 'communications audit is append-only during retention' USING ERRCODE='integrity_constraint_violation';
+END; $$;
 CREATE TRIGGER communication_audit_immutable BEFORE UPDATE OR DELETE ON communication_audit FOR EACH ROW EXECUTE FUNCTION communication_append_only();
 CREATE FUNCTION communication_guard_version() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN IF NEW.version<>OLD.version+1 THEN RAISE EXCEPTION 'communications version must advance by one' USING ERRCODE='integrity_constraint_violation'; END IF; RETURN NEW; END; $$;
@@ -172,3 +175,6 @@ BEGIN
  RETURN NEW;
 END; $$;
 CREATE TRIGGER communication_block_scope BEFORE INSERT OR UPDATE ON communication_block_bridge FOR EACH ROW EXECUTE FUNCTION communication_block_scope_guard();
+CREATE INDEX communication_inbox_retention ON communication_inbox_dedupe(received_at);
+CREATE INDEX communication_reports_retention ON communication_profile_reports(created_at);
+CREATE INDEX communication_outbox_retention ON communication_outbox(delivered_at) WHERE state='DELIVERED';

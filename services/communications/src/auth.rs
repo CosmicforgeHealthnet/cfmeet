@@ -24,7 +24,10 @@ pub async fn middleware(
     };
     let permission = match request.uri().path() {
         "/internal/v1/communications/dispatch" => InternalPermission::CommunicationsUserForward,
-        "/internal/v1/communications/policy/check" => InternalPermission::CommunicationsPolicyCheck,
+        "/internal/v1/communications/policy/check"
+        | "/internal/v1/communications/principals/resolve" => {
+            InternalPermission::CommunicationsPolicyCheck
+        }
         "/internal/v1/communications/account-events" => {
             InternalPermission::CommunicationsAccountApply
         }
@@ -47,8 +50,20 @@ pub async fn middleware(
         Ok(_) => return Error::Authentication.into_response(),
         Err(e) => return e.into_response(),
     }
+    let issuer = ctx.authenticated_service().as_str().to_owned();
+    let route = request.uri().path().to_owned();
+    let started = std::time::Instant::now();
     request.extensions_mut().insert(ctx);
-    next.run(request).await
+    let response = next.run(request).await;
+    tracing::info!(
+        service = "communications",
+        caller = issuer,
+        route,
+        status = response.status().as_u16(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "signed request completed"
+    );
+    response
 }
 pub fn delegated(ctx: &InternalServiceContext) -> Result<DelegatedPlatformContext> {
     ctx.delegated_platform_context()
@@ -106,6 +121,43 @@ pub async fn account_status(
         return Err(Error::Unavailable);
     }
     r.json().map_err(|_| Error::Unavailable)
+}
+pub async fn principals_active(
+    s: &State,
+    scope: &DelegatedPlatformContext,
+    profiles: &[&crate::model::Profile],
+) -> Result<bool> {
+    let request = OutboundServiceRequest::new_operation(ServiceId::platform_access())
+        .with_delegated_context(scope.clone());
+    let references: Vec<_> = profiles
+        .iter()
+        .map(|p| json!({"principalId":p.principal_id}))
+        .collect();
+    let response = s
+        .config
+        .client
+        .post_json(
+            &request,
+            "/internal/v1/principals/resolve",
+            &json!({"references":references}),
+        )
+        .await
+        .map_err(|_| Error::Unavailable)?;
+    if response.status() != 200 {
+        return Err(Error::Unavailable);
+    }
+    let result: Value = response.json().map_err(|_| Error::Unavailable)?;
+    let results = result["results"]
+        .as_array()
+        .filter(|r| r.len() == profiles.len())
+        .ok_or(Error::Unavailable)?;
+    Ok(profiles.iter().zip(results).all(|(p, r)| {
+        r["outcome"] == "RESOLVED"
+            && r["principal"]["id"] == p.principal_id.to_string()
+            && r["principal"]["kind"] == "NATIVE_CF_USER"
+            && r["principal"]["status"] == "ACTIVE"
+            && r["principal"]["externalReference"] == p.account_reference
+    }))
 }
 pub async fn verify_principal(
     s: &State,

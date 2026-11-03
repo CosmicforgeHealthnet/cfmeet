@@ -62,6 +62,7 @@ pub enum Action {
     MessageSend,
     ContactRequest,
     GroupInvitation,
+    PersonalActivity,
     Presence,
     ProfileDiscovery,
 }

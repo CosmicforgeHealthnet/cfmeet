@@ -1390,23 +1390,24 @@ pub async fn answer_invitation(
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
                 let invitee = Administrator::Principal(acting.clone());
-                let row: Option<(String, Option<DateTime<Utc>>)> = {
+                let row: Option<(String, Option<DateTime<Utc>>, Option<Uuid>)> = {
                     #[derive(sea_orm::FromQueryResult)]
                     struct Inv {
                         role: String,
                         invitation_expires_at: Option<DateTime<Utc>>,
+                        invited_by_principal_id: Option<Uuid>,
                     }
                     db::one::<Inv, _>(
                         txn,
-                        "SELECT role, invitation_expires_at FROM messaging_conversation_members \
+                        "SELECT role, invitation_expires_at, invited_by_principal_id FROM messaging_conversation_members \
                          WHERE conversation_id = $1 AND principal_id = $2 AND state = 'INVITED' FOR UPDATE",
                         vec![conversation_id.into(), acting.principal_id.into()],
                     )
                     .await?
-                    .map(|i| (i.role, i.invitation_expires_at))
+                    .map(|i| (i.role, i.invitation_expires_at, i.invited_by_principal_id))
                 };
                 // No open invitation looks like an unknown conversation.
-                let Some((role, expires)) = row else {
+                let Some((role, expires, inviter)) = row else {
                     return Err(Error::code(ErrorCode::NotFound));
                 };
                 if expires.is_some_and(|t| t <= now) {
@@ -1420,6 +1421,9 @@ pub async fn answer_invitation(
                         json!({ "member_principal_id": acting.principal_id, "outcome": "DECLINED" }), &request_ctx, now).await?;
                     return Ok(Ok(member_row(txn, conversation_id, acting.principal_id).await?));
                 }
+                let inviter=inviter.unwrap_or(conversation.owner_principal_id);
+                if conversation.context_class=="GROUP" && inviter!=acting.principal_id {crate::communications::require(&st,&ctx,cf_communications_policy::Action::GroupInvitation,inviter,acting.principal_id).await?;}
+                if conversation.context_class=="DIRECT" {crate::communications::require(&st,&ctx,cf_communications_policy::Action::DirectConversation,conversation.owner_principal_id,acting.principal_id).await?;}
                 if banned(txn, conversation_id, acting.principal_id).await? {
                     return Err(Error::reason(ErrorCode::PrincipalNotAuthorized, "PRINCIPAL_BANNED"));
                 }

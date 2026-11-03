@@ -105,9 +105,9 @@ pub async fn account_event(
             };
             execute(&txn,"UPDATE communication_profiles SET activation_state=$2,account_version=$3,credentials_not_before=CASE WHEN $4 THEN GREATEST(COALESCE(credentials_not_before,$5),$5) ELSE credentials_not_before END,suspended_at=CASE WHEN $2='SUSPENDED' THEN $5 ELSE suspended_at END,deactivated_at=CASE WHEN $2='DEACTIVATED' THEN $5 ELSE deactivated_at END,version=version+1,updated_at=now() WHERE id=$1",vec![p.id.into(),next.into(),event.source_version.into(),(event.kind==AccountEventKind::SessionRevoked).into(),event.occurred_at.into()]).await?;
             s.store
-                .audit(
+                .audit_system(
                     &txn,
-                    &p,
+                    p.scope(),
                     "ACCOUNT_AUTHORITY_CHANGED",
                     Some(p.id),
                     json!({"kind":event.kind,"state":next,"sourceVersion":event.source_version}),
@@ -266,6 +266,15 @@ pub async fn backfill(
             )
             .await?;
             s.new_public_id(&txn, profile).await?;
+            s.store
+                .audit_system(
+                    &txn,
+                    Scope::of(&scope),
+                    "PROFILE_BACKFILLED",
+                    Some(profile),
+                    json!({"source":"ACCOUNT"}),
+                )
+                .await?;
             count += 1;
         }
         txn.commit().await?;
@@ -288,7 +297,18 @@ pub async fn replay(
     auth::validate_scope(&s, &scope).await?;
     let mut v = store::scoped(Scope::of(&scope));
     v.push(input.event_id.into());
-    let n=execute(&s.store.db,"UPDATE communication_outbox SET state='PENDING',attempts=0,next_attempt_at=now(),lease_id=NULL,lease_until=NULL WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND event_id=$4 AND state='DEAD'",v).await?;
+    let txn = s.store.begin().await?;
+    let n=execute(&txn,"UPDATE communication_outbox SET state='PENDING',attempts=0,next_attempt_at=now(),lease_id=NULL,lease_until=NULL WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND event_id=$4 AND state='DEAD'",v).await?;
+    s.store
+        .audit_system(
+            &txn,
+            Scope::of(&scope),
+            "OUTBOX_REPLAY_REQUESTED",
+            Some(input.event_id),
+            json!({"requeued":n}),
+        )
+        .await?;
+    txn.commit().await?;
     Ok(Json(json!({"requeued":n})))
 }
 
@@ -340,27 +360,54 @@ impl State {
         Ok(delivered)
     }
     pub async fn maintain(&self) -> Result<()> {
-        execute(
-            &self.store.db,
-            "DELETE FROM communication_service_nonces WHERE expires_at<now()",
-            vec![],
-        )
-        .await?;
-        execute(
-            &self.store.db,
-            "DELETE FROM communication_idempotency WHERE expires_at<now()",
-            vec![],
-        )
-        .await?;
-        execute(
-            &self.store.db,
-            "DELETE FROM communication_rate_windows WHERE window_start<now()-interval '2 days'",
-            vec![],
-        )
-        .await?;
-        execute(&self.store.db,"UPDATE communication_contact_requests SET state='EXPIRED',version=version+1,updated_at=now() WHERE state='PENDING' AND expires_at<=now()",vec![]).await?;
-        // Retain hashed invitation tombstones and identity history; never resurrect an
-        // expired, revoked or consumed token during replay or application rollback.
+        // Every sweep is bounded. Identity/public-id tombstones and undelivered events
+        // survive application rollback and are never silently purged.
+        for sql in [
+            "DELETE FROM communication_service_nonces WHERE ctid IN(SELECT ctid FROM communication_service_nonces WHERE expires_at<now() LIMIT 1000)",
+            "DELETE FROM communication_idempotency WHERE ctid IN(SELECT ctid FROM communication_idempotency WHERE expires_at<now() LIMIT 1000)",
+            "DELETE FROM communication_rate_windows WHERE ctid IN(SELECT ctid FROM communication_rate_windows WHERE window_start<now()-interval '2 days' LIMIT 1000)",
+            "DELETE FROM communication_outbox WHERE seq IN(SELECT seq FROM communication_outbox WHERE state='DELIVERED' AND delivered_at<now()-interval '30 days' LIMIT 1000)",
+            "DELETE FROM communication_audit WHERE seq IN(SELECT seq FROM communication_audit WHERE created_at<now()-interval '365 days' LIMIT 1000)",
+            "DELETE FROM communication_profile_reports WHERE id IN(SELECT id FROM communication_profile_reports WHERE created_at<now()-interval '365 days' LIMIT 1000)",
+        ] {execute(&self.store.db,sql,vec![]).await?;}
+        let txn = self.store.begin().await?;
+        let pairs:Vec<Value>=rows(&txn,"SELECT to_jsonb(c) doc FROM communication_connections c WHERE state='REQUEST_PENDING' AND EXISTS(SELECT 1 FROM communication_contact_requests r WHERE r.connection_id=c.id AND r.state='PENDING' AND r.expires_at<=now()) ORDER BY c.id LIMIT 100 FOR UPDATE OF c SKIP LOCKED",vec![]).await?;
+        for pair in pairs {
+            let id = uuid_field(&pair, "id")?;
+            let count=execute(&txn,"UPDATE communication_contact_requests SET state='EXPIRED',version=version+1,updated_at=now() WHERE connection_id=$1 AND state='PENDING' AND expires_at<=now()",vec![id.into()]).await?;
+            if count > 0 {
+                execute(&txn,"UPDATE communication_connections SET state='NONE',version=version+1,updated_at=now() WHERE id=$1 AND state='REQUEST_PENDING'",vec![id.into()]).await?;
+                let scope = Scope {
+                    tenant_id: uuid_field(&pair, "tenant_id")?,
+                    application_id: uuid_field(&pair, "application_id")?,
+                    environment_id: uuid_field(&pair, "environment_id")?,
+                };
+                let p = self
+                    .store
+                    .profile(&txn, scope, uuid_field(&pair, "left_profile_id")?, false)
+                    .await?;
+                self.store
+                    .audit_system(
+                        &txn,
+                        scope,
+                        "CONNECTION_REQUEST_EXPIRED",
+                        Some(id),
+                        json!({}),
+                    )
+                    .await?;
+                self.store
+                    .event(
+                        &txn,
+                        &p,
+                        "communications.connection.expired",
+                        id,
+                        pair["version"].as_i64().ok_or(Error::Unavailable)? + 1,
+                        json!({"state":"NONE"}),
+                    )
+                    .await?;
+            }
+        }
+        txn.commit().await?;
         Ok(())
     }
 }

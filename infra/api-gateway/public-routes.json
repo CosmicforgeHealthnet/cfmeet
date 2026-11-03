@@ -3513,6 +3513,180 @@
       "method": "GET",
       "path": "/v1/sms/threads/{threadId}/messages",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/activation",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/capabilities",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/public-id",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/me/public-id/rotate",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/qr",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/privacy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/me/privacy",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/discovery/public-id/resolve",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/discovery/invites/resolve",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/invites",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/invites",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/invites/{inviteId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/contact-requests",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-requests/incoming",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-requests/outgoing",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/contact-requests/{requestId}/accept",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/contact-requests/{requestId}/decline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contact-requests/{requestId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contacts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contacts/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PATCH",
+      "path": "/api/v2/communications/contacts/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contacts/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contacts/{contactId}/common-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/profiles/{cfMeetId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/profiles/{cfMeetId}/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/profiles/{cfMeetId}/block",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/profiles/{cfMeetId}/block",
+      "class": "PUBLIC_CUSTOMER"
     }
   ]
 }

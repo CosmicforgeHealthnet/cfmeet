@@ -62,6 +62,7 @@ SOURCES = [
     ("sms", "cfmeet.sms-gateway", "sms-gateway/http/v1.openapi.json", "cfmeet.sms-gateway.http-api"),
     ("developer-platform", "cfmeet.developer-platform", "platform-developer/http/v1.openapi.json", "cfmeet.developer-platform.http-api"),
     ("gateway", "cfmeet.api-gateway", "platform-developer/gateway/http/v1.openapi.json", "cfmeet.api-gateway.http-api"),
+    ("communications", "cfmeet.meeting-service", "communications/http/v1.openapi.json", "cfmeet.communications.http-api"),
 ]
 
 # Services that may ever receive public customer traffic. Platform Access, Telephony,
@@ -97,7 +98,7 @@ class CatalogueError(Exception):
 
 
 def load(rel: str):
-    return json.loads((CONTRACTS / rel).read_text())
+    return json.loads((CONTRACTS / rel).read_text(encoding="utf-8"))
 
 
 def auto_class(domain: str, path: str, op: dict):
@@ -170,7 +171,7 @@ def check_replacements(routes):
 
 
 def build():
-    allow = json.loads(ALLOW_LIST.read_text())
+    allow = json.loads(ALLOW_LIST.read_text(encoding="utf-8"))
     entries = {}
     for e in allow["operations"]:
         key = (e["domain"], e["method"], e["path"])
@@ -439,7 +440,7 @@ def render(doc) -> str:
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
-PUBLIC_DOMAINS = ["meetings", "calling", "privacy-relay", "messaging", "numbering", "sms", "developer-platform", "gateway"]
+PUBLIC_DOMAINS = ["meetings", "calling", "privacy-relay", "messaging", "numbering", "sms", "developer-platform", "gateway", "communications"]
 
 
 def outputs():
@@ -476,11 +477,11 @@ def main(argv):
     stale = []
     for path, text in out.items():
         if check:
-            if not path.is_file() or path.read_text() != text:
+            if not path.is_file() or path.read_text(encoding="utf-8") != text:
                 stale.append(str(path.relative_to(ROOT)))
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8")
     if stale:
         print("stale public API catalogue outputs (run scripts/contracts/public_api.py):", file=sys.stderr)
         for s in stale:

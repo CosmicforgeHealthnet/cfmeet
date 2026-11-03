@@ -157,6 +157,21 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         return Err(Invalid::Expired);
     }
     let scope = current.owner_scope().ok_or(Invalid::SessionRevoked)?;
+    let personal = cf_communications_policy::Scope {
+        tenant_id: scope.tenant_id,
+        application_id: scope.application_id,
+        environment_id: scope.environment_id,
+    };
+    if state
+        .communications
+        .as_ref()
+        .is_some_and(|c| c.governs(personal))
+    {
+        let revoked=crate::db::scalar_i64(&state.db,"SELECT count(*) FROM messaging_communication_revocations WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 AND credentials_not_before>=$5",vec![scope.tenant_id.into(),scope.application_id.into(),scope.environment_id.into(),current.principal_id.into(),current.created_at.timestamp().into()]).await.map_err(|_|Invalid::Unavailable)?;
+        if revoked > 0 {
+            return Err(Invalid::SessionRevoked);
+        }
+    }
     match state.principals.resolve(&scope, current.principal_id).await {
         Ok(s @ PrincipalStatus::Active { .. }) if s.is_messaging_capable() => Ok(()),
         Ok(_) => Err(Invalid::PrincipalInactive),

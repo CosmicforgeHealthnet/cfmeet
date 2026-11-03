@@ -733,6 +733,8 @@ fn public_server_url(configured: Option<&str>) -> String {
 /// is inlined into the document's own `components/schemas`. The schema host is a naming
 /// authority, not a deployed service, so the raw contracts made Swagger UI report
 /// "Could not resolve reference: Failed to fetch".
+const COMMUNICATIONS_API: &str =
+    include_str!("../../../../packages/contracts/bundled/public/communications/v1.openapi.json");
 const CALLING_API: &str =
     include_str!("../../../../packages/contracts/bundled/calling/http/v1.openapi.json");
 const PLATFORM_ACCESS_API: &str =
@@ -759,7 +761,12 @@ const API_GATEWAY_PUBLIC_API: &str =
 
 /// (Swagger name, served path, document). The Meeting Service document is generated at
 /// runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 10] = [
+const PEER_DOCS: [(&str, &str, &str); 11] = [
+    (
+        "Communications",
+        "/api-docs/communications.json",
+        COMMUNICATIONS_API,
+    ),
     ("Calling", "/api-docs/calling.json", CALLING_API),
     (
         "Platform Access (internal)",
@@ -1118,6 +1125,7 @@ mod tests {
         for path in [
             "/api-docs/openapi.json",
             "/api-docs/calling.json",
+            "/api-docs/communications.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
             "/api-docs/sms-gateway.json",

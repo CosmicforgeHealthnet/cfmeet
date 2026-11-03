@@ -16,7 +16,7 @@
     },
     {
       "id": "cfmeet.calling.http-api",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "kind": "openapi",
       "path": "calling/http/v1.openapi.json",
       "owner": "calling",
@@ -610,7 +610,7 @@
     },
     {
       "id": "cfmeet.calling.http-api-bundled",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "kind": "openapi",
       "path": "bundled/calling/http/v1.openapi.json",
       "owner": "calling",
@@ -831,7 +831,7 @@
     },
     {
       "id": "cfmeet.calling.public-api",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "kind": "openapi",
       "path": "bundled/public/calling/v1.openapi.json",
       "owner": "calling",
@@ -924,6 +924,85 @@
       "authority": "generated",
       "generated_by": "scripts/contracts/public_api.py (checked by .github/workflows/contracts.yml: --check)",
       "description": "Aggregate customer-facing API reference of the CF Meet public API Gateway (every public domain, service-namespaced components, per-service versions preserved). Derived from the per-domain public documents; never edited."
+    },
+    {
+      "id": "cfmeet.communications.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "communications/http/v1.openapi.json",
+      "owner": "communications",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy."
+    },
+    {
+      "id": "cfmeet.communications.public-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/public/communications/v1.openapi.json",
+      "owner": "communications",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "description": "Audience-filtered Communications consumer API served through the existing Account-authenticated ingress.",
+      "generated_by": "python3 scripts/contracts/public_api.py"
+    },
+    {
+      "id": "cfmeet.communications.communications-internal",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "communications/internal/v1.openapi.json",
+      "owner": "communications",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority."
+    },
+    {
+      "id": "cfmeet.calling.communications-internal",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "calling/communications-internal/v1.openapi.json",
+      "owner": "calling",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Private signed Communications integration owned by calling; no consumer credential or copied data authority."
+    },
+    {
+      "id": "cfmeet.messaging.communications-internal",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "messaging/communications-internal/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Private signed Communications integration owned by messaging; no consumer credential or copied data authority."
+    },
+    {
+      "id": "cfmeet.meeting-service.communications-internal",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "meeting-service/communications-internal/v1.openapi.json",
+      "owner": "meeting-service",
+      "visibility": "internal",
+      "lifecycle": "beta",
+      "authority": "contract-first",
+      "description": "Private signed Communications integration owned by meeting-service; no consumer credential or copied data authority."
+    },
+    {
+      "id": "cfmeet.communications.swagger-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "bundled/communications/http/v1.openapi.json",
+      "owner": "communications",
+      "visibility": "public",
+      "lifecycle": "beta",
+      "authority": "generated",
+      "generated_by": "python3 scripts/contracts/bundle_openapi.py",
+      "description": "Self-contained Swagger rendering of the canonical Communications consumer contract."
     }
   ]
 }

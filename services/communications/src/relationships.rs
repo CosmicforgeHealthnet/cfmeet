@@ -230,6 +230,7 @@ impl State {
         let mut data = Vec::new();
         let mut next = None;
         for request in requests.into_iter().take(limit as usize) {
+            next = Some(request.id);
             let other = if incoming {
                 request.sender_profile_id
             } else {

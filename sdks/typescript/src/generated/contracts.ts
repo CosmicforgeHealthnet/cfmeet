@@ -17,10 +17,11 @@ export const CONTRACTS: readonly ContractRef[] = [
   { id: "cfmeet.api-gateway.public-api", version: "1.0.0", kind: "openapi", path: "bundled/public/aggregate/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.api-gateway.public-http-api", version: "1.1.0", kind: "openapi", path: "bundled/public/gateway/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.meeting-service.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/meetings/v1.openapi.json", lifecycle: "beta" },
-  { id: "cfmeet.calling.public-api", version: "1.13.0", kind: "openapi", path: "bundled/public/calling/v1.openapi.json", lifecycle: "beta" },
+  { id: "cfmeet.calling.public-api", version: "1.14.0", kind: "openapi", path: "bundled/public/calling/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.privacy-relay.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/privacy-relay/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.messaging.public-api", version: "1.13.0", kind: "openapi", path: "bundled/public/messaging/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.numbering.public-api", version: "1.12.0", kind: "openapi", path: "bundled/public/numbering/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.sms-gateway.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/sms/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.developer-platform.public-api", version: "1.5.0", kind: "openapi", path: "bundled/public/developer-platform/v1.openapi.json", lifecycle: "beta" },
+  { id: "cfmeet.communications.public-api", version: "1.0.0", kind: "openapi", path: "bundled/public/communications/v1.openapi.json", lifecycle: "beta" },
 ] as const;

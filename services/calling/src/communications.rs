@@ -33,6 +33,25 @@ fn policy_error(e: PolicyError) -> CallError {
     }
 }
 impl AppCallService {
+    pub(crate) async fn personal_call_governed(&self, call: &calls::Model) -> CallResult<bool> {
+        if !self
+            .communications
+            .as_ref()
+            .is_some_and(|c| c.governs(scope(crate::calls::app::scope_of(call))))
+        {
+            return Ok(false);
+        }
+        Ok(self
+            .db()
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1",
+                [call.id.into()],
+            ))
+            .await?
+            .is_none())
+    }
+
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
         self.communications = client;
         self
@@ -152,6 +171,24 @@ impl AppCallService {
     }
 }
 impl AppState {
+    pub(crate) async fn require_personal_signaling(
+        &self,
+        identity: &crate::signaling::SignalingIdentity,
+    ) -> Result<(), CallingError> {
+        if !self
+            .communications
+            .as_ref()
+            .is_some_and(|c| c.governs(scope(identity.scope())))
+        {
+            return Ok(());
+        }
+        let own = scope(identity.scope());
+        let row=self.db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT 1 FROM calling_communication_revocations WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 AND credentials_not_before>=$5",[own.tenant_id.into(),own.application_id.into(),own.environment_id.into(),identity.principal_id().as_uuid().into(),identity.issued_at().timestamp().into()])).await.map_err(|_|CallingError::ServiceUnavailable)?;
+        if row.is_some() {
+            return Err(CallingError::AuthenticationFailed);
+        }
+        Ok(())
+    }
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
         self.app = Arc::new((*self.app).clone().with_communications(client.clone()));
         self.communications = client;

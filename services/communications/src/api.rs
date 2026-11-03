@@ -8,7 +8,7 @@ use crate::{
 use axum::{
     extract::{DefaultBodyLimit, State as HttpState},
     http::{HeaderValue, StatusCode},
-    middleware::from_fn_with_state,
+    middleware::{from_fn_with_state, map_response},
     response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Json, Router,
@@ -24,6 +24,10 @@ pub fn app(state: State) -> Router {
         .route(
             "/internal/v1/communications/policy/check",
             post(policy_check),
+        )
+        .route(
+            "/internal/v1/communications/principals/resolve",
+            post(resolve_principal),
         )
         .route(
             "/internal/v1/communications/account-events",
@@ -51,8 +55,75 @@ pub fn app(state: State) -> Router {
         )
         .route("/ready", get(ready))
         .merge(internal)
+        .layer(map_response(normalize_rejection))
         .layer(DefaultBodyLimit::max(16 * 1024))
         .with_state(state)
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolvePrincipal {
+    actor_principal_id: Uuid,
+    cf_meet_id: String,
+}
+/// A private translation for authoritative owners; consumer discovery never exposes it.
+async fn resolve_principal(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ResolvePrincipal>,
+) -> Result<Json<Value>> {
+    let scope = auth::delegated(&ctx)?;
+    auth::validate_scope(&s, &scope).await?;
+    let target = s
+        .store
+        .by_public_id(
+            &s.store.db,
+            cf_communications_policy::Scope::of(&scope),
+            &input.cf_meet_id,
+        )
+        .await?;
+    let action = if ctx.authenticated_service() == &cf_service_auth::ServiceId::calling() {
+        cf_communications_policy::Action::DirectCall
+    } else if ctx.authenticated_service() == &cf_service_auth::ServiceId::messaging() {
+        cf_communications_policy::Action::DirectConversation
+    } else {
+        return Err(Error::Forbidden);
+    };
+    let decision = s
+        .check_policy(
+            &scope,
+            &cf_communications_policy::PolicyCheck {
+                action,
+                actor_principal_id: input.actor_principal_id,
+                target_principal_id: target.principal_id,
+                credential_issued_at: None,
+                credential_principal_id: None,
+            },
+        )
+        .await?;
+    if !decision.allowed {
+        return Err(Error::NotFound);
+    }
+    Ok(Json(
+        json!({"schemaVersion":1,"principalId":target.principal_id,"kind":"NATIVE_CF_USER","policyVersion":decision.policy_version}),
+    ))
+}
+async fn normalize_rejection(response: Response) -> Response {
+    if !response.status().is_success()
+        && !response
+            .headers()
+            .get("content-type")
+            .is_some_and(|h| h.as_bytes().starts_with(b"application/json"))
+    {
+        return match response.status().as_u16() {
+            401 => Error::Authentication,
+            403 => Error::Forbidden,
+            404 => Error::NotFound,
+            500..=599 => Error::Unavailable,
+            _ => Error::Validation,
+        }
+        .into_response();
+    }
+    response
 }
 async fn ready(HttpState(s): HttpState<State>) -> impl IntoResponse {
     let ready = communications_migration::ready(&s.store.db)

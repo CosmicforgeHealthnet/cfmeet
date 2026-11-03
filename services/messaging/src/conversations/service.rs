@@ -357,6 +357,16 @@ pub async fn create(
         )
         .await?;
     }
+    if request.context_class == ContextClass::Group {
+        crate::communications::require(
+            state,
+            ctx,
+            cf_communications_policy::Action::PersonalActivity,
+            acting.principal_id,
+            acting.principal_id,
+        )
+        .await?;
+    }
     let now = state.now();
     let key = format!(
         "conversation-create:{}:{}",

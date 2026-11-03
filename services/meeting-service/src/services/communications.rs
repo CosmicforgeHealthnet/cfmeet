@@ -147,6 +147,73 @@ pub fn public_routes() -> Router<AppState> {
         .route("/", any(root))
         .route("/*path", any(relay))
         .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(axum::middleware::map_response(public_error_envelope))
+}
+async fn public_error_envelope(response: Response) -> Response {
+    if response.status().is_success() {
+        return response;
+    }
+    let status = response.status();
+    let (parts, body) = response.into_parts();
+    if let Ok(bytes) = axum::body::to_bytes(body, 16384).await {
+        if serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .is_some_and(|v| v["schemaVersion"] == 1 && v["error"]["code"].is_string())
+        {
+            return Response::from_parts(parts, axum::body::Body::from(bytes));
+        }
+    }
+    let (status, code, message) = match status.as_u16() {
+        401 => (
+            StatusCode::UNAUTHORIZED,
+            "AUTHENTICATION_REQUIRED",
+            "A registered account session is required",
+        ),
+        403 => (
+            StatusCode::FORBIDDEN,
+            "PERMISSION_DENIED",
+            "The operation is not permitted",
+        ),
+        404 => (
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+            "The resource is unavailable",
+        ),
+        409 => (
+            StatusCode::CONFLICT,
+            "VERSION_CONFLICT",
+            "The resource changed",
+        ),
+        429 => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMITED",
+            "Too many requests",
+        ),
+        500..=599 => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "COMMUNICATIONS_UNAVAILABLE",
+            "Communications is temporarily unavailable",
+        ),
+        _ => (
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
+            "The request is invalid",
+        ),
+    };
+    let mut response = (
+        status,
+        Json(json!({"schemaVersion":1,"error":{"code":code,"message":message}})),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert("cache-control", HeaderValue::from_static("no-store"));
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        response
+            .headers_mut()
+            .insert("retry-after", HeaderValue::from_static("60"));
+    }
+    response
 }
 async fn root() -> ApiError {
     ApiError::domain(

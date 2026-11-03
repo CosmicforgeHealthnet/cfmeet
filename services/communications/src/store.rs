@@ -56,6 +56,19 @@ pub struct Store {
     pub db: DatabaseConnection,
 }
 impl Store {
+    pub async fn audit_system<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: Scope,
+        operation: &str,
+        resource: Option<Uuid>,
+        details: Json,
+    ) -> Result<()> {
+        let mut v = scoped(scope);
+        v.extend([operation.into(), resource.into(), details.into()]);
+        execute(db,"INSERT INTO communication_audit(tenant_id,application_id,environment_id,operation,resource_id,details) VALUES($1,$2,$3,$4,$5,$6)",v).await?;
+        Ok(())
+    }
     pub async fn begin(&self) -> Result<DatabaseTransaction> {
         Ok(self.db.begin().await?)
     }

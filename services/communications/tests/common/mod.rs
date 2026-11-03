@@ -20,6 +20,7 @@ use communications::{
 use communications_migration::{Migrator, MigratorTrait};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::BTreeMap,
     sync::{Arc, RwLock},
@@ -38,11 +39,15 @@ pub struct Account {
 }
 #[derive(Clone)]
 struct Owners {
+    available: Arc<AtomicBool>,
     accounts: Arc<RwLock<BTreeMap<Uuid, Account>>>,
     verifiers: Arc<Vec<ServiceTokenVerifier>>,
     blocked: Arc<RwLock<bool>>,
 }
 async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
+    if !s.available.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if !s
         .verifiers
         .iter()
@@ -63,10 +68,11 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             json!({"authorityMode":"FULL","tenant":{"classification":"FIRST_PARTY"}})
         }
         "/internal/v1/principals/resolve" => {
-            let id = body["references"][0]["principalId"]
-                .as_str()
-                .and_then(|v| Uuid::parse_str(v).ok());
-            json!({"results":[match id.and_then(|i|accounts.get(&i)) {Some(a)=>json!({"outcome":"RESOLVED","principal":{"id":a.principal,"kind":"NATIVE_CF_USER","externalReference":a.reference,"status":"ACTIVE"}}),None=>json!({"outcome":"NOT_FOUND"})}]})
+            let results:Vec<_>=body["references"].as_array().unwrap().iter().map(|v| {
+                let id=v["principalId"].as_str().and_then(|v|Uuid::parse_str(v).ok());
+                match id.and_then(|i|accounts.get(&i)) {Some(a)=>json!({"outcome":"RESOLVED","principal":{"id":a.principal,"kind":"NATIVE_CF_USER","externalReference":a.reference,"status":"ACTIVE"}}),None=>json!({"outcome":"NOT_FOUND"})}
+            }).collect();
+            json!({"results":results})
         }
         "/internal/v1/accounts/communications/status" => match accounts
             .values()
@@ -110,6 +116,7 @@ fn verifier(
     )
 }
 pub struct Harness {
+    available: Arc<AtomicBool>,
     pub state: State,
     pub scope: DelegatedPlatformContext,
     pub accounts: Arc<RwLock<BTreeMap<Uuid, Account>>>,
@@ -123,6 +130,7 @@ pub struct Harness {
 }
 impl Harness {
     pub fn stop_owners(&self) {
+        self.available.store(false, Ordering::SeqCst);
         self.server.abort();
     }
     pub async fn new() -> Self {
@@ -199,7 +207,9 @@ impl Harness {
         let blocked = Arc::new(RwLock::new(false));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let available = Arc::new(AtomicBool::new(true));
         let router = Router::new().fallback(any(owner)).with_state(Owners {
+            available: available.clone(),
             accounts: accounts.clone(),
             verifiers: Arc::new(verifiers),
             blocked: blocked.clone(),
@@ -265,6 +275,7 @@ impl Harness {
             accounts,
             blocked,
             account_signer,
+            available,
             calling_signer,
             operator,
             admin,

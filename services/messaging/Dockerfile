@@ -17,6 +17,7 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+COPY packages/communications-policy packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts packages/usage-facts
 COPY packages/messaging-crypto packages/messaging-crypto
@@ -24,7 +25,7 @@ COPY packages/object-storage packages/object-storage
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
-RUN cargo build --release --locked -p messaging-migration --bin messaging-migration \
+RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration \
  && cargo build --release --locked -p messaging --bin messaging
 
 FROM debian:bookworm-slim
@@ -37,6 +38,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 WORKDIR /app
 COPY --from=builder /src/services/messaging/target/release/messaging ./messaging
 COPY --from=builder /src/services/messaging/target/release/messaging-migration ./messaging-migration
+COPY --from=builder /src/services/messaging/target/release/messaging-communications-migration ./messaging-communications-migration
 USER messaging
 ENV MESSAGING_BIND_ADDRESS=0.0.0.0:8097 \
     LOG_FORMAT=json

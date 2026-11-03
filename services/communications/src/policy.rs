@@ -76,7 +76,7 @@ impl State {
             policy_version: version,
         };
         let (actor, target) = match (actor, target) {
-            (Ok(a), Ok(b)) if a.id != b.id => (a, b),
+            (Ok(a), Ok(b)) if a.id != b.id || check.action == Action::PersonalActivity => (a, b),
             (Err(Error::NotFound), _) | (_, Err(Error::NotFound)) => {
                 return Ok(deny(DecisionReason::NotPermitted, 0))
             }
@@ -85,6 +85,9 @@ impl State {
         };
         let privacy = self.store.privacy(&self.store.db, target.id).await?;
         let version = actor.version.max(target.version).max(privacy.version);
+        if !auth::principals_active(self, scope, &[&actor, &target]).await? {
+            return Ok(deny(DecisionReason::NotPermitted, version));
+        }
         if actor.activation_state != Activation::Active
             || target.activation_state != Activation::Active
             || !self.active_account(scope, &actor).await?
@@ -106,6 +109,19 @@ impl State {
             {
                 return Ok(deny(DecisionReason::CredentialRevoked, version));
             }
+        }
+        if check.action == Action::PersonalActivity {
+            let allowed = actor.id == target.id;
+            return Ok(Decision {
+                schema_version: 1,
+                allowed,
+                reason: if allowed {
+                    DecisionReason::Allowed
+                } else {
+                    DecisionReason::NotPermitted
+                },
+                policy_version: version,
+            });
         }
         if self
             .store
@@ -246,6 +262,7 @@ pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
             connected && p.direct_chat_policy == Audience::Connections
         }
         Action::ContactRequest => p.contact_request_permissions == RequestPermission::Everyone,
+        Action::PersonalActivity => false, // handled only for a verified active self above
         Action::GroupInvitation => {
             connected && p.contact_request_permissions == RequestPermission::Everyone
         }
