@@ -598,10 +598,6 @@ pub async fn kt_verify(
             database_size: head.tree_size,
             checkpoint_size: checkpoint.tree_size,
         }
-    } else if checkpoint.tree_size == 0 {
-        KtVerdict::Consistent {
-            tree_size: head.tree_size,
-        }
     } else {
         let root = hex::encode(transparency::root_at(db, checkpoint.tree_size).await?);
         if root != checkpoint.root_hash.to_ascii_lowercase() {
@@ -638,16 +634,75 @@ pub fn read_checkpoint(path: &Path) -> std::io::Result<Option<KtCheckpoint>> {
     }
 }
 
-/// Writes a checkpoint atomically (`<file>.tmp` + rename, mode 0600).
+/// Writes a checkpoint atomically and durably, mode 0600 before writing any bytes.
 pub fn write_checkpoint(path: &Path, checkpoint: &KtCheckpoint) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(checkpoint)?)?;
+    use std::io::Write;
+    let tmp = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    std::fs::rename(tmp, path)
+    let result = (|| {
+        let mut file = options.open(&tmp)?;
+        file.write_all(&serde_json::to_vec_pretty(checkpoint)?)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+async fn checkpoint_unverifiable(db: &DatabaseConnection, now: DateTime<Utc>) -> String {
+    // Reuse existing, audited, narrowly scoped controls. Never silently re-enable
+    // after an integrity failure; restore/verify evidence and use the operator CLI.
+    for switch in [KillSwitch::E2eeOnboarding, KillSwitch::KtProofs] {
+        let _ = set_switch(
+            db,
+            switch,
+            None,
+            true,
+            "KT_CHECKPOINT_UNVERIFIABLE",
+            "messaging-kt-monitor",
+            now,
+        )
+        .await;
+    }
+    crate::metrics::inc("messaging_kt_checkpoint_failures_total", &[]);
+    "key-transparency checkpoint cannot be verified; protected operations stopped".into()
+}
+
+/// Verify at the protected request boundary too: a monitor tick or failed attempt to
+/// persist a stop control must not create an authorization window after an outage.
+pub async fn verify_request_checkpoint(state: &crate::state::AppState) -> Result<()> {
+    let Some(path) = &state.kt_checkpoint else {
+        return Ok(());
+    };
+    let verified = match read_checkpoint(path) {
+        Ok(Some(checkpoint)) => matches!(
+            kt_verify(&state.db, &checkpoint, state.now()).await,
+            Ok(KtVerdict::Consistent { .. })
+        ),
+        _ => false,
+    };
+    if !verified {
+        checkpoint_unverifiable(&state.db, state.now()).await;
+        return Err(Error::reason(
+            ErrorCode::ServiceUnavailable,
+            "KT_CHECKPOINT_UNVERIFIABLE",
+        ));
+    }
+    Ok(())
 }
 
 /// Log appends fail closed while a rollback incident is OPEN (or onboarding is
@@ -691,7 +746,15 @@ pub async fn kt_monitor_once(
     path: &Path,
 ) -> std::result::Result<KtVerdict, String> {
     let current = kt_checkpoint(db).await.map_err(|e| e.to_string())?;
-    let verdict = match read_checkpoint(path).map_err(|e| format!("checkpoint unreadable: {e}"))? {
+    let established = db::scalar_i64(db,
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM messaging_operator_audit WHERE action='KT_CHECKPOINT_ESTABLISHED') THEN 1 ELSE 0 END", vec![])
+        .await.map_err(|_| "checkpoint initialization state unavailable".to_string())? > 0;
+    let checkpoint = match read_checkpoint(path) {
+        Ok(Some(value)) => Some(value),
+        Ok(None) if !established => None,
+        _ => return Err(checkpoint_unverifiable(db, now).await),
+    };
+    let verdict = match checkpoint {
         None => KtVerdict::Consistent {
             tree_size: current.tree_size,
         },
@@ -700,7 +763,21 @@ pub async fn kt_monitor_once(
             .map_err(|e| e.to_string())?,
     };
     if matches!(verdict, KtVerdict::Consistent { .. }) {
-        write_checkpoint(path, &current).map_err(|e| format!("checkpoint not written: {e}"))?;
+        if write_checkpoint(path, &current).is_err() {
+            return Err(checkpoint_unverifiable(db, now).await);
+        }
+        if !established {
+            audit(
+                db,
+                "messaging-kt-monitor",
+                "KT_CHECKPOINT_ESTABLISHED",
+                "transparency-log",
+                json!({"treeSize":current.tree_size}),
+                now,
+            )
+            .await
+            .map_err(|_| "checkpoint initialization audit unavailable".to_string())?;
+        }
     }
     Ok(verdict)
 }

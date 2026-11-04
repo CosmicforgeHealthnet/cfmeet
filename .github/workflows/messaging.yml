@@ -237,6 +237,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
+            python3 scripts/messaging/generate_consumer_guide.py --check
           if grep -n -E 'services/(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)|\.\./(calling|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway)' \
                services/messaging/Cargo.toml services/messaging/migration/Cargo.toml; then
             echo "::error::services/messaging depends on another service"; exit 1

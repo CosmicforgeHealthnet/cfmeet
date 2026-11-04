@@ -156,10 +156,26 @@ async fn capabilities(
     let policy = crate::conversations::policy::current(&s.db, ctx.scope.environment_id).await?;
     let head = crate::transparency::tree_head(&s.db).await?;
     let signatures = crate::transparency::witness::cosignatures(&s.db, &s.witnesses, &head).await?;
-    let security = devices > 0
+    let security = s.devices.enabled
+        && devices > 0
         && s.tree_heads.is_some()
         && s.witnesses.quorum > 0
-        && signatures.len() >= s.witnesses.quorum;
+        && signatures.len() >= s.witnesses.quorum
+        && crate::operations::verify_request_checkpoint(&s)
+            .await
+            .is_ok()
+        && !crate::operations::engaged(
+            &s.db,
+            crate::operations::KillSwitch::E2eeOnboarding,
+            Some(ctx.scope.environment_id),
+        )
+        .await?
+        && !crate::operations::engaged(
+            &s.db,
+            crate::operations::KillSwitch::KtProofs,
+            Some(ctx.scope.environment_id),
+        )
+        .await?;
     let available = security && policy.sending_enabled;
     Ok(Json(
         json!({"available":available,"securityReady":security,"reason":if !security {"DEVICE_SECURITY_SETUP_REQUIRED"} else if !available {"DISABLED"} else {"AVAILABLE"}}),

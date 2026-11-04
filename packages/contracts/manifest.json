@@ -566,7 +566,7 @@
     },
     {
       "id": "cfmeet.messaging.http-api",
-      "version": "1.13.0",
+      "version": "1.13.1",
       "kind": "openapi",
       "path": "messaging/http/v1.openapi.json",
       "owner": "messaging",
@@ -588,7 +588,7 @@
     },
     {
       "id": "cfmeet.messaging.event",
-      "version": "1.11.0",
+      "version": "1.11.1",
       "kind": "json-schema",
       "path": "messaging/events/v1.schema.json",
       "owner": "messaging",
@@ -622,7 +622,7 @@
     },
     {
       "id": "cfmeet.messaging.http-api-bundled",
-      "version": "1.13.0",
+      "version": "1.13.1",
       "kind": "openapi",
       "path": "bundled/messaging/http/v1.openapi.json",
       "owner": "messaging",
@@ -855,7 +855,7 @@
     },
     {
       "id": "cfmeet.messaging.public-api",
-      "version": "1.13.0",
+      "version": "1.13.1",
       "kind": "openapi",
       "path": "bundled/public/messaging/v1.openapi.json",
       "owner": "messaging",

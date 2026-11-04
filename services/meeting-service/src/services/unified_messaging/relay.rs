@@ -547,6 +547,48 @@ pub fn route_for(method: &Method, path: &str) -> Option<&'static RelayRoute> {
     })
 }
 
+/// Documentation of the existing native transport, derived from the real allowlist.
+/// The canonical resource schema stays Messaging-owned; native clients authenticate
+/// through their Account session and never receive a service credential.
+pub fn native_public_path(method: &str, template: &str) -> Option<String> {
+    let direct = match (method, template) {
+        ("post", "/v1/messaging/devices/registration-challenges") => {
+            Some("/api/v2/messaging/devices/registration-challenges")
+        }
+        ("post", "/v1/messaging/devices") => Some("/api/v2/messaging/devices"),
+        ("post", "/v1/messaging/devices/{deviceId}/key-packages") => {
+            Some("/api/v2/messaging/devices/{deviceId}/key-packages")
+        }
+        ("post", "/v1/messaging/devices/{deviceId}/revoke") => {
+            Some("/api/v2/messaging/devices/{deviceId}/revoke")
+        }
+        ("post", "/v1/messaging/client-tokens") => Some("/api/v2/messaging/client-tokens"),
+        ("post", "/v1/messaging/client-sessions/revoke-all") => {
+            Some("/api/v2/messaging/client-sessions/revoke-all")
+        }
+        _ => None,
+    };
+    if let Some(path) = direct {
+        return Some(path.into());
+    }
+    let path = template
+        .trim_start_matches('/')
+        .split('/')
+        .map(|part| {
+            if part == "{reaction}" {
+                ":example:"
+            } else if part.starts_with('{') && part.ends_with('}') {
+                "00000000-0000-0000-0000-000000000001"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let method = Method::from_bytes(method.to_uppercase().as_bytes()).ok()?;
+    route_for(&method, &path).map(|_| format!("/api/v2/messaging/relay{template}"))
+}
+
 /// A relayed request (the handler parsed it; nothing here is trusted for identity).
 pub struct RelayRequest<'a> {
     pub method: Method,

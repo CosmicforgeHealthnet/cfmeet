@@ -926,6 +926,18 @@
         "conversation_id": {
           "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
           "description": "The conversation (added by the webhook relay; the outbox row carries it as its conversation cursor)."
+        },
+        "initiating_service_account_id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "Optional internal delayed-worker authority reference. Removed from public webhook envelopes; never a credential."
+        },
+        "environment_kind": {
+          "enum": [
+            "SANDBOX",
+            "TEST",
+            "PRODUCTION"
+          ],
+          "description": "Optional authenticated worker scope metadata, removed from public webhook envelopes."
         }
       },
       "required": [

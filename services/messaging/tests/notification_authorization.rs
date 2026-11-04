@@ -64,6 +64,11 @@ async fn queued_push_is_not_delivered_after_member_departure() {
     let report = push::dispatch_due(&h.state, 100, 3).await.unwrap();
     assert_eq!(report.disabled, 1, "{report:?}");
     assert!(rt.push.sent.lock().unwrap().is_empty());
+    let metrics = messaging::metrics::render(&h.state).await;
+    assert!(metrics.contains("messaging_push_jobs{status=\"DISABLED\"} 1"));
+    assert!(metrics.contains("messaging_storage_committed_bytes 0"));
+    assert!(!metrics.contains(&bob.device_id().to_string()));
+    assert!(!metrics.contains(&bob.principal.to_string()));
 }
 
 #[tokio::test]

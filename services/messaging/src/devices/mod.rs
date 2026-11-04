@@ -183,6 +183,8 @@ pub async fn create_challenge(
     acting: &Acting,
 ) -> Result<ChallengeView> {
     require_enabled(state)?;
+    crate::operations::verify_request_checkpoint(state).await?;
+    crate::operations::require_kt_appendable(&state.db, ctx.scope.environment_id).await?;
     let now = state.now();
     let key = format!(
         "challenge:{}:{}",
@@ -285,6 +287,7 @@ pub async fn register(
     request: RegisterRequest,
 ) -> Result<Registered> {
     require_enabled(state)?;
+    crate::operations::verify_request_checkpoint(state).await?;
     crate::operations::require_kt_appendable(&state.db, ctx.scope.environment_id).await?;
     let label = match request.display_label.as_deref().map(str::trim) {
         None | Some("") => None,
@@ -568,6 +571,7 @@ pub async fn publish_key_packages(
     request: PublishRequest,
 ) -> Result<Vec<PublishedKeyPackage>> {
     require_enabled(state)?;
+    crate::operations::verify_request_checkpoint(state).await?;
     crate::operations::require_kt_appendable(&state.db, ctx.scope.environment_id).await?;
     if request.key_packages.is_empty() || request.key_packages.len() > MAX_KEY_PACKAGES_PER_REQUEST
     {

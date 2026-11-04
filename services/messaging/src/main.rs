@@ -221,7 +221,11 @@ async fn main() -> anyhow::Result<()> {
         rt.start();
         rt
     };
-    let state = state.with_realtime(realtime.clone());
+    let mut state = state.with_realtime(realtime.clone());
+    state.kt_checkpoint = std::env::var("MESSAGING_KT_CHECKPOINT_FILE")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from);
     // Part V H SMS Bridge: the SMS Gateway is the only SMS transport authority.
     let sms_configured = settings
         .targets
@@ -240,6 +244,12 @@ async fn main() -> anyhow::Result<()> {
     // outside the database (and its backups).
     match std::env::var("MESSAGING_KT_CHECKPOINT_FILE") {
         Ok(path) if !path.is_empty() => {
+            // Verify the configured checkpoint before accepting protected requests.
+            // A fault engages existing onboarding/proof controls; other Messaging
+            // reads and independently authorized services remain available.
+            if let Err(error) = messaging::operations::kt_monitor_once(&db, state.now(), std::path::Path::new(&path)).await {
+                tracing::warn!(%error, "key-transparency startup verification failed");
+            }
             tokio::spawn(messaging::operations::run_kt_monitor(
                 db.clone(),
                 state.clock.clone(),

@@ -34,6 +34,9 @@ pub struct AppState {
     pub tree_heads: Option<Arc<TreeHeadSigner>>,
     /// Key-transparency witnesses and the quorum a served head needs (none: UNWITNESSED).
     pub witnesses: Arc<crate::transparency::witness::WitnessSet>,
+    /// Local durable KT checkpoint, independent of database restore. Protected
+    /// directory/enrollment operations verify it at their own boundary as well.
+    pub kt_checkpoint: Option<std::path::PathBuf>,
     /// Seals MANAGED message text at rest. `None`: MANAGED sending fails closed.
     pub managed_keys: Option<Arc<ManagedKeyring>>,
     /// The realtime gateway runtime of this instance.
@@ -72,6 +75,7 @@ impl AppState {
             workers: WorkerSettings::default(),
             tree_heads: None,
             witnesses: Arc::new(Default::default()),
+            kt_checkpoint: None,
             managed_keys: None,
             realtime: Arc::new(Realtime::disabled()),
             storage: Arc::new(cf_object_storage::UnconfiguredStore),

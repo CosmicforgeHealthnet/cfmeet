@@ -3,6 +3,116 @@
 
 mod common;
 
+#[tokio::test]
+async fn empty_checkpoint_still_requires_the_correct_merkle_root() {
+    let Some(h) = common::Harness::new().await else {
+        return;
+    };
+    let checkpoint = KtCheckpoint {
+        tree_size: 0,
+        root_hash: "00".repeat(32),
+    };
+    assert!(matches!(
+        operations::kt_verify(h.conn(), &checkpoint, h.state.now())
+            .await
+            .unwrap(),
+        KtVerdict::Forked { checkpoint_size: 0 }
+    ));
+    assert!(
+        operations::open(h.conn(), IncidentCategory::KtRollbackDetected)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn corrupted_or_deleted_established_checkpoint_stops_onboarding_and_proofs() {
+    let Some(mut h) = common::Harness::new().await else {
+        return;
+    };
+    let c = h.customer(common::flows::ALL_SCOPES);
+    let member = h.member(&c, 1).await;
+    let dir = std::env::temp_dir().join(format!(
+        "messaging-checkpoint-fault-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("checkpoint.json");
+    let now = h.state.now();
+    operations::kt_monitor_once(h.conn(), now, &path)
+        .await
+        .unwrap();
+    h.state.kt_checkpoint = Some(path.clone());
+    let original = std::fs::read(&path).unwrap();
+    std::fs::write(&path, b"malformed checkpoint").unwrap();
+    assert!(operations::kt_monitor_once(h.conn(), now, &path)
+        .await
+        .is_err());
+    assert!(
+        operations::engaged(h.conn(), KillSwitch::E2eeOnboarding, None)
+            .await
+            .unwrap()
+    );
+    assert!(operations::engaged(h.conn(), KillSwitch::KtProofs, None)
+        .await
+        .unwrap());
+    assert!(
+        operations::require_kt_appendable(h.conn(), c.context.scope.environment_id)
+            .await
+            .is_err()
+    );
+    let proof = h
+        .get(
+            &c,
+            Some(member.principal),
+            &format!(
+                "/v1/messaging/key-transparency/proofs?deviceId={}",
+                member.device_id()
+            ),
+        )
+        .await;
+    assert_eq!(proof.status, StatusCode::SERVICE_UNAVAILABLE);
+    // Clearing persisted controls without restoring trustworthy evidence cannot
+    // bypass the request-boundary check (including after a monitor/DB outage).
+    for switch in [KillSwitch::E2eeOnboarding, KillSwitch::KtProofs] {
+        operations::set_switch(
+            h.conn(),
+            switch,
+            None,
+            false,
+            "TEST_RECOVERY",
+            "security-test",
+            now,
+        )
+        .await
+        .unwrap();
+    }
+    assert!(operations::verify_request_checkpoint(&h.state)
+        .await
+        .is_err());
+    let challenge = h.challenge(&c, member.principal).await;
+    assert_eq!(challenge.status, StatusCode::SERVICE_UNAVAILABLE);
+    std::fs::write(&path, &original).unwrap();
+    operations::kt_monitor_once(h.conn(), now, &path)
+        .await
+        .unwrap();
+    // Restoring a file alone does not undo an integrity incident's security control.
+    assert!(
+        operations::engaged(h.conn(), KillSwitch::E2eeOnboarding, None)
+            .await
+            .unwrap()
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert!(operations::kt_monitor_once(h.conn(), now, &path)
+        .await
+        .is_err());
+    assert!(
+        !path.exists(),
+        "missing established checkpoint must never be silently reseeded"
+    );
+    std::fs::remove_dir(&dir).unwrap();
+}
+
 use async_trait::async_trait;
 use axum::http::StatusCode;
 use common::{flows::ALL_SCOPES, *};

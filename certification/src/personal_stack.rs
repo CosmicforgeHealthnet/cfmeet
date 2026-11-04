@@ -288,6 +288,11 @@ impl PersonalStack {
                 "http://127.0.0.1:3000/oauth/google/callback".into(),
             ),
             ("FEATURE_MEETING_V2_ENABLED".into(), "true".into()),
+            ("FEATURE_UNIFIED_MESSAGING".into(), "true".into()),
+            (
+                "CF_MESSAGING_BASE_URL".into(),
+                self.urls["messaging"].clone(),
+            ),
             (
                 "CF_COMMUNICATIONS_BASE_URL".into(),
                 self.urls["communications"].clone(),

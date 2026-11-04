@@ -252,6 +252,18 @@ pub async fn render(state: &AppState) -> String {
             "messaging_outbox_events",
             "status",
         ),
+        (
+            "SELECT state, count(*) FROM messaging_attachments GROUP BY state ORDER BY state",
+            "messaging_attachments", "state",
+        ),
+        (
+            "SELECT status, count(*) FROM messaging_push_jobs GROUP BY status ORDER BY status",
+            "messaging_push_jobs", "status",
+        ),
+        (
+            "SELECT status, count(*) FROM messaging_object_deletions GROUP BY status ORDER BY status",
+            "messaging_object_deletions", "status",
+        ),
     ] {
         if let Ok(rows) = db
             .query_all(Statement::from_string(DbBackend::Postgres, sql))
@@ -286,6 +298,18 @@ pub async fn render(state: &AppState) -> String {
         (
             "SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::bigint FROM messaging_webhook_relay WHERE status = 'PENDING'",
             "messaging_webhook_relay_oldest_pending_seconds",
+        ),
+        (
+            "SELECT COALESCE(sum(committed_bytes),0)::bigint FROM messaging_storage_usage",
+            "messaging_storage_committed_bytes",
+        ),
+        (
+            "SELECT COALESCE(sum(reserved_bytes),0)::bigint FROM messaging_storage_usage",
+            "messaging_storage_reserved_bytes",
+        ),
+        (
+            "SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(next_attempt_at)),0)::bigint FROM messaging_object_deletions WHERE status='PENDING' AND next_attempt_at<=now()",
+            "messaging_object_deletion_lag_seconds",
         ),
     ] {
         if let Ok(Some(row)) = db

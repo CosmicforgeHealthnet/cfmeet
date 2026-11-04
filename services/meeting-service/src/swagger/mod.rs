@@ -958,6 +958,26 @@ fn public_doc(service: &str, raw: &str) -> String {
             )
         })
     });
+    if service == "Messaging" {
+        // Document actual native routing without exposing application/service credentials
+        // or inventing a second message API. Privileged paths were filtered above.
+        for (path, item) in doc["paths"].as_object_mut().unwrap() {
+            for (method, operation) in item.as_object_mut().unwrap() {
+                if !matches!(method.as_str(), "get" | "post" | "put" | "patch" | "delete") {
+                    continue;
+                }
+                if let Some(native) =
+                    crate::services::unified_messaging::relay::native_public_path(method, path)
+                {
+                    operation["x-cfmeet-native-path"] = serde_json::json!(native);
+                    operation["x-cfmeet-native-auth"] = serde_json::json!("ACCOUNT_BEARER_SESSION");
+                    operation["x-cfmeet-native-principal"] =
+                        serde_json::json!("SERVER_DERIVED_DO_NOT_SEND_CF_ACTING_PRINCIPAL");
+                }
+            }
+        }
+        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. Production enrollment remains blocked pending independent assessment. Administrative operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
+    }
     // The source Developer Platform public bundle uses operation tags but currently omits
     // the top-level tag declarations. Swagger can render those operations only if their
     // existing source tags are declared. Do not invent any additional API operation.
@@ -1195,6 +1215,20 @@ mod tests {
             serde_json::from_str(&public_doc("Messaging", MESSAGING_API)).unwrap();
         assert!(public_messaging["paths"]["/v1/conversations"].is_object());
         assert!(public_messaging["paths"]["/v1/messaging/legal-holds"].is_null());
+        assert_eq!(
+            public_messaging["paths"]["/v1/conversations"]["post"]["x-cfmeet-native-path"],
+            "/api/v2/messaging/relay/v1/conversations"
+        );
+        assert_eq!(
+            public_messaging["paths"]["/v1/messaging/devices"]["post"]["x-cfmeet-native-path"],
+            "/api/v2/messaging/devices"
+        );
+        assert_eq!(
+            public_messaging["paths"]["/v1/messaging/client-sessions/revoke-all"]["post"]
+                ["x-cfmeet-native-path"],
+            "/api/v2/messaging/client-sessions/revoke-all"
+        );
+        assert!(public_messaging["paths"]["/v1/messaging/policy"].is_null());
     }
 
     /// Every `$ref` of every document Swagger renders resolves INSIDE that document: no

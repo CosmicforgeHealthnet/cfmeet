@@ -93,6 +93,8 @@ async fn public_events_are_relayed_as_platform_envelopes_without_content() {
             "\"text\"",
             "epoch_secret",
             "key_package",
+            "initiating_service_account_id",
+            "environment_kind",
         ] {
             assert!(!text.contains(leak), "{leak} in {text}");
         }

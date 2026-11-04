@@ -79,5 +79,15 @@ def inspect_runtime(sha, run_id):
 
 
 def run(operation, sha, run_id):
-    assert operation == 'messaging-inspect', 'Unsupported Messaging operation'
-    inspect_runtime(sha, run_id)
+    if operation == 'messaging-inspect':
+        inspect_runtime(sha, run_id)
+    elif operation == 'messaging-configure':
+        import messaging_runtime
+        messaging_runtime.configure(sha, run_id)
+    elif operation == 'messaging-verify':
+        import messaging_acceptance
+        messaging_acceptance.execute(sha, run_id)
+        inspect_runtime(sha, run_id)
+        p.regression()
+    else:
+        raise AssertionError('Unsupported Messaging operation')
