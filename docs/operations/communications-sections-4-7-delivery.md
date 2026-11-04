@@ -410,6 +410,41 @@ successful tests. Production implementation and functional/security acceptance
 are complete. Off-server disaster recovery remains an explicit deferred owner
 requirement, and production Messaging activation remains outside this milestone.
 
+## Post-release repository synchronization — November 4, 16:00 UTC
+
+Both final milestone branch checks passed:
+[main 41800907493](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/41800907493)
+and [staging 41800907862](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/41800907862),
+including ownership/mutation guards, secret scanning and database-role isolation.
+
+During the subsequent pause, another author advanced main to
+`f7269415a8ddf35e2f2d38b59d45a1de664b983e` with later Calling documentation/CORS
+and frontend work. That history was preserved and local/main/staging were
+fast-forwarded together. No frontend code was edited, inspected or manually
+tested as part of this continuation; its later failed checks are outside this
+backend milestone.
+
+Backend-only cleanup commit `b8c3de34b6e53c7aad7074592a979edda5e28e85` fixes
+the new Calling formatting failure and scopes the security test's tracing
+dispatcher to every asynchronous request poll. The test still requires the
+rejection log and safe key identifier, and still checks that tokens/signatures
+never reach logs, responses or headers. No security assertion was removed.
+`cargo fmt --check` and `cargo check --locked --test internal_auth` passed locally.
+
+Fresh [Calling CI 41865047261](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/41865047261)
+and the other main backend checks are queued during the official
+[GitHub Actions/Pages incident](https://www.githubstatus.com/incidents/xr3myzj7ms51).
+Their new PostgreSQL/security execution is **PENDING**, not reported as passed.
+Duplicate staging suites were superseded by the identical-commit main validation;
+repository guard checks remain enabled for both branches.
+
+These later repository changes have **not** replaced the accepted production
+image set. Production remains on source `787bb9a`, with the completed functional
+and security receipts above. The external CI outage blocks verification of the
+later repository-only cleanup, not the already delivered Sections 4–7 APIs.
+The final report-only commit and synchronized branch SHA are supplied in the
+handoff.
+
 ## DEFERRED and next milestone
 
 Phone OTP, telecom verification providers, phone ownership/matching, external
