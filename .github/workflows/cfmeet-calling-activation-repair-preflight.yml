@@ -1,0 +1,72 @@
+name: CF Meet calling activation repair preflight (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-activation-repair-preflight.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: SSH setup
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 6 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Exact capture dependency and Calling topology inventory (no writes)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== HOSTIDENTITY (container evidence) ==='
+          for n in cfmeet-calling cfmeet-production-backend cfmeet-messaging cfmeet-platform-access lk-server cfmeet-calling-redis cfmeet-calling-artifacts cfmeet-calling-egress; do
+            if docker inspect "$n" >/dev/null 2>&1; then
+              printf '%s: %s\n' "$n" "$(docker inspect -f '{{.State.Status}}' "$n")"
+            else echo "$n: absent"; fi
+          done
+          echo '=== NETWORKS (names only) ==='
+          for n in cfmeet-calling lk-server cfmeet-calling-redis cfmeet-calling-artifacts; do
+            if docker inspect "$n" >/dev/null 2>&1; then
+              docker inspect -f '{{.Name}}{{range $k,$v := .NetworkSettings.Networks}} {{$k}}{{end}}' "$n"
+              docker inspect -f '{{.Name}} NetworkMode={{.HostConfig.NetworkMode}} PortBindings={{json .HostConfig.PortBindings}}' "$n"
+            fi
+          done
+          echo '=== CAPTURE SECRET FILES (presence only) ==='
+          for name in calling-capture-redis-password minio-egress-access-key minio-egress-secret minio-service-access-key calling-artifact-store-secret calling-livekit-api-key calling-livekit-api-secret; do
+            if test -s "/opt/cfmeet-core/secrets/$name"; then echo "secret/$name: present"; else echo "secret/$name: absent";fi
+          done
+          echo '=== LIVEKIT FILE CONFIG KEYS ONLY ==='
+          if test -s /opt/livekit/livekit.yaml; then
+            awk '/^[a-zA-Z_]+:/{print $1}' /opt/livekit/livekit.yaml
+          fi
+          echo '=== CALLING ENV CONFIG KEYS ONLY ==='
+          for f in /opt/cfmeet-core/calling-livekit.runtime.env /opt/cfmeet-core/calling-capture.production.env; do
+            if test -s "$f"; then
+              echo "$f: present"
+              awk -F= '/^(CALLING_(NEW_CALLS_ENABLED|APP_CALLING_ENABLED|MEDIA_PROVIDER|CAPTURE_PROVIDER|ARTIFACT_STORAGE_.*)|ENTERPRISE_CALLING_ENABLED|VOICEMAIL_ENABLED|CALL_RECORDING_ENABLED)=/ {print $1}' "$f"
+            else echo "$f: absent";fi
+          done
+          echo '=== CONTROLS AND RESOURCES ==='
+          for f in /opt/cfmeet-core/calling-capture-production-certified /opt/cfmeet-core/calling-app-active.runtime.env /opt/cfmeet-core/calling-full.runtime.env; do
+            if test -e "$f"; then echo "$f: exists";else echo "$f: absent";fi
+          done
+          df -h / | tail -1
+          free -h | grep '^Mem:'
+          echo '=== MEETINGS HEALTH ==='
+          if curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null; then echo 'MEETINGS: healthy';else echo 'MEETINGS: FAILED';exit 1;fi
+          echo '=== READ ONLY COMPLETE ==='
+          REMOTE

@@ -154,3 +154,5 @@ jobs:
             [ -s "$f" ] || continue
             echo "== $f"; tail -50 "$f"
           done
+
+# Production readiness recertification requested 2026-11-02; same executable gates, no weakened assertions.

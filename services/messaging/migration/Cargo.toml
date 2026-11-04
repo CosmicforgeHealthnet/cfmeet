@@ -18,3 +18,7 @@ tokio = { version = "1.42", features = ["macros", "rt-multi-thread"] }
 dotenvy = "0.15"
 sea-orm-migration = { version = "1.1", default-features = false, features = ["cli", "sqlx-postgres", "runtime-tokio-rustls"] }
 async-trait = "0.1"
+
+[[bin]]
+name = "messaging-communications-migration"
+path = "src/communications-main.rs"

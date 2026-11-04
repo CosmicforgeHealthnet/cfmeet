@@ -273,7 +273,7 @@ SMS_TABLE_PREFIXES = ("sms_",)
 MESSAGING_OWNER = "messaging"
 MESSAGING_TABLE_PREFIXES = ("messaging_",)
 MESSAGING_CRYPTO_RE = re.compile(r"\b[a-z_]*(?:key_package|mls_|messaging_device)[a-z0-9_]*\b")
-E2EE_SECRET_SERVICES = {"messaging", "platform-access"}
+E2EE_SECRET_SERVICES = {"messaging", "platform-access", "communications"}
 E2EE_SECRET_RE = re.compile(
     r"\b[a-z_]*(?:private_key|secret_key|signing_key_private|epoch_secret|exporter_secret|init_secret|"
     r"encryption_secret|leaf_secret|joiner_secret|welcome_secret|psk_secret|hpke_private|init_private|"
@@ -337,7 +337,7 @@ class Repository:
     def _owned_tables(self, service: str) -> set[str]:
         tables: set[str] = set()
         for path in self.files(self.root / "services" / service):
-            if path.suffix != ".rs" or "migration" not in path.relative_to(self.root).parts:
+            if path.suffix not in (".rs", ".sql") or "migration" not in path.relative_to(self.root).parts:
                 continue
             code = strip_rust(path.read_text(encoding="utf-8", errors="replace"), keep_strings=True)
             tables |= {m.lower() for m in RAW_CREATE_RE.findall(code)}
@@ -570,7 +570,7 @@ def check_rust(repo: Repository, path: Path, out: list[Violation]):
 def migration_sources(repo: Repository, service: str):
     """(path, lower-case code with strings, comments removed) of a service's migrations."""
     for path in repo.files(repo.root / "services" / service):
-        if path.suffix == ".rs" and "migration" in path.relative_to(repo.root).parts:
+        if path.suffix in (".rs", ".sql") and "migration" in path.relative_to(repo.root).parts:
             code = strip_rust(path.read_text(encoding="utf-8", errors="replace"), keep_strings=True)
             # SQL comments (`-- ...`) inside migration strings may discuss forbidden data.
             code = "\n".join(line.split("--", 1)[0] for line in code.splitlines())

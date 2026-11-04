@@ -96,6 +96,7 @@ export type DomainClient<Ops> = {
 /** Accessor property name of each domain. */
 export const DOMAIN_ACCESSORS = {
   calling: 'calling',
+  communications: 'communications',
   'developer-platform': 'developerPlatform',
   gateway: 'gateway',
   meetings: 'meetings',
@@ -211,6 +212,7 @@ export class CfMeetClient {
   readonly realtime: RealtimeClient;
 
   declare readonly calling: DomainClient<DomainOperations['calling']>;
+  declare readonly communications: DomainClient<DomainOperations['communications']>;
   declare readonly developerPlatform: DomainClient<DomainOperations['developer-platform']>;
   declare readonly gateway: DomainClient<DomainOperations['gateway']>;
   declare readonly meetings: DomainClient<DomainOperations['meetings']>;

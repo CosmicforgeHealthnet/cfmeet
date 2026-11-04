@@ -1,0 +1,62 @@
+name: Certify CF Meet enterprise public API routing and scopes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cfmeet-enterprise-public-access-cert.yml"
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 9
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Inspect protected enterprise endpoints (no secrets or writes)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== ACTIVE ENTERPRISE HTTP ROUTING ==='
+          SITE=/etc/nginx/sites-enabled/api.cfmeet.com
+          test -r "$SITE"
+          echo "ENTERPRISE_SNIPPET_COUNT: $(grep -c 'include /etc/nginx/snippets/cfmeet-calling-routes.conf' "$SITE" || true)"
+          if test -r /etc/nginx/snippets/cfmeet-calling-routes.conf; then
+            grep -E '^[[:space:]]*location ' /etc/nginx/snippets/cfmeet-calling-routes.conf || true
+          fi
+          TOKEN_FILE=/opt/cfmeet-core/secrets/cfmeet-web-bff.credential
+          test -s "$TOKEN_FILE"
+          TOKEN="$(cat "$TOKEN_FILE")"
+          for endpoint in /v1/enterprise/voicemail/mailboxes /v1/enterprise/extensions /v1/calls; do
+            for auth in anonymous authenticated; do
+              if test "$auth" = authenticated; then
+                code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                  --max-time 8 --resolve api.cfmeet.com:443:127.0.0.1 \
+                  -H "Authorization: Bearer $TOKEN" "https://api.cfmeet.com$endpoint" || true)"
+              else
+                code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                  --max-time 8 --resolve api.cfmeet.com:443:127.0.0.1 \
+                  "https://api.cfmeet.com$endpoint" || true)"
+              fi
+              echo "CHECK $endpoint $auth: HTTP_$code"
+            done
+          done
+          echo '=== ENTERPRISE API AUDIT DONE; NO CHANGES MADE ==='
+          REMOTE
+
+# Recheck live enterprise routing after Nginx reload, 2026-11-02.

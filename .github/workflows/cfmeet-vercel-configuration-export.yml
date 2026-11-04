@@ -1,0 +1,48 @@
+name: Export CF Meet Calling setup to Vercel securely
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-vercel-configuration-export.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  secure-export:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Set up SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Export non-secret UUIDs and encrypted one-time credential
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          PUB="$(mktemp)"
+          CIPHER="$(mktemp)"
+          trap 'rm -f "$PUB" "$CIPHER"' EXIT
+          printf '%s\n' 'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQm9qQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FZOEFNSUlCaWdLQ0FZRUF1VnRlbFkvYXp0NE9zQUJ2ZUkwUQpqTEZvQVJlaVJPNWRiak4raCtRVXUwcXJZVFU2RXNRVWgzT2FBY2FHSXd5YTlVM1Bzc0N2V0dmZ2hjcUJvR0gzClZ4M3RCeVdBMisxdEVueWM1aGttOExiWFZyNm1CVEdXNndVeXdVdW13dXVCd0xtR09TT1lkUDh0WEV4TkV1cWsKbHkwbWN3MGN2UGltdU9oUnRRZTRHcUsvcE1CUW5lOU5CK0c3QnpZb05Ycnlpd2pieGphTHV2ZzlTME5yMS92Mwo3NFBNU1hmTnRoZVNGek9qR3NzTHVCeVlhdXlPMzA2ZVZTbWthVGxwd2NCRUVZTFVhRWlVRXlTQm9VRDJuNDd2ClFRUGpkQjhiMWdabmhRRVV0ZisyTThYN0hCR055ZkxCZFRJbXExRFh3QnRMQUVxTS9mK0kyd2dYYVYxZ3JpdXUKYXNoWEIyZjZsdmhQUmo5amdrYVlQeFNYMyt3eS9jazV0L3lFTjRRSUhHSHZwbmoxSldQeE01NzZjbG5RNHN2TApWa2lzSGRrcVdRVnV4dUJrS3ArU0wzY3NYU3c0WlI0Ylk1T2lnU3lqYXNiY1ZoWm52NzBQT3pBdklnYlJ0ZVViCkRtTWdJSG8vNVJ2cXhzYVZ2V3NXYWZ0clVWVFJ0VGxEWXRpVEx4SG1iWXVIQWdNQkFBRT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==' | base64 -d > "$PUB"
+          test -s /opt/cfmeet-core/secrets/cfmeet-web-bff.credential
+          test -s /opt/cfmeet-core/communication.scope.env
+          openssl pkeyutl -encrypt -pubin -inkey "$PUB" \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -in /opt/cfmeet-core/secrets/cfmeet-web-bff.credential -out "$CIPHER"
+          echo "CFMEET_ENCRYPTED_BFF_CREDENTIAL=$(base64 -w0 "$CIPHER")"
+          grep -E '^CFMEET_COMMUNICATION_(TENANT|APPLICATION|ENVIRONMENT)_ID=' \
+            /opt/cfmeet-core/communication.scope.env
+          echo 'CREDENTIAL_IS_ENCRYPTED: yes'
+          REMOTE

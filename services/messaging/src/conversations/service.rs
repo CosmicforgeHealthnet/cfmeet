@@ -347,6 +347,26 @@ pub async fn create(
             }
         }
     }
+    if let Some(target) = counterpart {
+        crate::communications::require(
+            state,
+            ctx,
+            cf_communications_policy::Action::DirectConversation,
+            acting.principal_id,
+            target,
+        )
+        .await?;
+    }
+    if request.context_class == ContextClass::Group {
+        crate::communications::require(
+            state,
+            ctx,
+            cf_communications_policy::Action::PersonalActivity,
+            acting.principal_id,
+            acting.principal_id,
+        )
+        .await?;
+    }
     let now = state.now();
     let key = format!(
         "conversation-create:{}:{}",

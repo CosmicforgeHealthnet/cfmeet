@@ -13,7 +13,8 @@
     "cfmeet.messaging.public-api",
     "cfmeet.numbering.public-api",
     "cfmeet.sms-gateway.public-api",
-    "cfmeet.developer-platform.public-api"
+    "cfmeet.developer-platform.public-api",
+    "cfmeet.communications.public-api"
   ],
   "typescript": {
     "package": "@cfmeet/platform-sdk",

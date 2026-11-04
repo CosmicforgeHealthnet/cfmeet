@@ -75,6 +75,10 @@ impl SignalingIdentity {
         self.claims.minted_by_credential_id
     }
 
+    pub fn issued_at(&self) -> DateTime<Utc> {
+        self.claims.issued_at
+    }
+
     pub fn expires_at(&self) -> DateTime<Utc> {
         self.claims.expires_at
     }
@@ -218,6 +222,8 @@ impl FromRequestParts<AppState> for SignalingIdentity {
             .get::<RequestContext>()
             .cloned()
             .unwrap_or_else(RequestContext::generate);
-        state.signaling.authenticate(&token, request).await
+        let identity = state.signaling.authenticate(&token, request).await?;
+        state.require_personal_signaling(&identity).await?;
+        Ok(identity)
     }
 }

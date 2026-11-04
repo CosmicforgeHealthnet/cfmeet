@@ -93,6 +93,8 @@ pub enum CallError {
     /// obtained (timeout, outage, authentication, malformed answer): fail closed.
     #[error("privacy authorization unavailable")]
     PrivacyAuthorizationUnavailable,
+    #[error("communications authorization unavailable")]
+    CommunicationsPolicyUnavailable,
     /// The Routing Engine denied a public-network route (stable denial code, safe).
     #[error("public route denied ({0})")]
     PublicRouteDenied(&'static str),
@@ -143,6 +145,7 @@ impl CallError {
             CallError::ParticipantLimitExceeded { .. } => "PARTICIPANT_LIMIT_EXCEEDED",
             CallError::TargetUnavailable => "TARGET_UNAVAILABLE",
             CallError::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
+            CallError::CommunicationsPolicyUnavailable => "COMMUNICATIONS_POLICY_UNAVAILABLE",
             CallError::PublicRouteDenied(_) => "PUBLIC_ROUTE_DENIED",
             CallError::PublicRouteUnavailable(_) => "PUBLIC_ROUTE_UNAVAILABLE",
             CallError::TelecomSpendLimitExceeded(_) => "TELECOM_SPEND_LIMIT_EXCEEDED",
@@ -187,6 +190,7 @@ impl CallError {
             }
             CallError::MediaUnavailable
             | CallError::PrivacyAuthorizationUnavailable
+            | CallError::CommunicationsPolicyUnavailable
             | CallError::ArtifactStorageUnavailable
             | CallError::PublicRouteUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             CallError::PublicRouteDenied(_) => StatusCode::FORBIDDEN,
@@ -264,6 +268,9 @@ impl From<CallError> for CallingError {
             CallError::ParticipantLimitExceeded { .. } => ErrorCode::ParticipantLimitExceeded,
             CallError::TargetUnavailable => ErrorCode::TargetUnavailable,
             CallError::ArtifactStorageUnavailable => ErrorCode::ArtifactStorageUnavailable,
+            CallError::CommunicationsPolicyUnavailable => {
+                ErrorCode::CommunicationsPolicyUnavailable
+            }
             CallError::PrivacyAuthorizationUnavailable => {
                 ErrorCode::PrivacyAuthorizationUnavailable
             }

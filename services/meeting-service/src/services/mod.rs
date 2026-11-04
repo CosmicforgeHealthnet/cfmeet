@@ -43,3 +43,5 @@ pub use otp::OtpService;
 pub use rate_limiter::RateLimiterService;
 pub use redis::RedisService;
 pub use token_blacklist::TokenBlacklistService;
+
+pub mod communications;

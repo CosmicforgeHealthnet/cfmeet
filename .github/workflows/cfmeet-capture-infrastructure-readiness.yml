@@ -1,0 +1,77 @@
+name: Inspect CF Meet production capture infrastructure (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-capture-infrastructure-readiness.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Read-only capacity, runtime, network, and capture prerequisites
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== SYSTEM AND CAPACITY ==='
+          uname -m
+          df -h / | tail -1
+          free -m | grep -E '^(Mem:|Swap:)'
+          nproc
+          echo '=== CONTAINERS AND DOCKER NETWORKS ==='
+          docker ps -a --format '{{.Names}} {{.Status}}' | grep -Ei 'cfmeet|livekit|lk-server|egress|redis|minio|s3|object|storage|nginx' | head -90 || true
+          docker network ls --format '{{.Name}} {{.Driver}}' | grep -Ei 'cfmeet|livekit|rtc' | head -60 || true
+          echo '=== LIVEKIT CONFIGURATION PREREQUISITES ==='
+          if test -f /opt/livekit/livekit.yaml; then
+            echo 'LIVEKIT_CONFIG: PRESENT'
+            for name in redis rtc port; do
+              if grep -Eq "^$name:" /opt/livekit/livekit.yaml; then echo "LIVEKIT_$name CONFIG_PRESENT"; else echo "LIVEKIT_$name CONFIG_ABSENT"; fi
+            done
+          else
+            echo 'LIVEKIT_CONFIG: ABSENT'
+          fi
+          docker inspect lk-server --format 'LIVEKIT_IMAGE={{.Config.Image}} NETWORK={{.HostConfig.NetworkMode}} RESTART={{.HostConfig.RestartPolicy.Name}}' || true
+          docker inspect lk-server --format '{{range .Mounts}}LIVEKIT_MOUNT_DEST={{.Destination}} SOURCE_TYPE={{.Type}}{{println}}{{end}}' || true
+          echo '=== RUNNING MEDIA/STORE CONTAINERS ==='
+          for name in lk-server cfmeet-calling cfmeet-calling-egress cfmeet-calling-redis cfmeet-calling-artifacts; do
+            if docker container inspect "$name" >/dev/null 2>&1; then
+              echo "SERVICE $name $(docker inspect -f '{{.State.Status}}' "$name")"
+            else
+              echo "SERVICE $name missing"
+            fi
+          done
+          echo '=== CALLING CAPTURE ENV PREREQUISITE KEY NAMES ==='
+          for file in /opt/cfmeet-core/calling-livekit.runtime.env /opt/cfmeet-core/calling-capture.production.env /opt/cfmeet-core/calling-full.runtime.env; do
+            if test -s "$file"; then
+              echo "FILE_EXISTS: $file"
+              awk -F= '/^(CALLING_CAPTURE_PROVIDER|CALLING_CAPTURE_STAGING_PREFIX|CALLING_ARTIFACT_STORAGE_)/ {print "CONFIG_KEY: " $1}' "$file"
+            else echo "FILE_MISSING: $file"; fi
+          done
+          if test -s /opt/cfmeet-core/secrets/calling-artifact-store-secret; then echo 'ARTIFACT_CREDENTIAL_FILE: PRESENT'; else echo 'ARTIFACT_CREDENTIAL_FILE: MISSING'; fi
+          if test -e /opt/cfmeet-core/calling-capture-production-certified; then echo 'CAPTURE_CERTIFICATION_MARKER: PRESENT'; else echo 'CAPTURE_CERTIFICATION_MARKER: MISSING'; fi
+          echo '=== ARTIFACT DATA AND BACKUP LOCATIONS ==='
+          for d in /var/lib/cfmeet-artifacts /opt/cfmeet-core/storage /opt/livekit/egress /opt/cfmeet-core/backup; do if test -d "$d"; then echo "DIRECTORY_EXISTS: $d"; else echo "DIRECTORY_MISSING: $d"; fi; done
+          echo '=== NO SERVICE MODIFIED ==='
+          REMOTE

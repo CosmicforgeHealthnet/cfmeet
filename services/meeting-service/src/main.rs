@@ -127,6 +127,30 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
+    state.communications = backend::services::communications::Bridge::from_env()
+        .unwrap_or_else(|e| panic!("Communications configuration error: {e}"));
+    if state.communications.is_some() {
+        if !migration::communications_ready(&state.db)
+            .await
+            .expect("Communications migration readiness")
+        {
+            panic!("Account Communications integration migration is required");
+        }
+        let communications_state = state.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+            loop {
+                tick.tick().await;
+                if backend::services::communications::deliver_due(&communications_state)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Account Communications events deferred");
+                }
+            }
+        });
+    }
+
     // Start email worker (only if SMTP is configured)
     let _email_worker = if !email_config.smtp_host.is_empty() {
         match spawn_email_worker(state.email_service.queue().clone(), &email_config) {

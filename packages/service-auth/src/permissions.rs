@@ -26,6 +26,27 @@ use crate::identity::services;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum InternalPermission {
+    #[serde(rename = "communications-user.forward")]
+    CommunicationsUserForward,
+    #[serde(rename = "communications-policy.check")]
+    CommunicationsPolicyCheck,
+    #[serde(rename = "communications-account.apply")]
+    CommunicationsAccountApply,
+    #[serde(rename = "communications-block.apply")]
+    CommunicationsBlockApply,
+    #[serde(rename = "communications-backfill.run")]
+    CommunicationsBackfill,
+    #[serde(rename = "communications-account.read")]
+    CommunicationsAccountRead,
+    #[serde(rename = "calling-communications.read")]
+    CallingCommunicationsRead,
+    #[serde(rename = "messaging-communications.read")]
+    MessagingCommunicationsRead,
+    #[serde(rename = "calling-communications.apply")]
+    CallingCommunicationsApply,
+    #[serde(rename = "messaging-communications.apply")]
+    MessagingCommunicationsApply,
+
     /// Privacy Relay: authorize a communication.
     #[serde(rename = "communication.authorize")]
     CommunicationAuthorize,
@@ -281,6 +302,17 @@ pub struct PermissionDefinition {
 }
 
 pub const REGISTRY: &[PermissionDefinition] = &[
+    PermissionDefinition { permission: InternalPermission::CommunicationsUserForward, name: "communications-user.forward", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Forward an account-authenticated personal Communications request with server-resolved principal" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsPolicyCheck, name: "communications-policy.check", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Check current personal relationships and privacy; no enterprise override supplied by clients" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsAccountApply, name: "communications-account.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Apply a durable account lifecycle or session-revocation event idempotently" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsBlockApply, name: "communications-block.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Apply restrictive domain block references without message or call contents" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsBackfill, name: "communications-backfill.run", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: false, description: "Run bounded authenticated profile backfill and event replay" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsAccountRead, name: "communications-account.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current account eligibility and bounded backfill references; no credentials" },
+    PermissionDefinition { permission: InternalPermission::CallingCommunicationsRead, name: "calling-communications.read", receiver: services::CALLING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current Calling block decisions and backend capability flags" },
+    PermissionDefinition { permission: InternalPermission::MessagingCommunicationsRead, name: "messaging-communications.read", receiver: services::MESSAGING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current Messaging blocks, security readiness and mutually visible groups" },
+    PermissionDefinition { permission: InternalPermission::CallingCommunicationsApply, name: "calling-communications.apply", receiver: services::CALLING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Receive deduplicated personal policy and session-revocation events" },
+    PermissionDefinition { permission: InternalPermission::MessagingCommunicationsApply, name: "messaging-communications.apply", receiver: services::MESSAGING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Receive deduplicated personal policy and session-revocation events" },
+
     PermissionDefinition {
         permission: InternalPermission::CommunicationAuthorize,
         name: "communication.authorize",
@@ -494,7 +526,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformPrincipalResolve,
         name: "platform-principal.resolve",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
+        grantable_to: &[services::COMMUNICATIONS, services::CALLING, services::NUMBERING, services::SMS_GATEWAY, services::MESSAGING],
         sensitive: false,
         description: "Resolve communication principals inside the signed delegated scope",
     },
@@ -510,7 +542,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::PlatformIdentityRead,
         name: "platform-identity.read",
         receiver: services::PLATFORM_ACCESS,
-        grantable_to: &[services::CALLING, services::NUMBERING, services::MESSAGING, services::DEVELOPER_PLATFORM],
+        grantable_to: &[services::COMMUNICATIONS, services::CALLING, services::NUMBERING, services::MESSAGING, services::DEVELOPER_PLATFORM],
         sensitive: false,
         description: "Read the identity change feed, trusted tenant / application / environment context, effective scopes, credential status and import receipts (no verifier material)",
     },
@@ -776,6 +808,16 @@ const WILDCARD_LIKE: &[&str] = &["*", "admin", "all", "root", "any", "superuser"
 
 impl InternalPermission {
     pub const ALL: &'static [InternalPermission] = &[
+        InternalPermission::CommunicationsUserForward,
+        InternalPermission::CommunicationsPolicyCheck,
+        InternalPermission::CommunicationsAccountApply,
+        InternalPermission::CommunicationsBlockApply,
+        InternalPermission::CommunicationsBackfill,
+        InternalPermission::CommunicationsAccountRead,
+        InternalPermission::CallingCommunicationsRead,
+        InternalPermission::MessagingCommunicationsRead,
+        InternalPermission::CallingCommunicationsApply,
+        InternalPermission::MessagingCommunicationsApply,
         InternalPermission::CommunicationAuthorize,
         InternalPermission::CommunicationContextRead,
         InternalPermission::ProtectedContactResolveForExecution,
@@ -1107,6 +1149,14 @@ mod tests {
             receiving,
             [
                 (
+                    "messaging-communications.read",
+                    &[services::COMMUNICATIONS][..]
+                ),
+                (
+                    "messaging-communications.apply",
+                    &[services::COMMUNICATIONS][..]
+                ),
+                (
                     "messaging-application.delegate",
                     &[services::MEETING_SERVICE][..]
                 ),
@@ -1119,7 +1169,7 @@ mod tests {
                 ("messaging-request.forward", &[services::API_GATEWAY][..]),
             ]
         );
-        // Principal creation is the Meeting Service's (first-party login authority) only.
+        // Native account bootstrap remains owned by Account; Hub backfill reuses its bindings.
         assert_eq!(
             InternalPermission::PlatformPrincipalEnsure
                 .definition()
@@ -1147,6 +1197,8 @@ mod tests {
     /// committed events for customer webhooks and submitting MANAGED SMS Bridge copies.
     /// Never principal registration or identity administration.
     const MESSAGING_GRANTS: &[&str] = &[
+        "communications-policy.check",
+        "communications-block.apply",
         "communication-context.read",
         "platform-event.publish",
         "platform-credential.authenticate",
@@ -1264,7 +1316,14 @@ mod tests {
             .filter(|d| d.receiver == services::MEETING_SERVICE)
             .map(|d| d.name)
             .collect();
-        assert_eq!(received, ["meeting-request.forward", "user-session.verify"]);
+        assert_eq!(
+            received,
+            [
+                "communications-account.read",
+                "meeting-request.forward",
+                "user-session.verify"
+            ]
+        );
         for d in REGISTRY.iter().filter(|d| d.sensitive) {
             assert!(
                 !d.grantable_to.contains(&services::MEETING_SERVICE),

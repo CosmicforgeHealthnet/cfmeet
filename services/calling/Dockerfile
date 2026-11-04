@@ -16,6 +16,7 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+COPY packages/communications-policy packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts packages/usage-facts
 COPY packages/object-storage packages/object-storage
@@ -23,7 +24,7 @@ COPY packages/webhooks packages/webhooks
 COPY packages/contracts packages/contracts
 COPY services/calling services/calling
 WORKDIR /src/services/calling
-RUN cargo build --release --locked -p calling-migration --bin calling-migration \
+RUN cargo build --release --locked -p calling-migration --bin calling-migration --bin calling-communications-migration \
  && cargo build --release --locked -p calling --bin calling --bin platform_admin
 
 FROM debian:bookworm-slim
@@ -38,6 +39,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 WORKDIR /app
 COPY --from=builder /src/services/calling/target/release/calling ./calling
 COPY --from=builder /src/services/calling/target/release/calling-migration ./calling-migration
+COPY --from=builder /src/services/calling/target/release/calling-communications-migration ./calling-communications-migration
 COPY --from=builder /src/services/calling/target/release/platform_admin ./platform_admin
 USER calling
 ENV CALLING_BIND_ADDRESS=0.0.0.0:8090 \

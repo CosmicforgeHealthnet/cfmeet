@@ -48,6 +48,8 @@ pub enum UserStatus {
     Active,
     #[sea_orm(string_value = "inactive")]
     Inactive,
+    #[sea_orm(string_value = "suspended")]
+    Suspended,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

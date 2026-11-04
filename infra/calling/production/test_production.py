@@ -1,0 +1,166 @@
+import copy
+import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import production as p
+import api_acceptance
+
+
+class FixtureCredentialLifetime(unittest.TestCase):
+    def test_expired_fixture_credentials_renew_without_replacing_principals(self):
+        with tempfile.TemporaryDirectory() as folder:
+            value={'actors':{'tenantId':'11111111-1111-4111-8111-111111111111','principals':['existing-a'],'token':'expired'},
+                   'other':{'tenantId':'22222222-2222-4222-8222-222222222222','principals':['existing-b'],'token':'expired'},
+                   'credentialExpiresAt':1,'restrictedToken':'expired'}
+            path=Path(folder)/'calling-api-acceptance.json';path.write_text(json.dumps(value))
+            with patch.object(p,'SECRETS',Path(folder)),patch.object(api_acceptance.time,'time',return_value=10000),\
+                 patch.object(api_acceptance,'sql',side_effect=[value['actors']['tenantId'],value['other']['tenantId']]),\
+                 patch.object(api_acceptance,'admin',side_effect=[{'secret':'renewed-a'},{'secret':'renewed-b'},{'secret':'renewed-read'}]) as admin:
+                result=api_acceptance.context()
+                self.assertEqual(result['actors']['principals'],['existing-a'])
+                self.assertEqual(result['other']['principals'],['existing-b'])
+                self.assertEqual(result['restrictedToken'],'renewed-read')
+                self.assertEqual(result['credentialExpiresAt'],96400)
+                self.assertEqual(admin.call_count,3)
+                self.assertEqual(admin.call_args.args.count('--scope'),1)
+                self.assertIn('calls.read',admin.call_args.args)
+            with patch.object(p,'SECRETS',Path(folder)),patch.object(api_acceptance.time,'time',return_value=11000),\
+                 patch.object(api_acceptance,'admin') as admin:
+                self.assertEqual(api_acceptance.context(),result)
+                admin.assert_not_called()
+
+
+class ActivationSafety(unittest.TestCase):
+    def evidence(self):
+        return dict(schema=1,status='PRODUCTION_CERTIFIED',timestamp=1000,
+            images={'calling':'sha256:original'},git_sha='a'*40,
+            rollback_reference='/protected/rollback',acceptance={k:'PASS' for k in p.REQUIRED})
+
+    def test_infrastructure_success_cannot_activate(self):
+        evidence = self.evidence()
+        evidence['status'] = 'INFRASTRUCTURE_ONLY_NOT_CERTIFIED'
+        with self.assertRaises(AssertionError):
+            p.validate_acceptance(evidence,1001,evidence['images'])
+
+    def test_marker_and_pass_labels_without_receipts_cannot_activate(self):
+        evidence = self.evidence()
+        with self.assertRaises(AssertionError):
+            p.validate_acceptance(evidence,1001,evidence['images'])
+
+    def test_stale_evidence_and_changed_images_cannot_activate(self):
+        evidence = self.evidence()
+        for now,images in ((900,evidence['images']),(100000,evidence['images']),(1001,{'calling':'new'})):
+            with self.subTest(now=now,images=images), self.assertRaises(AssertionError):
+                p.validate_acceptance(evidence,now,images)
+
+    def test_every_production_scenario_is_required(self):
+        for name in p.REQUIRED:
+            evidence = self.evidence()
+            evidence['acceptance'][name] = 'NOT_RUN'
+            with self.subTest(name=name), self.assertRaises(AssertionError):
+                p.validate_acceptance(evidence,1001,evidence['images'])
+
+    def test_real_receipt_hashes_are_required_and_tampering_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(p,'ROOT',Path(directory)):
+            base = Path(directory)/'production-evidence'
+            base.mkdir()
+            evidence = self.evidence()
+            evidence['receipts'] = {}
+            for name in p.REQUIRED:
+                path = base/(name+'.json')
+                path.write_text(json.dumps(dict(scenario=name,result='PASS',git_sha=evidence['git_sha'],
+                    images=evidence['images'],started_at=900,finished_at=999,assertions=['controlled test assertion'])))
+                evidence['receipts'][name] = dict(path=str(path),sha256=p.hashlib.sha256(path.read_bytes()).hexdigest())
+            p.validate_acceptance(evidence,1001,evidence['images'])
+            path.write_text('{}')
+            with self.assertRaises(AssertionError):
+                p.validate_acceptance(evidence,1001,evidence['images'])
+
+
+class RuntimePreservation(unittest.TestCase):
+    def container(self):
+        return {'Id':'a'*64,'Image':'sha256:original','Config':{
+            'Image':'moving:tag','Env':['SECRET_FILE=/run/secret','CUSTOM=keep'],
+            'Cmd':['/app/calling','--custom'],'Entrypoint':None,'User':'10001',
+            'Healthcheck':{'Test':['CMD','/health']}},
+            'HostConfig':{'AutoRemove':False,'PortBindings':{},'RestartPolicy':{'Name':'unless-stopped'},
+                'Binds':['/source:/target:ro'],'Memory':123,'NanoCpus':456,'SecurityOpt':['no-new-privileges']},
+            'Mounts':[{'Source':'/source','Destination':'/target','RW':False}],
+            'NetworkSettings':{'Networks':{'private':{'Aliases':['calling','a'*12],'IPAMConfig':None},
+                'ingress':{'Aliases':['calling-ingress'],'IPAMConfig':None}}}}
+
+    def test_clone_retains_all_startup_security_network_and_mount_settings(self):
+        container = self.container()
+        original = copy.deepcopy(container)
+        cloned = p.clone_payload(container,{'CALLING_CAPTURE_PROVIDER':'livekit-egress'})
+        self.assertEqual(container,original)
+        self.assertEqual(cloned['Image'],'sha256:original')
+        self.assertEqual(cloned['Cmd'],container['Config']['Cmd'])
+        self.assertEqual(cloned['User'],'10001')
+        self.assertEqual(cloned['Healthcheck'],container['Config']['Healthcheck'])
+        for k,v in container['HostConfig'].items():
+            self.assertEqual(cloned['HostConfig'][k],v)
+        self.assertIn('CUSTOM=keep',cloned['Env'])
+        self.assertIn('SECRET_FILE=/run/secret',cloned['Env'])
+        self.assertEqual(set(cloned['NetworkingConfig']['EndpointsConfig']),{'private','ingress'})
+        self.assertEqual(cloned['NetworkingConfig']['EndpointsConfig']['private']['Aliases'],['calling'])
+        self.assertEqual(cloned['HostConfig']['Mounts'][0]['ReadOnly'],True)
+
+    def test_static_network_and_public_ports_require_explicit_safe_handling(self):
+        for change in ('ip','port'):
+            container = self.container()
+            if change=='ip':
+                container['NetworkSettings']['Networks']['private']['IPAMConfig']={'IPv4Address':'172.20.0.10'}
+            else:
+                container['HostConfig']['PortBindings']={'8090/tcp':[{'HostPort':'8090'}]}
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                p.clone_payload(container,{})
+
+
+class IsolatedAcceptanceSafety(unittest.TestCase):
+    def fixture(self):
+        return {'actors':{k:'11111111-1111-4111-8111-111111111111'
+            for k in ('tenantId','applicationId','environmentId')}}, {
+            'kind':'recording','artifactId':'22222222-2222-4222-8222-222222222222',
+            'callId':'33333333-3333-4333-8333-333333333333'}
+
+    def test_retention_acceleration_rejects_injected_identifier_without_database_access(self):
+        value,request=self.fixture();request['artifactId']="'; UPDATE calls SET current_state='ENDED';"
+        with patch.object(p,'run') as execute,self.assertRaises(ValueError):
+            api_acceptance.expire_fixture(value,request)
+        execute.assert_not_called()
+
+    def test_retention_acceleration_refuses_any_other_tenant(self):
+        value,request=self.fixture()
+        with patch.object(api_acceptance,'sql',return_value='different-tenant'),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.expire_fixture(value,request)
+        execute.assert_not_called()
+
+    def test_unexpected_probe_failure_restores_changed_runtime(self):
+        with patch.object(p,'inspect',side_effect=[{'Id':'original'},{'Id':'replacement'}]), \
+            patch.object(api_acceptance,'_run',side_effect=TimeoutError), \
+            patch.object(api_acceptance,'context',return_value={}), \
+            patch.object(api_acceptance,'cleanup_fixture_calls'), \
+            patch.object(Path,'read_text',return_value=json.dumps({'original':{'Id':'original'}})), \
+            patch.object(p,'rollback_calling') as rollback:
+            with self.assertRaises(TimeoutError):api_acceptance.run('controlled-run','recording')
+        rollback.assert_called_once()
+
+    def test_abandoned_probe_cleanup_refuses_an_unrelated_image(self):
+        with patch.object(p,'inspect',return_value={'Config':{'Image':'unrelated-service'}}),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.retire_abandoned_probe()
+        execute.assert_not_called()
+
+    def test_abandoned_probe_cleanup_refuses_a_customer_mount(self):
+        container={'Config':{'Image':'cfmeet-calling-api-probe:test','Cmd':['python','/api_client.py']},
+            'Mounts':[{'Source':'/customer-data','Destination':'/result'}]}
+        with patch.object(p,'inspect',return_value=container),patch.object(p,'run') as execute:
+            with self.assertRaises(AssertionError):api_acceptance.retire_abandoned_probe()
+        execute.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

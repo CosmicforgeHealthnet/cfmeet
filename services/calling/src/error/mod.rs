@@ -51,6 +51,7 @@ pub enum ErrorCode {
     ParticipantLimitExceeded,
     TargetUnavailable,
     PrivacyAuthorizationUnavailable,
+    CommunicationsPolicyUnavailable,
     PublicRouteDenied,
     PublicRouteUnavailable,
     TelecomSpendLimitExceeded,
@@ -90,6 +91,7 @@ impl ErrorCode {
         ErrorCode::ParticipantLimitExceeded,
         ErrorCode::TargetUnavailable,
         ErrorCode::PrivacyAuthorizationUnavailable,
+        ErrorCode::CommunicationsPolicyUnavailable,
         ErrorCode::PublicRouteDenied,
         ErrorCode::PublicRouteUnavailable,
         ErrorCode::TelecomSpendLimitExceeded,
@@ -142,6 +144,7 @@ impl ErrorCode {
                 "The call's participant limit would be exceeded."
             }
             ErrorCode::TargetUnavailable => "The target has no eligible application endpoint.",
+            ErrorCode::CommunicationsPolicyUnavailable => "Communications authorization is temporarily unavailable.",
             ErrorCode::PrivacyAuthorizationUnavailable => {
                 "Privacy authorization is unavailable; the protected call was not placed. Retry later."
             }
@@ -201,6 +204,7 @@ impl ErrorCode {
             ErrorCode::ParticipantLimitExceeded => "PARTICIPANT_LIMIT_EXCEEDED",
             ErrorCode::TargetUnavailable => "TARGET_UNAVAILABLE",
             ErrorCode::PrivacyAuthorizationUnavailable => "PRIVACY_AUTHORIZATION_UNAVAILABLE",
+            ErrorCode::CommunicationsPolicyUnavailable => "COMMUNICATIONS_POLICY_UNAVAILABLE",
             ErrorCode::PublicRouteDenied => "PUBLIC_ROUTE_DENIED",
             ErrorCode::PublicRouteUnavailable => "PUBLIC_ROUTE_UNAVAILABLE",
             ErrorCode::TelecomSpendLimitExceeded => "TELECOM_SPEND_LIMIT_EXCEEDED",

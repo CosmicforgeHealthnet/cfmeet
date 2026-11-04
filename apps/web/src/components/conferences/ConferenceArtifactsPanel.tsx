@@ -12,6 +12,8 @@ import {
   useConsentRequirements,
   useDeleteArtifact,
   useGenerateReport,
+  useStartTranscription,
+  useStopTranscription,
   useRecordConsents,
   useRequestIntelligence,
   useStartTranscription,
@@ -31,9 +33,7 @@ import type {
   WithdrawalResponse,
 } from "@/types/v2";
 
-type ReportOptionValue = "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT" | "INTELLIGENCE_OUTPUT";
-
-const reportOptions: { value: ReportOptionValue; label: string }[] = [
+const reportOptions: { value: ArtifactType; label: string }[] = [
   { value: "ATTENDANCE_REPORT", label: "Attendance report" },
   { value: "POLL_REPORT", label: "Poll report" },
   { value: "CHAT_EXPORT", label: "Chat export" },
@@ -72,7 +72,7 @@ export default function ConferenceArtifactsPanel({
   recordingPolicy?: string;
   live: boolean;
 }) {
-  const [reportType, setReportType] = useState<ReportOptionValue>("ATTENDANCE_REPORT");
+  const [reportType, setReportType] = useState<ArtifactType>("ATTENDANCE_REPORT");
   const [feedback, setFeedback] = useState("");
   const [attendanceVisible, setAttendanceVisible] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState("");
@@ -148,7 +148,7 @@ export default function ConferenceArtifactsPanel({
               <select
                 className="h-9 rounded-md border border-input bg-background px-2"
                 value={reportType}
-                onChange={event => setReportType(event.target.value as ReportOptionValue)}
+                onChange={event => setReportType(event.target.value as ArtifactType)}
               >
                 {reportOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>

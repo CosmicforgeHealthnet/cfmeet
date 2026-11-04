@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
 import MobileSidebar from "./MobileSidebar";
+
+const subscribeToHydration = () => () => {};
+const getHydrated = () => true;
+const getServerHydrated = () => false;
 
 export default function DashboardLayout({
   children,
@@ -14,12 +18,7 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const { data: user, isLoading, error } = useProfile();
-  const [mounted, setMounted] = useState(false);
-
-  // Ensure hydration completes before rendering dynamic content
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(subscribeToHydration, getHydrated, getServerHydrated);
 
   useEffect(() => {
     // If not loading and no user (either error like 401 Guest, or just no session), redirect

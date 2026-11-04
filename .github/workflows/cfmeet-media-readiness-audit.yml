@@ -1,0 +1,60 @@
+name: Audit CF Meet LiveKit production media configuration
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-media-readiness-audit.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: SSH setup
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Safe LiveKit media and ingress inventory
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path('/opt/livekit/livekit.yaml')
+          print('LIVEKIT_YAML_EXISTS:',p.is_file())
+          if p.is_file():
+            text=p.read_text()
+            print('LIVEKIT_CONFIG_SECTIONS:', ','.join(re.findall(r'^([a-zA-Z_][\w]*):',text,re.M)))
+            m=re.search(r'^keys:\s*\n((?:[ \t]+.*\n)+)',text,re.M)
+            print('LIVEKIT_API_KEY_COUNT:', len([x for x in m.group(1).splitlines() if x.strip() and not x.lstrip().startswith('#')]) if m else 'unknown')
+            for field in ['port','rtc','turn','redis','room','webhook','key_file','cert_file','external_ip']:
+              print('LIVEKIT_FIELD_'+field.upper()+':',bool(re.search(r'^\s*'+field+r':',text,re.M)))
+          PY
+          echo '=== MEETINGS LIVEKIT URL (NONSECRET) ==='
+          docker inspect cfmeet-production-backend --format '{{range .Config.Env}}{{println .}}{{end}}' |
+            awk -F= '$1=="LIVEKIT_URL" || $1=="LIVEKIT_API_URL" {print $1"="$2} $1=="LIVEKIT_API_KEY" {print "LIVEKIT_API_KEY=PRESENT"} $1=="LIVEKIT_API_SECRET" {print "LIVEKIT_API_SECRET=PRESENT"}' || true
+          echo '=== CURRENT CF MEET HOST NGINX LOCATION PREFIXES ==='
+          awk '$1=="location" {print $2}' /etc/nginx/sites-enabled/api.cfmeet.com 2>/dev/null | sort -u | head -70
+          echo '=== AVAILABLE DNS FOR LIVEKIT ==='
+          for h in livekit.cfmeet.com rtc.cfmeet.com api.cfmeet.com; do
+            if getent ahostsv4 "$h" >/dev/null; then
+              echo "$h: RESOLVES"
+            else
+              echo "$h: NOT_RESOLVING"
+            fi
+          done
+          echo '=== END ==='
+          REMOTE

@@ -16,6 +16,7 @@ WORKDIR /app/services/meeting-service
 COPY services/meeting-service/ ./
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/service-auth/ /app/packages/service-auth/
+COPY packages/communications-policy /app/packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts/ /app/packages/usage-facts/
 # Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
@@ -23,7 +24,7 @@ COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-communications-migration
 # Build the backend binary from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend
 
@@ -40,6 +41,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy binaries from builder
 COPY --from=builder /app/services/meeting-service/target/release/migration ./migration
+COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 
 # Expose the application port

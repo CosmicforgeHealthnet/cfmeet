@@ -75,6 +75,8 @@ jobs:
           - services/calling
           - services/privacy-relay
           - services/telephony
+          - services/communications
+          - packages/communications-policy
           - packages/service-auth
           - packages/webhooks
           - packages/usage-facts

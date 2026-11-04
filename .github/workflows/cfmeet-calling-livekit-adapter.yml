@@ -1,0 +1,121 @@
+name: Connect CF Meet Calling to private LiveKit
+
+# Replaces only the new Calling container with rollback; leaves new calls
+# disabled. Never touches Meetings, its databases or LiveKit API keys.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-livekit-adapter.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-calling-livekit-adapter
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 17
+    steps:
+      - name: Set up SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Enable dark LiveKit adapter and verify
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core
+          SECRET="$ROOT/secrets"
+          OLD="$ROOT/calling.runtime.env"
+          NEW="$ROOT/calling-livekit.runtime.env"
+          API_KEY="$SECRET/calling-livekit-api-key"
+          API_SECRET="$SECRET/calling-livekit-api-secret"
+          EDGE="$SECRET/calling-media-edge.key"
+          BACKUP=cfmeet-calling-pre-media
+          LIVE=cfmeet-calling
+          test -s "$API_KEY" && test -s "$API_SECRET" && test -s "$OLD"
+          test "$(docker inspect -f '{{.State.Running}}' "$LIVE")" = true
+          if docker container inspect "$BACKUP" >/dev/null 2>&1; then
+            echo "Existing Calling rollback container found; refusing to overwrite"
+            exit 1
+          fi
+          if test ! -s "$EDGE"; then openssl rand -base64 48 > "$EDGE"; fi
+          chown 10001:10001 "$EDGE" "$API_SECRET"
+          chmod 0400 "$EDGE" "$API_SECRET"
+          # Preserve all existing calling settings except the explicit media and
+          # feature switches. The generated env file is root-only on the VPS.
+          awk -F= '!/^(CALLING_MEDIA_PROVIDER|CALLING_LIVEKIT_URL|CALLING_LIVEKIT_API_URL|CALLING_MEDIA_GATEWAY_URL|CALLING_MEDIA_EDGE_SIGNING_KEY_FILE|CALLING_LIVEKIT_API_KEY|CALLING_LIVEKIT_API_SECRET_FILE|CALLING_NEW_CALLS_ENABLED|CALLING_APP_CALLING_ENABLED)=/' "$OLD" > "$NEW"
+          {
+            printf '%s\n' 'CALLING_MEDIA_PROVIDER=livekit'
+            printf '%s\n' 'CALLING_LIVEKIT_URL=wss://api.cfmeet.com:8446'
+            printf '%s\n' 'CALLING_LIVEKIT_API_URL=https://api.cfmeet.com:8446'
+            printf '%s\n' 'CALLING_MEDIA_GATEWAY_URL=wss://api.cfmeet.com/v1/calling/media'
+            printf '%s\n' 'CALLING_MEDIA_EDGE_SIGNING_KEY_FILE=/run/secrets/calling-media-edge.key'
+            printf 'CALLING_LIVEKIT_API_KEY=%s\n' "$(cat "$API_KEY")"
+            printf '%s\n' 'CALLING_LIVEKIT_API_SECRET_FILE=/run/secrets/calling-livekit-api-secret'
+            printf '%s\n' 'CALLING_NEW_CALLS_ENABLED=false'
+            printf '%s\n' 'CALLING_APP_CALLING_ENABLED=true'
+          } >> "$NEW"
+          chmod 0600 "$NEW"
+          IMAGE="$(docker inspect -f '{{.Config.Image}}' "$LIVE")"
+          SIGNAL="$SECRET/calling-signaling.key"
+          SIGNING="$SECRET/calling-service-auth.pem"
+          TRUST="$SECRET/calling-trust.json"
+          for f in "$SIGNAL" "$SIGNING" "$TRUST"; do test -s "$f"; done
+          swapped=0
+          recover() {
+            rc=$?
+            trap - ERR
+            if test "$swapped" = 1; then
+              docker rm -f "$LIVE" >/dev/null 2>&1 || true
+              docker rename "$BACKUP" "$LIVE" || true
+              docker start "$LIVE" >/dev/null || true
+              echo "CALLING_ROLLBACK: old container restored"
+            fi
+            exit "$rc"
+          }
+          trap recover ERR
+          docker rename "$LIVE" "$BACKUP"
+          swapped=1
+          docker stop "$BACKUP" >/dev/null
+          docker run -d --name "$LIVE" --restart unless-stopped \
+            --network cfmeet-core-private --env-file "$NEW" \
+            --mount type=bind,src="$SIGNING",dst=/run/secrets/calling-auth.pem,readonly \
+            --mount type=bind,src="$SIGNAL",dst=/run/secrets/calling-signaling.key,readonly \
+            --mount type=bind,src="$TRUST",dst=/run/secrets/calling-trust.json,readonly \
+            --mount type=bind,src="$EDGE",dst=/run/secrets/calling-media-edge.key,readonly \
+            --mount type=bind,src="$API_SECRET",dst=/run/secrets/calling-livekit-api-secret,readonly \
+            "$IMAGE" >/dev/null
+          ok=0
+          for i in $(seq 1 30); do
+            if docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+              -fsS --max-time 5 https://api.cfmeet.com:8445/health >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" = 1 || { echo 'Calling media-enabled container failed health'; exit 1; }
+          ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$LIVE")"
+          test "$ports" = 'null' || test "$ports" = '{}'
+          trap - ERR
+          echo "CALLING_MEDIA_PROVIDER: livekit"
+          echo "CALLING_LIVEKIT_API_SECRET: FILE_ONLY"
+          echo "CALLING_MASTER_NEW_CALLS_SWITCH: disabled"
+          echo "PSTN: disabled"
+          echo "PUBLIC_HOST_PORTS: none"
+          echo "BACKUP_CONTAINER: retained"
+          REMOTE

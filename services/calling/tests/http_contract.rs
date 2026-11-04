@@ -191,6 +191,7 @@ fn contract_paths_equal_the_registered_routes() {
     // contract is the Privacy Relay API (one contract, never defined twice).
     let mut registered = BTreeSet::new();
     let mut ingress = BTreeSet::new();
+    let mut communications = BTreeSet::new();
     for file in files {
         let code = std::fs::read_to_string(&file).unwrap();
         let path = file.to_string_lossy().replace('\\', "/");
@@ -219,6 +220,7 @@ fn contract_paths_equal_the_registered_routes() {
             || path.ends_with("src/telephony/http.rs")
             || path.ends_with("src/webhooks/ingest.rs")
             || path.ends_with("src/webhooks/ownership_migration.rs")
+            || path.ends_with("src/communications.rs")
         {
             "/internal/v1"
         } else {
@@ -239,7 +241,9 @@ fn contract_paths_equal_the_registered_routes() {
                 })
                 .collect();
             let route = format!("{prefix}{}", templated.join("/"));
-            if is_ingress {
+            if path.ends_with("src/communications.rs") {
+                communications.insert(route);
+            } else if is_ingress {
                 ingress.insert(route);
             } else {
                 registered.insert(route);
@@ -251,6 +255,17 @@ fn contract_paths_equal_the_registered_routes() {
             file.display()
         );
     }
+    let private: BTreeSet<String> = read("calling/communications-internal/v1.openapi.json")
+        ["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(
+        communications, private,
+        "Private Communications adapters must match their own contract"
+    );
     let documented: BTreeSet<String> = read(CALLING_HTTP)["paths"]
         .as_object()
         .unwrap()
@@ -370,8 +385,13 @@ fn error_code_enumerations_equal_the_rust_codes() {
         .map(|c| c.as_str())
         .collect();
     assert_eq!(
-        public,
+        public
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<BTreeSet<_>>(),
         string_enum(CALLING_HTTP, "/components/schemas/ErrorCode/enum")
+            .into_iter()
+            .collect::<BTreeSet<_>>()
     );
     let internal: Vec<&str> = ErrorCode::ALL
         .iter()
@@ -1614,7 +1634,16 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
     let r = a.accept(expiring, offer, &carol_d, version).await;
     assert_eq!(r.status, StatusCode::GONE, "{}", r.text);
     conforms(&r, "/v1/calls/{call_id}/accept", "post");
-    a.h().state.app.expire_due(100).await.unwrap();
+    // The failed accept rolls back asynchronously when its transaction is dropped.
+    // Expiry deliberately uses SKIP LOCKED; exercise its bounded retry semantics
+    // instead of requiring the first sweep to win that rollback race.
+    for _ in 0..100 {
+        a.h().state.app.expire_due(100).await.unwrap();
+        if a.state(expiring).await.0 == CallState::NoAnswer {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     assert_eq!(a.state(expiring).await.0, CallState::NoAnswer);
 
     // Every delivered signal is a valid realtime signal; every push a valid push offer.

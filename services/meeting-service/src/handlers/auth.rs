@@ -249,7 +249,10 @@ pub async fn login(
 
     // Only block inactive users, allow pending verification users to login
     // Frontend will handle redirect to verify page based on status
-    if user.status == users::UserStatus::Inactive {
+    if matches!(
+        user.status,
+        users::UserStatus::Inactive | users::UserStatus::Suspended
+    ) {
         return Err(ApiError::Forbidden(
             "Account has been deactivated".to_string(),
         ));
@@ -314,17 +317,45 @@ pub async fn refresh_token(
 
     // Verify refresh token
     let claims = state.jwt_service.verify_token(&payload.refresh_token)?;
+    if state
+        .token_blacklist
+        .is_blacklisted(&payload.refresh_token)
+        .await?
+    {
+        return Err(ApiError::Unauthorized("Token has been revoked".into()));
+    }
 
     // Generate new tokens
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
 
-    let access_token = state
-        .jwt_service
-        .generate_access_token(user_id, &claims.role)?;
-    let refresh_token = state
-        .jwt_service
-        .generate_refresh_token(user_id, &claims.role)?;
+    let role = if claims.role == "guest" {
+        claims.role.clone()
+    } else {
+        let user = users::Entity::find_by_id(user_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))?;
+        if matches!(
+            user.status,
+            users::UserStatus::Inactive | users::UserStatus::Suspended
+        ) {
+            return Err(ApiError::Unauthorized("Account is unavailable".into()));
+        }
+        format!("{:?}", user.role).to_lowercase()
+    };
+    if claims.role != "guest" {
+        crate::services::communications::require_fresh_credentials(
+            &state,
+            user_id,
+            claims.auth_time,
+        )
+        .await?;
+    }
+    let (access_token, refresh_token) =
+        state
+            .jwt_service
+            .refreshed_tokens(user_id, &role, claims.auth_time)?;
 
     Ok(Json(RefreshTokenResponse {
         access_token,
@@ -384,6 +415,14 @@ pub async fn logout(
             .token_blacklist
             .blacklist_token(token, ttl_secs)
             .await?;
+    }
+
+    if claims.role != "guest" {
+        if let Ok(user_id) = uuid::Uuid::parse_str(&claims.sub) {
+            crate::services::communications::record_logout(&state, user_id).await?;
+            // Durable queue remains authoritative if synchronous delivery is unavailable.
+            let _ = crate::services::communications::deliver_due(&state).await;
+        }
     }
 
     // Part V H §104: logging out of CF Meet also ends the account's Messaging client
@@ -948,7 +987,10 @@ async fn oauth_google_callback_inner(
         .await?;
 
     let user = if let Some(mut user) = existing_user {
-        if user.status == users::UserStatus::Inactive {
+        if matches!(
+            user.status,
+            users::UserStatus::Inactive | users::UserStatus::Suspended
+        ) {
             return Err(ApiError::Forbidden(
                 "Account has been deactivated".to_string(),
             ));

@@ -572,6 +572,9 @@ impl AppCallService {
             _ => (CallState::Held, CallState::Connected),
         };
         let call = self.calls_row(scope, call_id).await?;
+        if operation == CommandOperation::Resume {
+            self.require_personal_call(&call, None).await?;
+        }
         if call.version != expected_version {
             return Err(CallError::StaleVersion {
                 expected: expected_version,

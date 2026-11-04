@@ -306,7 +306,9 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                 .ok_or_else(|| {
                     ApiError::domain(ErrorCode::AuthenticationRequired, "Account not found")
                 })?;
-            if user.status == UserStatus::Inactive || user.role == UserRole::Guest {
+            if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended)
+                || user.role == UserRole::Guest
+            {
                 return Err(ApiError::domain(
                     ErrorCode::AuthenticationRequired,
                     "Account is not active",
@@ -314,6 +316,15 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             }
             let email_verified = user.auth_type == AuthType::Google
                 || (user.status == UserStatus::Active && state.require_email_verification);
+            // Account-owned credential revocation remains independent of Hub reachability.
+            // A fresh login, rather than a refresh or another old access token, is needed
+            // after the account's Communications revocation epoch advances.
+            crate::services::communications::require_fresh_credentials(
+                state,
+                user.id,
+                claims.auth_time,
+            )
+            .await?;
             let verified_organizations = state
                 .organization_directory
                 .organizations_for_user(user.id)

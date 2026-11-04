@@ -21,6 +21,15 @@ doctest = false
 name = "cfmeet-cert-stack"
 path = "src/bin/cfmeet-cert-stack.rs"
 
+[features]
+personal-communications-e2e = []
+
+# This resource-requiring journey has its own mandatory CI job with five services,
+# PostgreSQL, Redis and LiveKit; ordinary harness unit jobs do not start that stack.
+[[test]]
+name = "personal_communications"
+required-features = ["personal-communications-e2e"]
+
 [dependencies]
 # Real service keys, signed operator calls and trust bundles derived from the registry.
 cf-service-auth = { path = "../packages/service-auth" }

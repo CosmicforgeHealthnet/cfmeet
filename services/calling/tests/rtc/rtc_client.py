@@ -223,6 +223,26 @@ class Client:
             await self.room.disconnect()
         return {"ok": True}
 
+    async def verify_received(self, kind, timeout):
+        async def receive():
+            wanted = rtc.TrackKind.KIND_VIDEO if kind == "video" else rtc.TrackKind.KIND_AUDIO
+            while True:
+                track = next((p.track for who in self.room.remote_participants.values()
+                              for p in who.track_publications.values() if p.track and p.track.kind == wanted), None)
+                if track:
+                    break
+                await asyncio.sleep(0.1)
+            stream = rtc.VideoStream(track) if kind == "video" else rtc.AudioStream(track)
+            try:
+                async for event in stream:
+                    if kind == "video" and event.frame.width > 0 and event.frame.height > 0:
+                        return {"ok": True}
+                    if kind == "audio" and max(abs(int(v)) for v in event.frame.data) > 100:
+                        return {"ok": True}
+            finally:
+                await stream.aclose()
+        return await asyncio.wait_for(receive(), timeout)
+
 
 async def main():
     # SDK diagnostics go to stderr (the test harness keeps one log file per client).
@@ -258,6 +278,8 @@ async def main():
                 out = await client.wait_refreshed(msg["publish"], msg["timeout"])
             elif cmd == "disconnect":
                 out = await client.disconnect()
+            elif cmd == "verify_received":
+                out = await client.verify_received(msg["kind"], msg.get("timeout", 10))
             elif cmd == "quit":
                 await client.disconnect()
                 print(json.dumps({"ok": True}), flush=True)

@@ -91,7 +91,13 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
 }
 
 export async function callingFetch(path: string, init: RequestInit = {}) {
-  const base = process.env.CALLING_API_URL || process.env.NEXT_PUBLIC_CALLING_API_URL || "http://localhost:8090";
+  const configured = process.env.CALLING_API_URL || process.env.NEXT_PUBLIC_CALLING_API_URL;
+  // Never silently fall back to a localhost Calling backend in a deployed app.
+  // The adapter must only call the explicitly configured service over TLS.
+  if (process.env.NODE_ENV === "production" && (!configured || !configured.startsWith("https://"))) {
+    throw new CallingHttpError(503, "CALLING_NOT_CONFIGURED", "Calling API is not securely configured.");
+  }
+  const base = configured || "http://localhost:8090";
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${process.env.CALLING_PLATFORM_CREDENTIAL}`);
   headers.set("Content-Type", "application/json");

@@ -1,0 +1,69 @@
+name: Audit CF Meet Calling public ingress readiness
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-public-ingress-audit.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Check secure Vercel deployment credential presence
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if test -n "$VERCEL_TOKEN"; then
+            echo 'GITHUB_VERCEL_TOKEN_AVAILABLE: yes'
+          else
+            echo 'GITHUB_VERCEL_TOKEN_AVAILABLE: no'
+          fi
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Safe public API Nginx structure and loopback status
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path('/etc/nginx/sites-enabled/api.cfmeet.com')
+          print('API_NGINX_SITE_PRESENT:',p.exists())
+          s=p.read_text()
+          print('API_NGINX_SERVER_BLOCKS:',len(re.findall(r'\bserver\s*\{',s)))
+          for n,line in enumerate(s.splitlines(),1):
+              clean=line.strip().split('#',1)[0]
+              m=re.match(r'^(listen|server_name|location|include)\s+(.+)',clean)
+              if m:
+                  if m[1]=='location':
+                      print(f'NGINX_LINE_{n}_LOCATION:'," ".join(m[2].split()[:2]))
+                  elif m[1]=='server_name':
+                      print(f'NGINX_LINE_{n}_SERVER_NAME:'," ".join(m[2].split()[:3]))
+                  elif m[1]=='listen':
+                      print(f'NGINX_LINE_{n}_LISTEN:'," ".join(m[2].split()[:3]))
+                  else:
+                      print(f'NGINX_LINE_{n}_INCLUDE: PRESENT')
+          PY
+          echo '=== HOST LOOPBACK API STATUS ==='
+          curl -fsS --max-time 6 http://127.0.0.1:18081/health >/dev/null && echo 'MEETINGS_LOOPBACK_HEALTH: ok'
+          if ss -lnt | grep -q ':18090 '; then
+            echo 'CALLING_LOOPBACK_18090: already_in_use'
+          else
+            echo 'CALLING_LOOPBACK_18090: free'
+          fi
+          REMOTE

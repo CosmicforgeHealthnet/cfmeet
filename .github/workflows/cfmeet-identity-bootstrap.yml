@@ -1,0 +1,125 @@
+name: Provision CF Meet first-party communication identity
+
+# Audited, idempotent authority registration. No Meeting restart, no
+# public routing, no LiveKit edits, no credential printed in Actions logs.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-identity-bootstrap.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-identity-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Setup deployment SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 7 -H "$VPS_HOST" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Provision first-party principal namespace and BFF credential privately
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core
+          SECRET="$ROOT/secrets"
+          IMG=ghcr.io/cosmicforgehealthnet/cfmeet-platform-access:884776b0757109d4ccb84ad25ada7c1a0f5af336
+          test -f "$ROOT/platform-access.runtime.env"
+          test -s "$SECRET/platform-access-pepper"
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-platform-access)" = true
+          sql() {
+            docker exec -u postgres cfmeet-core-db psql -XAtq -v ON_ERROR_STOP=1 -U postgres -d cfmeet_platform_access -c "$1"
+          }
+          admin() {
+            docker run --rm --network cfmeet-core-private \
+              --env-file "$ROOT/platform-access.runtime.env" \
+              --mount type=bind,src="$SECRET/platform-access-pepper",dst=/run/secrets/platform-pepper,readonly \
+              --entrypoint /app/platform-access-admin "$IMG" \
+              --operator cfmeet-production-activation "$@"
+          }
+          if test "$(sql "SELECT count(*) FROM platform_tenants WHERE slug='cfmeet';")" = 0; then
+            admin tenant create --slug cfmeet --name 'CF Meet' --classification first-party >/dev/null
+          fi
+          test "$(sql "SELECT count(*) FROM platform_tenants WHERE slug='cfmeet' AND classification='FIRST_PARTY' AND status='ACTIVE';")" = 1
+          if test "$(sql "SELECT count(*) FROM platform_applications a JOIN platform_tenants t ON t.id=a.tenant_id WHERE t.slug='cfmeet' AND a.slug='web';")" = 0; then
+            admin application create --tenant cfmeet --slug web --name 'CF Meet Web' >/dev/null
+          fi
+          if test "$(sql "SELECT count(*) FROM platform_environments e JOIN platform_applications a ON a.id=e.application_id JOIN platform_tenants t ON t.id=a.tenant_id WHERE t.slug='cfmeet' AND a.slug='web' AND e.kind='PRODUCTION';")" = 0; then
+            admin environment create --tenant cfmeet --application web --environment production >/dev/null
+          fi
+          if test "$(sql "SELECT count(*) FROM platform_service_accounts sa JOIN platform_environments e ON e.id=sa.environment_id JOIN platform_applications a ON a.id=e.application_id JOIN platform_tenants t ON t.id=a.tenant_id WHERE t.slug='cfmeet' AND a.slug='web' AND e.kind='PRODUCTION' AND sa.name='web-bff';")" = 0; then
+            admin service-account create --tenant cfmeet --application web --environment production --name web-bff >/dev/null
+          fi
+          for scope in calls.read calls.write; do
+            if test "$(sql "SELECT count(*) FROM platform_application_scopes s JOIN platform_applications a ON a.id=s.application_id JOIN platform_tenants t ON t.id=a.tenant_id WHERE t.slug='cfmeet' AND a.slug='web' AND s.scope='$scope';")" = 0; then
+              admin scope grant --tenant cfmeet --application web --scope "$scope" --environment-kind production >/dev/null
+            fi
+          done
+
+          # Keep stable ownership IDs for future deployment; they are not credentials.
+          sql "SELECT t.id||'|'||a.id||'|'||e.id||'|'||sa.id FROM platform_tenants t JOIN platform_applications a ON a.tenant_id=t.id JOIN platform_environments e ON e.application_id=a.id JOIN platform_service_accounts sa ON sa.environment_id=e.id WHERE t.slug='cfmeet' AND a.slug='web' AND e.kind='PRODUCTION' AND sa.name='web-bff';" > "$ROOT/communication.ids"
+          test "$(wc -l < "$ROOT/communication.ids")" -eq 1
+          python3 - "$ROOT/communication.ids" "$ROOT/communication.scope.env" <<'PY'
+          import sys,uuid,pathlib
+          vals=pathlib.Path(sys.argv[1]).read_text().strip().split('|')
+          assert len(vals)==4
+          vals=[str(uuid.UUID(v)) for v in vals]
+          keys=['CFMEET_COMMUNICATION_TENANT_ID','CFMEET_COMMUNICATION_APPLICATION_ID','CFMEET_COMMUNICATION_ENVIRONMENT_ID','CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID']
+          pathlib.Path(sys.argv[2]).write_text('\n'.join(f'{k}={v}' for k,v in zip(keys,vals))+'\nCFMEET_COMMUNICATION_ENVIRONMENT_KIND=PRODUCTION\n')
+          PY
+          chmod 0600 "$ROOT/communication.ids" "$ROOT/communication.scope.env"
+
+          # A platform credential is created once. Never regenerate if already
+          # issued and the one-time secret has been lost; stop for recovery.
+          CREDENTIAL_FILE="$SECRET/cfmeet-web-bff.credential"
+          if test ! -s "$CREDENTIAL_FILE"; then
+            current="$(sql "SELECT count(*) FROM platform_api_credentials c JOIN platform_service_accounts sa ON sa.id=c.service_account_id WHERE sa.name='web-bff';")"
+            if test "$current" != 0; then
+              echo 'Credential already issued but encrypted capture file is absent. Stop and rotate through audited recovery.'
+              exit 1
+            fi
+            tmp="$(mktemp "$SECRET/.bff-credential.XXXXXXXX")"
+            trap 'rm -f "$tmp"' EXIT
+            admin credential create --tenant cfmeet --application web --environment production \
+              --service-account web-bff --scope calls.read --scope calls.write \
+              --label cfmeet-web-server > "$tmp"
+            python3 - "$tmp" "$CREDENTIAL_FILE" <<'PY'
+          import json,sys,pathlib
+          raw=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          secret=raw['secret']
+          assert isinstance(secret,str) and len(secret)>30
+          pathlib.Path(sys.argv[2]).write_text(secret+'\n')
+          PY
+            chmod 0400 "$CREDENTIAL_FILE"
+            rm -f "$tmp"
+            trap - EXIT
+          fi
+          test -s "$CREDENTIAL_FILE"
+          echo 'FIRST_PARTY_IDENTITY: PROVISIONED'
+          echo 'CFMEET_WEB_BFF_CREDENTIAL: STORED_ON_VPS'
+          echo 'TELECOM: NOT_ENABLED'
+          echo 'MEETINGS: UNCHANGED'
+          REMOTE

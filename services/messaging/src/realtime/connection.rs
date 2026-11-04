@@ -943,6 +943,18 @@ impl Connection {
                 started,
                 ttl_ms,
             } => {
+                if crate::communications::require(
+                    &self.state,
+                    &self.ctx,
+                    cf_communications_policy::Action::Presence,
+                    self.session.principal_id,
+                    principal_id,
+                )
+                .await
+                .is_err()
+                {
+                    return Flow::Continue;
+                }
                 // Not shown to other devices of the typing principal itself.
                 if !self.subs.contains_key(&conversation_id)
                     || principal_id == self.session.principal_id
@@ -965,6 +977,18 @@ impl Connection {
                 state,
                 last_seen_at,
             } => {
+                if crate::communications::require(
+                    &self.state,
+                    &self.ctx,
+                    cf_communications_policy::Action::Presence,
+                    self.session.principal_id,
+                    principal_id,
+                )
+                .await
+                .is_err()
+                {
+                    return Flow::Continue;
+                }
                 if self.subs.contains_key(&conversation_id) {
                     self.send(json!({
                         "type": "presence",

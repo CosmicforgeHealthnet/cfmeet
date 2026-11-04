@@ -286,6 +286,7 @@ class CfMeetClient {
   }
 
   DomainClient get calling => domain('calling');
+  DomainClient get communications => domain('communications');
   DomainClient get developerPlatform => domain('developer-platform');
   DomainClient get gateway => domain('gateway');
   DomainClient get meetings => domain('meetings');

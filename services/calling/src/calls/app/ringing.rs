@@ -157,6 +157,13 @@ impl AppCallService {
             .calls
             .lock_call(&txn, scope, CallId::from_uuid(located.call_id))
             .await?;
+        let evidence = match &actor {
+            InvitationActor::Endpoint(i) => {
+                Some((i.principal_id().as_uuid(), i.issued_at().timestamp()))
+            }
+            _ => None,
+        };
+        self.require_personal_call(&call, evidence).await?;
         let invitation = self
             .calls
             .lock_invitation(&txn, &call, invitation_id)

@@ -245,6 +245,7 @@ pub async fn submit_commit(
             Box::pin(async move {
                 let now = st.now();
                 crate::messages::lock_sender(txn, &conversation, acting.principal_id, now, false).await?;
+                crate::communications::require_send(txn,&st,&ctx2,&conversation,acting.principal_id).await?;
                 let group = lock_group(txn, conversation.id).await?;
                 if let Some(existing) =
                     load_by_client_id(txn, conversation.id, acting.principal_id, request.client_message_id).await?

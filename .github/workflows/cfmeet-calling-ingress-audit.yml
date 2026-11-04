@@ -1,0 +1,63 @@
+name: Audit CF Meet Calling production ingress and LiveKit
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-calling-ingress-audit.yml"]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Read-only deployment inventory
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== LIVEKIT CONTAINER ==='
+          if docker inspect lk-server >/dev/null 2>&1; then
+            docker inspect lk-server --format 'Image: {{.Config.Image}}; Status: {{.State.Status}}; Ports: {{json .HostConfig.PortBindings}}'
+            echo 'LiveKit mounts (paths only, not contents):'
+            docker inspect lk-server --format '{{range .Mounts}}{{println .Source "=>" .Destination}}{{end}}'
+            echo 'LiveKit networks (names only):'
+            docker inspect lk-server --format '{{range $key,$_ := .NetworkSettings.Networks}}{{println $key}}{{end}}'
+            echo 'LiveKit environment variable names only:'
+            docker inspect lk-server --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | grep -Ei 'LIVEKIT|CONFIG|REDIS|KEY|PORT|NODE|RTC' | sort || true
+          else
+            echo 'LIVEKIT: missing'
+          fi
+          echo '=== PRODUCTION MEETING BACKEND ==='
+          docker inspect cfmeet-production-backend --format 'Image: {{.Config.Image}}; Network: {{.HostConfig.NetworkMode}}; Ports: {{json .HostConfig.PortBindings}}; Status: {{.State.Status}}'
+          docker inspect cfmeet-production-backend --format '{{range .Mounts}}{{println .Source "=>" .Destination}}{{end}}'
+          echo '=== NGINX CONF FILE NAMES ==='
+          test -d /etc/nginx/sites-enabled && find /etc/nginx/sites-enabled -maxdepth 1 -type l -printf '%f\n' || true
+          test -d /etc/nginx/conf.d && find /etc/nginx/conf.d -maxdepth 1 -type f -printf '%f\n' || true
+          echo '=== SERVICE LISTENING PORTS (NO ADDRESSES) ==='
+          ss -lnt 2>/dev/null | awk 'NR>1 { split($4,a,":"); print a[length(a)] }' | sort -u | grep -E '^(80|443|7880|7881|8443|8444|8445|18081|3478)$' || true
+          echo '=== CF MEET IDENTITY BOOTSTRAP OBJECT COUNTS ==='
+          if docker inspect cfmeet-core-db >/dev/null 2>&1; then
+            docker exec -u postgres cfmeet-core-db psql -XAtq -U postgres -d cfmeet_platform_access -c 'SELECT (SELECT count(*) FROM platform_tenants),(SELECT count(*) FROM platform_applications),(SELECT count(*) FROM platform_environments),(SELECT count(*) FROM platform_service_accounts),(SELECT count(*) FROM platform_api_credentials);'
+          fi
+          echo '=== EXIT ==='
+          REMOTE

@@ -1,0 +1,105 @@
+name: Certify CF Meet production enterprise capture prerequisites
+
+# Read-only production assessment for enterprise, voicemail and recording.
+# No flags change, migrations, restarts, credentials or storage writes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cfmeet-enterprise-capture-production-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Configure deployment SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Inspect deployed prerequisites without printing secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== CF MEET ENTERPRISE / CAPTURE PRODUCTION CERTIFICATION READINESS ==='
+          for c in cfmeet-calling cfmeet-platform-access cfmeet-messaging cfmeet-production-backend lk-server; do
+            if docker container inspect "$c" >/dev/null 2>&1; then
+              printf 'CONTAINER_%s: %s\n' "$c" "$(docker inspect -f '{{.State.Status}}' "$c")"
+            else
+              printf 'CONTAINER_%s: absent\n' "$c"
+            fi
+          done
+          echo '=== Enterprise and capture deployment flags (only known non-secret flags) ==='
+          docker inspect cfmeet-calling --format '{{range .Config.Env}}{{println .}}{{end}}' |
+            awk -F= '
+             $1=="CALLING_NEW_CALLS_ENABLED" ||
+             $1=="CALLING_APP_CALLING_ENABLED" ||
+             $1=="ENTERPRISE_CALLING_ENABLED" ||
+             $1=="VOICEMAIL_ENABLED" ||
+             $1=="CALL_RECORDING_ENABLED" ||
+             $1=="CALLING_CAPTURE_PROVIDER" ||
+             $1=="CALLING_MEDIA_PROVIDER" ||
+             $1=="CALLING_PUBLIC_INBOUND_ENABLED" ||
+             $1=="CALLING_PUBLIC_OUTBOUND_ENABLED" {
+                print "FEATURE_" $1 ": " $2
+             }'
+          echo '=== Required protected store configuration (presence only) ==='
+          docker inspect cfmeet-calling --format '{{range .Config.Env}}{{println .}}{{end}}' |
+            awk -F= '
+             $1=="CALLING_ARTIFACT_STORAGE_ENDPOINT" ||
+             $1=="CALLING_ARTIFACT_STORAGE_PUBLIC_ENDPOINT" ||
+             $1=="CALLING_ARTIFACT_STORAGE_REGION" ||
+             $1=="CALLING_ARTIFACT_STORAGE_BUCKET" ||
+             $1=="CALLING_ARTIFACT_STORAGE_ACCESS_KEY_ID" ||
+             $1=="CALLING_ARTIFACT_STORAGE_SECRET_ACCESS_KEY" ||
+             $1=="CALLING_ARTIFACT_STORAGE_SECRET_ACCESS_KEY_FILE" ||
+             $1=="CALLING_ARTIFACT_STORAGE_SSE" ||
+             $1=="CALLING_CAPTURE_STAGING_PREFIX" {
+               print "STORAGE_KEY_" $1 ": " (length($2)>0?"SET":"EMPTY")
+             }'
+          echo '=== Capture and storage deployments (names and states only) ==='
+          docker ps -a --format '{{.Names}} | {{.Status}}' |
+            grep -Ei 'cfmeet|livekit|egress|minio|object|storage|asterisk|telephony|redis' | head -75 || true
+          echo '=== Available egress images ==='
+          docker image ls --format '{{.Repository}}:{{.Tag}}' |
+            grep -Ei 'livekit/egress|pgsty/minio|minio/minio' || true
+          echo '=== Calling runtime env file keys only ==='
+          for file in /opt/cfmeet-core/calling-livekit.runtime.env /opt/cfmeet-core/calling-app-active.runtime.env; do
+            if test -s "$file"; then
+              echo "ENV_FILE_PRESENT: $file"
+              awk -F= '/^(CALLING_ARTIFACT_STORAGE_|CALLING_CAPTURE_PROVIDER|CALLING_CAPTURE_STAGING_PREFIX|ENTERPRISE_CALLING_ENABLED|VOICEMAIL_ENABLED|CALL_RECORDING_ENABLED)=/{
+                print "ENV_KEY_" $1 ": " (length($2)>0?"SET":"EMPTY")
+              }' "$file"
+            fi
+          done
+          echo '=== LiveKit Egress prerequisite (configuration presence only) ==='
+          if test -r /opt/livekit/livekit.yaml; then
+            if grep -Eq '^redis:[[:space:]]*$' /opt/livekit/livekit.yaml; then echo 'LIVEKIT_REDIS_CONFIG: PRESENT'; else echo 'LIVEKIT_REDIS_CONFIG: ABSENT'; fi
+          fi
+          echo '=== Host disk / memory ==='
+          df -h / | tail -1
+          free -h | grep '^Mem:'
+          echo '=== Existing Meetings remains healthy ==='
+          if curl -fsS --max-time 6 http://127.0.0.1:18081/health >/dev/null; then echo 'MEETINGS_HEALTH: OK'; else echo 'MEETINGS_HEALTH: FAIL'; exit 1; fi
+          echo '=== READ ONLY CERTIFICATION AUDIT COMPLETED ==='
+          REMOTE

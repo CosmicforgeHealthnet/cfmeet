@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// product-independent (contract `cfmeet.platform.common` `ServiceId`).
 pub mod services {
     pub const CALLING: &str = "cfmeet.calling";
+    pub const COMMUNICATIONS: &str = "cfmeet.communications";
     pub const PRIVACY_RELAY: &str = "cfmeet.privacy-relay";
     pub const TELEPHONY: &str = "cfmeet.telephony";
     pub const MEETING_SERVICE: &str = "cfmeet.meeting-service";
@@ -79,6 +80,10 @@ impl ServiceId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn communications() -> Self {
+        Self(services::COMMUNICATIONS.to_string())
     }
 
     pub fn calling() -> Self {

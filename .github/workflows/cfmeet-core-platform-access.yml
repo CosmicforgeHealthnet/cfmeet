@@ -1,0 +1,135 @@
+name: Deploy CF Meet Platform Access privately
+
+# Dark rollout: migration + Platform Access internal API only.
+# No host ports, no public traffic, no existing service restart.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-core-platform-access.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-platform-access
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Migrate and launch private Platform Access
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Create dedicated keys, migrate and start Platform Access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          ROOT=/opt/cfmeet-core
+          SECRETS="$ROOT/secrets"
+          NET=cfmeet-core-private
+          IMAGE=ghcr.io/cosmicforgehealthnet/cfmeet-platform-access:884776b0757109d4ccb84ad25ada7c1a0f5af336
+          CONTAINER=cfmeet-platform-access
+          test -d "$SECRETS" && test -s "$SECRETS/platform_access-migrator.password" &&
+            test -s "$SECRETS/platform_access-runtime.password" &&
+            docker image inspect "$IMAGE" >/dev/null &&
+            docker network inspect "$NET" >/dev/null &&
+            docker container inspect cfmeet-core-db >/dev/null
+
+          # These secrets remain on the VPS. Do not print or upload them.
+          AUTH_KEY="$SECRETS/platform-access-service-auth.pem"
+          TRUST="$SECRETS/platform-access-trust.json"
+          PEPPER="$SECRETS/platform-access-pepper"
+          if test ! -s "$AUTH_KEY"; then
+            openssl genpkey -algorithm Ed25519 -out "$AUTH_KEY" >/dev/null 2>&1
+          fi
+          if test ! -s "$TRUST"; then
+            printf '%s\n' '{"bundle_version":1,"receiver":"cfmeet.platform-access","runtime_environment":"production","trusted_issuers":[]}' > "$TRUST"
+          fi
+          if test ! -s "$PEPPER"; then
+            openssl rand -base64 48 > "$PEPPER"
+          fi
+          # The image's dedicated user is UID 10001. Only these three files
+          # are individually mounted; the host directory stays root-only.
+          chown 10001:10001 "$AUTH_KEY" "$TRUST" "$PEPPER"
+          chmod 0400 "$AUTH_KEY" "$TRUST" "$PEPPER"
+
+          DB_HOST=cfmeet-core-db
+          PW_MIGRATOR="$(cat "$SECRETS/platform_access-migrator.password")"
+          PW_RUNTIME="$(cat "$SECRETS/platform_access-runtime.password")"
+          RUNTIME_ENV="$ROOT/platform-access.runtime.env"
+          cat > "$RUNTIME_ENV" <<ENV
+          DATABASE_URL=postgres://platform_access:$PW_RUNTIME@$DB_HOST:5432/cfmeet_platform_access
+          PLATFORM_ACCESS_BIND_ADDRESS=0.0.0.0:8094
+          API_CREDENTIAL_PEPPER_FILE=/run/secrets/platform-pepper
+          CF_RUNTIME_ENVIRONMENT=production
+          CF_SERVICE_AUTH_KEY_ID=platform-access-production-1
+          CF_SERVICE_AUTH_PRIVATE_KEY_FILE=/run/secrets/platform-service-auth.pem
+          CF_SERVICE_TRUST_BUNDLE_FILE=/run/secrets/platform-trust.json
+          LOG_FORMAT=json
+          ENV
+          chmod 0600 "$RUNTIME_ENV"
+          # Migrations use a DB-owner role, never the app runtime role.
+          docker run --rm --network "$NET" \
+            -e "DATABASE_URL=postgres://platform_access_migrator:$PW_MIGRATOR@$DB_HOST:5432/cfmeet_platform_access" \
+            --entrypoint /app/platform-access-migration "$IMAGE" up
+          unset PW_MIGRATOR PW_RUNTIME
+
+          if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+            test "$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")" = "$IMAGE" ||
+              { echo 'Unexpected existing Platform Access version'; exit 1; }
+            test "$(docker inspect --format '{{.State.Running}}' "$CONTAINER")" = true ||
+              { echo 'Existing Platform Access container stopped'; exit 1; }
+          else
+            docker run -d --name "$CONTAINER" \
+              --restart unless-stopped --network "$NET" \
+              --env-file "$RUNTIME_ENV" \
+              --mount type=bind,src="$AUTH_KEY",dst=/run/secrets/platform-service-auth.pem,readonly \
+              --mount type=bind,src="$TRUST",dst=/run/secrets/platform-trust.json,readonly \
+              --mount type=bind,src="$PEPPER",dst=/run/secrets/platform-pepper,readonly \
+              "$IMAGE" >/dev/null
+          fi
+          # No host port may be exposed.
+          ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$CONTAINER")"
+          test "$ports" = 'null' || test "$ports" = '{}' ||
+            { echo 'Refusing public Platform Access port'; exit 1; }
+          # Keep the one-shot health-check image outside the private network.
+          docker pull busybox:1.36 >/dev/null
+          passed=0
+          for try in $(seq 1 25); do
+            if docker run --rm --network "$NET" busybox:1.36 \
+              wget -q -O /dev/null http://cfmeet-platform-access:8094/ready >/dev/null 2>&1; then
+              passed=1
+              break
+            fi
+            sleep 2
+          done
+          if test "$passed" != 1; then
+            echo 'Platform Access did not become ready; refusing activation'
+            docker logs --tail 35 "$CONTAINER" 2>&1 | sed -E 's@(postgres(ql)?://)[^ ]+@\1[REDACTED]@g' || true
+            exit 1
+          fi
+          echo "PLATFORM_ACCESS_PRIVATE_READY: yes"
+          echo "PUBLIC_PORTS: none"
+          echo "MEETING_SERVICE_RESTARTED: no"
+          REMOTE

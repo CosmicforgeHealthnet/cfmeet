@@ -85,6 +85,7 @@ pub struct AppState {
     pub signaling: SignalingAuthority,
     /// Application calling orchestration (§20–§25).
     pub app: Arc<AppCallService>,
+    pub communications: Option<cf_communications_policy::PolicyClient>,
     /// Media connection gateway (none when application media is disabled).
     pub media_gateway: Option<Arc<dyn MediaConnectionGateway>>,
     /// Internal service authentication (separate from customer credentials).
@@ -178,6 +179,7 @@ impl AppState {
             endpoints,
             signaling: SignalingAuthority::new(runtime.signaling_keys, db.clone(), clock.clone()),
             app,
+            communications: None,
             media_gateway,
             service_auth,
             privacy_relay: runtime.privacy_relay,

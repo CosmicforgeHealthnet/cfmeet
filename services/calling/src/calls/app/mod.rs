@@ -222,7 +222,8 @@ pub struct AppCallService {
     calls: Arc<CallService>,
     endpoints: Arc<EndpointService>,
     principals: Arc<PrincipalResolver>,
-    media: Option<Arc<dyn CallMediaProvider>>,
+    pub(crate) media: Option<Arc<dyn CallMediaProvider>>,
+    pub(crate) communications: Option<cf_communications_policy::PolicyClient>,
     credentials: MediaCredentialPolicy,
     bus: Arc<dyn RealtimeSignalBus>,
     push: Arc<dyn PushDispatcher>,
@@ -231,7 +232,7 @@ pub struct AppCallService {
     /// unconfigured — DCN calls fail closed; nothing else depends on it).
     pub(crate) numbering: Arc<dyn crate::numbering::NumberingPort>,
     public: public::PublicNetwork,
-    config: AppCallingConfig,
+    pub(crate) config: AppCallingConfig,
     /// Enterprise kill switches (Part F).
     pub(crate) enterprise_flags: crate::enterprise::EnterpriseFlags,
     /// Protected artifact storage (Part F voicemail / recordings).
@@ -256,6 +257,7 @@ impl AppCallService {
         config: AppCallingConfig,
     ) -> Self {
         Self {
+            communications: None,
             calls,
             endpoints,
             principals,
@@ -364,7 +366,7 @@ impl AppCallService {
         &self.calls
     }
 
-    fn db(&self) -> &DatabaseConnection {
+    pub(crate) fn db(&self) -> &DatabaseConnection {
         self.calls.db()
     }
 

@@ -8,6 +8,8 @@
 !packages/
 !packages/contracts/
 !packages/contracts/**
+!packages/communications-policy/
+!packages/communications-policy/**
 !packages/service-auth/
 !packages/service-auth/**
 !packages/usage-facts/

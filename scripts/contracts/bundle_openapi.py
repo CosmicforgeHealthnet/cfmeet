@@ -27,6 +27,7 @@ OUT = CONTRACTS / "bundled"
 BASE = "https://schemas.cfmeet.com/"
 # Every OpenAPI document that is (or may be) rendered by a Swagger UI.
 SOURCES = [
+    "communications/http/v1.openapi.json",
     "calling/http/v1.openapi.json",
     "messaging/http/v1.openapi.json",
     "messaging/internal/v1.openapi.json",
@@ -86,11 +87,11 @@ class Bundler:
             f = CONTRACTS / path
             if not f.is_file():
                 raise BundleError(f"no checked-in schema for {BASE}{path}")
-            self.files[path] = json.loads(f.read_text())
+            self.files[path] = json.loads(f.read_text(encoding="utf-8"))
         return self.files[path]
 
     def bundle(self, source: str):
-        return self.bundle_doc(json.loads((CONTRACTS / source).read_text()), source)
+        return self.bundle_doc(json.loads((CONTRACTS / source).read_text(encoding="utf-8")), source)
 
     def bundle_doc(self, doc, source: str):
         """Bundles an in-memory OpenAPI document (`source` names it in errors)."""
@@ -185,11 +186,11 @@ def main(argv):
             return 1
         out = OUT / source
         if check:
-            if not out.is_file() or out.read_text() != text:
+            if not out.is_file() or out.read_text(encoding="utf-8") != text:
                 stale.append(str(out.relative_to(ROOT)))
         else:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(text)
+            out.write_text(text, encoding="utf-8")
             print(f"bundled {source}")
     if stale:
         print("stale or missing bundles (run scripts/contracts/bundle_openapi.py):", file=sys.stderr)

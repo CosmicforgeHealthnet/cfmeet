@@ -1,0 +1,148 @@
+name: CF Meet core VPS deployment preflight
+
+# Read-only inventory. This workflow NEVER builds, pulls, migrates,
+# restarts or deploys a service. It does not read or print secret values.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cfmeet-core-vps-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-vps-preflight
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Inspect CF Meet production prerequisites
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Prepare SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VPS_HOST}" && test -n "${VPS_USER}" && test -n "${VPS_SSH_KEY}"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "${VPS_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Match the existing Deploy Backend SSH bootstrap. A pinned host-key
+          # secret should replace ssh-keyscan before enabling write deployments.
+          ssh-keyscan -T 7 -H "${VPS_HOST}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Read-only remote preflight
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 \
+            "${VPS_USER}@${VPS_HOST}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '===== CF MEET CORE READ-ONLY PREFLIGHT ====='
+          echo "TIME_UTC: $(date -u +%FT%TZ)"
+          echo "DISK_FREE_GB: $(df -BG / | awk 'NR==2{gsub(/G/,"",$4); print $4}')"
+          echo "MEM_AVAILABLE_MB: $(free -m | awk '/^Mem:/{print $7}')"
+          echo "DOCKER: $(docker --version)"
+          for path in /opt/cfmeet-production/source /opt/cfmeet-production/.env; do
+            if test -e "$path"; then echo "PRESENT: $path"; else echo "MISSING: $path"; fi
+          done
+          if test -d /opt/cfmeet-production/source/.git; then
+            echo "PROD_SOURCE_SHA: $(git -C /opt/cfmeet-production/source rev-parse --short HEAD)"
+            for svc in platform-access messaging calling; do
+              if test -f "/opt/cfmeet-production/source/services/$svc/Dockerfile"; then
+                echo "DOCKERFILE_$svc: YES"
+              else
+                echo "DOCKERFILE_$svc: NO"
+              fi
+            done
+          fi
+          echo '---- Running CF Meet components ----'
+          docker ps --format '{{.Names}} {{.Status}}' | grep -Ei 'cfmeet|^lk-server |^cosmicforge-(backend|db|redis) ' || true
+          echo '---- PostgreSQL versions of existing DB containers ----'
+          for c in cosmicforge-db cfmeet-staging-db; do
+            if docker inspect "$c" >/dev/null 2>&1; then
+              printf '%s: ' "$c"
+              docker exec "$c" postgres -V 2>/dev/null || echo 'NOT_DETERMINED'
+            fi
+          done
+          echo '---- Required networks ----'
+          for n in rtc_backend_cosmicforge-network cfmeet-staging-net; do
+            if docker network inspect "$n" >/dev/null 2>&1; then
+              echo "NETWORK_$n: EXISTS"
+            else
+              echo "NETWORK_$n: MISSING"
+            fi
+          done
+          echo '---- Private service container inventory ----'
+          for c in cfmeet-platform-access cfmeet-messaging cfmeet-calling; do
+            if docker container inspect "$c" >/dev/null 2>&1; then
+              echo "$c: EXISTS"
+            else
+              echo "$c: NOT_DEPLOYED"
+            fi
+          done
+          echo '---- Production env key presence (never values) ----'
+          if test -f /opt/cfmeet-production/.env; then
+            for k in FEATURE_UNIFIED_MESSAGING CF_RUNTIME_ENVIRONMENT CF_SERVICE_AUTH_KEY_ID CF_SERVICE_AUTH_PRIVATE_KEY_FILE CF_SERVICE_TRUST_BUNDLE_FILE CF_PLATFORM_ACCESS_BASE_URL CF_MESSAGING_BASE_URL CFMEET_COMMUNICATION_TENANT_ID CFMEET_COMMUNICATION_APPLICATION_ID CFMEET_COMMUNICATION_ENVIRONMENT_ID CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID; do
+              if grep -Eq "^[[:space:]]*${k}=" /opt/cfmeet-production/.env; then
+                echo "$k: PRESENT"
+              else
+                echo "$k: ABSENT"
+              fi
+            done
+          fi
+          echo '---- Existing Meeting API health ----'
+          if curl -fsS --max-time 6 http://127.0.0.1:18081/health >/dev/null; then
+            echo 'MEETING_HEALTH: OK'
+          else
+            echo 'MEETING_HEALTH: FAILED'
+          fi
+          echo '---- Existing CF Meet TLS certificate SANs (public names only) ----'
+          for f in /etc/letsencrypt/live/api.cfmeet.com/fullchain.pem /etc/letsencrypt/live/cfmeet.com/fullchain.pem; do
+            if test -r "$f"; then
+              echo "CERT_PATH: $f"
+              openssl x509 -in "$f" -noout -ext subjectAltName 2>/dev/null | tail -n +2 || true
+            fi
+          done
+          echo '---- Core production container status and host-port exposure ----'
+          for c in cfmeet-core-db cfmeet-platform-access cfmeet-messaging cfmeet-calling cfmeet-core-tls; do
+            if docker container inspect "$c" >/dev/null 2>&1; then
+              state="$(docker inspect --format '{{.State.Running}}' "$c")"
+              ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$c")"
+              if test "$ports" = 'null' || test "$ports" = '{}'; then
+                echo "CORE_CONTAINER_$c: running=$state public_ports=none"
+              else
+                echo "CORE_CONTAINER_$c: running=$state public_ports=UNEXPECTED"
+                exit 1
+              fi
+            else
+              echo "CORE_CONTAINER_$c: missing"
+              exit 1
+            fi
+          done
+          echo '---- Verify signed-TLS private service health ----'
+          for p in 8443 8444 8445; do
+            health=/ready
+            if test "$p" = 8445; then health=/health; fi
+            if docker run --rm --network cfmeet-core-private curlimages/curl:8.12.1 \
+              -fsS --max-time 6 "https://api.cfmeet.com:$p$health" >/dev/null; then
+              echo "CORE_TLS_PORT_$p: VERIFIED"
+            else
+              echo "CORE_TLS_PORT_$p: FAILED"
+              exit 1
+            fi
+          done
+          echo '===== PREFLIGHT DONE: NO CHANGES MADE ====='
+          REMOTE

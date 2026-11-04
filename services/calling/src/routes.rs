@@ -61,6 +61,7 @@ pub fn public_api() -> Router<AppState> {
 /// Mounted as `internal` by `main` (nested under `/internal/v1`).
 pub fn internal_api() -> Router<AppState> {
     crate::privacy_relay::enforcement::internal_routes()
+        .merge(crate::communications::routes())
         .merge(crate::telephony::http::internal_routes())
         .merge(crate::webhooks::ingest::internal_routes())
         .merge(crate::webhooks::ownership_migration::internal_routes())

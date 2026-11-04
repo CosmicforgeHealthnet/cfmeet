@@ -440,6 +440,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-communications-policy"
+version = "0.1.0"
+dependencies = [
+ "cf-service-auth",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "cf-messaging-crypto"
 version = "0.1.0"
 dependencies = [
@@ -2491,6 +2502,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "cf-communications-policy",
  "cf-messaging-crypto",
  "cf-object-storage",
  "cf-service-auth",

@@ -47,3 +47,5 @@ pub mod telemetry;
 pub mod telephony;
 pub mod usage;
 pub mod webhooks;
+
+pub mod communications;

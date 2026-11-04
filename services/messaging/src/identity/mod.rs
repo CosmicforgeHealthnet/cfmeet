@@ -98,6 +98,8 @@ impl OwnerScope {
 pub struct TrustedContext {
     pub scope: OwnerScope,
     pub credential_id: Uuid,
+    /// Authoritative device-session creation time; never taken from consumer JSON.
+    pub personal_session_issued_at: Option<i64>,
     pub first_party: bool,
     /// FULL; SAFETY_ONLY (a suspended tenant / application / environment) is refused.
     pub full_authority: bool,
@@ -167,6 +169,7 @@ impl TrustedContext {
                 service_account_id: id(&["serviceAccount", "id"])?,
             },
             credential_id: id(&["credential", "id"])?,
+            personal_session_issued_at: None,
             first_party: authority.get("tenant")?.get("classification")?.as_str()? == "FIRST_PARTY",
             full_authority: authority.get("authorityMode")?.as_str()? == "FULL",
             scopes,
@@ -244,6 +247,7 @@ impl TrustedContext {
                 service_account_id: ctx.initiating_service_account_id(),
             },
             credential_id: ctx.initiating_service_account_id(),
+            personal_session_issued_at: None,
             first_party,
             full_authority,
             scopes: DELEGATED_SCOPES.iter().map(|s| s.to_string()).collect(),

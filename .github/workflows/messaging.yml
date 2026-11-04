@@ -475,7 +475,7 @@ jobs:
       - name: image contains only the Messaging binaries and no key material
         run: |
           set -euo pipefail
-          test "$(docker run --rm --entrypoint /bin/ls cfmeet-messaging:ci /app | tr '\n' ' ')" = "messaging messaging-migration "
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-messaging:ci /app | tr '\n' ' ')" = "messaging messaging-communications-migration messaging-migration "
           if docker run --rm --entrypoint /bin/sh cfmeet-messaging:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi

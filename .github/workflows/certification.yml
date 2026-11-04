@@ -111,6 +111,11 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
+      # Nine signed-service processes share this runner. Unoptimized Ed25519
+      # verification saturates its CPU before the scheduled load is delivered.
+      # Keep debug assertions and every latency/security criterion unchanged,
+      # while compiling the measured services with basic optimization.
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       TEST_REDIS_URL: redis://127.0.0.1:6379
       CFMEET_BIN_DIR: ${{ github.workspace }}/.cfmeet-bin

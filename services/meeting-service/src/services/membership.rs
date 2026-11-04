@@ -120,7 +120,10 @@ impl MembershipService {
                 .one(&txn)
                 .await?
                 .filter(|x| {
-                    x.status != users::UserStatus::Inactive && x.role != users::UserRole::Guest
+                    !matches!(
+                        x.status,
+                        users::UserStatus::Inactive | users::UserStatus::Suspended
+                    ) && x.role != users::UserRole::Guest
                 })
                 .ok_or_else(|| validation("userId must reference an active registered user"))?;
         }

@@ -57,6 +57,7 @@ fn expired_token(sub: Uuid, role: &str) -> String {
     encode(
         &Header::default(),
         &Claims {
+            auth_time: None,
             sub: sub.to_string(),
             role: role.into(),
             exp: now - 3600,

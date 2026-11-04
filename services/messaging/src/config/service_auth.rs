@@ -105,6 +105,7 @@ impl ServiceAuthRuntime {
 
 /// Base-URL variables of the services Messaging calls.
 const TARGETS: &[(&str, &str)] = &[
+    ("CF_COMMUNICATIONS_BASE_URL", services::COMMUNICATIONS),
     ("CF_PLATFORM_ACCESS_BASE_URL", services::PLATFORM_ACCESS),
     // Part V H SMS Bridge: carrier transport (sms-bridge.submit).
     ("CF_SMS_GATEWAY_BASE_URL", services::SMS_GATEWAY),

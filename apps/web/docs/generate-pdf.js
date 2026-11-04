@@ -12,10 +12,9 @@
  * - Background graphics: Enabled
  */
 
-const puppeteer = require('puppeteer');
-const path = require('path');
-
 async function generatePDF() {
+    const puppeteer = (await import('puppeteer')).default;
+    const path = await import('node:path');
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 

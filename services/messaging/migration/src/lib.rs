@@ -139,3 +139,41 @@ where
     }
     Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
 }
+
+mod communications;
+pub struct CommunicationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for CommunicationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(communications::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("messaging_communications_migrations").into_iden()
+    }
+}
+
+/// Read-only readiness for the independently versioned additive integration.
+pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db.query_one(Statement::from_string(DbBackend::Postgres, "SELECT to_regclass('public.messaging_communications_migrations') IS NOT NULL AS present".to_owned())).await?.ok_or_else(||sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?.try_get::<bool>("","present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM messaging_communications_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = CommunicationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}

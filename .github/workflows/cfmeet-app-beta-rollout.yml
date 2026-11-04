@@ -1,0 +1,66 @@
+name: Activate CF Meet app-only Calling beta (no carrier/capture)
+
+# User-authorized limited production rollout. This does not claim full certification.
+# Failed health, API authorization or runtime preservation checks roll back Calling.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cfmeet-app-beta-rollout.yml
+  workflow_dispatch:
+
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-calling-production
+  cancel-in-progress: false
+
+jobs:
+  activate-app-beta:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check release code and existing Calling safety tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile infra/calling/production/app_beta.py infra/calling/production/production.py
+          python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
+      - name: Configure production SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Run rollback-safe app beta activation on CF Meet VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - app_beta.py production.py |
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+              "umask 077; tar -C '$remote' -xf -"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            "python3 -u '$remote/app_beta.py' '$GITHUB_SHA' '$GITHUB_RUN_ID'" |
+            tee app-beta-release-result.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cfmeet-app-beta-${{ github.run_id }}
+          path: app-beta-release-result.log
+          if-no-files-found: ignore

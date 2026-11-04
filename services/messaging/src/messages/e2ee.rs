@@ -288,6 +288,14 @@ pub async fn send(
             Box::pin(async move {
                 let now = st.now();
                 super::lock_sender(txn, &conversation, acting.principal_id, now, true).await?;
+                crate::communications::require_send(
+                    txn,
+                    &st,
+                    &ctx,
+                    &conversation,
+                    acting.principal_id,
+                )
+                .await?;
                 let group = lock_group(txn, conversation.id).await?;
                 if let Some(existing) = load_by_client_id(
                     txn,

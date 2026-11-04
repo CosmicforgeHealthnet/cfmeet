@@ -1,0 +1,14 @@
+*
+!packages/service-auth
+!packages/communications-policy
+!services/communications
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+**/*.rs.bk
+services/communications/Dockerfile
+services/communications/Dockerfile.dockerignore

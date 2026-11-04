@@ -186,6 +186,17 @@ impl AppCallService {
         {
             return Err(CallError::TargetUnavailable);
         }
+        if self.personal_call_governed(&call).await? {
+            self.require_personal_call(&call, None).await?;
+            self.require_personal_create(ctx, transferring.principal_id, &[target.id().as_uuid()])
+                .await?;
+            self.require_personal_create(
+                ctx,
+                call.initiator_principal_id,
+                &[target.id().as_uuid()],
+            )
+            .await?;
+        }
         let participants = call_participants::Entity::find()
             .filter(call_participants::Column::CallId.eq(call.id))
             .all(&txn)

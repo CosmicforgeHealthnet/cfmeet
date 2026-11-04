@@ -116,6 +116,11 @@ impl AppCallService {
         request: CreateAppCall,
     ) -> CallResult<CreatedAppCall> {
         let scope = CallScope::of_platform(ctx);
+        // A retained command result never revives personal authority after a block,
+        // suspension or relationship revocation. Safety/history APIs remain available.
+        let personal_targets: Vec<Uuid> = request.targets.iter().map(|p| p.as_uuid()).collect();
+        self.require_personal_create(ctx, request.initiator.as_uuid(), &personal_targets)
+            .await?;
         // Replays are answered before anything else (no provider, no validation drift).
         if let Some(prior) = self
             .calls

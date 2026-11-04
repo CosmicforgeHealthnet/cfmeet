@@ -1,0 +1,91 @@
+name: CF Meet app-to-app rollout production readiness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cfmeet-app-rollout-readiness.yml
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  readiness:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Inspect app-only Calling cutover without modifying production
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== VERIFY ACTUAL CF MEET VPS ==='
+          for n in cfmeet-calling cfmeet-production-backend cfmeet-platform-access cfmeet-messaging lk-server cfmeet-calling-redis cfmeet-calling-egress; do
+            test "$(docker inspect -f '{{.State.Running}}' "$n")" = true
+            echo "$n: running"
+          done
+          echo '=== ACTIVE CALLING SAFE SWITCHES ==='
+          docker inspect cfmeet-calling --format '{{range .Config.Env}}{{println .}}{{end}}' |
+            awk -F= '$1=="CALLING_NEW_CALLS_ENABLED" ||
+                      $1=="CALLING_APP_CALLING_ENABLED" ||
+                      $1=="ENTERPRISE_CALLING_ENABLED" ||
+                      $1=="VOICEMAIL_ENABLED" ||
+                      $1=="CALL_RECORDING_ENABLED" ||
+                      $1=="CALLING_PUBLIC_OUTBOUND_ENABLED" ||
+                      $1=="CALLING_PUBLIC_INBOUND_ENABLED" ||
+                      $1=="CALLING_CALLBACK_RELAY_ENABLED" ||
+                      $1=="CALLING_SYNTHETIC_INTERCONNECT_ENABLED" { print $1 "=" $2 }'
+          echo '=== MEDIA AND CALLING NETWORK ==='
+          docker inspect cfmeet-calling --format 'CALLING_NETWORKS={{range $key,$value := .NetworkSettings.Networks}}{{$key}} {{end}} PORT_BINDINGS={{json .HostConfig.PortBindings}}'
+          docker inspect cfmeet-calling-egress --format 'EGRESS_HEALTH={{.State.Health.Status}}'
+          curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null
+          echo 'MEETINGS_BACKEND: healthy'
+          curl -fsS --max-time 8 http://127.0.0.1:18090/health >/dev/null
+          echo 'CALLING_LOOPBACK: healthy'
+          token=/opt/cfmeet-core/secrets/cfmeet-web-bff.credential
+          if test -s "$token"; then
+            for endpoint in /v1/calls /v1/calling/endpoints; do
+              code="$(curl -sS --max-time 7 -o /dev/null -w '%{http_code}' \
+                -H "Authorization: Bearer $(cat "$token")" \
+                --resolve api.cfmeet.com:443:127.0.0.1 \
+                "https://api.cfmeet.com$endpoint" || true)"
+              echo "BFF $endpoint: HTTP_$code"
+            done
+          else
+            echo 'BFF_CREDENTIAL: missing'
+          fi
+          for endpoint in /v1/calls /v1/calling/signaling; do
+            code="$(curl -sS --max-time 7 -o /dev/null -w '%{http_code}' \
+              --resolve api.cfmeet.com:443:127.0.0.1 \
+              "https://api.cfmeet.com$endpoint" || true)"
+            echo "ANONYMOUS $endpoint: HTTP_$code"
+            test "$code" = 401
+          done
+          echo '=== APPROVED TEST CREDENTIAL FILES (file names withheld) ==='
+          if find /opt/cfmeet-core/secrets -maxdepth 1 -type f \( -iname '*app-accept*' -o -iname '*canary*' -o -iname '*calling-test*' \) -print -quit | grep -q .; then
+            echo 'APP_ACCEPTANCE_TEST_CREDENTIALS: possible candidate present; must be validated'
+          else
+            echo 'APP_ACCEPTANCE_TEST_CREDENTIALS: no candidate found'
+          fi
+          echo '=== RELEASE DECISION ==='
+          echo 'READ_ONLY_PREFLIGHT: COMPLETE'
+          echo 'NO_FLAGS_CHANGED: true'
+          echo 'FULL_PRODUCTION_APP_E2E: NOT_CERTIFIED_BY_THIS_CHECK'
+          REMOTE
+
+# Post-cutover runtime verification: check effective app-only flags after successful beta activation.

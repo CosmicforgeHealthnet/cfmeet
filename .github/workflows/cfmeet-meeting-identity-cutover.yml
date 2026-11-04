@@ -1,0 +1,128 @@
+name: Activate CF Meet Messaging identity bridge
+
+# Controlled Meeting Service container switch with rollback. Uses only the
+# already running production image; no source code or database migrations.
+# Does not turn on Calling, change LiveKit, or enable PSTN.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-meeting-identity-cutover.yml"]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency:
+  group: cfmeet-meeting-identity-cutover
+  cancel-in-progress: false
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 17
+    steps:
+      - name: Configure deployment SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Switch Meeting to Messaging identity with rollback
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=20 "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          LIVE=cfmeet-production-backend
+          BACKUP=cfmeet-production-pre-identity-cutover
+          KEY=/opt/cfmeet-core/secrets/meeting-service-auth.pem
+          SCOPE=/opt/cfmeet-core/communication.scope.env
+          ORIGINAL=/opt/cfmeet-production/.env
+          OVERLAY=/opt/cfmeet-core/meeting-identity.runtime.env
+          test -s "$KEY" && test -s "$SCOPE" && test -s "$ORIGINAL"
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-platform-access)" = true
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-messaging)" = true
+          test "$(docker inspect -f '{{.State.Running}}' "$LIVE")" = true
+          docker network inspect rtc_backend_cosmicforge-network >/dev/null
+          docker network inspect cfmeet-core-private >/dev/null
+          if docker inspect "$BACKUP" >/dev/null 2>&1; then
+            echo 'An existing pre-identity backup container exists; refusing to overwrite rollback target.'
+            exit 1
+          fi
+          IMAGE="$(docker inspect -f '{{.Config.Image}}' "$LIVE")"
+          # Copy the existing production config, replacing only bridge keys.
+          # Do not log this file: it contains the existing Meeting credentials.
+          awk -F= '!/^(FEATURE_UNIFIED_MESSAGING|CF_RUNTIME_ENVIRONMENT|CF_SERVICE_AUTH_KEY_ID|CF_SERVICE_AUTH_PRIVATE_KEY_FILE|CF_PLATFORM_ACCESS_BASE_URL|CF_MESSAGING_BASE_URL|CFMEET_COMMUNICATION_TENANT_ID|CFMEET_COMMUNICATION_APPLICATION_ID|CFMEET_COMMUNICATION_ENVIRONMENT_ID|CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID|CFMEET_COMMUNICATION_ENVIRONMENT_KIND)=/' "$ORIGINAL" > "$OVERLAY"
+          cat "$SCOPE" >> "$OVERLAY"
+          cat >> "$OVERLAY" <<'ENV'
+          FEATURE_UNIFIED_MESSAGING=true
+          CF_RUNTIME_ENVIRONMENT=production
+          CF_SERVICE_AUTH_KEY_ID=meeting-service-production-1
+          CF_SERVICE_AUTH_PRIVATE_KEY_FILE=/run/secrets/meeting-service-auth.pem
+          CF_PLATFORM_ACCESS_BASE_URL=https://api.cfmeet.com:8443
+          CF_MESSAGING_BASE_URL=https://api.cfmeet.com:8444
+          ENV
+          chmod 0600 "$OVERLAY"
+
+          if ! curl -fsS --max-time 6 http://127.0.0.1:18081/health >/dev/null; then
+            echo 'Current production backend is not healthy; refusing cutover'
+            exit 1
+          fi
+          swapped=0
+          recover() {
+            rc=$?
+            trap - ERR
+            if test "$swapped" = 1; then
+              docker rm -f "$LIVE" >/dev/null 2>&1 || true
+              docker rename "$BACKUP" "$LIVE" || true
+              docker start "$LIVE" >/dev/null || true
+              curl -fsS --max-time 8 http://127.0.0.1:18081/health >/dev/null || true
+              echo "CUTOVER_FAILED_ROLLED_BACK: yes"
+            fi
+            exit "$rc"
+          }
+          trap recover ERR
+          docker rename "$LIVE" "$BACKUP"
+          swapped=1
+          docker stop "$BACKUP" >/dev/null
+          docker run -d --name "$LIVE" --restart unless-stopped \
+            --network rtc_backend_cosmicforge-network \
+            --env-file "$OVERLAY" \
+            --mount type=bind,src="$KEY",dst=/run/secrets/meeting-service-auth.pem,readonly \
+            -p 127.0.0.1:18081:8080 "$IMAGE" >/dev/null
+          docker network connect cfmeet-core-private "$LIVE"
+
+          healthy=0
+          for i in $(seq 1 35); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18081/health >/dev/null &&
+               curl -fsSL --max-time 5 http://127.0.0.1:18081/swagger-ui/ >/dev/null; then
+              healthy=1
+              break
+            fi
+            sleep 2
+          done
+          test "$healthy" = 1 || { echo 'Meeting health failed after identity switch'; exit 1; }
+
+          # Anonymous requests must remain unauthorized even after the bridge
+          # is enabled; no auth token is created for these checks.
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 \
+            http://127.0.0.1:18081/api/v2/messaging/me)"
+          test "$status" = 401 || { echo "Unexpected anonymous messaging identity status: $status"; exit 1; }
+
+          # Existing Meetings functionality must remain live.
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-platform-access)" = true
+          test "$(docker inspect -f '{{.State.Running}}' cfmeet-messaging)" = true
+          trap - ERR
+          echo 'MEETING_HEALTH: OK'
+          echo 'MESSAGING_BRIDGE: ENABLED'
+          echo 'ANONYMOUS_MESSAGING_IDENTITY: 401'
+          echo 'BACKUP_CONTAINER: RETAINED_FOR_ROLLBACK'
+          echo 'PSTN: STILL_DISABLED'
+          REMOTE

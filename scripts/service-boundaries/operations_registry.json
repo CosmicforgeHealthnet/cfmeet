@@ -1,179 +1,637 @@
 {
   "description": "Part I section 82: every durable background responsibility, the one service that owns it, its entry point and the tests that prove its multi-instance / exactly-once behaviour. Checked by check_operations_registry.py (service-boundaries CI). No generic mega-worker: each service runs its own loop.",
   "required": [
-    "call-timeout", "relay-expiry", "telephony-command-worker", "telephony-reconciler",
-    "usage-finalizer", "artifact-worker", "webhook-delivery-worker"
+    "call-timeout",
+    "relay-expiry",
+    "telephony-command-worker",
+    "telephony-reconciler",
+    "usage-finalizer",
+    "artifact-worker",
+    "webhook-delivery-worker"
   ],
   "responsibilities": [
-    {"id": "developer-platform-worker-heartbeat", "owner": "developer-platform", "source": "src/worker.rs", "entry": "run_once",
-     "tests": ["tests/worker.rs::worker_heartbeats_are_per_instance_and_monotonic", "tests/worker.rs::the_worker_loop_runs_until_shutdown"]},
-    {"id": "messaging-kt-rollback-monitor", "owner": "messaging", "source": "src/operations.rs", "entry": "kt_monitor_once",
-     "tests": ["tests/operations.rs::a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_closed",
-               "tests/disaster_recovery.rs::a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_rollback"]},
-    {"id": "messaging-webhook-relay", "owner": "messaging", "source": "src/webhook_relay.rs", "entry": "relay_due",
-     "tests": ["tests/webhook_relay.rs::public_events_are_relayed_as_platform_envelopes_without_content",
-               "tests/webhook_relay.rs::relay_failures_retry_dead_letter_and_wait_for_configuration"]},
-    {"id": "messaging-sms-bridge-transport", "owner": "messaging", "source": "src/sms_bridge/mod.rs", "entry": "run_due",
-     "tests": ["tests/sms_bridge.rs::a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_separate_transport_state"]},
-    {"id": "sms-bridge-inbound-delivery", "owner": "sms-gateway", "source": "src/sms/bridge.rs", "entry": "deliver_due",
-     "tests": ["tests/bridge.rs::inbound_sms_of_a_bridged_party_reach_messaging_durably"]},
-    {"id": "privacy-relay-messaging-authority", "owner": "privacy-relay", "source": "src/messaging_authority.rs", "entry": "run_messaging_authority_sweep",
-     "tests": ["tests/messaging_authority.rs::every_context_version_reaches_messaging_once_in_order_without_contact_data",
-               "tests/messaging_authority.rs::messaging_outages_are_retried_and_stale_answers_count_as_applied"]},
-    {"id": "meeting-unified-messaging-sync", "owner": "meeting-service", "source": "src/services/unified_messaging/mod.rs", "entry": "sync_once",
-     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
-    {"id": "meeting-messaging-session-revocation", "owner": "meeting-service", "source": "src/services/unified_messaging/identity.rs", "entry": "process_revocations",
-     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
-    {"id": "meeting-chat-rollback-copy", "owner": "meeting-service", "source": "src/services/unified_messaging/mirror.rs", "entry": "copy_back_native",
-     "tests": ["tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"]},
-    {"id": "meeting-public-event-publication", "owner": "meeting-service", "source": "src/services/platform/events.rs", "entry": "run_once",
-     "tests": ["tests/platform_events.rs::environment_meetings_publish_safe_envelopes_to_the_developer_platform",
-               "tests/platform_events.rs::refusals_dead_letter_and_outages_retry_under_the_same_event_id",
-               "tests/platform_events.rs::concurrent_publishers_deliver_each_event_once"]},
-    {"id": "messaging-conversation-expiry", "owner": "messaging", "source": "src/conversations/service.rs", "entry": "expire_due",
-     "tests": ["tests/conversations.rs::reopening_and_expiry_follow_the_conversations_policy_snapshot"]},
-    {"id": "messaging-outbox-publisher", "owner": "messaging", "source": "src/events/outbox.rs", "entry": "publish_due",
-     "tests": ["tests/outbox.rs::concurrent_publishers_deliver_each_event_once",
-               "tests/outbox.rs::a_crashed_claim_is_reclaimed_after_its_lease_and_failures_dead_letter"]},
-    {"id": "messaging-push-dispatch", "owner": "messaging", "source": "src/realtime/push.rs", "entry": "dispatch_due",
-     "tests": ["tests/realtime.rs::push_payloads_are_metadata_only_and_revoked_devices_get_none"]},
-    {"id": "messaging-realtime-fanout", "owner": "messaging", "source": "src/realtime/fanout.rs", "entry": "broker_message",
-     "tests": ["tests/realtime.rs::committed_messages_survive_a_broker_outage",
-               "tests/realtime_redis.rs::two_gateway_instances_share_fanout_and_presence_through_redis"]},
-    {"id": "messaging-attachment-lifecycle", "owner": "messaging", "source": "src/attachments/lifecycle.rs", "entry": "process_deletions",
-     "tests": ["tests/attachments.rs::legal_holds_preserve_objects_and_are_administration_only",
-               "tests/attachments.rs::quotas_are_atomic_and_released"]},
-    {"id": "messaging-attachment-rescan", "owner": "messaging", "source": "src/attachments/lifecycle.rs", "entry": "rescan_due",
-     "tests": ["tests/attachments.rs::scanning_fails_closed_and_quarantines"]},
-    {"id": "messaging-retention-purge", "owner": "messaging", "source": "src/compliance/retention.rs", "entry": "purge_due",
-     "tests": ["tests/compliance.rs::retention_expires_and_purges_but_legal_holds_preserve"]},
-    {"id": "messaging-managed-export", "owner": "messaging", "source": "src/compliance/exports.rs", "entry": "run_pending",
-     "tests": ["tests/compliance.rs::exports_are_managed_only_authorized_and_expire"]},
-    {"id": "messaging-data-deletion", "owner": "messaging", "source": "src/compliance/deletion.rs", "entry": "run_pending",
-     "tests": ["tests/compliance.rs::data_deletion_requests_respect_holds"]},
-    {"id": "messaging-key-package-claims", "owner": "messaging", "source": "src/devices/mod.rs", "entry": "claim_key_packages",
-     "tests": ["tests/devices.rs::key_package_claims_are_single_use_under_concurrency"]},
-    {"id": "call-timeout", "owner": "calling", "source": "src/calls/app/workers.rs", "entry": "expire_stalled_setups",
-     "tests": ["tests/durable_workers.rs::a_call_stuck_before_connect_times_out_once_and_its_paid_leg_is_released",
-               "tests/durable_workers.rs::the_setup_deadline_cancels_outstanding_ring_offers_of_a_stuck_application_call",
-               "tests/app_ringing.rs::offers_expire_on_the_server_and_are_never_revived"]},
-    {"id": "call-reconciliation", "owner": "calling", "source": "src/calls/app/workers.rs", "entry": "reconcile_due",
-     "tests": ["tests/app_media.rs::reconciliation_repairs_drift_without_creating_authority"]},
-    {"id": "calling-telephony-command-dispatch", "owner": "calling", "source": "src/calls/app/public/dispatch.rs", "entry": "dispatch_telephony_commands",
-     "tests": ["tests/durable_workers.rs::two_concurrent_dispatch_workers_send_each_command_exactly_once",
-               "tests/durable_workers.rs::a_claim_whose_worker_died_is_reclaimed_after_its_lease_and_sent_once",
-               "tests/durable_workers.rs::a_command_at_its_attempt_cap_goes_dead_stops_retrying_and_raises_one_incident",
-               "tests/cross_service_races.rs::context_revoked_after_the_grant_was_issued_issues_no_paid_command"]},
-    {"id": "calling-outbox-publisher", "owner": "calling", "source": "src/webhooks/worker.rs", "entry": "publish_outbox_once",
-     "tests": ["tests/durable_workers.rs::an_outbox_claim_lost_to_a_crash_is_reclaimed_after_its_lease_and_published_once",
-               "tests/durable_workers.rs::an_outbox_claim_crashing_at_its_attempt_cap_is_dead_lettered_not_reclaimed_forever"]},
-    {"id": "webhook-delivery-worker", "owner": "calling", "source": "src/webhooks/worker.rs", "entry": "deliver_due_once",
-     "tests": ["tests/webhooks.rs::concurrent_workers_and_crash_recovery_deliver_once",
-               "tests/webhooks.rs::retries_dead_letter_timeouts_and_manual_replay"]},
-    {"id": "developer-platform-webhook-delivery-worker", "owner": "developer-platform", "source": "src/webhooks/worker.rs", "entry": "deliver_due_once",
-     "tests": ["tests/webhooks.rs::concurrent_workers_and_crash_recovery_deliver_each_once",
-               "tests/webhooks.rs::permanent_failures_and_exhaustion_dead_letter_and_replays_keep_the_event_id",
-               "tests/webhooks.rs::shadow_mode_records_deliveries_and_sends_nothing"]},
-    {"id": "artifact-worker", "owner": "calling", "source": "src/calls/app/enterprise/voicemail.rs", "entry": "voicemail_tick",
-     "tests": ["tests/enterprise_voicemail.rs::concurrent_finalization_stores_once",
-               "tests/enterprise_voicemail.rs::storage_failure_is_recoverable_and_captures_can_fail",
-               "tests/enterprise_recording.rs::orphaned_capture_objects_are_never_left_behind"]},
-    {"id": "recording-artifact-worker", "owner": "calling", "source": "src/calls/app/enterprise/recording.rs", "entry": "recording_tick",
-     "tests": ["tests/enterprise_recording.rs::concurrent_starts_record_once",
-               "tests/enterprise_recording.rs::stop_racing_the_call_end_stops_once"]},
-    {"id": "orphan-object-cleanup", "owner": "calling", "source": "src/calls/app/enterprise/orphans.rs", "entry": "orphan_tick",
-     "tests": ["tests/enterprise_recording.rs::orphaned_capture_objects_are_never_left_behind"]},
-    {"id": "usage-finalizer", "owner": "telephony", "source": "src/usage/mod.rs", "entry": "finalize_usage_once",
-     "tests": ["tests/reconciliation.rs::missing_usage_finalization_is_completed_exactly_once"]},
-    {"id": "calling-usage-finalization", "owner": "calling", "source": "src/calls/service/records.rs", "entry": "finalize_usage",
-     "tests": ["tests/call_records.rs::usage_records_are_idempotent_and_finalization_is_set_once",
-               "tests/call_records.rs::a_different_idempotency_key_can_never_bill_the_same_subject_twice",
-               "tests/cross_service_races.rs::usage_finalization_after_a_crash_and_under_concurrency_records_one_fact"]},
-    {"id": "calling-retention", "owner": "calling", "source": "src/retention/worker.rs", "entry": "retention_tick",
-     "tests": ["tests/retention.rs::two_concurrent_workers_act_on_each_row_exactly_once"]},
-    {"id": "relay-expiry", "owner": "privacy-relay", "source": "src/relay_numbers/assignment.rs", "entry": "expire_relay_assignments",
-     "tests": ["tests/expiry.rs::concurrent_workers_expire_each_context_and_session_exactly_once",
-               "tests/relay_numbers.rs::concurrent_workers_release_and_cool_down_each_assignment_exactly_once",
-               "tests/relay_numbers.rs::a_released_number_cools_down_before_anyone_else_gets_it"]},
-    {"id": "relay-cooldown", "owner": "privacy-relay", "source": "src/relay_numbers/assignment.rs", "entry": "complete_relay_cooldowns",
-     "tests": ["tests/relay_numbers.rs::completion_keeps_the_identity_only_through_grace_and_explicit_release_works"]},
-    {"id": "context-session-expiry", "owner": "privacy-relay", "source": "src/workers/mod.rs", "entry": "expire_sessions",
-     "tests": ["tests/expiry.rs::concurrent_workers_expire_each_context_and_session_exactly_once"]},
-    {"id": "privacy-relay-enforcement", "owner": "privacy-relay", "source": "src/enforcement/mod.rs", "entry": "run_enforcement_sweep",
-     "tests": ["tests/enforcement.rs::concurrent_retries_deliver_each_job_once",
-               "tests/enforcement.rs::a_crashed_workers_lease_expires_and_another_instance_applies_exactly_once",
-               "tests/enforcement.rs::enforcement_is_dead_lettered_after_its_attempt_cap_stops_retrying_and_is_visible"]},
-    {"id": "privacy-relay-outbox-publisher", "owner": "privacy-relay", "source": "src/events.rs", "entry": "publish_outbox",
-     "tests": ["tests/outbox_publication.rs::committed_events_are_published_once_retried_and_dead_lettered",
-               "tests/outbox_publication.rs::a_crashed_publishers_lease_expires_and_another_instance_publishes_exactly_once"]},
-    {"id": "privacy-relay-retention", "owner": "privacy-relay", "source": "src/retention/worker.rs", "entry": "retention_tick",
-     "tests": ["tests/retention.rs::concurrent_workers_erase_each_contact_exactly_once"]},
-    {"id": "telephony-command-worker", "owner": "telephony", "source": "src/commands/executor.rs", "entry": "run_commands_once",
-     "tests": ["tests/telephony_core.rs::duplicate_commands_have_one_provider_effect",
-               "tests/unknown_outcome.rs::worker_crash_after_the_provider_accepted_goes_to_reconciliation",
-               "tests/unknown_outcome.rs::a_command_at_its_attempt_cap_is_dead_lettered_and_a_transmitted_one_is_reconciled",
-               "tests/disaster_recovery.rs::a_stopped_worker_backlog_drains_exactly_once_in_per_leg_order"]},
-    {"id": "telephony-reconciler", "owner": "telephony", "source": "src/reconciliation/mod.rs", "entry": "reconcile_once",
-     "tests": ["tests/reconciliation.rs::two_reconcilers_on_the_same_object_make_exactly_one_repair",
-               "tests/reconciliation.rs::connected_but_provider_ended_is_repaired_from_read_back",
-               "tests/reconciliation.rs::connected_but_absent_at_the_provider_is_not_guessed",
-               "tests/reconciliation.rs::provider_calls_without_a_valid_binding_are_found",
-               "tests/reconciliation.rs::an_orphan_bridge_is_ended",
-               "tests/reconciliation.rs::an_unresolved_termination_is_never_reported_ended_until_the_provider_confirms"]},
-    {"id": "telephony-outbox-delivery", "owner": "telephony", "source": "src/workers/mod.rs", "entry": "deliver_outbox_once",
-     "tests": ["tests/outbox_delivery.rs::an_expired_outbox_lease_is_reclaimed_and_delivered_exactly_once",
-               "tests/outbox_delivery.rs::a_permanent_refusal_is_dead_lettered_once_and_never_retried"]},
-    {"id": "telephony-retention", "owner": "telephony", "source": "src/retention/mod.rs", "entry": "purge_expired_provider_events",
-     "tests": ["tests/provider_events.rs::raw_payloads_are_never_forwarded_and_delivered_events_follow_the_contract"]},
-    {"id": "calling-identity-projection", "owner": "calling", "source": "src/platform/projection.rs", "entry": "sync",
-     "tests": ["tests/identity_projection.rs::concurrent_instances_apply_the_feed_once_in_commit_order",
-               "tests/identity_projection.rs::replaying_the_feed_never_regresses_a_newer_state",
-               "tests/identity_projection.rs::principal_changes_at_platform_access_reach_calling_through_the_feed"]},
-    {"id": "platform-access-failure-window-pruning", "owner": "platform-access", "source": "src/identity/authentication.rs", "entry": "prune_failure_windows",
-     "tests": ["tests/authentication.rs::failure_windows_are_bounded_reset_and_pruned"]},
-    {"id": "numbering-outbox-publication", "owner": "numbering", "source": "src/infra/outbox.rs", "entry": "publish_due",
-     "tests": ["tests/outbox.rs::concurrent_publishers_never_deliver_the_same_claim_and_a_dead_publisher_is_taken_over",
-               "tests/outbox.rs::failures_back_off_and_exhausted_or_refused_events_are_dead_lettered_not_dropped",
-               "tests/outbox.rs::publication_preserves_per_aggregate_order_and_conforms_to_the_platform_envelope"]},
-    {"id": "numbering-job-lease-recovery", "owner": "numbering", "source": "src/infra/jobs.rs", "entry": "recover_expired",
-     "tests": ["tests/workers.rs::a_restarted_worker_retries_idempotent_work_and_parks_provider_affecting_work",
-               "tests/workers.rs::concurrent_runners_never_run_the_same_claim",
-               "tests/workers.rs::retries_back_off_until_exhausted_and_permanent_failures_are_final"]},
-    {"id": "numbering-idempotency-expiry", "owner": "numbering", "source": "src/infra/idempotency.rs", "entry": "purge_expired",
-     "tests": ["tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"]},
-    {"id": "numbering-capability-expiry", "owner": "numbering", "source": "src/numbers/capabilities.rs", "entry": "expire_capabilities",
-     "tests": ["tests/capability_catalog.rs::expired_stale_and_conflicting_evidence_cannot_authorize"]},
-    {"id": "numbering-kyc-verification", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "run_verification",
-     "tests": ["tests/kyc_eligibility.rs::an_unknown_verifier_outcome_is_polled_never_resubmitted_across_a_worker_restart"]},
-    {"id": "numbering-kyc-expiry", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "expire_due",
-     "tests": ["tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"]},
-    {"id": "numbering-kyc-revalidation", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "schedule_revalidations",
-     "tests": ["tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"]},
-    {"id": "numbering-kyc-evidence-retention", "owner": "numbering", "source": "src/numbers/kyc/cases.rs", "entry": "purge_expired_evidence",
-     "tests": ["tests/kyc_eligibility.rs::evidence_is_sealed_typed_minimal_audited_and_retained"]},
-    {"id": "numbering-provider-dispatch", "owner": "numbering", "source": "src/providers/commands.rs", "entry": "run_dispatch",
-     "tests": ["tests/provider_contract.rs::a_timeout_before_transmission_is_retried_and_succeeds_once"]},
-    {"id": "numbering-provider-reconciliation", "owner": "numbering", "source": "src/providers/reconcile.rs", "entry": "reconcile_command",
-     "tests": ["tests/provider_contract.rs::a_timeout_after_execution_is_unknown_never_resent_and_reconciled_from_read_back"]},
-    {"id": "numbering-provider-recovery", "owner": "numbering", "source": "src/providers/commands.rs", "entry": "recover_interrupted",
-     "tests": ["tests/provider_contract.rs::a_process_interruption_mid_dispatch_is_recovered_by_reconciliation_not_retry"]},
-    {"id": "numbering-provider-callbacks", "owner": "numbering", "source": "src/providers/events.rs", "entry": "ingest_callback",
-     "tests": ["tests/provider_contract.rs::callbacks_are_authenticated_deduplicated_correlated_and_order_safe"]},
-    {"id": "sms-gateway-outbox-publication", "owner": "sms-gateway", "source": "src/infra/outbox.rs", "entry": "publish_due",
-     "tests": ["tests/foundation.rs::the_outbox_publishes_in_order_retries_and_dead_letters",
-               "tests/foundation.rs::concurrent_publishers_deliver_each_event_once_and_a_dead_publishers_claim_is_taken_over"]},
-    {"id": "sms-gateway-retention-sweep", "owner": "sms-gateway", "source": "src/sms/workers.rs", "entry": "sweep",
-     "tests": ["tests/foundation.rs::rate_windows_count_hits_and_the_sweep_purges_only_expired_windows",
-               "tests/inbound.rs::content_and_quarantine_are_purged_after_their_retention"]},
-    {"id": "sms-gateway-inbound-callbacks", "owner": "sms-gateway", "source": "src/sms/inbound.rs", "entry": "receive",
-     "tests": ["tests/inbound.rs::duplicate_and_concurrent_duplicate_callbacks_store_the_message_once",
-               "tests/inbound.rs::a_numbering_outage_fails_closed_and_the_providers_retry_is_applied_once"]},
-    {"id": "sms-gateway-outbound-dispatch", "owner": "sms-gateway", "source": "src/sms/dispatch.rs", "entry": "run_once",
-     "tests": ["tests/outbound.rs::restarts_recover_safely_and_concurrent_dispatchers_submit_each_message_once",
-               "tests/outbound.rs::a_sender_revoked_after_authorization_is_stopped_before_the_provider"]},
-    {"id": "sms-gateway-unknown-reconciliation", "owner": "sms-gateway", "source": "src/sms/dispatch.rs", "entry": "reconcile_one",
-     "tests": ["tests/outbound.rs::ambiguous_timeouts_are_unknown_never_resubmitted_and_resolved_by_read_back"]},
-    {"id": "sms-gateway-delivery-receipts", "owner": "sms-gateway", "source": "src/sms/receipts.rs", "entry": "receive",
-     "tests": ["tests/outbound.rs::receipts_are_deduplicated_order_safe_and_never_regress_a_final_state"]}
+    {
+      "id": "developer-platform-worker-heartbeat",
+      "owner": "developer-platform",
+      "source": "src/worker.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/worker.rs::worker_heartbeats_are_per_instance_and_monotonic",
+        "tests/worker.rs::the_worker_loop_runs_until_shutdown"
+      ]
+    },
+    {
+      "id": "messaging-kt-rollback-monitor",
+      "owner": "messaging",
+      "source": "src/operations.rs",
+      "entry": "kt_monitor_once",
+      "tests": [
+        "tests/operations.rs::a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_closed",
+        "tests/disaster_recovery.rs::a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_rollback"
+      ]
+    },
+    {
+      "id": "messaging-webhook-relay",
+      "owner": "messaging",
+      "source": "src/webhook_relay.rs",
+      "entry": "relay_due",
+      "tests": [
+        "tests/webhook_relay.rs::public_events_are_relayed_as_platform_envelopes_without_content",
+        "tests/webhook_relay.rs::relay_failures_retry_dead_letter_and_wait_for_configuration"
+      ]
+    },
+    {
+      "id": "messaging-sms-bridge-transport",
+      "owner": "messaging",
+      "source": "src/sms_bridge/mod.rs",
+      "entry": "run_due",
+      "tests": [
+        "tests/sms_bridge.rs::a_managed_conversation_bridges_to_sms_with_explicit_disclosure_and_separate_transport_state"
+      ]
+    },
+    {
+      "id": "sms-bridge-inbound-delivery",
+      "owner": "sms-gateway",
+      "source": "src/sms/bridge.rs",
+      "entry": "deliver_due",
+      "tests": [
+        "tests/bridge.rs::inbound_sms_of_a_bridged_party_reach_messaging_durably"
+      ]
+    },
+    {
+      "id": "privacy-relay-messaging-authority",
+      "owner": "privacy-relay",
+      "source": "src/messaging_authority.rs",
+      "entry": "run_messaging_authority_sweep",
+      "tests": [
+        "tests/messaging_authority.rs::every_context_version_reaches_messaging_once_in_order_without_contact_data",
+        "tests/messaging_authority.rs::messaging_outages_are_retried_and_stale_answers_count_as_applied"
+      ]
+    },
+    {
+      "id": "meeting-unified-messaging-sync",
+      "owner": "meeting-service",
+      "source": "src/services/unified_messaging/mod.rs",
+      "entry": "sync_once",
+      "tests": [
+        "tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"
+      ]
+    },
+    {
+      "id": "meeting-messaging-session-revocation",
+      "owner": "meeting-service",
+      "source": "src/services/unified_messaging/identity.rs",
+      "entry": "process_revocations",
+      "tests": [
+        "tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"
+      ]
+    },
+    {
+      "id": "meeting-chat-rollback-copy",
+      "owner": "meeting-service",
+      "source": "src/services/unified_messaging/mirror.rs",
+      "entry": "copy_back_native",
+      "tests": [
+        "tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services"
+      ]
+    },
+    {
+      "id": "meeting-public-event-publication",
+      "owner": "meeting-service",
+      "source": "src/services/platform/events.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/platform_events.rs::environment_meetings_publish_safe_envelopes_to_the_developer_platform",
+        "tests/platform_events.rs::refusals_dead_letter_and_outages_retry_under_the_same_event_id",
+        "tests/platform_events.rs::concurrent_publishers_deliver_each_event_once"
+      ]
+    },
+    {
+      "id": "messaging-conversation-expiry",
+      "owner": "messaging",
+      "source": "src/conversations/service.rs",
+      "entry": "expire_due",
+      "tests": [
+        "tests/conversations.rs::reopening_and_expiry_follow_the_conversations_policy_snapshot"
+      ]
+    },
+    {
+      "id": "messaging-outbox-publisher",
+      "owner": "messaging",
+      "source": "src/events/outbox.rs",
+      "entry": "publish_due",
+      "tests": [
+        "tests/outbox.rs::concurrent_publishers_deliver_each_event_once",
+        "tests/outbox.rs::a_crashed_claim_is_reclaimed_after_its_lease_and_failures_dead_letter"
+      ]
+    },
+    {
+      "id": "messaging-push-dispatch",
+      "owner": "messaging",
+      "source": "src/realtime/push.rs",
+      "entry": "dispatch_due",
+      "tests": [
+        "tests/realtime.rs::push_payloads_are_metadata_only_and_revoked_devices_get_none"
+      ]
+    },
+    {
+      "id": "messaging-realtime-fanout",
+      "owner": "messaging",
+      "source": "src/realtime/fanout.rs",
+      "entry": "broker_message",
+      "tests": [
+        "tests/realtime.rs::committed_messages_survive_a_broker_outage",
+        "tests/realtime_redis.rs::two_gateway_instances_share_fanout_and_presence_through_redis"
+      ]
+    },
+    {
+      "id": "messaging-attachment-lifecycle",
+      "owner": "messaging",
+      "source": "src/attachments/lifecycle.rs",
+      "entry": "process_deletions",
+      "tests": [
+        "tests/attachments.rs::legal_holds_preserve_objects_and_are_administration_only",
+        "tests/attachments.rs::quotas_are_atomic_and_released"
+      ]
+    },
+    {
+      "id": "messaging-attachment-rescan",
+      "owner": "messaging",
+      "source": "src/attachments/lifecycle.rs",
+      "entry": "rescan_due",
+      "tests": [
+        "tests/attachments.rs::scanning_fails_closed_and_quarantines"
+      ]
+    },
+    {
+      "id": "messaging-retention-purge",
+      "owner": "messaging",
+      "source": "src/compliance/retention.rs",
+      "entry": "purge_due",
+      "tests": [
+        "tests/compliance.rs::retention_expires_and_purges_but_legal_holds_preserve"
+      ]
+    },
+    {
+      "id": "messaging-managed-export",
+      "owner": "messaging",
+      "source": "src/compliance/exports.rs",
+      "entry": "run_pending",
+      "tests": [
+        "tests/compliance.rs::exports_are_managed_only_authorized_and_expire"
+      ]
+    },
+    {
+      "id": "messaging-data-deletion",
+      "owner": "messaging",
+      "source": "src/compliance/deletion.rs",
+      "entry": "run_pending",
+      "tests": [
+        "tests/compliance.rs::data_deletion_requests_respect_holds"
+      ]
+    },
+    {
+      "id": "messaging-key-package-claims",
+      "owner": "messaging",
+      "source": "src/devices/mod.rs",
+      "entry": "claim_key_packages",
+      "tests": [
+        "tests/devices.rs::key_package_claims_are_single_use_under_concurrency"
+      ]
+    },
+    {
+      "id": "call-timeout",
+      "owner": "calling",
+      "source": "src/calls/app/workers.rs",
+      "entry": "expire_stalled_setups",
+      "tests": [
+        "tests/durable_workers.rs::a_call_stuck_before_connect_times_out_once_and_its_paid_leg_is_released",
+        "tests/durable_workers.rs::the_setup_deadline_cancels_outstanding_ring_offers_of_a_stuck_application_call",
+        "tests/app_ringing.rs::offers_expire_on_the_server_and_are_never_revived"
+      ]
+    },
+    {
+      "id": "call-reconciliation",
+      "owner": "calling",
+      "source": "src/calls/app/workers.rs",
+      "entry": "reconcile_due",
+      "tests": [
+        "tests/app_media.rs::reconciliation_repairs_drift_without_creating_authority"
+      ]
+    },
+    {
+      "id": "calling-telephony-command-dispatch",
+      "owner": "calling",
+      "source": "src/calls/app/public/dispatch.rs",
+      "entry": "dispatch_telephony_commands",
+      "tests": [
+        "tests/durable_workers.rs::two_concurrent_dispatch_workers_send_each_command_exactly_once",
+        "tests/durable_workers.rs::a_claim_whose_worker_died_is_reclaimed_after_its_lease_and_sent_once",
+        "tests/durable_workers.rs::a_command_at_its_attempt_cap_goes_dead_stops_retrying_and_raises_one_incident",
+        "tests/cross_service_races.rs::context_revoked_after_the_grant_was_issued_issues_no_paid_command"
+      ]
+    },
+    {
+      "id": "calling-outbox-publisher",
+      "owner": "calling",
+      "source": "src/webhooks/worker.rs",
+      "entry": "publish_outbox_once",
+      "tests": [
+        "tests/durable_workers.rs::an_outbox_claim_lost_to_a_crash_is_reclaimed_after_its_lease_and_published_once",
+        "tests/durable_workers.rs::an_outbox_claim_crashing_at_its_attempt_cap_is_dead_lettered_not_reclaimed_forever"
+      ]
+    },
+    {
+      "id": "webhook-delivery-worker",
+      "owner": "calling",
+      "source": "src/webhooks/worker.rs",
+      "entry": "deliver_due_once",
+      "tests": [
+        "tests/webhooks.rs::concurrent_workers_and_crash_recovery_deliver_once",
+        "tests/webhooks.rs::retries_dead_letter_timeouts_and_manual_replay"
+      ]
+    },
+    {
+      "id": "developer-platform-webhook-delivery-worker",
+      "owner": "developer-platform",
+      "source": "src/webhooks/worker.rs",
+      "entry": "deliver_due_once",
+      "tests": [
+        "tests/webhooks.rs::concurrent_workers_and_crash_recovery_deliver_each_once",
+        "tests/webhooks.rs::permanent_failures_and_exhaustion_dead_letter_and_replays_keep_the_event_id",
+        "tests/webhooks.rs::shadow_mode_records_deliveries_and_sends_nothing"
+      ]
+    },
+    {
+      "id": "artifact-worker",
+      "owner": "calling",
+      "source": "src/calls/app/enterprise/voicemail.rs",
+      "entry": "voicemail_tick",
+      "tests": [
+        "tests/enterprise_voicemail.rs::concurrent_finalization_stores_once",
+        "tests/enterprise_voicemail.rs::storage_failure_is_recoverable_and_captures_can_fail",
+        "tests/enterprise_recording.rs::orphaned_capture_objects_are_never_left_behind"
+      ]
+    },
+    {
+      "id": "recording-artifact-worker",
+      "owner": "calling",
+      "source": "src/calls/app/enterprise/recording.rs",
+      "entry": "recording_tick",
+      "tests": [
+        "tests/enterprise_recording.rs::concurrent_starts_record_once",
+        "tests/enterprise_recording.rs::stop_racing_the_call_end_stops_once"
+      ]
+    },
+    {
+      "id": "orphan-object-cleanup",
+      "owner": "calling",
+      "source": "src/calls/app/enterprise/orphans.rs",
+      "entry": "orphan_tick",
+      "tests": [
+        "tests/enterprise_recording.rs::orphaned_capture_objects_are_never_left_behind"
+      ]
+    },
+    {
+      "id": "usage-finalizer",
+      "owner": "telephony",
+      "source": "src/usage/mod.rs",
+      "entry": "finalize_usage_once",
+      "tests": [
+        "tests/reconciliation.rs::missing_usage_finalization_is_completed_exactly_once"
+      ]
+    },
+    {
+      "id": "calling-usage-finalization",
+      "owner": "calling",
+      "source": "src/calls/service/records.rs",
+      "entry": "finalize_usage",
+      "tests": [
+        "tests/call_records.rs::usage_records_are_idempotent_and_finalization_is_set_once",
+        "tests/call_records.rs::a_different_idempotency_key_can_never_bill_the_same_subject_twice",
+        "tests/cross_service_races.rs::usage_finalization_after_a_crash_and_under_concurrency_records_one_fact"
+      ]
+    },
+    {
+      "id": "calling-retention",
+      "owner": "calling",
+      "source": "src/retention/worker.rs",
+      "entry": "retention_tick",
+      "tests": [
+        "tests/retention.rs::two_concurrent_workers_act_on_each_row_exactly_once"
+      ]
+    },
+    {
+      "id": "relay-expiry",
+      "owner": "privacy-relay",
+      "source": "src/relay_numbers/assignment.rs",
+      "entry": "expire_relay_assignments",
+      "tests": [
+        "tests/expiry.rs::concurrent_workers_expire_each_context_and_session_exactly_once",
+        "tests/relay_numbers.rs::concurrent_workers_release_and_cool_down_each_assignment_exactly_once",
+        "tests/relay_numbers.rs::a_released_number_cools_down_before_anyone_else_gets_it"
+      ]
+    },
+    {
+      "id": "relay-cooldown",
+      "owner": "privacy-relay",
+      "source": "src/relay_numbers/assignment.rs",
+      "entry": "complete_relay_cooldowns",
+      "tests": [
+        "tests/relay_numbers.rs::completion_keeps_the_identity_only_through_grace_and_explicit_release_works"
+      ]
+    },
+    {
+      "id": "context-session-expiry",
+      "owner": "privacy-relay",
+      "source": "src/workers/mod.rs",
+      "entry": "expire_sessions",
+      "tests": [
+        "tests/expiry.rs::concurrent_workers_expire_each_context_and_session_exactly_once"
+      ]
+    },
+    {
+      "id": "privacy-relay-enforcement",
+      "owner": "privacy-relay",
+      "source": "src/enforcement/mod.rs",
+      "entry": "run_enforcement_sweep",
+      "tests": [
+        "tests/enforcement.rs::concurrent_retries_deliver_each_job_once",
+        "tests/enforcement.rs::a_crashed_workers_lease_expires_and_another_instance_applies_exactly_once",
+        "tests/enforcement.rs::enforcement_is_dead_lettered_after_its_attempt_cap_stops_retrying_and_is_visible"
+      ]
+    },
+    {
+      "id": "privacy-relay-outbox-publisher",
+      "owner": "privacy-relay",
+      "source": "src/events.rs",
+      "entry": "publish_outbox",
+      "tests": [
+        "tests/outbox_publication.rs::committed_events_are_published_once_retried_and_dead_lettered",
+        "tests/outbox_publication.rs::a_crashed_publishers_lease_expires_and_another_instance_publishes_exactly_once"
+      ]
+    },
+    {
+      "id": "privacy-relay-retention",
+      "owner": "privacy-relay",
+      "source": "src/retention/worker.rs",
+      "entry": "retention_tick",
+      "tests": [
+        "tests/retention.rs::concurrent_workers_erase_each_contact_exactly_once"
+      ]
+    },
+    {
+      "id": "telephony-command-worker",
+      "owner": "telephony",
+      "source": "src/commands/executor.rs",
+      "entry": "run_commands_once",
+      "tests": [
+        "tests/telephony_core.rs::duplicate_commands_have_one_provider_effect",
+        "tests/unknown_outcome.rs::worker_crash_after_the_provider_accepted_goes_to_reconciliation",
+        "tests/unknown_outcome.rs::a_command_at_its_attempt_cap_is_dead_lettered_and_a_transmitted_one_is_reconciled",
+        "tests/disaster_recovery.rs::a_stopped_worker_backlog_drains_exactly_once_in_per_leg_order"
+      ]
+    },
+    {
+      "id": "telephony-reconciler",
+      "owner": "telephony",
+      "source": "src/reconciliation/mod.rs",
+      "entry": "reconcile_once",
+      "tests": [
+        "tests/reconciliation.rs::two_reconcilers_on_the_same_object_make_exactly_one_repair",
+        "tests/reconciliation.rs::connected_but_provider_ended_is_repaired_from_read_back",
+        "tests/reconciliation.rs::connected_but_absent_at_the_provider_is_not_guessed",
+        "tests/reconciliation.rs::provider_calls_without_a_valid_binding_are_found",
+        "tests/reconciliation.rs::an_orphan_bridge_is_ended",
+        "tests/reconciliation.rs::an_unresolved_termination_is_never_reported_ended_until_the_provider_confirms"
+      ]
+    },
+    {
+      "id": "telephony-outbox-delivery",
+      "owner": "telephony",
+      "source": "src/workers/mod.rs",
+      "entry": "deliver_outbox_once",
+      "tests": [
+        "tests/outbox_delivery.rs::an_expired_outbox_lease_is_reclaimed_and_delivered_exactly_once",
+        "tests/outbox_delivery.rs::a_permanent_refusal_is_dead_lettered_once_and_never_retried"
+      ]
+    },
+    {
+      "id": "telephony-retention",
+      "owner": "telephony",
+      "source": "src/retention/mod.rs",
+      "entry": "purge_expired_provider_events",
+      "tests": [
+        "tests/provider_events.rs::raw_payloads_are_never_forwarded_and_delivered_events_follow_the_contract"
+      ]
+    },
+    {
+      "id": "calling-identity-projection",
+      "owner": "calling",
+      "source": "src/platform/projection.rs",
+      "entry": "sync",
+      "tests": [
+        "tests/identity_projection.rs::concurrent_instances_apply_the_feed_once_in_commit_order",
+        "tests/identity_projection.rs::replaying_the_feed_never_regresses_a_newer_state",
+        "tests/identity_projection.rs::principal_changes_at_platform_access_reach_calling_through_the_feed"
+      ]
+    },
+    {
+      "id": "platform-access-failure-window-pruning",
+      "owner": "platform-access",
+      "source": "src/identity/authentication.rs",
+      "entry": "prune_failure_windows",
+      "tests": [
+        "tests/authentication.rs::failure_windows_are_bounded_reset_and_pruned"
+      ]
+    },
+    {
+      "id": "numbering-outbox-publication",
+      "owner": "numbering",
+      "source": "src/infra/outbox.rs",
+      "entry": "publish_due",
+      "tests": [
+        "tests/outbox.rs::concurrent_publishers_never_deliver_the_same_claim_and_a_dead_publisher_is_taken_over",
+        "tests/outbox.rs::failures_back_off_and_exhausted_or_refused_events_are_dead_lettered_not_dropped",
+        "tests/outbox.rs::publication_preserves_per_aggregate_order_and_conforms_to_the_platform_envelope"
+      ]
+    },
+    {
+      "id": "numbering-job-lease-recovery",
+      "owner": "numbering",
+      "source": "src/infra/jobs.rs",
+      "entry": "recover_expired",
+      "tests": [
+        "tests/workers.rs::a_restarted_worker_retries_idempotent_work_and_parks_provider_affecting_work",
+        "tests/workers.rs::concurrent_runners_never_run_the_same_claim",
+        "tests/workers.rs::retries_back_off_until_exhausted_and_permanent_failures_are_final"
+      ]
+    },
+    {
+      "id": "numbering-idempotency-expiry",
+      "owner": "numbering",
+      "source": "src/infra/idempotency.rs",
+      "entry": "purge_expired",
+      "tests": [
+        "tests/workers.rs::idempotency_keys_replay_refuse_mismatches_and_are_scoped"
+      ]
+    },
+    {
+      "id": "numbering-capability-expiry",
+      "owner": "numbering",
+      "source": "src/numbers/capabilities.rs",
+      "entry": "expire_capabilities",
+      "tests": [
+        "tests/capability_catalog.rs::expired_stale_and_conflicting_evidence_cannot_authorize"
+      ]
+    },
+    {
+      "id": "numbering-kyc-verification",
+      "owner": "numbering",
+      "source": "src/numbers/kyc/cases.rs",
+      "entry": "run_verification",
+      "tests": [
+        "tests/kyc_eligibility.rs::an_unknown_verifier_outcome_is_polled_never_resubmitted_across_a_worker_restart"
+      ]
+    },
+    {
+      "id": "numbering-kyc-expiry",
+      "owner": "numbering",
+      "source": "src/numbers/kyc/cases.rs",
+      "entry": "expire_due",
+      "tests": [
+        "tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"
+      ]
+    },
+    {
+      "id": "numbering-kyc-revalidation",
+      "owner": "numbering",
+      "source": "src/numbers/kyc/cases.rs",
+      "entry": "schedule_revalidations",
+      "tests": [
+        "tests/kyc_eligibility.rs::the_deterministic_verifier_reproduces_every_outcome"
+      ]
+    },
+    {
+      "id": "numbering-kyc-evidence-retention",
+      "owner": "numbering",
+      "source": "src/numbers/kyc/cases.rs",
+      "entry": "purge_expired_evidence",
+      "tests": [
+        "tests/kyc_eligibility.rs::evidence_is_sealed_typed_minimal_audited_and_retained"
+      ]
+    },
+    {
+      "id": "numbering-provider-dispatch",
+      "owner": "numbering",
+      "source": "src/providers/commands.rs",
+      "entry": "run_dispatch",
+      "tests": [
+        "tests/provider_contract.rs::a_timeout_before_transmission_is_retried_and_succeeds_once"
+      ]
+    },
+    {
+      "id": "numbering-provider-reconciliation",
+      "owner": "numbering",
+      "source": "src/providers/reconcile.rs",
+      "entry": "reconcile_command",
+      "tests": [
+        "tests/provider_contract.rs::a_timeout_after_execution_is_unknown_never_resent_and_reconciled_from_read_back"
+      ]
+    },
+    {
+      "id": "numbering-provider-recovery",
+      "owner": "numbering",
+      "source": "src/providers/commands.rs",
+      "entry": "recover_interrupted",
+      "tests": [
+        "tests/provider_contract.rs::a_process_interruption_mid_dispatch_is_recovered_by_reconciliation_not_retry"
+      ]
+    },
+    {
+      "id": "numbering-provider-callbacks",
+      "owner": "numbering",
+      "source": "src/providers/events.rs",
+      "entry": "ingest_callback",
+      "tests": [
+        "tests/provider_contract.rs::callbacks_are_authenticated_deduplicated_correlated_and_order_safe"
+      ]
+    },
+    {
+      "id": "sms-gateway-outbox-publication",
+      "owner": "sms-gateway",
+      "source": "src/infra/outbox.rs",
+      "entry": "publish_due",
+      "tests": [
+        "tests/foundation.rs::the_outbox_publishes_in_order_retries_and_dead_letters",
+        "tests/foundation.rs::concurrent_publishers_deliver_each_event_once_and_a_dead_publishers_claim_is_taken_over"
+      ]
+    },
+    {
+      "id": "sms-gateway-retention-sweep",
+      "owner": "sms-gateway",
+      "source": "src/sms/workers.rs",
+      "entry": "sweep",
+      "tests": [
+        "tests/foundation.rs::rate_windows_count_hits_and_the_sweep_purges_only_expired_windows",
+        "tests/inbound.rs::content_and_quarantine_are_purged_after_their_retention"
+      ]
+    },
+    {
+      "id": "sms-gateway-inbound-callbacks",
+      "owner": "sms-gateway",
+      "source": "src/sms/inbound.rs",
+      "entry": "receive",
+      "tests": [
+        "tests/inbound.rs::duplicate_and_concurrent_duplicate_callbacks_store_the_message_once",
+        "tests/inbound.rs::a_numbering_outage_fails_closed_and_the_providers_retry_is_applied_once"
+      ]
+    },
+    {
+      "id": "sms-gateway-outbound-dispatch",
+      "owner": "sms-gateway",
+      "source": "src/sms/dispatch.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/outbound.rs::restarts_recover_safely_and_concurrent_dispatchers_submit_each_message_once",
+        "tests/outbound.rs::a_sender_revoked_after_authorization_is_stopped_before_the_provider"
+      ]
+    },
+    {
+      "id": "sms-gateway-unknown-reconciliation",
+      "owner": "sms-gateway",
+      "source": "src/sms/dispatch.rs",
+      "entry": "reconcile_one",
+      "tests": [
+        "tests/outbound.rs::ambiguous_timeouts_are_unknown_never_resubmitted_and_resolved_by_read_back"
+      ]
+    },
+    {
+      "id": "sms-gateway-delivery-receipts",
+      "owner": "sms-gateway",
+      "source": "src/sms/receipts.rs",
+      "entry": "receive",
+      "tests": [
+        "tests/outbound.rs::receipts_are_deduplicated_order_safe_and_never_regress_a_final_state"
+      ]
+    },
+    {
+      "id": "communications-outbox",
+      "owner": "communications",
+      "source": "src/events.rs",
+      "entry": "deliver_due",
+      "tests": [
+        "tests/foundation.rs::durable_outbox_leases_deliver_concurrently_and_dead_events_replay_by_scoped_operator"
+      ]
+    },
+    {
+      "id": "communications-retention-and-request-expiry",
+      "owner": "communications",
+      "source": "src/events.rs",
+      "entry": "maintain",
+      "tests": [
+        "tests/foundation.rs::retention_expires_pending_pairs_and_preserves_identity_and_undelivered_events"
+      ]
+    }
   ]
 }

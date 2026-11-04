@@ -195,7 +195,12 @@ impl OrganizationService {
         users::Entity::find_by_id(user)
             .one(conn)
             .await?
-            .filter(|u| u.status != users::UserStatus::Inactive && u.role != users::UserRole::Guest)
+            .filter(|u| {
+                !matches!(
+                    u.status,
+                    users::UserStatus::Inactive | users::UserStatus::Suspended
+                ) && u.role != users::UserRole::Guest
+            })
             .ok_or_else(|| validation("userId must reference an active registered user"))?;
         let now = Utc::now();
         Ok(organization_memberships::ActiveModel {

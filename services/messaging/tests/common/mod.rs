@@ -531,6 +531,7 @@ impl Harness {
             first_party: false,
             full_authority: true,
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            personal_session_issued_at: None,
             principal_restriction: None,
         };
         self.register_token(context)

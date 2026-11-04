@@ -106,6 +106,8 @@ fn is_calling_table(name: &str) -> bool {
         || name.starts_with("call_")
         || name == "calls"
         || name == "calling_outbox_events"
+        || name == "calling_communication_inbox"
+        || name == "calling_communication_revocations"
         // Part F §168: Calling's own operational incidents (Telephony keeps its own).
         || name == "calling_incidents"
         // Part F: enterprise configuration / continuity is Calling-owned (ADR 0018).

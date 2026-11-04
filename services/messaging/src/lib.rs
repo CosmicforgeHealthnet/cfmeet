@@ -47,3 +47,5 @@ pub mod usage;
 pub mod usage_export;
 pub mod webhook_relay;
 pub mod workers;
+
+pub mod communications;

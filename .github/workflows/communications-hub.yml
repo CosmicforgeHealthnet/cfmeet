@@ -1,0 +1,132 @@
+name: Communications Hub foundation
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/communications/**"
+      - "services/calling/**"
+      - "services/messaging/**"
+      - "services/meeting-service/**"
+      - "packages/communications-policy/**"
+      - "packages/service-auth/**"
+      - "certification/Cargo.toml"
+      - "certification/Cargo.lock"
+      - "certification/src/personal_stack.rs"
+      - "certification/tests/personal_communications.rs"
+      - ".github/workflows/communications-hub.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: communications-hub-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+jobs:
+  hub:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/communications -> target
+            packages/communications-policy -> target
+            packages/service-auth -> target
+      - name: Hub format, lint, migrations and PostgreSQL acceptance
+        run: |
+          cargo fmt --manifest-path services/communications/Cargo.toml --all -- --check
+          cargo clippy --manifest-path services/communications/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path services/communications/Cargo.toml --all-targets --locked
+          cargo test --manifest-path packages/communications-policy/Cargo.toml --locked
+          cargo test --manifest-path packages/service-auth/Cargo.toml --locked
+  consumers:
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [calling, messaging, meeting-service]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/${{ matrix.service }} -> target
+      - name: Compile authoritative consumer hooks and additive migrators
+        run: cargo check --manifest-path services/${{ matrix.service }}/Cargo.toml --all-targets --locked
+  real-services:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CFMEET_BIN_DIR: ${{ github.workspace }}/target/debug
+      COMMUNICATIONS_E2E_LIVEKIT_URL: ws://127.0.0.1:7880
+      COMMUNICATIONS_E2E_LIVEKIT_API_URL: http://127.0.0.1:7880
+      COMMUNICATIONS_E2E_LIVEKIT_KEY: calling-cert
+      COMMUNICATIONS_E2E_LIVEKIT_SECRET: calling-cert-only-key-not-a-secret-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: personal-communications-e2e
+          cache-on-failure: true
+          workspaces: |
+            services/platform-access -> ../../target
+            services/meeting-service -> ../../target
+            services/calling -> ../../target
+            services/messaging -> ../../target
+            services/communications -> ../../target
+            certification -> ../target
+      - name: Start the existing loopback LiveKit certification configuration
+        run: |
+          docker run -d --name communications-livekit --network host \
+            -v "$PWD/infra/livekit/livekit.calling-cert.yaml:/etc/livekit.yaml:ro" \
+            livekit/livekit-server:v1.13.9 --config /etc/livekit.yaml
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7880/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Build the five independent services and their owner migration binaries
+        run: |
+          for service in platform-access meeting-service calling messaging communications; do
+            cargo build --manifest-path "services/$service/Cargo.toml" --workspace --bins --locked
+          done
+      - name: Real backend journey with isolated owner databases and signed service authentication
+        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture

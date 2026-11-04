@@ -2342,8 +2342,10 @@ async fn rtc_voicemail_through_egress(cert: &Cert) {
         "RECORDING:APPLICATION"
     );
     assert_eq!(cert.state(call).await, CallState::Ringing);
-    // The caller leaves a message (real audio through the real Egress), then hangs up.
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Allow real Egress startup and microphone subscription before the caller hangs up.
+    // Keep the >=3s recorded-audio assertion below unchanged: startup latency must
+    // never turn this into a skipped or zero-length capture certification.
+    tokio::time::sleep(Duration::from_secs(9)).await;
     let (_, version) = cert.a.state(call).await;
     let r = cert.a.command(call, "cancel", version).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);

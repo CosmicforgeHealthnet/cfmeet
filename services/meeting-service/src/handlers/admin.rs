@@ -58,6 +58,7 @@ fn format_status(status: &UserStatus) -> String {
         UserStatus::PendingVerification => "pending_verification".to_string(),
         UserStatus::Active => "active".to_string(),
         UserStatus::Inactive => "inactive".to_string(),
+        UserStatus::Suspended => "suspended".to_string(),
     }
 }
 
@@ -112,6 +113,7 @@ fn parse_status(status: &str) -> Result<UserStatus, ApiError> {
         "pending_verification" => Ok(UserStatus::PendingVerification),
         "active" => Ok(UserStatus::Active),
         "inactive" => Ok(UserStatus::Inactive),
+        "suspended" => Ok(UserStatus::Suspended),
         _ => Err(ApiError::BadRequest(format!(
             "Invalid status: {}. Valid statuses: pending_verification, active, inactive",
             status

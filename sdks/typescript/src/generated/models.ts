@@ -628,7 +628,7 @@ export namespace Calling {
     enteredAt: string;
   };
   /** Stable public error codes of the Calling service. */
-  export type ErrorCode = "AUTHENTICATION_FAILED" | "INSUFFICIENT_SCOPE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "STALE_CALL_VERSION" | "CALL_STATE_CONFLICT" | "CALL_EVIDENCE_REQUIRED" | "CALL_NOT_AUTHORIZED" | "CONCURRENT_CALL_LIMIT_EXCEEDED" | "CALL_RESOURCE_STATE_CONFLICT" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "INVITATION_EXPIRED" | "INVITATION_NOT_ACTIONABLE" | "ANSWERED_ELSEWHERE" | "CAPABILITY_UNAVAILABLE" | "MEDIA_UNAVAILABLE" | "PARTICIPANT_LIMIT_EXCEEDED" | "TARGET_UNAVAILABLE" | "PRIVACY_AUTHORIZATION_UNAVAILABLE" | "PUBLIC_ROUTE_DENIED" | "PUBLIC_ROUTE_UNAVAILABLE" | "TELECOM_SPEND_LIMIT_EXCEEDED" | "VERSION_CONFLICT" | "ENTERPRISE_POLICY_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "RECORDING_NOT_AUTHORIZED" | "PRINCIPAL_NOT_ELIGIBLE";
+  export type ErrorCode = "AUTHENTICATION_FAILED" | "INSUFFICIENT_SCOPE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "STALE_CALL_VERSION" | "CALL_STATE_CONFLICT" | "CALL_EVIDENCE_REQUIRED" | "CALL_NOT_AUTHORIZED" | "CONCURRENT_CALL_LIMIT_EXCEEDED" | "CALL_RESOURCE_STATE_CONFLICT" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "INVITATION_EXPIRED" | "INVITATION_NOT_ACTIONABLE" | "ANSWERED_ELSEWHERE" | "CAPABILITY_UNAVAILABLE" | "MEDIA_UNAVAILABLE" | "PARTICIPANT_LIMIT_EXCEEDED" | "TARGET_UNAVAILABLE" | "PRIVACY_AUTHORIZATION_UNAVAILABLE" | "PUBLIC_ROUTE_DENIED" | "PUBLIC_ROUTE_UNAVAILABLE" | "TELECOM_SPEND_LIMIT_EXCEEDED" | "VERSION_CONFLICT" | "ENTERPRISE_POLICY_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "RECORDING_NOT_AUTHORIZED" | "PRINCIPAL_NOT_ELIGIBLE" | "COMMUNICATIONS_POLICY_UNAVAILABLE";
   /** Error response body. Messages are fixed, safe strings; authentication failures are uniform. */
   export type ErrorEnvelope = {
     error: {
@@ -2167,6 +2167,376 @@ export namespace Calling {
     updateWebhook: {
       params: { path: { webhook_id: string }; body: UpdateWebhookRequest };
       response: Webhook;
+    };
+  }
+}
+
+export namespace Communications {
+  export type Activation = {
+    schemaVersion: 1;
+    state: ActivationState;
+    version: number;
+    phoneVerificationRequired: false;
+  };
+  export type ActivationState = "ACCOUNT_CREATED" | "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
+  export type BackendCapability = {
+    available: boolean;
+    reason: "AVAILABLE" | "DISABLED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+    securityReady?: boolean;
+  };
+  export type Block = {
+    schemaVersion: 1;
+    cfMeetId: string;
+    blocked: boolean;
+    relationship: RelationshipState;
+  };
+  export type BlockMetadata = {
+    cfMeetId: string;
+    blocked: true;
+  };
+  export type BlocksPage = {
+    schemaVersion: 1;
+    data: Array<BlockMetadata>;
+    nextCursor: string | null;
+  };
+  export type Capabilities = {
+    schemaVersion: 1;
+    activationState: ActivationState;
+    personalCalling: BackendCapability;
+    messaging: BackendCapability;
+    contacts: {
+      available: boolean;
+    };
+    phoneVerification: PhoneVerification;
+    meetings: {
+      independent: true;
+      authorization: "EXISTING_MEETING_RULES";
+    };
+  };
+  export type CommonGroup = {
+    conversationId: string;
+    contextClass: "GROUP";
+  };
+  export type CommonGroups = {
+    schemaVersion: 1;
+    groups: Array<CommonGroup>;
+  };
+  export type Contact = {
+    schemaVersion: 1;
+    contactId: string;
+    cfMeetId: string;
+    displayName: string;
+    avatarReference: string | null;
+    relationship: RelationshipState;
+    relationshipVersion: number;
+    alias: string | null;
+    favorite: boolean;
+    notifications: "ALL" | "MUTED" | "MENTIONS";
+    version: number;
+  };
+  export type ContactPatch = {
+    expectedVersion: number;
+    alias?: string | null;
+    favorite?: boolean;
+    notifications?: "ALL" | "MUTED" | "MENTIONS";
+  };
+  export type ContactPreferences = {
+    schemaVersion: 1;
+    contactId: string;
+    alias: string | null;
+    favorite: boolean;
+    notifications: "ALL" | "MUTED" | "MENTIONS";
+    version: number;
+  };
+  export type ContactRemoved = {
+    schemaVersion: 1;
+    contactId: string;
+    relationship: "REVOKED";
+  };
+  export type ContactRequest = {
+    schemaVersion: 1;
+    requestId: string;
+    cfMeetId: string;
+    state: "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELLED" | "EXPIRED";
+    version: number;
+    expiresAt?: string;
+    relationship?: RelationshipState;
+  };
+  export type ContactsPage = {
+    schemaVersion: 1;
+    data: Array<Contact>;
+    nextCursor: string | null;
+  };
+  export type Error = {
+    schemaVersion: 1;
+    error: {
+      code: "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "NOT_FOUND" | "VALIDATION_ERROR" | "VERSION_CONFLICT" | "IDEMPOTENCY_CONFLICT" | "REQUEST_PENDING" | "RATE_LIMITED" | "RECENT_AUTHENTICATION_REQUIRED" | "COMMUNICATIONS_UNAVAILABLE";
+      message: string;
+    };
+  };
+  export type ExpectedVersion = {
+    expectedVersion: number;
+  };
+  export type Invite = {
+    schemaVersion: 1;
+    inviteId: string;
+    purpose: "CONNECT";
+    expiresAt: string;
+    maxUses: number;
+    uses: number;
+    version: number;
+    secretReturned: boolean;
+    payload?: string;
+  };
+  export type InviteCreate = {
+    purpose: "CONNECT";
+    expiresInSeconds: number;
+    maxUses: number;
+  };
+  export type InviteMetadata = {
+    inviteId: string;
+    purpose: "CONNECT";
+    expiresAt: string;
+    revoked: boolean;
+    maxUses: number;
+    uses: number;
+    version: number;
+  };
+  export type InviteResolve = {
+    token: string;
+    purpose: "CONNECT";
+  };
+  export type InviteRevoked = {
+    schemaVersion: 1;
+    inviteId: string;
+    revoked: true;
+  };
+  export type InvitesPage = {
+    schemaVersion: 1;
+    data: Array<InviteMetadata>;
+    nextCursor: string | null;
+  };
+  export type PermittedActions = {
+    requestConnection: boolean;
+    directCallEligible: boolean;
+    directChatEligible: boolean;
+  };
+  export type PhoneVerification = {
+    status: "DEFERRED";
+    required: false;
+  };
+  export type Privacy = {
+    publicIdDiscoverable: boolean;
+    invitationPermissions: "ENABLED" | "DISABLED";
+    contactRequestPermissions: "EVERYONE" | "NOBODY";
+    incomingCallPolicy: "CONNECTIONS" | "NOBODY";
+    directChatPolicy: "CONNECTIONS" | "NOBODY";
+    publicProfileVisibility: "PUBLIC" | "CONNECTIONS" | "HIDDEN";
+    presenceVisibility: "CONNECTIONS" | "NOBODY";
+  };
+  export type PrivacyUpdate = {
+    expectedVersion: number;
+    privacy: Privacy;
+  };
+  export type PrivacyView = {
+    schemaVersion: 1;
+    version: number;
+    privacy: Privacy;
+  };
+  export type Profile = {
+    schemaVersion: 1;
+    profileId: string;
+    cfMeetId: string;
+    displayName: string;
+    avatarReference: string | null;
+    activationState: ActivationState;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    phoneVerification: PhoneVerification;
+  };
+  export type PublicId = {
+    schemaVersion: 1;
+    cfMeetId: string;
+    version: number;
+  };
+  export type PublicIdResolve = {
+    cfMeetId: string;
+  };
+  export type PublicProfile = {
+    schemaVersion: 1;
+    cfMeetId: string;
+    displayName: string;
+    avatarReference: string | null;
+    relationship: RelationshipState | "SELF";
+    permittedActions?: PermittedActions;
+  };
+  export type RelationshipState = "NONE" | "REQUEST_PENDING" | "CONNECTED" | "BLOCKED" | "REVOKED";
+  export type ReportCreate = {
+    reason: "SPAM" | "HARASSMENT" | "IMPERSONATION" | "OTHER";
+  };
+  export type ReportReceipt = {
+    schemaVersion: 1;
+    reportId: string;
+    received: true;
+  };
+  export type RequestsPage = {
+    schemaVersion: 1;
+    data: Array<ContactRequest>;
+    nextCursor: string | null;
+  };
+
+  /** Typed parameters and response of every REST operation of this domain. */
+  export interface Operations {
+    /** POST /api/v2/communications/contact-requests/{requestId}/accept; auth MEETING_SESSION; retry IDEMPOTENT */
+    acceptCommunicationsContactRequest: {
+      params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
+      response: ContactRequest;
+    };
+    /** PUT /api/v2/communications/profiles/{cfMeetId}/block; auth MEETING_SESSION; retry IDEMPOTENT */
+    blockCommunicationsProfile: {
+      params: { path: { cfMeetId: string }; idempotencyKey?: string };
+      response: Block;
+    };
+    /** DELETE /api/v2/communications/contact-requests/{requestId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    cancelCommunicationsContactRequest: {
+      params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
+      response: ContactRequest;
+    };
+    /** POST /api/v2/communications/contact-requests; auth MEETING_SESSION; retry IDEMPOTENT */
+    createCommunicationsContactRequest: {
+      params: { body: PublicIdResolve; idempotencyKey?: string };
+      response: ContactRequest;
+    };
+    /** POST /api/v2/communications/invites; auth MEETING_SESSION; retry IDEMPOTENT */
+    createCommunicationsInvitation: {
+      params: { body: InviteCreate; idempotencyKey?: string };
+      response: Invite;
+    };
+    /** POST /api/v2/communications/contact-requests/{requestId}/decline; auth MEETING_SESSION; retry IDEMPOTENT */
+    declineCommunicationsContactRequest: {
+      params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
+      response: ContactRequest;
+    };
+    /** GET /api/v2/communications/activation; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsActivation: {
+      params: {};
+      response: Activation;
+    };
+    /** GET /api/v2/communications/me/capabilities; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsCapabilities: {
+      params: {};
+      response: Capabilities;
+    };
+    /** GET /api/v2/communications/contacts/{contactId}; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsContact: {
+      params: { path: { contactId: string } };
+      response: Contact;
+    };
+    /** GET /api/v2/communications/me/privacy; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsPrivacy: {
+      params: {};
+      response: PrivacyView;
+    };
+    /** GET /api/v2/communications/me; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsProfile: {
+      params: {};
+      response: Profile;
+    };
+    /** GET /api/v2/communications/me/public-id; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsPublicId: {
+      params: {};
+      response: PublicId;
+    };
+    /** GET /api/v2/communications/profiles/{cfMeetId}; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsPublicProfile: {
+      params: { path: { cfMeetId: string } };
+      response: PublicProfile;
+    };
+    /** GET /api/v2/communications/me/qr; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsQrInvitation: {
+      params: { idempotencyKey?: string };
+      response: Invite;
+    };
+    /** GET /api/v2/communications/blocks; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsBlocks: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: BlocksPage;
+      item: NonNullable<(BlocksPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/contacts/{contactId}/common-groups; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsCommonGroups: {
+      params: { path: { contactId: string } };
+      response: CommonGroups;
+    };
+    /** GET /api/v2/communications/contacts; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsContacts: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: ContactsPage;
+      item: NonNullable<(ContactsPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/invites; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsInvitations: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: InvitesPage;
+      item: NonNullable<(InvitesPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/contact-requests/incoming; auth MEETING_SESSION; retry SAFE */
+    listIncomingCommunicationsContactRequests: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: RequestsPage;
+      item: NonNullable<(RequestsPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/contact-requests/outgoing; auth MEETING_SESSION; retry SAFE */
+    listOutgoingCommunicationsContactRequests: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: RequestsPage;
+      item: NonNullable<(RequestsPage)["data"]>[number];
+    };
+    /** DELETE /api/v2/communications/contacts/{contactId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    removeCommunicationsContact: {
+      params: { path: { contactId: string }; idempotencyKey?: string };
+      response: ContactRemoved;
+    };
+    /** POST /api/v2/communications/profiles/{cfMeetId}/reports; auth MEETING_SESSION; retry IDEMPOTENT */
+    reportCommunicationsProfile: {
+      params: { path: { cfMeetId: string }; body: ReportCreate; idempotencyKey?: string };
+      response: ReportReceipt;
+    };
+    /** POST /api/v2/communications/discovery/invites/resolve; auth MEETING_SESSION; retry IDEMPOTENT */
+    resolveCommunicationsInvitation: {
+      params: { body: InviteResolve; idempotencyKey?: string };
+      response: PublicProfile;
+    };
+    /** POST /api/v2/communications/discovery/public-id/resolve; auth MEETING_SESSION; retry IDEMPOTENT */
+    resolveCommunicationsPublicId: {
+      params: { body: PublicIdResolve; idempotencyKey?: string };
+      response: PublicProfile;
+    };
+    /** DELETE /api/v2/communications/invites/{inviteId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    revokeCommunicationsInvitation: {
+      params: { path: { inviteId: string }; idempotencyKey?: string };
+      response: InviteRevoked;
+    };
+    /** POST /api/v2/communications/me/public-id/rotate; auth MEETING_SESSION; retry IDEMPOTENT */
+    rotateCommunicationsPublicId: {
+      params: { body: ExpectedVersion; idempotencyKey?: string };
+      response: PublicId;
+    };
+    /** DELETE /api/v2/communications/profiles/{cfMeetId}/block; auth MEETING_SESSION; retry IDEMPOTENT */
+    unblockCommunicationsProfile: {
+      params: { path: { cfMeetId: string }; idempotencyKey?: string };
+      response: Block;
+    };
+    /** PATCH /api/v2/communications/contacts/{contactId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    updateCommunicationsContact: {
+      params: { path: { contactId: string }; body: ContactPatch; idempotencyKey?: string };
+      response: ContactPreferences;
+    };
+    /** PUT /api/v2/communications/me/privacy; auth MEETING_SESSION; retry IDEMPOTENT */
+    updateCommunicationsPrivacy: {
+      params: { body: PrivacyUpdate; idempotencyKey?: string };
+      response: PrivacyView;
     };
   }
 }
@@ -8771,6 +9141,7 @@ export namespace Sms {
 /** Operation types of every domain, keyed like `OperationSpec.domain`. */
 export interface DomainOperations {
   calling: Calling.Operations;
+  communications: Communications.Operations;
   "developer-platform": DeveloperPlatform.Operations;
   gateway: Gateway.Operations;
   meetings: Meetings.Operations;

@@ -1,0 +1,123 @@
+name: Establish CF Meet core service identities
+
+# Production service-auth keys are generated only on the VPS. Receiver
+# grants are limited to the exact Calling/Messaging permissions registered
+# by packages/service-auth. Public endpoints remain closed.
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/cfmeet-core-identities.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-core-identities
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Set up SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Generate signing keys and install minimal trust policy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          SECRET_DIR=/opt/cfmeet-core/secrets
+          PLATFORM=cfmeet-platform-access
+          test -d "$SECRET_DIR"
+          test "$(docker inspect --format '{{.State.Running}}' "$PLATFORM")" = true
+          for svc in messaging calling; do
+            key="$SECRET_DIR/$svc-service-auth.pem"
+            if test ! -s "$key"; then
+              openssl genpkey -algorithm Ed25519 -out "$key" >/dev/null 2>&1
+            fi
+            chown 10001:10001 "$key"
+            chmod 0400 "$key"
+          done
+          kt="$SECRET_DIR/messaging-kt-signing.pem"
+          if test ! -s "$kt"; then
+            openssl genpkey -algorithm Ed25519 -out "$kt" >/dev/null 2>&1
+          fi
+          chown 10001:10001 "$kt"
+          chmod 0400 "$kt"
+          signing="$SECRET_DIR/calling-signaling.key"
+          if test ! -s "$signing"; then openssl rand -base64 48 > "$signing"; fi
+          chown 10001:10001 "$signing"
+          chmod 0400 "$signing"
+
+          # Public JWKs only enter receiver trust. No private key is logged,
+          # exported to GitHub or copied to another service.
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess
+          d=pathlib.Path('/opt/cfmeet-core/secrets')
+          root=d/'platform-access-trust.json'
+          def jwk(name):
+              pub=subprocess.check_output(['openssl','pkey','-in',str(d/f'{name}-service-auth.pem'),'-pubout','-outform','DER'])
+              assert len(pub)==44 and pub[:12].hex()=='302a300506032b6570032100', 'unexpected Ed25519 key format'
+              x=base64.urlsafe_b64encode(pub[12:]).decode().rstrip('=')
+              return {'kty':'OKP','crv':'Ed25519','kid':f'{name}-production-1','x':x}
+          def issuer(name,permissions):
+              return {'issuer':f'cfmeet.{name}','audience':'cfmeet.platform-access',
+                      'runtime_environment':'production','keys':[jwk(name)],'permissions':permissions}
+          bundle={'bundle_version':1,'receiver':'cfmeet.platform-access',
+                  'runtime_environment':'production','trusted_issuers':[
+                    issuer('calling',['platform-credential.authenticate','platform-principal.resolve',
+                                      'platform-principal.register','platform-identity.read']),
+                    issuer('messaging',['platform-credential.authenticate','platform-principal.resolve',
+                                        'platform-identity.read'])
+                  ]}
+          if root.exists():
+              backup=d/'platform-access-trust-before-core-integration.json'
+              if not backup.exists(): backup.write_bytes(root.read_bytes())
+          with root.open('w') as f:
+              json.dump(bundle,f,sort_keys=True)
+              f.write('\n')
+          os.chown(root,10001,10001); os.chmod(root,0o400)
+          PY
+
+          # Newly deployed, private Platform Access is the only process
+          # restarted. The existing public Meeting Service is never restarted.
+          docker restart "$PLATFORM" >/dev/null
+          ok=0
+          for i in $(seq 1 25); do
+            if docker run --rm --network cfmeet-core-private busybox:1.36 \
+              wget -q -O /dev/null http://cfmeet-platform-access:8094/ready >/dev/null 2>&1; then
+              ok=1; break
+            fi
+            sleep 2
+          done
+          if test "$ok" != 1; then
+            cp "$SECRET_DIR/platform-access-trust-before-core-integration.json" "$SECRET_DIR/platform-access-trust.json"
+            chown 10001:10001 "$SECRET_DIR/platform-access-trust.json"
+            chmod 0400 "$SECRET_DIR/platform-access-trust.json"
+            docker restart "$PLATFORM" >/dev/null || true
+            echo 'Platform Access trust validation failed; restored prior trust'
+            exit 1
+          fi
+          echo "PLATFORM_ACCESS_TRUSTED_CALLING_AND_MESSAGING: yes"
+          echo "NEW_SERVICE_PRIVATE_KEYS: stored on VPS"
+          echo "MEETING_SERVICE_CHANGED: no"
+          REMOTE

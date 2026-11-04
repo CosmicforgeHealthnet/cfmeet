@@ -147,6 +147,13 @@ impl AppCallService {
             crate::calls::ids::CallParticipantId::from_uuid(session.participant_id),
         )
         .await?;
+        let evidence = match &actor {
+            MediaCredentialActor::Endpoint(i) => {
+                Some((i.principal_id().as_uuid(), i.issued_at().timestamp()))
+            }
+            _ => None,
+        };
+        self.require_personal_call(&call, evidence).await?;
         if let MediaCredentialActor::Endpoint(identity) = &actor {
             // An endpoint only ever obtains credentials for its own sessions.
             if session.endpoint_id != Some(identity.endpoint_id().as_uuid())
@@ -1030,6 +1037,17 @@ impl AppCallService {
             txn.commit().await?;
             return Ok(Err(ConnectionDenied::ForeignResource));
         }
+        let participant = crate::calls::service::participant_of(
+            &txn,
+            &call,
+            crate::calls::ids::CallParticipantId::from_uuid(session.participant_id),
+        )
+        .await?;
+        self.require_personal_call(
+            &call,
+            Some((participant.principal_id, session.created_at.timestamp())),
+        )
+        .await?;
         let binding_active = self
             .calls
             .media_binding_in(&txn, call.id)
