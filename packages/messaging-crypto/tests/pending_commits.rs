@@ -4,6 +4,47 @@ use cf_messaging_crypto::{device::Device, group::Processed};
 use uuid::Uuid;
 
 #[test]
+fn authenticated_member_cannot_claim_another_devices_identity_in_application_aad() {
+    use cf_messaging_crypto::binding::{application_message_aad, ApplicationMessageBinding};
+    let alice = Device::generate(Uuid::new_v4()).unwrap();
+    let bob = Device::generate(Uuid::new_v4()).unwrap();
+    let mut a = alice.create_group(&[83; 32]).unwrap();
+    let add = alice
+        .add_devices(&mut a, &[bob.key_package().unwrap()])
+        .unwrap();
+    let mut b = bob.join(add.welcome.as_ref().unwrap()).unwrap();
+    let mut binding = ApplicationMessageBinding {
+        tenant_id: Uuid::new_v4(),
+        application_id: Uuid::new_v4(),
+        environment_id: Uuid::new_v4(),
+        conversation_id: Uuid::new_v4(),
+        client_message_id: Uuid::new_v4(),
+        sender_device_id: alice.device_id(),
+    };
+    let forgery = bob
+        .encrypt(
+            &mut b,
+            &application_message_aad(&binding),
+            b"forged attribution",
+        )
+        .unwrap();
+    assert!(alice.process(&mut a, &forgery).is_err());
+    binding.sender_device_id = bob.device_id();
+    binding.client_message_id = Uuid::new_v4();
+    let honest = bob
+        .encrypt(
+            &mut b,
+            &application_message_aad(&binding),
+            b"authenticated attribution",
+        )
+        .unwrap();
+    assert!(matches!(
+        alice.process(&mut a, &honest).unwrap(),
+        Processed::Application { .. }
+    ));
+}
+
+#[test]
 fn refused_membership_commit_cannot_advance_or_encrypt_from_an_unaccepted_epoch() {
     let alice = Device::generate(Uuid::new_v4()).unwrap();
     let bob = Device::generate(Uuid::new_v4()).unwrap();

@@ -423,7 +423,7 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
         )
         .await?;
         let bytes = b64.decode(
-            received["e2ee"]["ciphertext"]
+            received["message"]["e2ee"]["ciphertext"]
                 .as_str()
                 .context("stored ciphertext")?,
         )?;

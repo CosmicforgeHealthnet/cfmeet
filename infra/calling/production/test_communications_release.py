@@ -5,6 +5,15 @@ import communications_release as release
 
 
 class CommunicationsRuntimePreservation(unittest.TestCase):
+    def test_staging_never_writes_production_checkpoint_or_loads_its_managed_keyring(self):
+        cfg={'Env':['KEEP=preserved','MESSAGING_MANAGED_KEYRING_FILE=/run/messaging/managed.ring'],
+            'HostConfig':{'Mounts':[{'Type':'bind','Source':'/production/checkpoint','Target':'/var/lib/messaging-kt','ReadOnly':False},
+                {'Type':'bind','Source':'/production/managed','Target':'/run/messaging/managed.ring','ReadOnly':True}]}}
+        release.isolate_stage_messaging_state(cfg,'/stage/ring','/stage/checkpoint')
+        self.assertIn('KEEP=preserved',cfg['Env'])
+        self.assertEqual(sum(item.startswith('MESSAGING_MANAGED_KEYRING_FILE=') for item in cfg['Env']),1)
+        self.assertNotIn('/production',str(cfg))
+        self.assertIn('/stage/checkpoint',str(cfg['HostConfig']['Mounts']))
     def original(self):
         return {'Id':'a'*64,'Image':'sha256:old','Config':{'Image':'old:tag','Env':['KEEP=original','DATABASE_URL=private'],
             'Cmd':['./server'],'Entrypoint':None,'User':'10001'},

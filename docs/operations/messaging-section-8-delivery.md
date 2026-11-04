@@ -62,9 +62,11 @@ PostgreSQL remains authoritative; Redis and push are never delivery persistence.
 
 ## Production cryptographic activation verdict
 
-**BLOCKED_EXTERNAL_DEPENDENCY.** The repository's security decision register still marks
-AD-01–AD-10 pending and records no independent cryptographic assessment. Internal review
-and automated tests cannot supply that assessment or owner decisions. Production
+**BLOCKED_EXTERNAL_DEPENDENCY.** ADR 0052 selects AD-01–AD-10 for engineering development
+while explicitly withholding production cryptographic approval. The older security
+architecture uses PENDING terminology; GitHub issue 13 remains OPEN with no independent
+assessment or release approval attached. Internal review and automated tests cannot
+supply that assessment or production decisions. Production
 `MESSAGING_E2EE_DEVICES_ENABLED=true` must continue to be rejected. No override, guard
 removal, MANAGED substitution, fake witness or production E2EE certification is authorized.
 Authorized local/test crypto testing and safe operational repairs can proceed independently.
@@ -74,3 +76,31 @@ Authorized local/test crypto testing and safe operational repairs can proceed in
 Work in progress. Implemented/tested/deployed claims will be recorded separately with
 exact CI and VPS receipts. Sections 9–10 are not started. Phone verification and off-server
 backups remain deferred; loss of this VPS can lose databases, storage and recovery keys.
+
+Read-only detailed inspection **41928266782** succeeded: all 29 canonical Messaging
+migrations applied, 65 tables including two Communications feature tables, zero devices,
+zero conversations, zero pending/dead-letter events. `/health`, `/ready` and private
+`/openapi.json` returned 200. Runtime production E2EE=false; push=none; realtime TLS=true.
+The inspected registry evidence identifies the running image as
+`ghcr.io/cosmicforgehealthnet/cfmeet-messaging@sha256:0124976ae113b139b47a2cd7e5af61488c698ce7020c49668b2ec38bcef3cc6b`.
+Resource limits/log rotation were unset; no new runtime configuration has yet been claimed
+deployed by this report. Public probes found `/v1/realtime` and `/v1/realtime/tickets` 404.
+
+The Messaging public SDK bundle's 96 operations include 16 application administration/
+compliance operations intentionally filtered out of consumer Swagger. Served Swagger has
+80 operations/64 paths, not 96. This distinction is preserved and documented; no admin
+operations are exposed through the native relay. The native map now covers 71 operations
+(65 allowlisted relay operations plus six existing identity bridges), including 33 added
+allowlist entries for existing canonical operations. See
+[native integration map](messaging-native-api-map.md) and
+[internal security assessment](messaging-section-8-security-review.md).
+
+Implementation to date: public-application-frame rejection; canonical MLS sender/AAD
+binding; staged client commits and restart/conflict recovery; delayed push membership,
+block/privacy/mute checks; revocation cleanup and token-rotation race protection; failed
+privacy-read refusal; fail-closed KT checkpoint recovery and request-boundary checks;
+concurrent identity creation repair; native API/Swagger integration; bounded metrics;
+production inspection/configuration/verification in the existing VPS workflow. Database
+schema changes are unnecessary for these repairs; existing forward migration histories
+are retained. Runtime dependency preparation preserves the exact running image and
+production E2EE=false, with a private rollback container and separate stage checkpoint.

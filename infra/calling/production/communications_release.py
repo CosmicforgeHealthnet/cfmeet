@@ -188,6 +188,20 @@ def add_mount(cfg,source,target):
             return
     existing.append(dict(Type='bind',Source=str(source),Target=target,ReadOnly=True))
 
+
+def isolate_stage_messaging_state(cfg, ring, checkpoint):
+    # A candidate must not write the production KT checkpoint or accidentally load
+    # a duplicate, earlier production keyring environment entry.
+    values=dict(item.split('=',1) for item in cfg['Env'])
+    values['MESSAGING_MANAGED_KEYRING_FILE']='/run/communications/managed.ring'
+    cfg['Env']=[key+'='+value for key,value in values.items()]
+    mounts=cfg['HostConfig'].setdefault('Mounts',[])
+    mounts[:]=[m for m in mounts if m.get('Target')!='/run/messaging/managed.ring']
+    for mount in mounts:
+        if mount.get('Target')=='/var/lib/messaging-kt':
+            mount['Source']=str(checkpoint)
+    add_mount(cfg,ring,'/run/communications/managed.ring')
+
 def configured(service,sha,stage,scope,db=None):
     name=('cfmeet-comm-stage-' if stage else 'cfmeet-')+service
     if not stage and service in OWNERS:name=OWNERS[service]
@@ -225,8 +239,9 @@ def configured(service,sha,stage,scope,db=None):
         if stage and service=='messaging':
             ring=WORK/'stage-managed.ring'
             if not ring.exists():save(ring,'stage-1 '+base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')+'\n',True)
-            cfg['Env'].append('MESSAGING_MANAGED_KEYRING_FILE=/run/communications/managed.ring')
-            add_mount(cfg,ring,'/run/communications/managed.ring')
+            checkpoint=WORK/'staging-kt-checkpoints'
+            checkpoint.mkdir(exist_ok=True,mode=0o700);os.chown(checkpoint,10001,10001)
+            isolate_stage_messaging_state(cfg,ring,checkpoint)
     if stage:cfg.setdefault('Labels',{})['com.cfmeet.communications.candidate']='true'
     add_mount(cfg,WORK/(service+'.trust.json'),'/run/communications/trust.json')
     return name,cfg

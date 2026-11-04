@@ -244,6 +244,19 @@ async fn heads_are_witnessed_by_a_quorum_and_divergence_fails_closed() {
     let c2 = restored.customer(ALL_SCOPES);
     let bob = restored.principal(&c2);
     restored.active_device(&c2, bob).await;
+    // Prepare valid PoP while enrollment is healthy, so the registration denial
+    // below tests the authoritative boundary in addition to challenge refusal.
+    let pending = restored.challenge(&c2, bob).await;
+    assert_eq!(pending.status, StatusCode::CREATED);
+    let device =
+        cf_messaging_crypto::device::Device::generate(uuid(&pending.json["deviceId"])).unwrap();
+    let nonce: [u8; 32] = hex::decode(pending.json["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let package = device
+        .registration_key_package(uuid(&pending.json["challengeId"]), &nonce)
+        .unwrap();
     let r = submit_once(&restored.state, &set).await.unwrap();
     assert_eq!(r.divergence, 1, "{r:?}");
     assert_eq!(
@@ -252,7 +265,16 @@ async fn heads_are_witnessed_by_a_quorum_and_divergence_fails_closed() {
             .await,
         1
     );
-    let (_, reg) = restored.register_device(&c2, bob).await;
+    let challenge = restored.challenge(&c2, bob).await;
+    assert_eq!(challenge.status, StatusCode::SERVICE_UNAVAILABLE);
+    let reg = restored
+        .post(
+            &c2,
+            Some(bob),
+            "/v1/messaging/devices",
+            json!({"challengeId":pending.json["challengeId"],"keyPackage":b64(&package)}),
+        )
+        .await;
     assert_eq!(reg.status, StatusCode::SERVICE_UNAVAILABLE, "{}", reg.text);
     assert!(
         reg.text.contains("KT_LOG_ROLLBACK_DETECTED"),

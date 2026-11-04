@@ -295,6 +295,24 @@ impl Device {
             .process_message(self.provider(), protocol)
             .map_err(|_| GroupError::Refused)?;
         let aad = processed.aad().to_vec();
+        if matches!(
+            processed.content(),
+            ProcessedMessageContent::ApplicationMessage(_)
+        ) && aad.starts_with(b"cfmeet-messaging-aad:")
+        {
+            // MLS authenticates the leaf credential, not an arbitrary sender id
+            // a malicious group member places in application AAD. Bind both before
+            // returning any application content to the caller.
+            let claimed =
+                binding::parse_application_message_aad(&aad).ok_or(GroupError::Refused)?;
+            let credential = BasicCredential::try_from(processed.credential().clone())
+                .map_err(|_| GroupError::Refused)?;
+            if binding::parse_device_credential_identity(credential.identity())
+                != Some(claimed.sender_device_id)
+            {
+                return Err(GroupError::Refused);
+            }
+        }
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app) => Ok(Processed::Application {
                 aad,
