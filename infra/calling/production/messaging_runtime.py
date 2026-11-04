@@ -142,7 +142,28 @@ def scanner():
     stamp = datetime.datetime.strptime(date, '%a %b %d %H:%M:%S %Y').replace(tzinfo=datetime.timezone.utc)
     age = (datetime.datetime.now(datetime.timezone.utc) - stamp).total_seconds()
     assert 0 <= age <= 72 * 3600, 'ClamAV signatures need refresh; managed scanning remains unaccepted'
-    return {'imageId': c['Image'], 'registryDigests': json.loads(p.run('docker', 'image', 'inspect', c['Image']))[0].get('RepoDigests', []), 'signatureAgeSeconds': int(age)}
+    # Exercise the actual private TCP service, including its malware refusal. EICAR
+    # is the standard harmless antivirus test string; no customer attachment is used.
+    probe = r'''
+import socket, struct
+def scan(data):
+    with socket.create_connection(('cfmeet-messaging-clamav', 3310), timeout=10) as s:
+        s.sendall(b'zINSTREAM\0' + struct.pack('!I', len(data)) + data + b'\0\0\0\0')
+        result = b''
+        while b'\0' not in result:
+            chunk = s.recv(4096)
+            if not chunk: break
+            result += chunk
+        return result
+assert b': OK' in scan(b'CF Meet isolated scanner acceptance')
+assert b'FOUND' in scan(b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*')
+'''
+    checked = subprocess.run(['docker', 'run', '--rm', '--network', p.NET,
+        '--memory', '128m', '--cpus', '1', 'python:3.12-slim', 'python', '-c', probe],
+        capture_output=True, timeout=40)
+    assert checked.returncode == 0, 'Live ClamAV clean/EICAR acceptance failed'
+    return {'imageId': c['Image'], 'registryDigests': json.loads(p.run('docker', 'image', 'inspect', c['Image']))[0].get('RepoDigests', []),
+            'signatureAgeSeconds': int(age), 'privateTcpCleanScan': 'PASS', 'eicarDenied': 'PASS'}
 
 
 def runtime_overrides(env, user, redis_password):
