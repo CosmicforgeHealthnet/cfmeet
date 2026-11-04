@@ -90,6 +90,16 @@ pub fn check_framing(
 ) -> Result<()> {
     let f = framing::inspect(bytes)
         .map_err(|_| Error::reason(ErrorCode::ContentRejected, "NOT_AN_MLS_MESSAGE"))?;
+    // OpenMLS parses PublicMessage application bodies as well as PrivateMessage.
+    // Public handshake commits are allowed, but PRIVATE_E2EE application content
+    // must never be stored in the clear merely because its MLS framing is valid.
+    if expected == FramedContent::Application && f.wire_format != framing::FramedWireFormat::Private
+    {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "APPLICATION_MUST_BE_PRIVATE",
+        ));
+    }
     if Some(f.group_id.as_slice()) != conversation.mls_group_id.as_deref() {
         return Err(Error::reason(ErrorCode::ContentRejected, "WRONG_GROUP"));
     }

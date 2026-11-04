@@ -334,11 +334,12 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
         .iter()
         .map(|k| b64.decode(k["keyPackage"].as_str().unwrap()))
         .collect::<Result<Vec<_>, _>>()?;
-    let commit = da.add_devices(&mut ga, &packages)?;
+    let commit = da.prepare_add_devices(&mut ga, &packages)?;
     native_message_request(s,&a,Method::POST,&format!("conversations/{id}/mls/commits"),Some(json!({
         "clientMessageId":Uuid::new_v4(),"deviceId":da.device_id(),"epoch":commit.epoch,
         "commit":b64.encode(&commit.commit),"welcome":b64.encode(commit.welcome.as_ref().context("Welcome")?),
         "welcomeDeviceIds":[db.device_id()],"removedDeviceIds":[]})),201).await?;
+    da.accept_pending_commit(&mut ga)?;
     let welcomes = native_message_request(
         s,
         &b,
@@ -493,8 +494,8 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
     assert!((400..500).contains(&denied.status));
     let owner = Database::connect(&s.owner_urls["messaging"]).await?;
     let row = owner.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
-        "SELECT count(*) n FROM messaging_messages WHERE conversation_id=$1 AND message_kind='APPLICATION' AND security_profile='PRIVATE_E2EE' AND mls_ciphertext IS NOT NULL AND managed_sealed IS NULL",
-        [Uuid::parse_str(id)?.into()])).await?.context("ciphertext storage evidence")?;
+        "SELECT count(*) n FROM messaging_messages WHERE conversation_id=$1::uuid AND message_kind='APPLICATION' AND security_profile='PRIVATE_E2EE' AND mls_ciphertext IS NOT NULL AND managed_sealed IS NULL",
+        [id.to_string().into()])).await?.context("ciphertext storage evidence")?;
     assert_eq!(row.try_get::<i64>("", "n")?, 2);
     owner.close().await?;
     println!("EVIDENCE native-messaging TEST conversation={id} messages={} encrypted-storage=PASS client-decryption=PASS replay=PASS block=PASS revocation=PASS",message_ids.join(","));

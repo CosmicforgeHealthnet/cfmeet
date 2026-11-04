@@ -5,6 +5,51 @@
 
 mod common;
 
+/// Regression for the Delivery Service boundary, not MLS signature certification.
+/// OpenMLS can parse public application content; that must not become a stored
+/// PRIVATE_E2EE message even from an otherwise authorized sender/device.
+#[tokio::test]
+async fn public_mls_application_content_is_never_stored_as_private_ciphertext() {
+    use cf_messaging_crypto::framing::{self, FramedContent, FramedWireFormat};
+    use common::{flows::*, *};
+    use serde_json::json;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conversation, alice, _) = h.e2ee_direct(&c).await;
+    let gid = unb64(&conversation["encryption"]["mlsGroupId"]);
+    let epoch = alice.group.as_ref().unwrap().epoch();
+    let clear = b"public-application-boundary-probe";
+    let mut frame = vec![0, 1, 0, 1]; // MLS 1.0, mls_public_message
+    frame.push(gid.len() as u8);
+    frame.extend_from_slice(&gid);
+    frame.extend_from_slice(&epoch.to_be_bytes());
+    frame.push(1);
+    frame.extend_from_slice(&0u32.to_be_bytes()); // member sender
+    frame.push(0);
+    frame.push(1); // empty authenticated_data, application content
+    frame.push(clear.len() as u8);
+    frame.extend_from_slice(clear);
+    frame.extend_from_slice(&[0x40, 0x40]);
+    frame.extend_from_slice(&[0; 64]); // signature vector
+    frame.push(32);
+    frame.extend_from_slice(&[0; 32]); // unverified membership MAC; parser-level fixture only
+    let parsed = framing::inspect(&frame).expect("well-formed public MLS application fixture");
+    assert_eq!(parsed.content, FramedContent::Application);
+    assert_eq!(parsed.wire_format, FramedWireFormat::Public);
+    let before = h.scalar("SELECT count(*) FROM messaging_messages").await;
+    let r = h.post(&c, Some(alice.principal),
+        &format!("/v1/conversations/{}/messages",conversation["conversationId"].as_str().unwrap()),
+        json!({"clientMessageId":uuid::Uuid::new_v4(),"deviceId":alice.device_id(),"epoch":epoch,"ciphertext":b64(&frame)})).await;
+    assert_eq!(r.status.as_u16(), 422, "{}", r.text);
+    assert_eq!(r.reason(), "APPLICATION_MUST_BE_PRIVATE");
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_messages").await,
+        before
+    );
+}
+
 use axum::http::StatusCode;
 use cf_messaging_crypto::binding;
 use common::{flows::*, *};

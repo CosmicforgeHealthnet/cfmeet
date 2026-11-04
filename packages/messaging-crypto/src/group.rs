@@ -97,9 +97,10 @@ impl Device {
         Ok(ClientGroup { group })
     }
 
-    /// Commits the addition of the devices whose KeyPackages are given and merges it
-    /// locally. Returns the Commit (for existing members) and the Welcome (for the new).
-    pub fn add_devices(
+    /// Prepares an addition without advancing the local epoch (RFC 9420 section 14).
+    /// Submit the Commit first; after canonical acceptance call `accept_pending_commit`.
+    /// On refusal call `discard_pending_commit`. Do not publish the Welcome first.
+    pub fn prepare_add_devices(
         &self,
         group: &mut ClientGroup,
         key_packages: &[Vec<u8>],
@@ -112,10 +113,6 @@ impl Device {
         let (commit, welcome, _) = group
             .group
             .add_members(self.provider(), self.signer(), &packages)
-            .map_err(|_| GroupError::Refused)?;
-        group
-            .group
-            .merge_pending_commit(self.provider())
             .map_err(|_| GroupError::Refused)?;
         Ok(CommitOutput {
             commit: commit
@@ -130,8 +127,8 @@ impl Device {
         })
     }
 
-    /// Commits the removal of every leaf of `devices` and merges it locally.
-    pub fn remove_devices(
+    /// Prepares removal without advancing the epoch; accept/discard after the server verdict.
+    pub fn prepare_remove_devices(
         &self,
         group: &mut ClientGroup,
         devices: &[Uuid],
@@ -155,10 +152,6 @@ impl Device {
             .group
             .remove_members(self.provider(), self.signer(), &leaves)
             .map_err(|_| GroupError::Refused)?;
-        group
-            .group
-            .merge_pending_commit(self.provider())
-            .map_err(|_| GroupError::Refused)?;
         Ok(CommitOutput {
             commit: commit
                 .tls_serialize_detached()
@@ -169,9 +162,8 @@ impl Device {
     }
 
     /// Commits a fresh leaf for this device (new HPKE and path secrets; same signature
-    /// key) and merges it locally: post-compromise security — after this commit, state
-    /// copied from the device earlier cannot follow the group.
-    pub fn update_keys(&self, group: &mut ClientGroup) -> Result<CommitOutput, GroupError> {
+    /// key), without advancing the epoch. Accept/discard after the server verdict.
+    pub fn prepare_update_keys(&self, group: &mut ClientGroup) -> Result<CommitOutput, GroupError> {
         let epoch = group.epoch();
         let bundle = group
             .group
@@ -181,10 +173,6 @@ impl Device {
                 openmls::treesync::LeafNodeParameters::default(),
             )
             .map_err(|_| GroupError::Refused)?;
-        group
-            .group
-            .merge_pending_commit(self.provider())
-            .map_err(|_| GroupError::Refused)?;
         Ok(CommitOutput {
             commit: bundle
                 .commit()
@@ -193,6 +181,54 @@ impl Device {
             welcome: None,
             epoch,
         })
+    }
+
+    /// Finalizes the locally pending Commit ONLY after matching canonical acceptance.
+    pub fn accept_pending_commit(&self, group: &mut ClientGroup) -> Result<(), GroupError> {
+        if group.group.pending_commit().is_none() {
+            return Err(GroupError::Refused);
+        }
+        group
+            .group
+            .merge_pending_commit(self.provider())
+            .map_err(|_| GroupError::Refused)
+    }
+
+    /// Discards a refused/superseded local proposal without advancing the epoch.
+    /// Fetch/process the winning canonical Commit before preparing another change.
+    pub fn discard_pending_commit(&self, group: &mut ClientGroup) -> Result<(), GroupError> {
+        group
+            .group
+            .clear_pending_commit(self.provider().storage())
+            .map_err(|_| GroupError::Refused)
+    }
+
+    /// Immediate local-simulation compatibility helper. Network clients must use
+    /// `prepare_add_devices` followed by canonical acceptance, not this convenience API.
+    pub fn add_devices(
+        &self,
+        group: &mut ClientGroup,
+        packages: &[Vec<u8>],
+    ) -> Result<CommitOutput, GroupError> {
+        let out = self.prepare_add_devices(group, packages)?;
+        self.accept_pending_commit(group)?;
+        Ok(out)
+    }
+    /// Immediate local-simulation compatibility helper; live clients use the staged API.
+    pub fn remove_devices(
+        &self,
+        group: &mut ClientGroup,
+        devices: &[Uuid],
+    ) -> Result<CommitOutput, GroupError> {
+        let out = self.prepare_remove_devices(group, devices)?;
+        self.accept_pending_commit(group)?;
+        Ok(out)
+    }
+    /// Immediate local-simulation compatibility helper; live clients use the staged API.
+    pub fn update_keys(&self, group: &mut ClientGroup) -> Result<CommitOutput, GroupError> {
+        let out = self.prepare_update_keys(group)?;
+        self.accept_pending_commit(group)?;
+        Ok(out)
     }
 
     /// The device's state of a group it created or joined earlier, read back from its
@@ -230,6 +266,9 @@ impl Device {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<Vec<u8>, GroupError> {
+        if group.group.pending_commit().is_some() {
+            return Err(GroupError::Refused);
+        }
         group.group.set_aad(aad.to_vec());
         group
             .group
