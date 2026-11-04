@@ -12,7 +12,7 @@ import urllib.request
 import uuid
 
 
-def execute(sha, run_id, scope, stage):
+def execute(sha, run_id, scope, stage, verification=False):
     import production as p
     import communications_release as release
     folder=release.WORK/('staging-test-'+run_id if stage else 'production-test-'+run_id)
@@ -23,7 +23,7 @@ def execute(sha, run_id, scope, stage):
         import app_acceptance
         accounts=app_acceptance.accounts()[:2]
     ports=release.STAGE_TLS if stage else release.PROD_TLS
-    context=dict(sha=sha,stage=stage,scope=scope,accounts=accounts,
+    context=dict(sha=sha,stage=stage,verification=verification,scope=scope,accounts=accounts,
         urls={k:'https://api.cfmeet.com:'+str(v) for k,v in ports.items()})
     if not stage:
         # Match the existing successful real-media acceptance client: ordinary
@@ -314,13 +314,26 @@ class Journey:
         assert self.dial(a,b,expected=(403,404,409)).get('error',{}).get('code')=='TARGET_UNAVAILABLE'
         self.done('immediate_block_and_unblock_without_implicit_reconnection')
         self.connect(a,b)
+        unused=self.hub(a,'/invites','POST',{'purpose':'CONNECT','expiresInSeconds':600,'maxUses':1})
+        unused_token=unused['payload'].rsplit('/',1)[1]
         profile=self.hub(a,'/me')
-        rotated=self.hub(a,'/me/public-id/rotate','POST',{'expectedVersion':profile['version']})
-        assert rotated['cfMeetId']!=a['cfMeetId']
-        self.hub(b,'/discovery/public-id/resolve','POST',{'cfMeetId':a['cfMeetId']},expected=(404,))
-        self.hub(b,'/discovery/invites/resolve','POST',{'purpose':'CONNECT','token':token},expected=(404,))
+        rotated=self.hub(a,'/me/public-id/rotate','POST',{'expectedVersion':profile['version']},
+            expected=(200,429) if self.c.get('verification') else (200,))
+        if rotated.get('error',{}).get('code')=='RATE_LIMITED':
+            # Repeated verification must honor production anti-abuse controls.
+            # Release acceptance still requires successful functional rotation.
+            assert self.c.get('verification')
+            assert self.hub(a,'/me')['cfMeetId']==a['cfMeetId']
+            assert self.hub(b,'/discovery/public-id/resolve','POST',{'cfMeetId':a['cfMeetId']})['cfMeetId']==a['cfMeetId']
+            self.hub(a,'/invites/'+unused['inviteId'],'DELETE')
+            self.done('rotation_rate_limit_preserves_public_identity')
+        else:
+            assert rotated['cfMeetId']!=a['cfMeetId']
+            self.hub(b,'/discovery/public-id/resolve','POST',{'cfMeetId':a['cfMeetId']},expected=(404,))
+            self.hub(b,'/discovery/invites/resolve','POST',{'purpose':'CONNECT','token':unused_token},expected=(404,))
+            self.done('rotation_invalidates_old_id_and_unused_invite')
         assert self.request('meeting-service','/api/v2/messaging/me',token=a['session'])['principalId']==a['principalId']
-        self.done('rotation_invalidates_old_id_invite_and_preserves_principal')
+        self.done('public_id_operations_preserve_authoritative_principal')
         self.request('meeting-service','/api/v1/meetings',token=a['session'])
         self.done('meetings_remain_independently_available')
         # Close only fixture relationships; retained account/principal/history IDs

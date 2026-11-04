@@ -471,7 +471,7 @@ def verify(sha,run_id):
     import communications_acceptance
     scope=json.loads((WORK/'production-context.private.json').read_text())
     scope['token']=credential(scope)
-    report=communications_acceptance.execute(sha,run_id,scope,stage=False)
+    report=communications_acceptance.execute(sha,run_id,scope,stage=False,verification=True)
     p.regression();print(json.dumps(report),flush=True)
 
 def run(operation, sha, run_id):
