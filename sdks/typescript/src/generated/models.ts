@@ -5724,13 +5724,15 @@ export namespace Meetings {
 }
 
 export namespace Messaging {
-  export type AddMemberRequest = {
-    principalId: Uuid;
+  export type AddMemberRequest = ({
+    principalId?: Uuid;
     /** BOT_SERVICE only for BOT_OR_SERVICE principals (BOT_SERVICE_REQUIRES_BOT_PRINCIPAL); bots are never ADMIN / MODERATOR (BOT_CANNOT_ADMINISTER). */
     role?: "MEMBER" | "ADMIN" | "MODERATOR" | "READ_ONLY" | "BOT_SERVICE";
     /** §35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit. */
     invite?: boolean;
-  };
+    /** Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged. */
+    cfMeetId?: string;
+  }) & ({ principalId: Uuid } | { cfMeetId: string });
   /** An application environment's overrides of the platform defaults. MANAGED is available for a context only when listed here. */
   export type ApplicationPolicy = {
     contexts?: { [key: string]: {
@@ -6141,6 +6143,8 @@ export namespace Messaging {
     profileChangeDisclosureAcknowledged?: boolean;
     /** Appendix K: false turns read receipts off for this conversation (never on where the environment policy has them off). */
     readReceipts?: boolean;
+    /** Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged. */
+    counterpartCfMeetId?: string;
   };
   /** Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE). */
   export type CreateSmsBridgeRequest = {

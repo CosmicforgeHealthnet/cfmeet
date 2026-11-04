@@ -132,9 +132,21 @@ async fn add(
     caller: CustomerCaller,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-    Json(body): Json<AddRequest>,
+    Json(mut body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, ApiError> {
     let admin = administrator(&state, &caller, &headers).await?;
+    crate::communications::resolve_address(
+        &state,
+        caller.context(),
+        admin.principal_id(),
+        &mut body,
+        "cfMeetId",
+        "principalId",
+        cf_communications_policy::Action::GroupInvitation,
+    )
+    .await?;
+    let body: AddRequest =
+        serde_json::from_value(body).map_err(|_| ApiError::validation("invalid member request"))?;
     let (status, view) = super::add(&state, caller.context(), &admin, id, body).await?;
     Ok((
         StatusCode::from_u16(status).unwrap_or(StatusCode::OK),

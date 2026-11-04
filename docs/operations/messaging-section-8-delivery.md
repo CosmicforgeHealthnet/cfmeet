@@ -104,3 +104,10 @@ production inspection/configuration/verification in the existing VPS workflow. D
 schema changes are unnecessary for these repairs; existing forward migration histories
 are retained. Runtime dependency preparation preserves the exact running image and
 production E2EE=false, with a private rollback container and separate stage checkpoint.
+
+Contact integration closure: existing conversation creation now accepts an exclusive
+`counterpartCfMeetId` alternative; existing member addition accepts `cfMeetId`. Private
+Hub resolution is purpose-bound (DIRECT_CONVERSATION or GROUP_INVITATION) and then
+canonical Messaging authorization runs unchanged. Public discovery still exposes no
+principal IDs. Tests cover dual identifiers, chat privacy, group invitations, and blocks.
+HTTP contract 1.14.0 and private Hub contract 1.2.0 retain the existing operation counts.

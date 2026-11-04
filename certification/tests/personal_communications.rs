@@ -297,6 +297,10 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
     )
     .await?;
     connected(s, &a, &b).await?;
+    native_message_request(s, &a, Method::POST, "conversations", Some(json!({
+        "contextClass":"DIRECT", "counterpartPrincipalId":b.principal, "counterpartCfMeetId":b.public_id
+    })), 400).await?;
+    let body = json!({"contextClass":"DIRECT","securityProfile":"PRIVATE_E2EE","counterpartCfMeetId":b.public_id});
     let conversation = native_message_request(
         s,
         &a,
@@ -452,6 +456,84 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
         )
         .await?;
     }
+    // Group resolution uses GROUP_INVITATION, independently of direct-chat privacy.
+    let mut privacy = status(
+        hub(s, &b, Method::GET, "/me/privacy", None).await?,
+        200,
+        "privacy",
+    )?;
+    privacy["privacy"]["directChatPolicy"] = json!("NOBODY");
+    status(
+        hub(
+            s,
+            &b,
+            Method::PUT,
+            "/me/privacy",
+            Some(json!({
+                "expectedVersion":privacy["version"], "privacy":privacy["privacy"]
+            })),
+        )
+        .await?,
+        200,
+        "disable direct chat",
+    )?;
+    native_message_request(
+        s,
+        &a,
+        Method::POST,
+        "conversations",
+        Some(json!({
+            "contextClass":"DIRECT", "counterpartCfMeetId":b.public_id
+        })),
+        403,
+    )
+    .await?;
+    let group = native_message_request(
+        s,
+        &a,
+        Method::POST,
+        "conversations",
+        Some(json!({
+            "contextClass":"GROUP", "securityProfile":"PRIVATE_E2EE"
+        })),
+        201,
+    )
+    .await?;
+    let group_id = group["conversationId"].as_str().context("group id")?;
+    native_message_request(
+        s,
+        &a,
+        Method::POST,
+        &format!("conversations/{group_id}/members"),
+        Some(json!({"cfMeetId":b.public_id,"principalId":b.principal,"invite":true})),
+        400,
+    )
+    .await?;
+    native_message_request(
+        s,
+        &a,
+        Method::POST,
+        &format!("conversations/{group_id}/members"),
+        Some(json!({"cfMeetId":b.public_id,"invite":true})),
+        201,
+    )
+    .await?;
+    privacy["privacy"]["directChatPolicy"] = json!("CONNECTIONS");
+    status(
+        hub(
+            s,
+            &b,
+            Method::PUT,
+            "/me/privacy",
+            Some(json!({
+                "expectedVersion":privacy["version"].as_i64().context("privacy version")? + 1,
+                "privacy":privacy["privacy"]
+            })),
+        )
+        .await?,
+        200,
+        "restore direct chat before independent block test",
+    )?;
     let alt = enroll_native(s, &a).await?;
     status(
         hub(
@@ -465,6 +547,15 @@ async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()
         200,
         "contact block",
     )?;
+    native_message_request(
+        s,
+        &a,
+        Method::POST,
+        &format!("conversations/{group_id}/members"),
+        Some(json!({"cfMeetId":b.public_id,"invite":true})),
+        403,
+    )
+    .await?;
     native_message_request(s,&a,Method::POST,&format!("conversations/{id}/messages"),Some(json!({
         "clientMessageId":Uuid::new_v4(),"deviceId":alt.device_id(),"epoch":ga.epoch(),"ciphertext":b64.encode(&commit.commit)})),403).await?;
     status(

@@ -24,6 +24,58 @@ pub fn scope(ctx: &TrustedContext) -> Scope {
         environment_id: ctx.scope.environment_id,
     }
 }
+/// Normalize a consumer CF Meet ID into the existing canonical request model.
+/// The actor and authority chain are authenticated, never accepted from this body.
+pub async fn resolve_address(
+    state: &AppState,
+    ctx: &TrustedContext,
+    actor: Option<Uuid>,
+    body: &mut Value,
+    public_field: &str,
+    principal_field: &str,
+    purpose: Action,
+) -> Result<()> {
+    let Some(value) = body.get(public_field) else {
+        return Ok(());
+    };
+    if body.get(principal_field).is_some() {
+        return Err(Error::validation(
+            "provide exactly one recipient identifier",
+        ));
+    }
+    let id = value
+        .as_str()
+        .filter(|id| {
+            id.len() == 29
+                && id.starts_with("CF-")
+                && id.as_bytes()[3..]
+                    .iter()
+                    .all(|c| c.is_ascii_uppercase() || (b'2'..=b'7').contains(c))
+        })
+        .ok_or_else(|| Error::validation("invalid CF Meet ID"))?;
+    let client = state
+        .communications
+        .as_ref()
+        .filter(|p| p.governs(scope(ctx)))
+        .ok_or_else(|| Error::code(ErrorCode::DeliveryRefused))?;
+    let actor = actor.ok_or_else(|| Error::code(ErrorCode::ActingPrincipalRequired))?;
+    let principal = client
+        .resolve_principal(ctx.scope.delegated(), actor, id, purpose)
+        .await
+        .map_err(|e| match e {
+            PolicyError::Denied => Error::code(ErrorCode::DeliveryRefused),
+            PolicyError::Unavailable => Error::reason(
+                ErrorCode::ServiceUnavailable,
+                "COMMUNICATIONS_POLICY_UNAVAILABLE",
+            ),
+        })?;
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| Error::validation("object required"))?;
+    object.remove(public_field);
+    object.insert(principal_field.to_owned(), json!(principal));
+    Ok(())
+}
 impl AppState {
     pub fn with_communications(mut self, client: Option<PolicyClient>) -> Self {
         self.communications = client;

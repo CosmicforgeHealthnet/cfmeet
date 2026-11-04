@@ -908,9 +908,68 @@
         "readReceipts": {
           "type": "boolean",
           "description": "Appendix K: false turns read receipts off for this conversation (never on where the environment policy has them off)."
+        },
+        "counterpartCfMeetId": {
+          "type": "string",
+          "pattern": "^CF-[A-Z2-7]{26}$",
+          "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
         }
       },
-      "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
+      "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "contextClass": {
+                "const": "DIRECT"
+              }
+            },
+            "required": [
+              "contextClass"
+            ]
+          },
+          "then": {
+            "oneOf": [
+              {
+                "required": [
+                  "counterpartPrincipalId"
+                ],
+                "not": {
+                  "required": [
+                    "counterpartCfMeetId"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "counterpartCfMeetId"
+                ],
+                "not": {
+                  "required": [
+                    "counterpartPrincipalId"
+                  ]
+                }
+              }
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "counterpartCfMeetId"
+                  ]
+                },
+                {
+                  "required": [
+                    "counterpartPrincipalId"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     "Conversation": {
       "type": "object",
@@ -2163,10 +2222,34 @@
         "invite": {
           "type": "boolean",
           "description": "§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit."
+        },
+        "cfMeetId": {
+          "type": "string",
+          "pattern": "^CF-[A-Z2-7]{26}$",
+          "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
         }
       },
-      "required": [
-        "principalId"
+      "oneOf": [
+        {
+          "required": [
+            "principalId"
+          ],
+          "not": {
+            "required": [
+              "cfMeetId"
+            ]
+          }
+        },
+        {
+          "required": [
+            "cfMeetId"
+          ],
+          "not": {
+            "required": [
+              "principalId"
+            ]
+          }
+        }
       ]
     },
     "MemberRemoval": {

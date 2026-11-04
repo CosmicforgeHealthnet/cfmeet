@@ -74,6 +74,14 @@ examples and operation IDs remain in
 `packages/contracts/messaging/http/v1.openapi.json` and its self-contained bundles.
 An operation's presence does not certify runtime availability.
 
+Accepted personal contacts can address the existing DIRECT creation API with
+`counterpartCfMeetId` instead of `counterpartPrincipalId`. The member-add API accepts
+`cfMeetId` instead of `principalId`. Supply exactly one identifier. Messaging resolves
+the public ID privately under the authenticated actor/scope and the operation's policy
+purpose; no principal lookup endpoint or service credentials are needed by the client.
+Rotated IDs stop resolving; reload Contacts. Existing conversation IDs/history remain
+unchanged. UUID addressing remains compatible and enforces the same owner policies.
+
 ## Security and device prerequisites
 
 Production PRIVATE_E2EE enrollment is BLOCKED pending independent assessment and

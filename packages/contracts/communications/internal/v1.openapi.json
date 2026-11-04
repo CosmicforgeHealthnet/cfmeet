@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.1.0",
-    "description": "Private backend interfaces for Sections 4\u20137. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.2.0",
+    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
     {
@@ -1348,6 +1348,15 @@
           "cfMeetId": {
             "type": "string",
             "pattern": "^CF-[A-Z2-7]{26}$"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "DIRECT_CALL",
+              "DIRECT_CONVERSATION",
+              "GROUP_INVITATION"
+            ],
+            "description": "Optional for compatibility. Calling may request only DIRECT_CALL; Messaging only DIRECT_CONVERSATION (default) or GROUP_INVITATION. Other caller/purpose pairs are forbidden."
           }
         },
         "required": [

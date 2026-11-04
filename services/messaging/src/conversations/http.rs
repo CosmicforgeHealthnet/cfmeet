@@ -62,7 +62,7 @@ async fn create(
     State(state): State<AppState>,
     caller: CustomerCaller,
     headers: HeaderMap,
-    Json(body): Json<CreateRequest>,
+    Json(mut body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = caller.require_scope(CONVERSATIONS_CREATE)?;
     let key = headers
@@ -71,6 +71,25 @@ async fn create(
         .ok_or(ApiError::code(ErrorCode::IdempotencyKeyRequired))?
         .to_string();
     let acting = require_acting(&state, &caller, &headers).await?;
+    if body.get("counterpartCfMeetId").is_some()
+        && body.get("contextClass").and_then(|v| v.as_str()) != Some("DIRECT")
+    {
+        return Err(ApiError::validation(
+            "counterpartCfMeetId applies to DIRECT only",
+        ));
+    }
+    crate::communications::resolve_address(
+        &state,
+        ctx,
+        Some(acting.principal_id),
+        &mut body,
+        "counterpartCfMeetId",
+        "counterpartPrincipalId",
+        cf_communications_policy::Action::DirectConversation,
+    )
+    .await?;
+    let body: CreateRequest = serde_json::from_value(body)
+        .map_err(|_| ApiError::validation("invalid conversation request"))?;
     let created = service::create(&state, ctx, &acting, body, &key).await?;
     Ok((
         StatusCode::from_u16(created.status).unwrap_or(StatusCode::OK),

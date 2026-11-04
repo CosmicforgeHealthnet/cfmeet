@@ -2,10 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet public API — messaging",
-    "version": "1.13.1",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations).",
+    "version": "1.14.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints.",
     "x-cfmeet-source-contract": "cfmeet.messaging.http-api",
-    "x-cfmeet-source-version": "1.13.1"
+    "x-cfmeet-source-version": "1.14.0"
   },
   "servers": [
     {
@@ -7627,10 +7627,34 @@
           "invite": {
             "type": "boolean",
             "description": "§35: invite instead of adding. The principal becomes INVITED (no history, no events, no sends) until it accepts (POST .../invitation/accept); invitations expire after 7 days and count toward the member limit."
+          },
+          "cfMeetId": {
+            "type": "string",
+            "pattern": "^CF-[A-Z2-7]{26}$",
+            "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           }
         },
-        "required": [
-          "principalId"
+        "oneOf": [
+          {
+            "required": [
+              "principalId"
+            ],
+            "not": {
+              "required": [
+                "cfMeetId"
+              ]
+            }
+          },
+          {
+            "required": [
+              "cfMeetId"
+            ],
+            "not": {
+              "required": [
+                "principalId"
+              ]
+            }
+          }
         ]
       },
       "messaging.common.v1.ApplicationPolicy": {
@@ -9683,9 +9707,68 @@
           "readReceipts": {
             "type": "boolean",
             "description": "Appendix K: false turns read receipts off for this conversation (never on where the environment policy has them off)."
+          },
+          "counterpartCfMeetId": {
+            "type": "string",
+            "pattern": "^CF-[A-Z2-7]{26}$",
+            "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           }
         },
-        "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential."
+        "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contextClass": {
+                  "const": "DIRECT"
+                }
+              },
+              "required": [
+                "contextClass"
+              ]
+            },
+            "then": {
+              "oneOf": [
+                {
+                  "required": [
+                    "counterpartPrincipalId"
+                  ],
+                  "not": {
+                    "required": [
+                      "counterpartCfMeetId"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "counterpartCfMeetId"
+                  ],
+                  "not": {
+                    "required": [
+                      "counterpartPrincipalId"
+                    ]
+                  }
+                }
+              ]
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "counterpartCfMeetId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "counterpartPrincipalId"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
       },
       "messaging.common.v1.CreateSmsBridgeRequest": {
         "description": "Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE).",

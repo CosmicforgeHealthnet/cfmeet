@@ -110,6 +110,42 @@ pub struct PolicyClient {
     personal: Scope,
 }
 impl PolicyClient {
+    /// Private, purpose-bound translation; public discovery never returns principal IDs.
+    pub async fn resolve_principal(
+        &self,
+        scope: DelegatedPlatformContext,
+        actor: Uuid,
+        cf_meet_id: &str,
+        purpose: Action,
+    ) -> Result<Uuid, PolicyError> {
+        if !self.governs(Scope::of(&scope)) {
+            return Err(PolicyError::Denied);
+        }
+        let req = OutboundServiceRequest::new_operation(
+            ServiceId::parse("cfmeet.communications").expect("service identity"),
+        )
+        .with_delegated_context(scope);
+        let response = self.client.post_json(&req,
+            "/internal/v1/communications/principals/resolve",
+            &serde_json::json!({"actorPrincipalId":actor,"cfMeetId":cf_meet_id,"purpose":purpose}),
+        ).await.map_err(|_| PolicyError::Unavailable)?;
+        match response.status() {
+            200 => {}
+            403 | 404 => return Err(PolicyError::Denied),
+            _ => return Err(PolicyError::Unavailable),
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Resolved {
+            schema_version: u32,
+            principal_id: Uuid,
+        }
+        let resolved: Resolved = response.json().map_err(|_| PolicyError::Unavailable)?;
+        if resolved.schema_version != 1 {
+            return Err(PolicyError::Unavailable);
+        }
+        Ok(resolved.principal_id)
+    }
     pub fn new(client: Arc<InternalServiceClient>, personal: Scope) -> Self {
         Self { client, personal }
     }

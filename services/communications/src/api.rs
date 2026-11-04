@@ -64,6 +64,8 @@ pub fn app(state: State) -> Router {
 struct ResolvePrincipal {
     actor_principal_id: Uuid,
     cf_meet_id: String,
+    #[serde(default)]
+    purpose: Option<cf_communications_policy::Action>,
 }
 /// A private translation for authoritative owners; consumer discovery never exposes it.
 async fn resolve_principal(
@@ -81,12 +83,24 @@ async fn resolve_principal(
             &input.cf_meet_id,
         )
         .await?;
-    let action = if ctx.authenticated_service() == &cf_service_auth::ServiceId::calling() {
-        cf_communications_policy::Action::DirectCall
-    } else if ctx.authenticated_service() == &cf_service_auth::ServiceId::messaging() {
-        cf_communications_policy::Action::DirectConversation
-    } else {
-        return Err(Error::Forbidden);
+    use cf_communications_policy::Action;
+    let action = match (ctx.authenticated_service(), input.purpose) {
+        (caller, None | Some(Action::DirectCall))
+            if caller == &cf_service_auth::ServiceId::calling() =>
+        {
+            Action::DirectCall
+        }
+        (caller, None | Some(Action::DirectConversation))
+            if caller == &cf_service_auth::ServiceId::messaging() =>
+        {
+            Action::DirectConversation
+        }
+        (caller, Some(Action::GroupInvitation))
+            if caller == &cf_service_auth::ServiceId::messaging() =>
+        {
+            Action::GroupInvitation
+        }
+        _ => return Err(Error::Forbidden),
     };
     let decision = s
         .check_policy(

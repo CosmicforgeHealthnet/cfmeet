@@ -1,6 +1,6 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.13.1 contract.
+Generated from the Account relay and Messaging 1.14.0 contract.
 Canonical SDK contract: **96 operations**; audience-filtered public Swagger:
 **80 operations**; native Account transports: **71 operations**.
 There are no new canonical message/conversation/device endpoints.
@@ -18,6 +18,14 @@ operation carries `x-cfmeet-native-path`, `x-cfmeet-native-auth` and
 examples and operation IDs remain in
 `packages/contracts/messaging/http/v1.openapi.json` and its self-contained bundles.
 An operation's presence does not certify runtime availability.
+
+Accepted personal contacts can address the existing DIRECT creation API with
+`counterpartCfMeetId` instead of `counterpartPrincipalId`. The member-add API accepts
+`cfMeetId` instead of `principalId`. Supply exactly one identifier. Messaging resolves
+the public ID privately under the authenticated actor/scope and the operation's policy
+purpose; no principal lookup endpoint or service credentials are needed by the client.
+Rotated IDs stop resolving; reload Contacts. Existing conversation IDs/history remain
+unchanged. UUID addressing remains compatible and enforces the same owner policies.
 
 ## Security and device prerequisites
 

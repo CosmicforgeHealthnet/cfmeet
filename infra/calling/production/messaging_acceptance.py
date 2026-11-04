@@ -94,7 +94,7 @@ class MessagingJourney(Journey):
             self.done('controlled_relationship_and_session_cleanup')
         self.report['activationVerdict'] = 'BLOCKED_EXTERNAL_DEPENDENCY'
         self.report['requiredEvidence'] = ['independent cryptographic assessment',
-            'accepted AD-01 through AD-10 decisions', 'reviewed production key custody and transparency anti-equivocation evidence']
+            'owner signoff on the exact reviewed production E2EE configuration', 'reviewed production key custody and transparency anti-equivocation evidence']
         self.report['encryptedProductionDelivery'] = 'NOT_RUN_ENROLLMENT_BLOCKED'
         self.report['productionMediaAttachmentsOfflineMultiDevice'] = 'NOT_RUN_REQUIRES_APPROVED_E2EE'
         self.report['physicalDevicePush'] = 'NOT_RUN_NO_PROVIDER_CREDENTIALS_OR_DEVICE_EVIDENCE'
@@ -125,7 +125,7 @@ def execute(sha, run_id):
         '--mount', f'type=bind,src={source},dst=/scripts,readonly', 'python:3.12-slim',
         'python', '/scripts/messaging_acceptance.py'], capture_output=True, timeout=240)
     report = json.loads((folder / 'report.json').read_text()) if (folder / 'report.json').is_file() else {'failure': 'client produced no evidence'}
-    report.update(workflowSha=sha, runId=run_id, environment='production')
+    report.update(workflowSha=source.parent.name, requestedImageSha=sha, runId=run_id, environment='production')
     report['images'] = {name: p.inspect(container)['Image'] for name, container in dict(release.OWNERS, communications='cfmeet-communications').items()}
     p.write_private(folder / 'receipt.json', json.dumps(report, sort_keys=True))
     print(json.dumps(report, sort_keys=True))
