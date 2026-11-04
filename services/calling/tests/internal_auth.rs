@@ -16,6 +16,7 @@ use cf_service_auth::{
 };
 use common::{scalar_i64, secret_part, Harness, TestResponse};
 use serde_json::{json, Value};
+use tracing::instrument::WithSubscriber;
 use tracing_subscriber::{fmt::MakeWriter, layer::SubscriberExt};
 
 fn signed_headers(
@@ -360,7 +361,7 @@ async fn service_tokens_never_reach_logs_or_responses() {
         return;
     };
     let capture = Capture::default();
-    let _guard = tracing::subscriber::set_default(
+    let dispatcher = tracing::Dispatch::new(
         tracing_subscriber::registry().with(
             tracing_subscriber::fmt::layer()
                 .json()
@@ -377,14 +378,20 @@ async fn service_tokens_never_reach_logs_or_responses() {
         .1
         .clone();
     let signature = token.rsplit('.').next().unwrap().to_string();
-    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good).await;
+    // Enter the capture dispatcher on every async poll. A thread-local guard
+    // held across await can lose events when the runtime resumes another task.
+    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good)
+        .with_subscriber(dispatcher.clone())
+        .await;
     let mut bad = good.clone();
     for (k, v) in bad.iter_mut() {
         if k == "x-cf-service-authorization" {
             *v = format!("{}x", v);
         }
     }
-    let rejected = call(&h, Method::GET, "/internal/v1/test/caller", &bad).await;
+    let rejected = call(&h, Method::GET, "/internal/v1/test/caller", &bad)
+        .with_subscriber(dispatcher)
+        .await;
     assert_eq!(rejected.status, StatusCode::UNAUTHORIZED);
 
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();

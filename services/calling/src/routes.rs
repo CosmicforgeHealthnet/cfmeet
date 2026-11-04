@@ -30,9 +30,9 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use tower_http::cors::CorsLayer;
 use sea_orm::ConnectionTrait;
 use serde_json::json;
+use tower_http::cors::CorsLayer;
 
 use crate::{
     error::CallingError,
