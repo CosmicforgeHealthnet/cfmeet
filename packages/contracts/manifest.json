@@ -622,7 +622,7 @@
     },
     {
       "id": "cfmeet.messaging.http-api-bundled",
-      "version": "1.13.1",
+      "version": "1.14.0",
       "kind": "openapi",
       "path": "bundled/messaging/http/v1.openapi.json",
       "owner": "messaging",
@@ -855,7 +855,7 @@
     },
     {
       "id": "cfmeet.messaging.public-api",
-      "version": "1.13.1",
+      "version": "1.14.0",
       "kind": "openapi",
       "path": "bundled/public/messaging/v1.openapi.json",
       "owner": "messaging",
