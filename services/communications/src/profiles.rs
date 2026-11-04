@@ -49,6 +49,9 @@ impl State {
             .map(str::to_owned);
         let s = Scope::of(scope);
         let txn = self.store.begin().await?;
+        // Both the account reference and principal binding are unique. Concurrent
+        // inserts can hit either index first; handle all uniqueness conflicts, then
+        // validate the winner's immutable account/principal mapping below.
         let mut v = vec![Uuid::new_v4().into()];
         v.extend(store::scoped(s));
         v.extend([
@@ -57,7 +60,7 @@ impl State {
             display.into(),
             avatar.clone().into(),
         ]);
-        let created=execute(&txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name,avatar_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(tenant_id,application_id,environment_id,account_reference) DO NOTHING",v).await?;
+        let created=execute(&txn,"INSERT INTO communication_profiles(id,tenant_id,application_id,environment_id,account_reference,principal_id,display_name,avatar_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",v).await?;
         let p = self.store.principal(&txn, s, a.principal_id).await?;
         let p = self.store.profile(&txn, s, p.id, true).await?;
         if p.account_reference != a.account_reference

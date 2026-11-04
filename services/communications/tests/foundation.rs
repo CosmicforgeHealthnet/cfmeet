@@ -63,6 +63,18 @@ async fn concurrent_lazy_activation_keeps_one_stable_account_and_principal_witho
     let h = Harness::new().await;
     let a = h.account();
     let s = h.delegated(&a);
+    let mut concurrent = Vec::new();
+    for _ in 0..16 {
+        let (state, scope, account) = (h.state.clone(), s.clone(), a.clone());
+        concurrent.push(tokio::spawn(async move {
+            state.ensure_profile(&scope, &account).await
+        }));
+    }
+    let mut created_ids = std::collections::BTreeSet::new();
+    for task in concurrent {
+        created_ids.insert(task.await.unwrap().unwrap().id);
+    }
+    assert_eq!(created_ids.len(), 1);
     let (x, y) = tokio::join!(
         h.state.ensure_profile(&s, &a),
         h.state.ensure_profile(&s, &a)
