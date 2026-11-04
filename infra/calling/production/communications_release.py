@@ -16,7 +16,7 @@ def inspect_runtime():
         db=urlsplit(env.get('DATABASE_URL',''))
         print(json.dumps(dict(service=name,image=c['Config']['Image'],image_id=c['Image'],
             database=dict(host=db.hostname,port=db.port,name=db.path.lstrip('/'),role=db.username),
-            networks=list(c['NetworkSettings']['Networks']),ports=c['HostConfig']['PortBindings'],
+            networks=list(c['NetworkSettings']['Networks']),network_aliases={k:v.get('Aliases') for k,v in c['NetworkSettings']['Networks'].items()},ports=c['HostConfig']['PortBindings'],
             mounts=[dict(source=m['Source'],target=m['Destination'],readonly=not m['RW']) for m in c['Mounts']],
             configuration_names=sorted(env),
             personal_scope={k:v for k,v in env.items() if k in ('CFMEET_COMMUNICATION_TENANT_ID','CFMEET_COMMUNICATION_APPLICATION_ID','CFMEET_COMMUNICATION_ENVIRONMENT_ID','CFMEET_COMMUNICATION_ENVIRONMENT_KIND','CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')},
@@ -170,7 +170,7 @@ def clone(c,name,img,overrides,stage):
             assert all(x['HostIp'] in ('127.0.0.1','::1') for x in bindings),'Existing backend ingress must stay loopback'
     endpoints={}
     for net,ep in c['NetworkSettings']['Networks'].items():
-        aliases=[name] if stage else [a for a in ep.get('Aliases',[]) if a not in (c['Id'],c['Id'][:12])]
+        aliases=[name] if stage else ([a for a in (ep.get('Aliases') or []) if a not in (c['Id'],c['Id'][:12])] or [name])
         endpoints[net]={'Aliases':aliases}
         if not stage:
             for option in ('IPAMConfig','Links','DriverOpts'):
@@ -381,8 +381,8 @@ def replace(name,cfg,record):
     p.run('docker','stop','--time','30',previous)
     start(name,cfg)
 
-def rollback():
-    record=json.loads((WORK/'rollback.private.json').read_text())
+def rollback(record=None):
+    if record is None:record=json.loads((WORK/'rollback.private.json').read_text())
     names=p.run('docker','ps','-a','--format','{{.Names}}').splitlines()
     for entry in reversed(record['replacements']):
         name,previous=entry['name'],entry['previous']
@@ -459,7 +459,8 @@ def release(sha,run_id):
         p.write_private(WORK/'production-context.private.json',json.dumps(scope))
         print(json.dumps(report),flush=True)
     except Exception:
-        rollback();raise
+        if record['replacements'] or record.get('newHub'):rollback(record)
+        raise
 
 def verify(sha,run_id):
     report=json.loads((WORK/'production-evidence.json').read_text())

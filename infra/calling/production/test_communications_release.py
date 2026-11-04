@@ -40,6 +40,11 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         production=release.clone(old,'name','sha256:new',{},False)
         self.assertEqual(production['NetworkingConfig']['EndpointsConfig']['private']['IPAMConfig'],{'IPv4Address':'10.0.0.2'})
 
+    def test_production_network_with_null_aliases_keeps_the_service_dns_name(self):
+        old=self.original();old['NetworkSettings']['Networks']['private']['Aliases']=None
+        candidate=release.clone(old,'cfmeet-platform-access','sha256:new',{},False)
+        self.assertEqual(candidate['NetworkingConfig']['EndpointsConfig']['private']['Aliases'],['cfmeet-platform-access'])
+
     def test_revision_label_must_match_immutable_source_sha(self):
         with self.assertRaises(AssertionError):release.image('calling','main')
         with patch.object(release.p,'run',return_value='[{"Id":"sha256:test","Config":{"Labels":{"org.opencontainers.image.revision":"wrong"}}}]'):

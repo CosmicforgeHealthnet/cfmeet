@@ -840,6 +840,14 @@ if __name__ == '__main__':
             raise RuntimeError('Operation not yet implemented; activation requires real acceptance evidence')
     except Exception as exc:
         # Avoid exception details from network libraries leaking signed URLs.
+        import traceback
+        cause=exc
+        for _ in range(3):
+            print('PRODUCTION_FAILURE_ORIGIN:',json.dumps({'type':type(cause).__name__,
+                'frames':[{'file':Path(frame.filename).name,'line':frame.lineno,'function':frame.name}
+                    for frame in traceback.extract_tb(cause.__traceback__)]}))
+            cause=cause.__context__
+            if cause is None:break
         print('PRODUCTION_OPERATION_FAILED:', type(exc).__name__,
               str(exc) if isinstance(exc, (AssertionError, RuntimeError)) else '')
         sys.exit(1)
