@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Phone, PhoneIncoming, PhoneOutgoing, RefreshCw, Video } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,21 +12,102 @@ import { useCall, useCallActions, useCallHistory, useCallingDevice, useCallingId
 import { identityApi } from "@/lib/messaging/api";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
-import { isTerminalCallState, type CallKind, type MediaCredential, type RecoveredInvitation } from "@/types/calling";
+import { isTerminalCallState, type CallKind, type CallState, type MediaCredential, type RecoveredInvitation } from "@/types/calling";
 import CallMedia from "./CallMedia";
 
-export default function CallsContent() {
+const callStatePresentation: Record<CallState, { title: string; description: string }> = {
+  REQUESTED: {
+    title: "Placing call",
+    description: "The call request was accepted and is waiting for authorization.",
+  },
+  AUTHORIZED: {
+    title: "Verifying route",
+    description: "The call is authorized. The destination and available route are being resolved.",
+  },
+  RESOLVING: {
+    title: "Preparing call",
+    description: "Looking up the destination and preparing available endpoints.",
+  },
+  ROUTING: {
+    title: "Selecting a route",
+    description: "Selecting an available route. External telephone connectivity depends on configured routing.",
+  },
+  DIALING: {
+    title: "Dialing",
+    description: "Contacting the selected endpoint or endpoints.",
+  },
+  RINGING: {
+    title: "Ringing",
+    description: "Waiting for someone to answer.",
+  },
+  ANSWERED: {
+    title: "Connecting",
+    description: "An endpoint answered. Media is still being established.",
+  },
+  CONNECTED: {
+    title: "Connected",
+    description: "Your call is connected.",
+  },
+  HELD: {
+    title: "On hold",
+    description: "The call is intentionally on hold. Resume it when you are ready.",
+  },
+  TRANSFERRING: {
+    title: "Transferring",
+    description: "The handoff is in progress. If it cannot complete, the call may return to its previous state.",
+  },
+  ENDING: {
+    title: "Ending call",
+    description: "Termination was requested. Waiting for external cleanup to finish.",
+  },
+  ENDED: {
+    title: "Call ended",
+    description: "The call completed.",
+  },
+  DECLINED: {
+    title: "Call declined",
+    description: "The call offer was declined.",
+  },
+  BUSY: {
+    title: "Line busy",
+    description: "The destination is unavailable because it is busy.",
+  },
+  NO_ANSWER: {
+    title: "Missed call",
+    description: "The call timed out without an answer.",
+  },
+  FAILED: {
+    title: "Call failed",
+    description: "The call could not be completed. No automatic retry was started.",
+  },
+  CANCELLED: {
+    title: "Call cancelled",
+    description: "The call was cancelled before it connected.",
+  },
+};
+
+function formatCallDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export default function CallsContent({ initialCallId = "" }: { initialCallId?: string }) {
   const identity = useCallingIdentity();
   const principalId = identity.data?.principalId;
   // Keyed session unmounts and drops endpoint credentials when identity changes.
   if (identity.isPending) return <div className="flex items-center gap-2 p-6"><Spinner /> Loading calling…</div>;
   if (identity.error || !principalId) return <div className="space-y-3 p-6"><h1 className="text-2xl font-semibold">Calls</h1><p role="alert">{callingErrorMessage(identity.error)}</p><Button variant="outline" onClick={() => void identity.refetch()}>Try again</Button></div>;
-  return <CallingSession key={principalId} principalId={principalId} />;
+  return <CallingSession key={`${principalId}:${initialCallId}`} principalId={principalId} initialCallId={initialCallId} />;
 }
 
-function CallingSession({ principalId }: { principalId: string }) {
+function CallingSession({ principalId, initialCallId }: { principalId: string; initialCallId: string }) {
   const device = useCallingDevice(principalId);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(initialCallId);
   const [missed, setMissed] = useState(false);
   const [target, setTarget] = useState("");
   const [extension, setExtension] = useState("");
@@ -33,6 +115,7 @@ function CallingSession({ principalId }: { principalId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [media, setMedia] = useState<{ credential: MediaCredential; callId: string; sessionId: string } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const history = useCallHistory(missed ? { missed: true } : {});
   const call = useCall(selected);
   const mediaCall = useCall(media?.callId ?? "");
@@ -58,6 +141,19 @@ function CallingSession({ principalId }: { principalId: string }) {
   const ownParticipant = call.data?.participants.find((p) => p.principalId === principalId && !p.endedAt);
   const ownSession = call.data?.sessions.find((s) => s.participantId === ownParticipant?.participantId && s.endpointId === device.endpoint?.endpointId && s.mediaAccess === "AUTHORIZED");
   const available = (name: string) => actions.data?.actions.some((a) => a.action === name && a.available);
+  const selectedCallState = call.data?.state;
+
+  useEffect(() => {
+    if (selectedCallState !== "CONNECTED") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [selectedCallState]);
+
+  const connectedDuration = call.data?.connectedDurationMs ?? 0;
+  const durationAsOf = call.data ? Date.parse(call.data.durationsAsOf) : Number.NaN;
+  const liveDuration = selectedCallState === "CONNECTED" && Number.isFinite(durationAsOf)
+    ? connectedDuration + Math.max(0, now - durationAsOf)
+    : connectedDuration;
 
   return <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
     <header className="flex flex-wrap items-center justify-between gap-3">
@@ -108,23 +204,43 @@ function CallingSession({ principalId }: { principalId: string }) {
         {history.hasNextPage ? <Button variant="ghost" className="mt-3 w-full" disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>Load more</Button> : null}
       </section>
       <section className="space-y-4 rounded-2xl border border-border bg-card p-5">
-        <h2 className="font-semibold">Call details</h2>
+        <div className="flex items-center justify-between gap-2"><h2 className="font-semibold">Call details</h2>{selected ? <Button asChild size="sm" variant="ghost"><Link href={`/calling/${encodeURIComponent(selected)}`}>Open details</Link></Button> : null}</div>
         {!selected ? <p className="py-8 text-center text-sm text-muted-foreground">Select a call to view its details.</p> : call.isPending ? <Spinner /> : call.error ? <p role="alert" className="text-sm text-destructive">{callingErrorMessage(call.error)}</p> : call.data ? <>
-          <div><p className="text-lg font-medium">{call.data.kind === "VIDEO" ? "Video call" : "Voice call"}</p><p className="text-sm text-muted-foreground" role="status">{call.data.state.replaceAll("_", " ")}</p></div>
+          <div className="rounded-xl border border-border bg-background p-4">
+            <p className="text-lg font-medium">{call.data.kind === "VIDEO" ? "Video call" : "Voice call"}</p>
+            <p className="mt-1 flex items-center gap-2 font-semibold" role="status" aria-live="polite">
+              <span className={`size-2 rounded-full bg-primary ${call.data.state === "RINGING" ? "animate-pulse" : ""}`} />
+              {callStatePresentation[call.data.state].title}
+              {call.data.state === "CONNECTED" ? <span className="font-mono text-sm tabular-nums">{formatCallDuration(liveDuration)}</span> : null}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{callStatePresentation[call.data.state].description}</p>
+            {call.data.state === "FAILED" && call.data.failureCategory ? (
+              <p className="mt-2 text-sm text-destructive">Reason: {call.data.failureCategory.replaceAll("_", " ")}</p>
+            ) : null}
+            {call.data.state === "ENDED" && call.data.connectedDurationMs !== null ? (
+              <p className="mt-2 text-sm text-muted-foreground">Call summary · Duration {formatCallDuration(call.data.connectedDurationMs)}</p>
+            ) : null}
+          </div>
           <ul className="space-y-2 text-sm">{call.data.participants.map((p) => <li key={p.participantId} className="flex justify-between gap-2"><span>{p.principalId === principalId ? "You" : p.displayName || "CF Meet user"}</span><span className="text-muted-foreground">{p.endedAt ? "Left" : p.role === "INITIATOR" ? "Caller" : "Recipient"}</span></li>)}</ul>
-          <div className="flex flex-wrap gap-2">{(["cancel", "end", "hold", "resume"] as const).map((operation) => available(operation.toUpperCase()) && call.data?.initiatorPrincipalId === principalId ? <Button key={operation} variant={operation === "end" ? "destructive" : "outline"} disabled={busy || mutation.isPending} onClick={() => void run(() => mutation.mutateAsync({ operation, callId: selected, body: { expectedVersion: call.data!.version }, key: newIdempotencyKey() }))}>{operation[0].toUpperCase() + operation.slice(1)}</Button> : null)}
-            {ownSession && !activeMedia && !isTerminalCallState(call.data.state) ? <Button disabled={busy} onClick={() => void run(() => connectMedia(selected, ownSession.sessionId))}>Join audio</Button> : null}
-            {ownSession && !isTerminalCallState(call.data.state) ? <Button variant="outline" disabled={busy} onClick={() => void run(async () => {
+          <div className="flex flex-wrap gap-2">{(["cancel", "end", "hold", "resume"] as const).map((operation) => {
+            const requestedOnlyAllowsCancel = call.data?.state !== "REQUESTED" || operation === "cancel";
+            const commandsEnabled = call.data?.state !== "ENDING" && !isTerminalCallState(call.data!.state);
+            return available(operation.toUpperCase()) && call.data?.initiatorPrincipalId === principalId && requestedOnlyAllowsCancel && commandsEnabled ? (
+              <Button key={operation} variant={operation === "end" ? "destructive" : "outline"} disabled={busy || mutation.isPending} onClick={() => void run(() => mutation.mutateAsync({ operation, callId: selected, body: { expectedVersion: call.data!.version }, key: newIdempotencyKey() }))}>{operation[0].toUpperCase() + operation.slice(1)}</Button>
+            ) : null;
+          })}
+            {ownSession && !activeMedia && !isTerminalCallState(call.data.state) && call.data.state !== "ENDING" ? <Button disabled={busy} onClick={() => void run(() => connectMedia(selected, ownSession.sessionId))}>Join audio</Button> : null}
+            {ownSession && !isTerminalCallState(call.data.state) && call.data.state !== "ENDING" ? <Button variant="outline" disabled={busy} onClick={() => void run(async () => {
               await mutation.mutateAsync({ operation: "removeSession", callId: selected, sessionId: ownSession.sessionId, body: { expectedVersion: call.data!.version }, key: newIdempotencyKey() });
               if (media?.callId === selected) setMedia(null);
             })}>Leave call</Button> : null}
           </div>
-          {device.endpoint && !isTerminalCallState(call.data.state) && call.data.initiatorPrincipalId === principalId ? <form className="flex gap-2" onSubmit={(event) => {
+          {device.endpoint && !isTerminalCallState(call.data.state) && call.data.state !== "ENDING" && call.data.initiatorPrincipalId === principalId ? <form className="flex gap-2" onSubmit={(event) => {
             event.preventDefault();
             const digit = String(new FormData(event.currentTarget).get("digit")) as import("@/types/calling").IvrInputRequest["digit"];
             void run(() => mutation.mutateAsync({ operation: "ivrInput", callId: selected, body: { endpointId: device.endpoint!.endpointId, digit } }));
           }}><Input name="digit" aria-label="Keypad digit" placeholder="Keypad: 0–9, * or #" maxLength={1} pattern="[0-9*#]" required /><Button type="submit" disabled={busy} variant="outline">Send key</Button></form> : null}
-          {available("TRANSFER") && ownParticipant ? <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); void run(() => mutation.mutateAsync({ operation: "transfer", callId: selected, key: newIdempotencyKey(), body: { transferringParticipantId: ownParticipant.participantId, expectedVersion: call.data!.version, targetExtension: String(form.get("extension")) } })); }}><Input name="extension" aria-label="Transfer to extension" placeholder="Transfer to extension" maxLength={32} required /><Button type="submit" variant="outline" disabled={busy}>Transfer</Button></form> : null}
+          {available("TRANSFER") && ownParticipant && call.data.state !== "ENDING" ? <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); void run(() => mutation.mutateAsync({ operation: "transfer", callId: selected, key: newIdempotencyKey(), body: { transferringParticipantId: ownParticipant.participantId, expectedVersion: call.data!.version, targetExtension: String(form.get("extension")) } })); }}><Input name="extension" aria-label="Transfer to extension" placeholder="Transfer to extension" maxLength={32} required /><Button type="submit" variant="outline" disabled={busy}>Transfer</Button></form> : null}
           {call.data.failureCategory ? <p className="text-sm text-destructive">Call failed: {call.data.failureCategory.replaceAll("_", " ")}</p> : null}
           {actions.error ? <p className="text-sm text-destructive">{callingErrorMessage(actions.error)}</p> : null}
         </> : null}

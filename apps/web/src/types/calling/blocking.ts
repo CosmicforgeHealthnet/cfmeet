@@ -1,48 +1,26 @@
-/**
- * Call Blocking types for the Calling API.
- * Manages blocked numbers and contacts.
- */
-
 import type { Uuid } from "./common";
 
-/** Scope of the block - which call types are blocked */
-export type BlockScope = "ALL" | "VOICE" | "VIDEO";
+export type BlockReason = "UNWANTED" | "HARASSMENT" | "SPAM" | "OTHER";
 
-/** Reason for blocking */
-export type BlockReason = "UNWANTED" | "SPAM" | "ABUSE" | "OTHER";
-
-/** A single block rule */
 export interface Block {
   blockId: Uuid;
-  principalId: Uuid;
-  blockedNumber?: string;
-  blockedPrincipalId?: Uuid;
-  scope: BlockScope;
-  reason?: BlockReason;
-  note?: string;
+  principalId: Uuid | null;
+  blockedKind: "PRINCIPAL" | "CONTACT_REFERENCE";
+  blockedPrincipalId?: Uuid | null;
+  blockedContactReferenceId?: Uuid | null;
+  reasonCode: BlockReason;
+  status: "ACTIVE" | "RELEASED";
   createdAt: string;
-  expiresAt?: string;
+  releasedAt?: string | null;
+  version: number;
 }
 
-/** Paginated list of block rules */
 export interface BlockList {
-  data: Block[];
-  nextCursor?: string | null;
+  items: Block[];
 }
 
-/** Request body for creating a new block rule */
 export interface CreateBlockRequest {
-  blockedNumber?: string;
   blockedPrincipalId?: Uuid;
-  scope?: BlockScope;
-  reason?: BlockReason;
-  note?: string;
-  expiresAt?: string;
-}
-
-/** Filters for listing block rules */
-export interface BlockFilters {
-  limit?: number;
-  cursor?: string;
-  scope?: BlockScope;
+  blockedContactReferenceId?: Uuid;
+  reasonCode: BlockReason;
 }

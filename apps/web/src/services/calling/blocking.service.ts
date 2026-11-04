@@ -4,21 +4,19 @@
  */
 
 import callingApi from "./api";
+import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import type {
   Block,
   BlockList,
   CreateBlockRequest,
-  BlockFilters,
 } from "@/types/calling";
 
 export const blockingService = {
   /**
    * List block rules with optional filters
    */
-  list: async (filters: BlockFilters = {}): Promise<BlockList> => {
-    const response = await callingApi.get<BlockList>("/v1/blocks", {
-      params: filters,
-    });
+  list: async (): Promise<BlockList> => {
+    const response = await callingApi.get<BlockList>("/v1/blocks");
     return response.data;
   },
 
@@ -26,7 +24,9 @@ export const blockingService = {
    * Create a new block rule
    */
   create: async (body: CreateBlockRequest): Promise<Block> => {
-    const response = await callingApi.post<Block>("/v1/blocks", body);
+    const response = await callingApi.post<Block>("/v1/blocks", body, {
+      headers: { "Idempotency-Key": newIdempotencyKey() },
+    });
     return response.data;
   },
 
@@ -34,6 +34,8 @@ export const blockingService = {
    * Delete (release) a block rule
    */
   delete: async (blockId: string): Promise<void> => {
-    await callingApi.delete(`/v1/blocks/${encodeURIComponent(blockId)}`);
+    await callingApi.delete(`/v1/blocks/${encodeURIComponent(blockId)}`, {
+      headers: { "Idempotency-Key": newIdempotencyKey() },
+    });
   },
 };

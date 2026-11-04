@@ -1,18 +1,14 @@
 "use client";
 
-/**
- * BlockingPanel - Manage blocked numbers and contacts.
- */
-
 import { useState } from "react";
-import { Ban, Trash2, Plus, Phone } from "lucide-react";
+import { Ban, Trash2, Plus, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useBlocks, useCreateBlock, useDeleteBlock } from "@/hooks/calling";
 import { callingErrorMessage } from "@/lib/calling/errors";
-import type { BlockScope, BlockReason } from "@/types/calling";
+import type { BlockReason } from "@/types/calling";
 
 interface BlockingPanelProps {
   className?: string;
@@ -20,10 +16,9 @@ interface BlockingPanelProps {
 
 export default function BlockingPanel({ className }: BlockingPanelProps) {
   const [showForm, setShowForm] = useState(false);
-  const [blockedNumber, setBlockedNumber] = useState("");
-  const [scope, setScope] = useState<BlockScope>("ALL");
-  const [reason, setReason] = useState<BlockReason>("UNWANTED");
-  const [note, setNote] = useState("");
+  const [targetKind, setTargetKind] = useState<"PRINCIPAL" | "CONTACT_REFERENCE">("PRINCIPAL");
+  const [targetId, setTargetId] = useState("");
+  const [reasonCode, setReasonCode] = useState<BlockReason>("UNWANTED");
   const [error, setError] = useState<string | null>(null);
 
   const blocks = useBlocks();
@@ -35,13 +30,12 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
     setError(null);
     try {
       await createBlock.mutateAsync({
-        blockedNumber: blockedNumber.trim() || undefined,
-        scope,
-        reason,
-        note: note.trim() || undefined,
+        ...(targetKind === "PRINCIPAL"
+          ? { blockedPrincipalId: targetId.trim() }
+          : { blockedContactReferenceId: targetId.trim() }),
+        reasonCode,
       });
-      setBlockedNumber("");
-      setNote("");
+      setTargetId("");
       setShowForm(false);
     } catch (err) {
       setError(callingErrorMessage(err));
@@ -57,21 +51,21 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
     }
   };
 
-  const entries = blocks.data?.pages.flatMap((page) => page.data) ?? [];
+  const entries = blocks.data?.items ?? [];
 
   return (
     <div className={className}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Ban className="size-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Blocked Numbers</h2>
+          <h2 className="text-lg font-semibold">Blocked callers</h2>
         </div>
         <Button
           size="sm"
           variant={showForm ? "outline" : "default"}
           onClick={() => setShowForm(!showForm)}
         >
-          {showForm ? "Cancel" : <><Plus className="mr-1 size-4" /> Block Number</>}
+          {showForm ? "Cancel" : <><Plus className="mr-1 size-4" /> Add block</>}
         </Button>
       </div>
 
@@ -84,52 +78,43 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-6 space-y-4 rounded-xl border border-border bg-muted/30 p-4">
           <div className="space-y-2">
-            <Label htmlFor="blocked-number">Phone Number</Label>
-            <Input
-              id="blocked-number"
-              value={blockedNumber}
-              onChange={(e) => setBlockedNumber(e.target.value)}
-              placeholder="+1 555 123 4567"
-              required
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="block-scope">Block Type</Label>
-              <select
-                id="block-scope"
-                value={scope}
-                onChange={(e) => setScope(e.target.value as BlockScope)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="ALL">All Calls</option>
-                <option value="VOICE">Voice Only</option>
-                <option value="VIDEO">Video Only</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="block-reason">Reason</Label>
-              <select
-                id="block-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value as BlockReason)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="UNWANTED">Unwanted</option>
-                <option value="SPAM">Spam</option>
-                <option value="ABUSE">Abuse</option>
-                <option value="OTHER">Other</option>
-              </select>
-            </div>
+            <Label htmlFor="blocked-target-kind">Caller type</Label>
+            <select
+              id="blocked-target-kind"
+              value={targetKind}
+              onChange={(e) => setTargetKind(e.target.value as typeof targetKind)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="PRINCIPAL">CF Meet principal</option>
+              <option value="CONTACT_REFERENCE">Protected contact reference</option>
+            </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="block-note">Note (optional)</Label>
+            <Label htmlFor="blocked-target">Caller ID</Label>
             <Input
-              id="block-note"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Additional details"
+              id="blocked-target"
+              value={targetId}
+              onChange={(e) => setTargetId(e.target.value)}
+              placeholder="UUID"
+              required
             />
+            <p className="text-xs text-muted-foreground">
+              Use the principal ID or opaque protected-contact reference ID. Phone numbers are not accepted.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="block-reason">Reason</Label>
+            <select
+              id="block-reason"
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value as BlockReason)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="UNWANTED">Unwanted</option>
+              <option value="HARASSMENT">Harassment</option>
+              <option value="SPAM">Spam</option>
+              <option value="OTHER">Other</option>
+            </select>
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
@@ -137,7 +122,7 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
             </Button>
             <Button type="submit" disabled={createBlock.isPending}>
               {createBlock.isPending ? <Spinner className="mr-2 size-4" /> : null}
-              Block Number
+              Add block
             </Button>
           </div>
         </form>
@@ -151,7 +136,7 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
         <p className="text-sm text-destructive">{callingErrorMessage(blocks.error)}</p>
       ) : entries.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          No blocked numbers. You can block unwanted callers using the button above.
+          No blocked callers. Add a principal or protected contact reference to block.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -162,13 +147,15 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
             >
               <div className="flex items-center gap-3">
                 <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
-                  <Phone className="size-5 text-destructive" />
+                  <UserRound className="size-5 text-destructive" />
                 </div>
                 <div>
-                  <p className="font-medium">{block.blockedNumber || "Unknown"}</p>
+                  <p className="font-medium">
+                    {block.blockedKind === "PRINCIPAL" ? "Principal" : "Protected contact"} ·{" "}
+                    {block.blockedPrincipalId ?? block.blockedContactReferenceId ?? "Unknown"}
+                  </p>
                   <p className="text-sm text-muted-foreground">
-                    {block.scope} · {block.reason?.toLowerCase() || "blocked"}
-                    {block.note && ` · ${block.note}`}
+                    {block.status.toLowerCase()} · {block.reasonCode.toLowerCase()}
                   </p>
                 </div>
               </div>
@@ -176,7 +163,7 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
                 size="icon"
                 variant="ghost"
                 onClick={() => handleDelete(block.blockId)}
-                disabled={deleteBlock.isPending}
+                disabled={deleteBlock.isPending || block.status !== "ACTIVE"}
                 aria-label="Unblock"
               >
                 <Trash2 className="size-4 text-destructive" />
@@ -186,16 +173,6 @@ export default function BlockingPanel({ className }: BlockingPanelProps) {
         </ul>
       )}
 
-      {blocks.hasNextPage && (
-        <Button
-          variant="ghost"
-          className="mt-4 w-full"
-          disabled={blocks.isFetchingNextPage}
-          onClick={() => void blocks.fetchNextPage()}
-        >
-          Load more
-        </Button>
-      )}
     </div>
   );
 }

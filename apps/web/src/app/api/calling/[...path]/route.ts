@@ -4,6 +4,88 @@ export const runtime = "nodejs";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Context = { params: Promise<{ path: string[] }> };
 
+const resourceId = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const enterpriseRules: Array<[RegExp, string[]]> = [
+  [/^v1\/calling\/(usage|limits)$/, ["GET"]],
+  [new RegExp(`^v1/enterprise/(policies|departments|extensions|ring-groups|queues|ivr-flows|business-hours|public-contacts|forwarding-rules|voicemail/mailboxes|recording-policies|sip-devices)$`), ["GET", "POST"]],
+  [new RegExp(`^v1/enterprise/(policies|departments|extensions|ring-groups|queues|ivr-flows|forwarding-rules|voicemail/mailboxes|recording-policies)/${resourceId}$`), ["GET", "PATCH", "DELETE"]],
+  [new RegExp(`^v1/enterprise/business-hours/${resourceId}$`), ["GET", "PUT", "DELETE"]],
+  [new RegExp(`^v1/enterprise/public-contacts/${resourceId}$`), ["GET", "DELETE"]],
+  [new RegExp(`^v1/enterprise/sip-devices/${resourceId}$`), ["GET", "DELETE"]],
+  [new RegExp(`^v1/enterprise/departments/${resourceId}/members$`), ["PUT"]],
+  [new RegExp(`^v1/enterprise/ring-groups/${resourceId}/members$`), ["PUT"]],
+  [new RegExp(`^v1/enterprise/queues/${resourceId}/members$`), ["PUT"]],
+  [new RegExp(`^v1/enterprise/queues/${resourceId}/entries$`), ["GET"]],
+  [new RegExp(`^v1/enterprise/ivr-flows/${resourceId}/versions$`), ["GET", "POST"]],
+  [new RegExp(`^v1/enterprise/ivr-flows/${resourceId}/versions/[0-9]+$`), ["GET"]],
+  [new RegExp(`^v1/enterprise/ivr-flows/${resourceId}/activation$`), ["PUT"]],
+  [new RegExp(`^v1/enterprise/business-hours/${resourceId}/evaluation$`), ["POST"]],
+  [/^v1\/enterprise\/audit$/, ["GET"]],
+  [/^v1\/enterprise\/effective-policy$/, ["GET"]],
+  [new RegExp(`^v1/enterprise/voicemail/messages$`), ["GET"]],
+  [new RegExp(`^v1/enterprise/voicemail/messages/${resourceId}$`), ["GET", "DELETE"]],
+  [new RegExp(`^v1/enterprise/voicemail/messages/${resourceId}/read-state$`), ["PUT"]],
+  [new RegExp(`^v1/enterprise/voicemail/messages/${resourceId}/media-access$`), ["POST"]],
+  [new RegExp(`^v1/enterprise/recordings/${resourceId}$`), ["GET", "DELETE"]],
+  [new RegExp(`^v1/enterprise/recordings/${resourceId}/media-access$`), ["POST"]],
+  [new RegExp(`^v1/enterprise/recordings/${resourceId}/access-audit$`), ["GET"]],
+  [/^v1\/webhooks$/, ["GET", "POST"]],
+  [new RegExp(`^v1/webhooks/${resourceId}$`), ["GET", "PATCH", "DELETE"]],
+  [new RegExp(`^v1/webhooks/${resourceId}/rotate-secret$`), ["POST"]],
+  [new RegExp(`^v1/webhooks/${resourceId}/deliveries$`), ["GET"]],
+  [new RegExp(`^v1/webhook-deliveries/${resourceId}/replay$`), ["POST"]],
+];
+
+const privacyRelayRules: Array<[RegExp, string[]]> = [
+  [/^v1\/privacy-relay\/contexts$/, ["GET", "POST"]],
+  [new RegExp(`^v1/privacy-relay/contexts/${resourceId}$`), ["GET", "PATCH"]],
+  [new RegExp(`^v1/privacy-relay/contexts/${resourceId}/evidence$`), ["GET"]],
+  [new RegExp(`^v1/privacy-relay/contexts/${resourceId}/sessions$`), ["POST"]],
+  [new RegExp(`^v1/privacy-relay/contexts/${resourceId}/(suspend|resume|complete|revoke)$`), ["POST"]],
+  [/^v1\/privacy-relay\/sessions$/, ["GET"]],
+  [new RegExp(`^v1/privacy-relay/sessions/${resourceId}$`), ["GET"]],
+  [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/evidence$`), ["GET"]],
+  [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/(suspend|resume|revoke)$`), ["POST"]],
+  [/^v1\/privacy-relay\/contact-access-grants$/, ["POST"]],
+  [/^v1\/privacy-relay\/contacts$/, ["POST"]],
+  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}$`), ["GET", "PATCH"]],
+  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}/disable$`), ["POST"]],
+];
+
+function isAllowedResourceRoute(route: string, method: string): boolean {
+  return [...enterpriseRules, ...privacyRelayRules].some(
+    ([pattern, methods]) => pattern.test(route) && methods.includes(method),
+  );
+}
+
+function requireResourceAdministrator(principalId: string, route: string) {
+  const variable = route.startsWith("v1/privacy-relay/")
+    ? "CALLING_PRIVACY_ADMIN_PRINCIPAL_IDS"
+    : "CALLING_ADMIN_PRINCIPAL_IDS";
+  const allowedPrincipals = new Set(
+    (process.env[variable] ?? "").split(",").map((id) => id.trim()).filter(Boolean),
+  );
+  if (!allowedPrincipals.has(principalId)) {
+    throw new CallingHttpError(403, "INSUFFICIENT_SCOPE", "This Calling administration surface is not enabled for your account.");
+  }
+}
+
+async function requireOwnBlockRule(blockId: string, principalId: string) {
+  const response = await callingFetch(`/v1/blocks?principalId=${encodeURIComponent(principalId)}`);
+  if (!response.ok) {
+    throw new CallingHttpError(503, "CALLING_NOT_CONFIGURED", "Could not verify block ownership.");
+  }
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !("items" in payload) || !Array.isArray(payload.items)) {
+    throw new CallingHttpError(502, "UPSTREAM_ERROR", "Calling returned an invalid block list.");
+  }
+  const ownsRule = payload.items.some((item) =>
+    !!item && typeof item === "object" && "blockId" in item &&
+    item.blockId === blockId && "principalId" in item && item.principalId === principalId,
+  );
+  if (!ownsRule) throw new CallingHttpError(404, "NOT_FOUND", "Block rule not found.");
+}
+
 /** Check if calling dev mode is enabled */
 function isDevMode(): boolean {
   return process.env.CALLING_DEV_MODE === "true";
@@ -25,7 +107,7 @@ function devModeResponse(route: string, method: string, identity: { principalId:
 
   // Blocks - empty list in dev mode
   if (route === "v1/blocks" && method === "GET") {
-    return json({ data: [], pagination: { cursor: null, hasMore: false } });
+    return json({ items: [] });
   }
 
   // Forwarding rules - empty list in dev mode
@@ -77,11 +159,18 @@ async function handle(request: Request, context: Context) {
     const method = request.method;
     const url = new URL(request.url);
     let body: Record<string, unknown> | undefined;
-    if (method === "POST") {
+    if (["POST", "PATCH", "PUT"].includes(method)) {
       const text = await request.text();
       if (text.length > 16_384) throw new CallingHttpError(413, "VALIDATION_ERROR", "Request too large.");
       try { body = JSON.parse(text || "{}"); } catch { throw new CallingHttpError(400, "VALIDATION_ERROR", "Invalid JSON."); }
       if (!body || Array.isArray(body) || typeof body !== "object") throw new CallingHttpError(400, "VALIDATION_ERROR", "Expected a JSON object.");
+    } else if (method === "DELETE") {
+      const text = await request.text();
+      if (text.length > 16_384) throw new CallingHttpError(413, "VALIDATION_ERROR", "Request too large.");
+      if (text) {
+        try { body = JSON.parse(text); } catch { throw new CallingHttpError(400, "VALIDATION_ERROR", "Invalid JSON."); }
+        if (!body || Array.isArray(body) || typeof body !== "object") throw new CallingHttpError(400, "VALIDATION_ERROR", "Expected a JSON object.");
+      }
     }
     const route = path.join("/");
     let allowed = false;
@@ -91,7 +180,14 @@ async function handle(request: Request, context: Context) {
         throw new CallingHttpError(404, "NOT_FOUND", "Device not found.");
       }
     };
-    if (route === "v1/calling/endpoints") {
+    if (route === "v1/blocks") {
+      allowed = method === "GET" || method === "POST";
+      if (method === "GET") url.searchParams.set("principalId", identity.principalId);
+      if (body) body.principalId = identity.principalId;
+    } else if (path.length === 3 && path[0] === "v1" && path[1] === "blocks" && uuid.test(path[2])) {
+      allowed = method === "DELETE";
+      if (allowed) await requireOwnBlockRule(path[2], identity.principalId);
+    } else if (route === "v1/calling/endpoints") {
       allowed = method === "GET" || method === "POST";
       if (method === "GET") url.searchParams.set("principalId", identity.principalId);
       if (body) body.principalId = identity.principalId;
@@ -138,6 +234,9 @@ async function handle(request: Request, context: Context) {
         const session = call.sessions.find((s) => s.sessionId === path[4] && s.participantId === ownParticipant?.participantId);
         allowed = method === "POST" && !!session;
       }
+    } else if (isAllowedResourceRoute(route, method)) {
+      requireResourceAdministrator(identity.principalId, route);
+      allowed = true;
     }
     if (!allowed) throw new CallingHttpError(404, "NOT_FOUND", "Calling operation not found.");
     const headers = new Headers();
@@ -158,4 +257,4 @@ async function handle(request: Request, context: Context) {
   } catch (error) { return callingFailure(error); }
 }
 
-export { handle as GET, handle as POST, handle as DELETE };
+export { handle as GET, handle as POST, handle as PATCH, handle as PUT, handle as DELETE };

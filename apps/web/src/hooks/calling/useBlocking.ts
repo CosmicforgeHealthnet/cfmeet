@@ -4,27 +4,25 @@
  * React Query hooks for call blocking management.
  */
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { blockingService } from "@/services/calling";
-import type { CreateBlockRequest, BlockFilters } from "@/types/calling";
+import type { CreateBlockRequest } from "@/types/calling";
 
 export const blockingKeys = {
   all: ["calling", "blocks"] as const,
   lists: () => [...blockingKeys.all, "list"] as const,
-  list: (filters?: BlockFilters) => [...blockingKeys.lists(), filters] as const,
+  list: () => [...blockingKeys.lists()] as const,
 };
 
 /**
- * List blocked numbers/contacts with pagination
+ * List the signed-in principal's blocking rules.
  */
-export function useBlocks(filters: BlockFilters = {}) {
-  return useInfiniteQuery({
-    queryKey: blockingKeys.list(filters),
-    queryFn: ({ pageParam }) =>
-      blockingService.list({ ...filters, cursor: pageParam }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
+export function useBlocks() {
+  return useQuery({
+    queryKey: blockingKeys.list(),
+    queryFn: () => blockingService.list(),
     staleTime: 1000 * 60,
+    retry: false,
   });
 }
 

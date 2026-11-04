@@ -9,3 +9,4 @@ export { recordingService } from "./recording.service";
 export { abuseService } from "./abuse.service";
 export { usageService } from "./usage.service";
 export { voicemailService } from "./voicemail.service";
+export { callingResourcesService } from "./resources.service";
