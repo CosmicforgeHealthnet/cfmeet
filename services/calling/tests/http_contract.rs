@@ -1634,7 +1634,16 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
     let r = a.accept(expiring, offer, &carol_d, version).await;
     assert_eq!(r.status, StatusCode::GONE, "{}", r.text);
     conforms(&r, "/v1/calls/{call_id}/accept", "post");
-    a.h().state.app.expire_due(100).await.unwrap();
+    // The failed accept rolls back asynchronously when its transaction is dropped.
+    // Expiry deliberately uses SKIP LOCKED; exercise its bounded retry semantics
+    // instead of requiring the first sweep to win that rollback race.
+    for _ in 0..100 {
+        a.h().state.app.expire_due(100).await.unwrap();
+        if a.state(expiring).await.0 == CallState::NoAnswer {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     assert_eq!(a.state(expiring).await.0, CallState::NoAnswer);
 
     // Every delivered signal is a valid realtime signal; every push a valid push offer.
