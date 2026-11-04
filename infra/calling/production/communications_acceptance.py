@@ -207,8 +207,15 @@ class Journey:
                 client.cmd('wait_permission',publish=True,timeout=15)
                 client.cmd('publish',kind='audio')
                 if kind=='VIDEO':client.cmd('publish',kind='video')
-            for _ in range(40):
-                if self.request('calling',path,token=token)['state']=='CONNECTED':break
+            # Provider confirmation may arrive through the existing 15-second
+            # reconciliation lease plus its worker sweep. A ten-second wait can
+            # fail after both clients already connected and published. Keep the
+            # positive canonical-state and received-frame assertions mandatory.
+            for _ in range(120):
+                observed=self.request('calling',path,token=token)
+                self.report['observedMediaState']={'state':observed['state'],
+                    'sessions':[session['state'] for session in observed.get('sessions',[])]}
+                if observed['state']=='CONNECTED':break
                 time.sleep(.25)
             else:raise AssertionError('Native media call did not become CONNECTED')
             for client in clients:
