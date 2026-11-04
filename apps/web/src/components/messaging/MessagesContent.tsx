@@ -7,7 +7,7 @@
  * servers and say so. Message text is rendered only as text (React escapes it).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Lock, LockOpen, Paperclip, Send, ShieldCheck, ShieldAlert, Wifi, WifiOff, Smartphone, History, UserPlus } from "lucide-react";
+import { ArrowLeft, Check, Lock, LockOpen, Paperclip, Search, Send, ShieldCheck, ShieldAlert, Wifi, WifiOff, Smartphone, History, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -267,7 +267,7 @@ function MessageBubble({ m, name, onDownload }: { m: MessageView; name: string; 
   );
 }
 
-function ConversationPane({ engine, conversation }: { engine: MessagingEngine; conversation: ConversationView }) {
+function ConversationPane({ engine, conversation, onBack }: { engine: MessagingEngine; conversation: ConversationView; onBack?: () => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [text, setText] = useState("");
   const [members, setMembers] = useState(false);
@@ -298,12 +298,22 @@ function ConversationPane({ engine, conversation }: { engine: MessagingEngine; c
   );
   return (
     <section className="flex h-full flex-col" data-testid="conversation" data-conversation-id={conversation.id} data-profile={conversation.securityProfile}>
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-3">
-        <div>
-          <h2 className="text-base font-semibold" data-testid="conversation-title">{conversation.title}</h2>
-          <ProfileBadge profile={conversation.securityProfile} />
+      <header className="flex min-h-[4.5rem] items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {onBack ? (
+            <Button type="button" variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onBack} aria-label="Back to conversations" data-testid="back-to-conversations">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          ) : null}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary" aria-hidden="true">
+            {conversation.title.trim().slice(0, 1).toUpperCase() || "?"}
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold" data-testid="conversation-title">{conversation.title}</h2>
+            <div className="mt-1"><ProfileBadge profile={conversation.securityProfile} /></div>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setMembers(!members)}>
+        <Button variant="outline" size="sm" onClick={() => setMembers(!members)} aria-expanded={members} data-testid="conversation-members-toggle">
           Members
         </Button>
       </header>
@@ -381,48 +391,142 @@ export default function MessagesContent() {
   const engine = useEngine();
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [selected, setSelected] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [profileFilter, setProfileFilter] = useState<"ALL" | SecurityProfile>("ALL");
+  const [securityOpen, setSecurityOpen] = useState(false);
   const current = s.conversations.find((c) => c.id === selected) ?? null;
+  const conversations = s.conversations.filter((conversation) => {
+    const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
+    return matchesSearch && (profileFilter === "ALL" || conversation.securityProfile === profileFilter);
+  });
   return (
-    <div className="mx-auto flex h-[calc(100vh-6rem)] max-w-6xl flex-col gap-3 p-4" data-testid="messages-page">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold tracking-tight">Messages</h1>
-        <StatusBar engine={engine} />
-      </div>
-      <DevicePanel engine={engine} />
-      <MessagingDevicesPanel engine={engine} />
-      {s.phase === "loading" ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> Loading…
+    <div className="mx-auto flex h-[calc(100dvh-2rem)] min-h-[32rem] max-w-[88rem] flex-col gap-3 p-3 sm:p-5" data-testid="messages-page">
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Messages</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">Your conversations, all in one place.</p>
         </div>
+        <StatusBar engine={engine} />
+      </header>
+      {s.phase !== "loading" && s.phase !== "ready" ? (
+        <section className="rounded-xl border border-border bg-card px-4 py-3" aria-label="Secure messaging setup">
+          <p className="mb-2 text-sm font-medium">Finish setting up secure messaging</p>
+          <DevicePanel engine={engine} />
+        </section>
       ) : null}
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <aside className={cn("flex w-full min-h-0 flex-col border-r border-border md:w-[21rem] md:shrink-0", current && "hidden md:flex")} aria-label="Conversations">
+          <div className="space-y-3 border-b border-border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-semibold">Chats</h2>
+                <p className="text-xs text-muted-foreground">{s.conversations.length} {s.conversations.length === 1 ? "conversation" : "conversations"}</p>
+              </div>
+              <NewConversation engine={engine} onCreated={setSelected} />
+            </div>
+            <label className="flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-3 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
+              <Search className="h-4 w-4 shrink-0" />
+              <input
+                type="search"
+                aria-label="Search conversations"
+                data-testid="conversation-search"
+                placeholder="Search conversations"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </label>
+            <div className="flex gap-1" role="group" aria-label="Filter conversations">
+              {([
+                ["ALL", "All"],
+                ["PRIVATE_E2EE", "Private"],
+                ["MANAGED", "Managed"],
+              ] as const).map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={profileFilter === value}
+                  onClick={() => setProfileFilter(value)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    profileFilter === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <ul className="min-h-0 flex-1 overflow-y-auto p-2" data-testid="conversation-list">
+            {s.phase === "loading" ? (
+              <li className="flex items-center gap-2 px-3 py-5 text-sm text-muted-foreground"><Spinner /> Loading conversations…</li>
+            ) : conversations.map((c) => {
+              const latest = s.messages[c.id]?.at(-1);
+              const preview = latest?.text ?? latest?.file?.name ?? latest?.note ?? "No messages yet";
+              return (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    data-testid="conversation-item"
+                    data-profile={c.securityProfile}
+                    aria-current={c.id === selected ? "true" : undefined}
+                    onClick={() => setSelected(c.id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/70",
+                      c.id === selected && "bg-muted",
+                    )}
+                  >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary" aria-hidden="true">
+                      {c.title.trim().slice(0, 1).toUpperCase() || "?"}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                          {c.securityProfile === "PRIVATE_E2EE" ? <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-600" /> : <LockOpen className="h-3.5 w-3.5 shrink-0 text-amber-600" />}
+                          <span className="truncate">{c.title}</span>
+                        </span>
+                        {latest?.createdAt ? <time className="shrink-0 text-[10px] text-muted-foreground">{new Date(latest.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time> : null}
+                      </span>
+                      <span className="mt-1 flex items-center justify-between gap-2">
+                        <span className="truncate text-xs text-muted-foreground">{latest?.mine ? "You: " : ""}{preview}</span>
+                        {latest?.mine && latest.state !== "failed" ? <Check className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Sent" /> : null}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {s.phase !== "loading" && conversations.length === 0 ? (
+              <li className="px-4 py-10 text-center">
+                <p className="text-sm font-medium">{search ? "No matching conversations" : "No conversations yet"}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{search ? "Try another name or search term." : "Start a new chat to get the conversation going."}</p>
+              </li>
+            ) : null}
+          </ul>
+          {s.phase === "ready" ? (
+            <div className="border-t border-border p-3">
+              <button type="button" className="w-full text-left text-xs text-muted-foreground hover:text-foreground" onClick={() => setSecurityOpen(!securityOpen)} aria-expanded={securityOpen}>
+                {securityOpen ? "Hide device & security settings" : "Device & security settings"}
+              </button>
+              {securityOpen ? <div className="mt-3 space-y-3"><DevicePanel engine={engine} /><MessagingDevicesPanel engine={engine} /></div> : null}
+            </div>
+          ) : null}
+        </aside>
+        <main className={cn("min-w-0 min-h-0 flex-1", !current && "hidden md:flex md:items-center md:justify-center")} data-testid="conversation-pane">
+          {current ? (
+            <ConversationPane key={current.id} engine={engine} conversation={current} onBack={() => setSelected(null)} />
+          ) : (
+            <div className="max-w-sm px-6 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary"><Send className="h-7 w-7" /></div>
+              <h2 className="mt-5 text-lg font-semibold">Your messages</h2>
+              <p className="mt-2 text-sm text-muted-foreground">Choose a conversation to pick up where you left off, or start a new chat with a colleague.</p>
+            </div>
+          )}
+        </main>
+      </div>
       {s.phase === "error" ? (
         <p className="text-sm text-destructive" data-testid="messaging-error">Messaging error: {s.detail}</p>
       ) : null}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[18rem_1fr]">
-        <aside className="flex min-h-0 flex-col gap-2 rounded-2xl border border-border bg-card p-3">
-          <NewConversation engine={engine} onCreated={setSelected} />
-          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto" data-testid="conversation-list">
-            {s.conversations.map((c) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  data-testid="conversation-item"
-                  data-profile={c.securityProfile}
-                  onClick={() => setSelected(c.id)}
-                  className={cn("w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-muted", c.id === selected && "bg-muted")}
-                >
-                  <span className="flex items-center gap-1 font-medium">
-                    {c.securityProfile === "PRIVATE_E2EE" ? <Lock className="h-3 w-3" /> : <LockOpen className="h-3 w-3" />} {c.title}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-        <main className="min-h-0 rounded-2xl border border-border bg-card">
-          {current ? <ConversationPane key={current.id} engine={engine} conversation={current} /> : <p className="p-6 text-sm text-muted-foreground">Select or start a conversation.</p>}
-        </main>
-      </div>
     </div>
   );
 }
