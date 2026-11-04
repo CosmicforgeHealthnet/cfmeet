@@ -257,6 +257,22 @@ async fn kill_switches_stop_capabilities_per_environment_or_globally_and_are_aud
         .await;
     assert_eq!(r.reason(), "KILL_SWITCH_ENGAGED", "{}", r.text);
     // E2EE onboarding (device registration appends to the transparency log).
+    let blocked_principal = h.principal(&c);
+    let pending = h.challenge(&c, blocked_principal).await;
+    assert_eq!(pending.status, StatusCode::CREATED, "{}", pending.text);
+    let pending_device = cf_messaging_crypto::device::Device::generate(
+        uuid::Uuid::parse_str(pending.json["deviceId"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let challenge_id =
+        uuid::Uuid::parse_str(pending.json["challengeId"].as_str().unwrap()).unwrap();
+    let nonce: [u8; 32] = hex::decode(pending.json["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let pending_package = pending_device
+        .registration_key_package(challenge_id, &nonce)
+        .unwrap();
     operations::set_switch(
         h.conn(),
         KillSwitch::E2eeOnboarding,
@@ -276,7 +292,17 @@ async fn kill_switches_stop_capabilities_per_environment_or_globally_and_are_aud
         "other environments onboard: {}",
         ok.text
     );
-    let (_, refused) = h.register_device(&c, h.principal(&c)).await;
+    let refused_challenge = h.challenge(&c, blocked_principal).await;
+    assert_eq!(refused_challenge.status, StatusCode::SERVICE_UNAVAILABLE);
+    let refused = h
+        .post(
+            &c,
+            Some(blocked_principal),
+            "/v1/messaging/devices",
+            json!({"challengeId":challenge_id,"keyPackage":b64(&pending_package)}),
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(refused.reason(), "KILL_SWITCH_ENGAGED", "{}", refused.text);
 
     // Every change is audited; the audit is append-only.

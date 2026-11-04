@@ -68,7 +68,7 @@ class MessagingJourney(Journey):
                 assert denied.get('error'), 'Enrollment must remain blocked, not return a challenge'
             self.done('production_e2ee_device_guard_remains_active')
             for profile in ('PRIVATE_E2EE', None):
-                body = {'contextClass': 'DIRECT', 'counterpartPrincipalId': b['principalId']}
+                body = {'contextClass': 'DIRECT', 'counterpartCfMeetId': b['cfMeetId']}
                 if profile: body['securityProfile'] = profile
                 denied = self.native(a, 'relay/v1/conversations', 'POST', body, expected=(409,))
                 assert denied['error']['code'] == 'E2EE_NOT_AVAILABLE'

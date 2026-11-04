@@ -747,7 +747,7 @@ pub async fn kt_monitor_once(
 ) -> std::result::Result<KtVerdict, String> {
     let current = kt_checkpoint(db).await.map_err(|e| e.to_string())?;
     let established = db::scalar_i64(db,
-        "SELECT CASE WHEN EXISTS(SELECT 1 FROM messaging_operator_audit WHERE action='KT_CHECKPOINT_ESTABLISHED') THEN 1 ELSE 0 END", vec![])
+        "SELECT (EXISTS(SELECT 1 FROM messaging_operator_audit WHERE action='KT_CHECKPOINT_ESTABLISHED'))::int::bigint", vec![])
         .await.map_err(|_| "checkpoint initialization state unavailable".to_string())? > 0;
     let checkpoint = match read_checkpoint(path) {
         Ok(Some(value)) => Some(value),
