@@ -25,7 +25,17 @@ def execute(sha, run_id, scope, stage):
     ports=release.STAGE_TLS if stage else release.PROD_TLS
     context=dict(sha=sha,stage=stage,scope=scope,accounts=accounts,
         urls={k:'https://api.cfmeet.com:'+str(v) for k,v in ports.items()})
-    if not stage:context['urls']['meeting-service']='https://api.cfmeet.com'
+    if not stage:
+        # Match the existing successful real-media acceptance client: ordinary
+        # outbound networking reaches LiveKit's advertised public ICE addresses.
+        # Customer requests exercise the actual public ingress, without a private
+        # Docker DNS alias intercepting the issued media URL.
+        context['urls']={name:'https://api.cfmeet.com' for name in ('meeting-service','calling','communications')}
+        status=p.run('docker','run','--rm','--network',p.NET,'curlimages/curl:8.12.1',
+            '-sS','-o','/dev/null','-w','%{http_code}','--max-time','15','-X','POST',
+            '-H','Content-Type:application/json','--data','{}',
+            'https://api.cfmeet.com:'+str(ports['communications'])+'/internal/v1/communications/policy/check')
+        assert status=='401','Private policy endpoint must require service authentication'
     p.write_private(folder/'context.private.json',json.dumps(context))
     os.chown(folder,10001,10001);os.chown(folder/'context.private.json',10001,10001)
     source=Path(__file__).resolve().parent
@@ -34,7 +44,7 @@ def execute(sha, run_id, scope, stage):
     p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
     # The test client receives only fixture account credentials and a bounded
     # customer credential. No owner DB password or internal service key.
-    command=['docker','run','--rm','--name','cfmeet-communications-client-'+run_id,'--network',p.NET,'--memory','768m','--cpus','1',
+    command=['docker','run','--rm','--name','cfmeet-communications-client-'+run_id,'--network',p.NET if stage else 'bridge','--memory','768m','--cpus','1',
         '--mount',f'type=bind,src={folder},dst=/result',
         '--mount',f'type=bind,src={Path(__file__).resolve()},dst=/acceptance.py,readonly',
         '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',
@@ -60,6 +70,14 @@ def execute(sha, run_id, scope, stage):
         assert all(provenance[name]['imageId']==ref for name,ref in report['images'].items()),'Transferred image identity differs from registry evidence'
         report['registryDigests']={name:provenance[name]['registryDigests'] for name in report['images']}
     if result.returncode:
+        # SDK stderr can contain signed URLs. Emit only fixed diagnostic labels,
+        # never raw logs, tokens, account data or candidate addresses.
+        diagnostics='\n'.join(f.read_text(errors='replace')[-20000:] for f in folder.glob('rtc-*.private.log')).lower()
+        report['rtcDiagnostics']={label:needle in diagnostics for label,needle in {
+            'ice_failure':'ice connection state: failed','ice_checks':'checking',
+            'signal_error':'signal error','connection_refused':'connection refused',
+            'certificate_error':'certificate','unauthorized':'unauthorized',
+            'websocket_error':'websocket error','connection_timeout':'timed out'}.items()}
         print(json.dumps(report),flush=True)
         raise RuntimeError('Communications backend acceptance failed; protected evidence retained on VPS')
     assert report['checks'] and all(x=='PASS' for x in report['checks'].values())
@@ -221,7 +239,7 @@ class Journey:
                 for method in ('GET','POST'):
                     self.request('meeting-service',path,method,{} if method=='POST' else None,expected=(404,))
             self.done('public_ingress_denies_private_account_endpoints')
-        self.request('communications','/internal/v1/communications/policy/check','POST',{},expected=(401,))
+        self.request('communications','/internal/v1/communications/policy/check','POST',{},expected=(401,) if self.c['stage'] else (404,))
         swagger=self.request('meeting-service','/api-docs/communications.json')
         operations=[v for path,item in swagger['paths'].items() for verb,v in item.items() if verb in ('get','put','post','patch','delete')]
         assert len(operations)==29 and not any('/internal/' in x for x in swagger['paths'])
