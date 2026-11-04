@@ -49,5 +49,17 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         with self.assertRaises(AssertionError):release.database('cfmeet_calling')
         with self.assertRaises(AssertionError):release.database('cfmeet_comm_a; DROP DATABASE x')
 
+    def test_public_ingress_denies_only_private_account_routes_and_preserves_existing_ingress(self):
+        original='server {\n include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n location / { proxy_pass http://127.0.0.1:18081; }\n}'
+        candidate=release.public_ingress_config(original)
+        self.assertIn('location ^~ /internal/v1/accounts/communications/ { return 404; }',candidate)
+        self.assertIn('location / { proxy_pass http://127.0.0.1:18081; }',candidate)
+        self.assertEqual(release.public_ingress_config(candidate),candidate)
+        with self.assertRaises(AssertionError):release.public_ingress_config(candidate.replace('return 404','return 200'))
+
+    def test_public_ingress_refuses_unknown_or_duplicate_site_includes(self):
+        for value in ('server {}','include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'*2):
+            with self.assertRaises(AssertionError):release.public_ingress_config(value)
+
 
 if __name__=='__main__':unittest.main()

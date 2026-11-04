@@ -234,20 +234,57 @@ def configured(service,sha,stage,scope,db=None):
 def proxy_routes():
     path=p.ROOT/'tls-proxy'/'nginx.conf'
     text=path.read_text();marker='  # CFMEET COMMUNICATIONS PRIVATE ROUTES'
-    if marker in text:return
     routes=[]
-    for stage,ports in ((False,PROD_TLS),(True,STAGE_TLS)):
+    for stage,ports in (() if marker in text else ((False,PROD_TLS),(True,STAGE_TLS))):
         for service,port in ports.items():
             if not stage and service not in ('communications','meeting-service'):continue
             name=('cfmeet-comm-stage-' if stage else 'cfmeet-')+service
             if not stage and service in OWNERS:name=OWNERS[service]
             routes.append(f'  server {{ listen {port} ssl; server_name api.cfmeet.com; location / {{ set $peer {name}:{PORTS[service]}; proxy_pass http://$peer$request_uri; proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_read_timeout 3600; }} }}')
-    candidate=text.rstrip().removesuffix('}')+'\n'+marker+'\n'+'\n'.join(routes)+'\n}\n'
+    public_marker='  # CFMEET VERIFIED PUBLIC INGRESS LOOP'
+    if public_marker not in text:
+        # Docker DNS maps api.cfmeet.com to this private proxy. Forward its 443
+        # listener through the actual host ingress, so issued media URLs and
+        # public Account requests exercise the real public routing unchanged.
+        import ipaddress
+        network=json.loads(p.run('docker','network','inspect',p.NET))[0]
+        gateway=network['IPAM']['Config'][0]['Gateway']
+        assert ipaddress.ip_address(gateway).is_private,'Expected private host gateway'
+        p.run('docker','exec','cfmeet-core-tls','test','-f','/etc/ssl/certs/ca-certificates.crt')
+        routes.append(public_marker)
+        routes.append(f'  server {{ listen 443 ssl; server_name api.cfmeet.com; location / {{ proxy_pass https://{gateway}:443; proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 3; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt; proxy_http_version 1.1; proxy_set_header Host api.cfmeet.com; proxy_set_header X-Forwarded-Proto https; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_read_timeout 3600; }} }}')
+    if not routes:return
+    candidate=text.rstrip().removesuffix('}')+'\n'+('' if marker in text else marker+'\n')+'\n'.join(routes)+'\n}\n'
     p.write_private(WORK/'tls-before.conf',text)
     path.write_text(candidate) # existing readonly bind mount requires same inode
-    try:p.run('docker','exec','cfmeet-core-tls','nginx','-t');p.run('docker','exec','cfmeet-core-tls','nginx','-s','reload')
-    except Exception:path.write_text(text);raise
+    try:
+        p.run('docker','exec','cfmeet-core-tls','nginx','-t');p.run('docker','exec','cfmeet-core-tls','nginx','-s','reload')
+        p.run('docker','run','--rm','--network',p.NET,'curlimages/curl:8.12.1','-fsS','--max-time','15','https://api.cfmeet.com/health')
+    except Exception:
+        path.write_text(text)
+        p.run('docker','exec','cfmeet-core-tls','nginx','-s','reload')
+        raise
     assert not p.inspect('cfmeet-core-tls')['HostConfig']['PortBindings']
+
+def public_ingress_config(previous):
+    marker='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
+    rule='    location ^~ /internal/v1/accounts/communications/ { return 404; }'
+    if marker in previous:
+        assert rule in previous,'Private endpoint denial was changed'
+        return previous
+    include='include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
+    assert previous.count(include)==1,'Unexpected existing public ingress topology'
+    return previous.replace(include,include+'\n'+marker+'\n'+rule+'\n')
+
+def secure_public_ingress():
+    site=Path('/etc/nginx/sites-enabled/api.cfmeet.com').resolve()
+    assert site==Path('/etc/nginx/sites-available/api.cfmeet.com')
+    previous=site.read_text();candidate=public_ingress_config(previous)
+    if candidate==previous:return
+    p.write_private(WORK/'public-ingress.before.conf',previous)
+    site.write_text(candidate)
+    try:p.run('nginx','-t');p.run('nginx','-s','reload')
+    except Exception:site.write_text(previous);raise
 
 def wait(name,service):
     probe="import urllib.request; urllib.request.urlopen('http://"+name+':'+str(PORTS[service])+('/health' if service in ('meeting-service','calling') else '/ready')+"',timeout=3).read()"
@@ -383,7 +420,7 @@ def release(sha,run_id):
     assert evidence['sha']==sha and evidence['checks'] and all(v=='PASS' for v in evidence['checks'].values()),'Exact image staging acceptance has not passed'
     for service in PORTS:
         assert evidence['images'][service]==image(service,sha),'Staged image digest mismatch'
-    scope=prod_scope();prepare_trust();proxy_routes()
+    scope=prod_scope();prepare_trust();proxy_routes();secure_public_ingress()
     record=dict(sha=sha,runId=run_id,replacements=[],newHub=False)
     # Only the three additive owner feature migrations and the new isolated Hub
     # schema are applied. Existing base histories are deliberately untouched.

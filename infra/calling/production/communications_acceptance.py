@@ -216,6 +216,11 @@ class Journey:
 
     def run(self):
         self.request('meeting-service','/api/v2/communications/me',expected=(401,))
+        if not self.c['stage']:
+            for path in ('/internal/v1/accounts/communications/status','/internal/v1/accounts/communications/backfill'):
+                for method in ('GET','POST'):
+                    self.request('meeting-service',path,method,{} if method=='POST' else None,expected=(404,))
+            self.done('public_ingress_denies_private_account_endpoints')
         self.request('communications','/internal/v1/communications/policy/check','POST',{},expected=(401,))
         swagger=self.request('meeting-service','/api-docs/communications.json')
         operations=[v for path,item in swagger['paths'].items() for verb,v in item.items() if verb in ('get','put','post','patch','delete')]
