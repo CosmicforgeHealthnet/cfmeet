@@ -195,6 +195,312 @@ async fn connected(s: &PersonalStack, a: &Account, b: &Account) -> anyhow::Resul
     Ok(())
 }
 
+async fn native_message_request(
+    s: &PersonalStack,
+    a: &Account,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    expected: u16,
+) -> anyhow::Result<Value> {
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&a.session),
+            None,
+            method,
+            &format!("/api/v2/messaging/relay/v1/{path}"),
+            body,
+        )
+        .await?,
+        expected,
+        "native Messaging relay",
+    )
+}
+
+async fn enroll_native(
+    s: &PersonalStack,
+    a: &Account,
+) -> anyhow::Result<cf_messaging_crypto::device::Device> {
+    use cf_messaging_crypto::device::Device;
+    let ch = status(
+        request(
+            s,
+            "meeting-service",
+            Some(&a.session),
+            None,
+            Method::POST,
+            "/api/v2/messaging/devices/registration-challenges",
+            Some(json!({})),
+        )
+        .await?,
+        201,
+        "native challenge",
+    )?;
+    let device = Device::generate(Uuid::parse_str(
+        ch["deviceId"].as_str().context("device id")?,
+    )?)?;
+    let nonce: [u8; 32] = hex::decode(ch["nonce"].as_str().context("challenge nonce")?)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("nonce length"))?;
+    let registration = device.registration_key_package(
+        Uuid::parse_str(ch["challengeId"].as_str().context("challenge id")?)?,
+        &nonce,
+    )?;
+    status(request(s,"meeting-service",Some(&a.session),None,Method::POST,
+        "/api/v2/messaging/devices",Some(json!({"challengeId":ch["challengeId"],"keyPackage":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(registration)}))).await?,201,"native proof of possession")?;
+    status(request(s,"meeting-service",Some(&a.session),None,Method::POST,
+        &format!("/api/v2/messaging/devices/{}/key-packages",device.device_id()),
+        Some(json!({"keyPackages":[base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(device.key_package()?)]}))).await?,201,"native KeyPackage")?;
+    Ok(device)
+}
+
+/// Actual encrypted delivery through native authenticated Account APIs, five REAL
+/// service processes and PostgreSQL. TEST runtime only; never production certification.
+#[tokio::test]
+async fn native_contacts_exchange_opaque_mls_messages_and_block_alternate_devices(
+) -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(encrypted_messaging_journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(r) => r,
+        Err(p) => std::panic::resume_unwind(p),
+    }
+}
+
+async fn encrypted_messaging_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
+    use cf_messaging_crypto::{
+        binding::{application_message_aad, ApplicationMessageBinding},
+        group::Processed,
+    };
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let a = account(s).await?;
+    let b = account(s).await?;
+    let da = enroll_native(s, &a).await?;
+    let db = enroll_native(s, &b).await?;
+    // Principal impersonation headers do not establish the required relationship.
+    let body = json!({"contextClass":"DIRECT","securityProfile":"PRIVATE_E2EE","counterpartPrincipalId":b.principal});
+    native_message_request(
+        s,
+        &a,
+        Method::POST,
+        "conversations",
+        Some(body.clone()),
+        403,
+    )
+    .await?;
+    connected(s, &a, &b).await?;
+    let conversation = native_message_request(
+        s,
+        &a,
+        Method::POST,
+        "conversations",
+        Some(body.clone()),
+        201,
+    )
+    .await?;
+    let id = conversation["conversationId"]
+        .as_str()
+        .context("conversation id")?;
+    let reused =
+        native_message_request(s, &a, Method::POST, "conversations", Some(body), 200).await?;
+    assert_eq!(reused["conversationId"], conversation["conversationId"]);
+    let mut ga = da.create_group(
+        &b64.decode(
+            conversation["encryption"]["mlsGroupId"]
+                .as_str()
+                .context("group id")?,
+        )?,
+    )?;
+    let claim = native_message_request(
+        s,
+        &a,
+        Method::POST,
+        &format!("conversations/{id}/mls/key-package-claims"),
+        Some(json!({"principalIds":[b.principal]})),
+        200,
+    )
+    .await?;
+    let packages = claim["keyPackages"]
+        .as_array()
+        .context("claimed packages")?
+        .iter()
+        .map(|k| b64.decode(k["keyPackage"].as_str().unwrap()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let commit = da.add_devices(&mut ga, &packages)?;
+    native_message_request(s,&a,Method::POST,&format!("conversations/{id}/mls/commits"),Some(json!({
+        "clientMessageId":Uuid::new_v4(),"deviceId":da.device_id(),"epoch":commit.epoch,
+        "commit":b64.encode(&commit.commit),"welcome":b64.encode(commit.welcome.as_ref().context("Welcome")?),
+        "welcomeDeviceIds":[db.device_id()],"removedDeviceIds":[]})),201).await?;
+    let welcomes = native_message_request(
+        s,
+        &b,
+        Method::GET,
+        &format!("messaging/devices/{}/welcomes", db.device_id()),
+        None,
+        200,
+    )
+    .await?;
+    let welcome = welcomes["welcomes"]
+        .as_array()
+        .context("pending Welcomes")?
+        .iter()
+        .find(|w| w["conversationId"] == conversation["conversationId"])
+        .context("own Welcome")?;
+    let mut gb = db.join(&b64.decode(welcome["welcome"].as_str().context("Welcome bytes")?)?)?;
+    native_message_request(
+        s,
+        &b,
+        Method::POST,
+        &format!(
+            "messaging/devices/{}/welcomes/{}/consume",
+            db.device_id(),
+            welcome["welcomeId"].as_str().unwrap()
+        ),
+        Some(json!({})),
+        200,
+    )
+    .await?;
+    let mut last_sequence = 0;
+    let mut message_ids = Vec::new();
+    // Bob remains offline between reads; canonical history catches up in order.
+    for direction in 0..2 {
+        let (sender, recipient, device, group, peer_device, peer_group) = if direction == 0 {
+            (&a, &b, &da, &mut ga, &db, &mut gb)
+        } else {
+            (&b, &a, &db, &mut gb, &da, &mut ga)
+        };
+        let client_id = Uuid::new_v4();
+        let aad = application_message_aad(&ApplicationMessageBinding {
+            tenant_id: s.customer.tenant_id,
+            application_id: s.customer.application_id,
+            environment_id: s.customer.environment_id,
+            conversation_id: Uuid::parse_str(id)?,
+            client_message_id: client_id,
+            sender_device_id: device.device_id(),
+        });
+        let plaintext = format!("test-only-{}", Uuid::new_v4());
+        let ciphertext = device.encrypt(group, &aad, plaintext.as_bytes())?;
+        let payload = json!({"clientMessageId":client_id,"deviceId":device.device_id(),"epoch":group.epoch(),"ciphertext":b64.encode(&ciphertext)});
+        let sent = native_message_request(
+            s,
+            sender,
+            Method::POST,
+            &format!("conversations/{id}/messages"),
+            Some(payload.clone()),
+            201,
+        )
+        .await?;
+        let replay = native_message_request(
+            s,
+            sender,
+            Method::POST,
+            &format!("conversations/{id}/messages"),
+            Some(payload),
+            200,
+        )
+        .await?;
+        assert_eq!(sent["messageId"], replay["messageId"]);
+        let sequence = sent["sequence"].as_i64().context("committed sequence")?;
+        assert!(sequence > last_sequence);
+        last_sequence = sequence;
+        let message_id = sent["messageId"].as_str().context("message id")?;
+        let received = native_message_request(
+            s,
+            recipient,
+            Method::GET,
+            &format!("conversations/{id}/messages/{message_id}"),
+            None,
+            200,
+        )
+        .await?;
+        let bytes = b64.decode(
+            received["e2ee"]["ciphertext"]
+                .as_str()
+                .context("stored ciphertext")?,
+        )?;
+        assert_eq!(bytes, ciphertext);
+        match peer_device.process(peer_group, &bytes)? {
+            Processed::Application {
+                aad: actual,
+                plaintext: opened,
+            } => {
+                assert_eq!(actual, aad);
+                assert!(
+                    opened == plaintext.as_bytes(),
+                    "authorized client decryption did not match"
+                );
+            }
+            _ => bail!("expected an authenticated application message"),
+        }
+        message_ids.push(message_id.to_owned());
+        native_message_request(
+            s,
+            recipient,
+            Method::PUT,
+            &format!("conversations/{id}/read-cursor"),
+            Some(json!({"sequence":sequence})),
+            200,
+        )
+        .await?;
+    }
+    let alt = enroll_native(s, &a).await?;
+    status(
+        hub(
+            s,
+            &b,
+            Method::PUT,
+            &format!("/profiles/{}/block", a.public_id),
+            Some(json!({})),
+        )
+        .await?,
+        200,
+        "contact block",
+    )?;
+    native_message_request(s,&a,Method::POST,&format!("conversations/{id}/messages"),Some(json!({
+        "clientMessageId":Uuid::new_v4(),"deviceId":alt.device_id(),"epoch":ga.epoch(),"ciphertext":b64.encode(&commit.commit)})),403).await?;
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&a.session),
+            None,
+            Method::POST,
+            &format!("/api/v2/messaging/devices/{}/revoke", alt.device_id()),
+            Some(json!({"reason":"COMPROMISED"})),
+        )
+        .await?,
+        200,
+        "device revocation",
+    )?;
+    let denied = request(
+        s,
+        "meeting-service",
+        Some(&a.session),
+        None,
+        Method::POST,
+        "/api/v2/messaging/client-tokens",
+        Some(json!({"deviceId":alt.device_id()})),
+    )
+    .await?;
+    assert!((400..500).contains(&denied.status));
+    let owner = Database::connect(&s.owner_urls["messaging"]).await?;
+    let row = owner.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
+        "SELECT count(*) n FROM messaging_messages WHERE conversation_id=$1 AND message_kind='APPLICATION' AND security_profile='PRIVATE_E2EE' AND mls_ciphertext IS NOT NULL AND managed_sealed IS NULL",
+        [Uuid::parse_str(id)?.into()])).await?.context("ciphertext storage evidence")?;
+    assert_eq!(row.try_get::<i64>("", "n")?, 2);
+    owner.close().await?;
+    println!("EVIDENCE native-messaging TEST conversation={id} messages={} encrypted-storage=PASS client-decryption=PASS replay=PASS block=PASS revocation=PASS",message_ids.join(","));
+    Ok(())
+}
+
 #[tokio::test]
 async fn personal_identity_contacts_and_authoritative_policy_across_real_services(
 ) -> anyhow::Result<()> {

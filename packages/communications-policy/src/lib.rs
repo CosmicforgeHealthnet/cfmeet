@@ -60,6 +60,8 @@ pub enum Action {
     DirectCall,
     DirectConversation,
     MessageSend,
+    MessageNotification,
+    GroupNotification,
     ContactRequest,
     GroupInvitation,
     PersonalActivity,

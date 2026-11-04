@@ -198,6 +198,12 @@ impl OutboxEvent {
             "correlation_id": self.correlation_id,
             "payload": self.payload,
         });
+        // Delayed notification workers need these authenticated owner references;
+        // customer webhook envelopes do not.
+        if let Some(payload) = envelope["payload"].as_object_mut() {
+            payload.remove("initiating_service_account_id");
+            payload.remove("environment_kind");
+        }
         if let Some(cause) = self
             .causation_id
             .as_deref()

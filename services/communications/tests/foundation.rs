@@ -11,6 +11,54 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 #[tokio::test]
+async fn notification_policy_uses_recipient_preferences_and_live_blocks() {
+    let h = Harness::new().await;
+    let a = h.profile(&h.account()).await;
+    let b = h.profile(&h.account()).await;
+    h.connected(&a, &b).await;
+    let request = check(Action::MessageNotification, &a, &b);
+    assert!(
+        h.state
+            .check_policy(&h.scope, &request)
+            .await
+            .unwrap()
+            .allowed
+    );
+    for preference in ["MUTED", "MENTIONS", "ALL"] {
+        execute(&h.state.store.db,
+            "UPDATE communication_contact_aliases SET notifications=$2,version=version+1 WHERE owner_profile_id=$1",
+            vec![b.id.into(),preference.into()]).await.unwrap();
+        let direct = h.state.check_policy(&h.scope, &request).await.unwrap();
+        let group = h
+            .state
+            .check_policy(&h.scope, &check(Action::GroupNotification, &a, &b))
+            .await
+            .unwrap();
+        assert_eq!(direct.allowed, preference == "ALL");
+        assert_eq!(group.allowed, preference == "ALL");
+        // B's preferences do not mute A's notifications about B.
+        assert!(
+            h.state
+                .check_policy(&h.scope, &check(Action::MessageNotification, &b, &a))
+                .await
+                .unwrap()
+                .allowed
+        );
+    }
+    *h.blocked.write().unwrap() = true;
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &request)
+            .await
+            .unwrap()
+            .allowed
+    );
+    h.stop_owners();
+    assert!(h.state.check_policy(&h.scope, &request).await.is_err());
+    h.close().await;
+}
+
+#[tokio::test]
 async fn concurrent_lazy_activation_keeps_one_stable_account_and_principal_without_phone() {
     let h = Harness::new().await;
     let a = h.account();

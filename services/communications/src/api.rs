@@ -148,6 +148,14 @@ async fn policy_check(
     Extension(ctx): Extension<InternalServiceContext>,
     Json(check): Json<cf_communications_policy::PolicyCheck>,
 ) -> Result<Json<cf_communications_policy::Decision>> {
+    if matches!(
+        check.action,
+        cf_communications_policy::Action::MessageNotification
+            | cf_communications_policy::Action::GroupNotification
+    ) && ctx.authenticated_service() != &cf_service_auth::ServiceId::messaging()
+    {
+        return Err(Error::Forbidden);
+    }
     s.metrics.requests.fetch_add(1, Ordering::Relaxed);
     let result = s.check_policy(&auth::delegated(&ctx)?, &check).await?;
     if !result.allowed {

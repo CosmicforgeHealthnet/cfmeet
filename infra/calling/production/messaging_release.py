@@ -37,7 +37,7 @@ def database_summary():
       'devices', (SELECT count(*) FROM messaging_devices),
       'conversations', (SELECT count(*) FROM messaging_conversations),
       'pending_outbox', (SELECT count(*) FROM messaging_outbox_events WHERE status='PENDING'),
-      'dead_outbox', (SELECT count(*) FROM messaging_outbox_events WHERE status='DEAD'),
+      'dead_outbox', (SELECT count(*) FROM messaging_outbox_events WHERE status='DEAD_LETTER'),
       'oldest_pending_seconds', (SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(occurred_at)),0)::bigint
                                 FROM messaging_outbox_events WHERE status='PENDING'),
       'push_statuses', (SELECT json_object_agg(status,n) FROM

@@ -28,9 +28,10 @@ use crate::error::{ApiError, ApiResult, ErrorCode};
 enum Seg {
     Lit(&'static str),
     Id,
+    Reaction,
 }
 
-use Seg::{Id, Lit};
+use Seg::{Id, Lit, Reaction};
 
 /// One relayed operation: method, path shape (under `/v1/`), accepted query keys and
 /// whether the client's `Idempotency-Key` is forwarded.
@@ -292,7 +293,243 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // Section 8: existing end-user domain operations; authority stays in Messaging.
+    r(Method::PATCH, &[Lit("conversations"), Id], &[], false),
+    r(
+        Method::PATCH,
+        &[Lit("conversations"), Id, Lit("members"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("conversations"), Id, Lit("messages"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("revisions"),
+        ],
+        &[],
+        false,
+    ),
+    r(Method::GET, &[Lit("messaging"), Lit("blocks")], &[], false),
+    r(Method::POST, &[Lit("messaging"), Lit("blocks")], &[], false),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("blocks"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("client-sessions"), Id, Lit("revoke")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("presence"), Lit("settings")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("presence"), Lit("settings")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("devices"),
+            Id,
+            Lit("push-registration"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("devices"),
+            Id,
+            Lit("push-registration"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("search")],
+        &["q", "limit", "beforeSequence"],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("search")],
+        &["q", "limit"],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("reports")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("bans")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("conversations"), Id, Lit("bans"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("reactions"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("reactions"),
+            Reaction,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[
+            Lit("conversations"),
+            Id,
+            Lit("messages"),
+            Id,
+            Lit("reactions"),
+            Reaction,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("pins")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("conversations"), Id, Lit("pins"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("conversations"), Id, Lit("pins"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("backups")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("backups"), Lit("latest")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("backups"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("backups"), Id, Lit("finalize")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("backups"), Id, Lit("download-grants")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("conversations"), Id, Lit("messages"), Id, Lit("thread")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("invitation"), Lit("accept")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("invitation"), Lit("decline")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("invitations")],
+        &[],
+        false,
+    ),
 ];
+
+// Bound the path segment independently of the domain reaction validation. Reject
+// decoded delimiters, traversal, control characters and double-encoded escapes.
+fn safe_reaction_segment(raw: &str) -> bool {
+    if raw.len() > 192 {
+        return false;
+    }
+    let Ok(value) = urlencoding::decode(raw) else {
+        return false;
+    };
+    !value.is_empty()
+        && value.len() <= 64
+        && !value.chars().any(|c| {
+            c.is_control() || c.is_whitespace() || matches!(c, '/' | '\\' | '?' | '#' | '%' | '.')
+        })
+}
 
 /// Matches a client path (relative, e.g. `v1/conversations/<id>/messages`) against the
 /// allowlist. Every `Id` segment must be a canonical UUID.
@@ -305,6 +542,7 @@ pub fn route_for(method: &Method, path: &str) -> Option<&'static RelayRoute> {
             && r.path.iter().zip(&segs).all(|(p, s)| match p {
                 Lit(l) => l == s,
                 Id => Uuid::parse_str(s).is_ok_and(|u| u.hyphenated().to_string() == *s),
+                Reaction => safe_reaction_segment(s),
             })
     })
 }
@@ -532,6 +770,18 @@ mod tests {
             (Method::GET, "v1/conversations".to_string()),
             (Method::POST, format!("v1/conversations/{C}/messages")),
             (Method::POST, format!("v1/conversations/{C}/mls/commits")),
+            (Method::PATCH, format!("v1/conversations/{C}/members/{C}")),
+            (Method::POST, format!("v1/conversations/{C}/bans")),
+            (
+                Method::PUT,
+                format!("v1/conversations/{C}/messages/{C}/reactions/:thumbsup:"),
+            ),
+            (
+                Method::PUT,
+                format!("v1/conversations/{C}/messages/{C}/reactions/%F0%9F%91%8D"),
+            ),
+            (Method::GET, "v1/messaging/invitations".into()),
+            (Method::PUT, "v1/messaging/presence/settings".into()),
             (Method::GET, format!("v1/messaging/devices/{C}/welcomes")),
             (
                 Method::PUT,
@@ -549,7 +799,6 @@ mod tests {
             (Method::GET, "v1/messaging/audit".to_string()),
             (Method::POST, "v1/messaging/moderation/actions".to_string()),
             (Method::POST, format!("v1/conversations/{C}/sms-bridges")),
-            (Method::POST, format!("v1/conversations/{C}/bans")),
             (
                 Method::GET,
                 format!("v1/conversations/{C}/attachments/{C}/content"),
@@ -568,6 +817,27 @@ mod tests {
             (Method::GET, "v2/conversations".to_string()),
         ] {
             assert!(route_for(&m, &p).is_none(), "{m} {p}");
+        }
+    }
+    #[test]
+    fn reaction_paths_cannot_escape_the_domain_or_smuggle_a_query() {
+        for value in [
+            "/",
+            "..",
+            "%2f",
+            "%5c",
+            "%252f",
+            "%00",
+            "x?admin=true",
+            "x#fragment",
+            " ",
+        ] {
+            assert!(!safe_reaction_segment(value), "{value}");
+            assert!(route_for(
+                &Method::PUT,
+                &format!("v1/conversations/{C}/messages/{C}/reactions/{value}")
+            )
+            .is_none());
         }
     }
 }

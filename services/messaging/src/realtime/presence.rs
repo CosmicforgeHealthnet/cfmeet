@@ -40,20 +40,18 @@ struct Settings {
     share_read_receipts: bool,
 }
 
-async fn settings(state: &AppState, env: Uuid, principal: Uuid) -> Settings {
-    db::one::<Settings, _>(
+async fn settings(state: &AppState, env: Uuid, principal: Uuid) -> Result<Settings> {
+    Ok(db::one::<Settings, _>(
         &state.db,
         "SELECT visibility, share_last_seen, share_read_receipts FROM messaging_presence_settings WHERE environment_id = $1 AND principal_id = $2",
         vec![env.into(), principal.into()],
     )
-    .await
-    .ok()
-    .flatten()
+    .await?
     .unwrap_or(Settings {
         visibility: "CONVERSATION_MEMBERS".into(),
         share_last_seen: false,
         share_read_receipts: true,
-    })
+    }))
 }
 
 fn ttl(state: &AppState) -> std::time::Duration {
@@ -114,11 +112,11 @@ pub async fn connected(state: &AppState, session: &SessionRow, policy: &Effectiv
     if !came_online || !policy.privacy.presence {
         return false;
     }
-    if settings(state, session.environment_id, session.principal_id)
-        .await
-        .visibility
-        == "HIDDEN"
-    {
+    let Ok(preference) = settings(state, session.environment_id, session.principal_id).await else {
+        // A failed privacy read must not become the default sharing preference.
+        return false;
+    };
+    if preference.visibility == "HIDDEN" {
         return false;
     }
     announce(state, session, "AVAILABLE", None).await;
@@ -147,7 +145,9 @@ pub async fn disconnected(state: &AppState, session: &SessionRow, policy: &Effec
     if !offline || !policy.privacy.presence {
         return;
     }
-    let s = settings(state, session.environment_id, session.principal_id).await;
+    let Ok(s) = settings(state, session.environment_id, session.principal_id).await else {
+        return;
+    };
     if s.visibility == "HIDDEN" {
         return;
     }
@@ -382,7 +382,7 @@ pub async fn get_settings(
     ctx: &TrustedContext,
     acting: &Acting,
 ) -> Result<Value> {
-    let s = settings(state, ctx.scope.environment_id, acting.principal_id).await;
+    let s = settings(state, ctx.scope.environment_id, acting.principal_id).await?;
     Ok(
         json!({ "visibility": s.visibility, "shareLastSeen": s.share_last_seen, "shareReadReceipts": s.share_read_receipts }),
     )

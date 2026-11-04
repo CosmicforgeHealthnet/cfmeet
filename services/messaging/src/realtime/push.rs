@@ -280,6 +280,93 @@ struct Job {
     push_handle: String,
     enabled: bool,
     device_status: String,
+    recipient_principal_id: Uuid,
+    member_active: bool,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    event_payload: Value,
+    context_class: String,
+}
+
+/// Reauthorize delayed notifications. The scope comes from the committed owner event,
+/// never a push registration or consumer request. Legacy jobs without authority refs
+/// are suppressed in the governed personal scope, rather than guessed.
+async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
+    if !job.member_active {
+        return Ok(false);
+    }
+    let sender = job.event_payload["sender_principal_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok());
+    let Some(sender) = sender else {
+        return Ok(false);
+    };
+    if job.context_class == "DIRECT"
+        && crate::safety::blocks::blocked_between(
+            &state.db,
+            job.environment_id,
+            sender,
+            job.recipient_principal_id,
+        )
+        .await?
+    {
+        return Ok(false);
+    }
+    let Some(client) = state.communications.as_ref() else {
+        return Ok(true);
+    };
+    let scope = cf_communications_policy::Scope {
+        tenant_id: job.tenant_id,
+        application_id: job.application_id,
+        environment_id: job.environment_id,
+    };
+    if !client.governs(scope) || !matches!(job.context_class.as_str(), "DIRECT" | "GROUP") {
+        return Ok(true);
+    }
+    let Some(account) = job.event_payload["initiating_service_account_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    else {
+        return Ok(false);
+    };
+    let kind = match job.event_payload["environment_kind"].as_str() {
+        Some("PRODUCTION") => cf_service_auth::ApplicationEnvironmentKind::Production,
+        Some("TEST") => cf_service_auth::ApplicationEnvironmentKind::Test,
+        Some("SANDBOX") => cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+        _ => return Ok(false),
+    };
+    let scope = cf_service_auth::DelegatedPlatformContext::new(
+        job.tenant_id,
+        job.application_id,
+        job.environment_id,
+        kind,
+        account,
+    );
+    let action = if job.context_class == "DIRECT" {
+        cf_communications_policy::Action::MessageNotification
+    } else {
+        cf_communications_policy::Action::GroupNotification
+    };
+    match client
+        .check(
+            scope,
+            &cf_communications_policy::PolicyCheck {
+                action,
+                actor_principal_id: sender,
+                target_principal_id: job.recipient_principal_id,
+                credential_issued_at: None,
+                credential_principal_id: None,
+            },
+        )
+        .await
+    {
+        Ok(()) => Ok(true),
+        Err(cf_communications_policy::PolicyError::Denied) => Ok(false),
+        Err(cf_communications_policy::PolicyError::Unavailable) => {
+            Err(Error::code(ErrorCode::ServiceUnavailable))
+        }
+    }
 }
 
 /// One dispatch pass: claims due jobs under a lease and calls the provider.
@@ -295,7 +382,17 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
            (SELECT platform FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS platform, \
            (SELECT push_handle FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS push_handle, \
            (SELECT enabled FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS enabled, \
-           (SELECT status FROM messaging_devices d WHERE d.id = j.device_id) AS device_status",
+           (SELECT status FROM messaging_devices d WHERE d.id = j.device_id) AS device_status, \
+           (SELECT principal_id FROM messaging_devices d WHERE d.id = j.device_id) AS recipient_principal_id, \
+           j.environment_id, \
+           (SELECT tenant_id FROM messaging_outbox_events e WHERE e.id=j.event_id) AS tenant_id, \
+           (SELECT application_id FROM messaging_outbox_events e WHERE e.id=j.event_id) AS application_id, \
+           (SELECT payload FROM messaging_outbox_events e WHERE e.id=j.event_id) AS event_payload, \
+           (SELECT context_class FROM messaging_conversations c WHERE c.id=j.conversation_id) AS context_class, \
+           EXISTS(SELECT 1 FROM messaging_conversation_members m JOIN messaging_devices d ON d.principal_id=m.principal_id AND d.environment_id=m.environment_id \
+             JOIN messaging_outbox_events e ON e.id=j.event_id JOIN messaging_conversations c ON c.id=m.conversation_id \
+             WHERE m.conversation_id=j.conversation_id AND d.id=j.device_id AND m.state='ACTIVE' \
+             AND c.lifecycle_state='ACTIVE' AND e.conversation_event_sequence>=m.visible_from_event) AS member_active",
         vec![now.into(), batch.into(), token.into(), (now + chrono::Duration::seconds(60)).into()],
     )
     .await?;
@@ -318,12 +415,25 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
             report.not_configured += 1;
             ("NOT_CONFIGURED", None, None)
         } else {
-            match state
-                .realtime
-                .push
-                .send(&job.platform, &job.push_handle, &job.payload)
-                .await
-            {
+            let outcome = match authorized(state, &job).await {
+                Ok(true) => {
+                    state
+                        .realtime
+                        .push
+                        .send(&job.platform, &job.push_handle, &job.payload)
+                        .await
+                }
+                Ok(false) => {
+                    report.disabled += 1;
+                    db::exec(&state.db,
+                        "UPDATE messaging_push_jobs SET status='DISABLED',attempts=$3,lease_token=NULL,lease_expires_at=NULL,completed_at=$4 WHERE id=$1 AND lease_token=$2",
+                        vec![job.id.into(),token.into(),attempts.into(),now.into()]).await?;
+                    crate::metrics::inc("messaging_push_jobs_total", &[("status", "disabled")]);
+                    continue;
+                }
+                Err(_) => PushOutcome::Retryable("notification authorization unavailable".into()),
+            };
+            match outcome {
                 PushOutcome::Sent => {
                     report.sent += 1;
                     ("SENT", None, None)
@@ -333,8 +443,8 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
                     let _ = db::exec(
                         &state.db,
                         "UPDATE messaging_push_registrations SET enabled = FALSE, disabled_reason = 'INVALID_HANDLE', updated_at = $2 \
-                         WHERE id = (SELECT registration_id FROM messaging_push_jobs WHERE id = $1)",
-                        vec![job.id.into(), now.into()],
+                         WHERE id = (SELECT registration_id FROM messaging_push_jobs WHERE id = $1) AND push_handle=$3",
+                        vec![job.id.into(), now.into(), job.push_handle.into()],
                     )
                     .await;
                     ("FAILED", None, Some("invalid handle".into()))

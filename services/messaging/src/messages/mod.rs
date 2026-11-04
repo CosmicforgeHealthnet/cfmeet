@@ -539,6 +539,10 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
                 "sender_device_id": row.sender_device_id,
                 "security_provenance": row.security_provenance,
                 "notify": notify,
+                // Non-secret, authenticated authority references for delayed workers.
+                // Never accepted from the message request or exposed as push payload.
+                "initiating_service_account_id": ctx.scope.service_account_id,
+                "environment_kind": ctx.scope.environment_kind.as_str(),
             }),
         ),
     };

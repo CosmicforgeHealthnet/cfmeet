@@ -466,6 +466,9 @@ pub async fn revoke_all_sessions(
                     vec![acting.principal_id.into(), ctx2.scope.environment_id.into(), now.into()],
                 )
                 .await?;
+                  db::exec(txn,
+                      "UPDATE messaging_push_registrations SET enabled=FALSE,disabled_reason='SESSIONS_REVOKED',updated_at=$3 WHERE principal_id=$1 AND environment_id=$2",
+                      vec![acting.principal_id.into(),ctx2.scope.environment_id.into(),now.into()]).await?;
                 for r in &revoked {
                     outbox::enqueue(
                         txn,

@@ -137,7 +137,24 @@ impl State {
             .relationship(&self.store.db, &actor, &target)
             .await?;
         let connected = relationship == "CONNECTED";
-        let allowed = decide(check.action, connected, &privacy.settings());
+        let mut allowed = decide(check.action, connected, &privacy.settings());
+        if allowed
+            && matches!(
+                check.action,
+                Action::MessageNotification | Action::GroupNotification
+            )
+        {
+            // Preferences belong to the RECIPIENT, never the sender. No message
+            // content is inspected; MENTIONS cannot be inferred from opaque ciphertext.
+            let preference: Option<Value> = store::one(&self.store.db,
+                "SELECT jsonb_build_object('notifications',a.notifications) doc FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.owner_profile_id=$1 AND ((c.left_profile_id=$1 AND c.right_profile_id=$2) OR (c.right_profile_id=$1 AND c.left_profile_id=$2))",
+                vec![target.id.into(), actor.id.into()]).await?;
+            allowed = notification_preference_allows(
+                preference
+                    .as_ref()
+                    .and_then(|v| v["notifications"].as_str()),
+            );
+        }
         Ok(Decision {
             schema_version: 1,
             allowed,
@@ -259,9 +276,12 @@ impl State {
 pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
     match action {
         Action::DirectCall => connected && p.incoming_call_policy == Audience::Connections,
-        Action::DirectConversation | Action::MessageSend => {
+        Action::DirectConversation | Action::MessageSend | Action::MessageNotification => {
             connected && p.direct_chat_policy == Audience::Connections
         }
+        // Messaging alone establishes group membership. Groups do not require every
+        // co-member to be a personal contact; active-account/block checks above apply.
+        Action::GroupNotification => true,
         Action::ContactRequest => p.contact_request_permissions == RequestPermission::Everyone,
         Action::PersonalActivity => false, // handled only for a verified active self above
         Action::GroupInvitation => {
@@ -275,6 +295,9 @@ pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
         }
     }
 }
+fn notification_preference_allows(preference: Option<&str>) -> bool {
+    matches!(preference, None | Some("ALL"))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +308,7 @@ mod tests {
             Action::DirectCall,
             Action::DirectConversation,
             Action::MessageSend,
+            Action::MessageNotification,
             Action::Presence,
             Action::GroupInvitation,
         ] {
@@ -303,10 +327,19 @@ mod tests {
         for a in [
             Action::DirectCall,
             Action::MessageSend,
+            Action::MessageNotification,
             Action::DirectConversation,
             Action::Presence,
         ] {
             assert!(!decide(a, true, &p));
+        }
+    }
+    #[test]
+    fn opaque_notifications_respect_recipient_mute_and_do_not_invent_mentions() {
+        assert!(notification_preference_allows(None));
+        assert!(notification_preference_allows(Some("ALL")));
+        for value in ["MUTED", "MENTIONS", "unknown"] {
+            assert!(!notification_preference_allows(Some(value)));
         }
     }
 }
