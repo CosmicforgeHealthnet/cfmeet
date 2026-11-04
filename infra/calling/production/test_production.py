@@ -9,6 +9,30 @@ import production as p
 import api_acceptance
 
 
+class FixtureCredentialLifetime(unittest.TestCase):
+    def test_expired_fixture_credentials_renew_without_replacing_principals(self):
+        with tempfile.TemporaryDirectory() as folder:
+            value={'actors':{'tenantId':'11111111-1111-4111-8111-111111111111','principals':['existing-a'],'token':'expired'},
+                   'other':{'tenantId':'22222222-2222-4222-8222-222222222222','principals':['existing-b'],'token':'expired'},
+                   'credentialExpiresAt':1,'restrictedToken':'expired'}
+            path=Path(folder)/'calling-api-acceptance.json';path.write_text(json.dumps(value))
+            with patch.object(p,'SECRETS',Path(folder)),patch.object(api_acceptance.time,'time',return_value=10000),\
+                 patch.object(api_acceptance,'sql',side_effect=[value['actors']['tenantId'],value['other']['tenantId']]),\
+                 patch.object(api_acceptance,'admin',side_effect=[{'secret':'renewed-a'},{'secret':'renewed-b'},{'secret':'renewed-read'}]) as admin:
+                result=api_acceptance.context()
+                self.assertEqual(result['actors']['principals'],['existing-a'])
+                self.assertEqual(result['other']['principals'],['existing-b'])
+                self.assertEqual(result['restrictedToken'],'renewed-read')
+                self.assertEqual(result['credentialExpiresAt'],96400)
+                self.assertEqual(admin.call_count,3)
+                self.assertEqual(admin.call_args.args.count('--scope'),1)
+                self.assertIn('calls.read',admin.call_args.args)
+            with patch.object(p,'SECRETS',Path(folder)),patch.object(api_acceptance.time,'time',return_value=11000),\
+                 patch.object(api_acceptance,'admin') as admin:
+                self.assertEqual(api_acceptance.context(),result)
+                admin.assert_not_called()
+
+
 class ActivationSafety(unittest.TestCase):
     def evidence(self):
         return dict(schema=1,status='PRODUCTION_CERTIFIED',timestamp=1000,

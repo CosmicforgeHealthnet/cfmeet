@@ -32,11 +32,24 @@ def context():
     file=p.SECRETS/'calling-api-acceptance.json'
     if file.exists():
         value=json.loads(file.read_text())
-        if 'restrictedToken' not in value:
+        expired=value.get('credentialExpiresAt',0)<time.time()+900
+        if expired:
+            # A paused release may outlive the one-day fixture credentials.
+            # Renew only the two explicitly owned test service accounts; retain
+            # their principal mappings, scopes and customer-independent history.
+            for key,tenant in (('actors','cfmeet-calling-acceptance'),('other','cfmeet-calling-isolation')):
+                assert sql("SELECT id FROM platform_tenants WHERE slug='"+tenant+"'")==str(uuid.UUID(value[key]['tenantId']))
+                credential=admin('credential','create','--tenant',tenant,'--application','suite',
+                    '--environment','production','--service-account','acceptance','--expires-in-days','1',
+                    *[v for scope in SCOPES for v in ('--scope',scope)],'--label','Renewed controlled production acceptance')
+                value[key]['token']=credential['secret']
+        if expired or 'restrictedToken' not in value:
             credential=admin('credential','create','--tenant','cfmeet-calling-acceptance','--application','suite',
                 '--environment','production','--service-account','acceptance','--expires-in-days','1',
                 '--scope','calls.read','--label','Controlled scope denial acceptance')
-            value['restrictedToken']=credential['secret'];p.write_private(file,json.dumps(value))
+            value['restrictedToken']=credential['secret']
+        if expired:value['credentialExpiresAt']=time.time()+86400
+        p.write_private(file,json.dumps(value))
         return value
     users=app_acceptance.accounts()
     tenants=['cfmeet-calling-acceptance','cfmeet-calling-isolation']
@@ -58,7 +71,7 @@ def context():
         principals=[admin('principal','register',*path,'--kind','native-cf-user','--reference',u['userId'])['principal'] for u in users]
         records.append(dict(token=credential['secret'],principals=[x['id'] for x in principals],
             tenantId=principals[0]['tenantId'],applicationId=principals[0]['applicationId'],environmentId=principals[0]['environmentId']))
-    value={'actors':records[0],'other':records[1]}
+    value={'actors':records[0],'other':records[1],'credentialExpiresAt':time.time()+86400}
     p.write_private(file,json.dumps(value));return context()
 
 
