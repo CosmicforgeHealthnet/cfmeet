@@ -267,5 +267,8 @@ def run(operation, sha, run_id):
         inventory()
     elif operation == 'resource-recover':
         recover(run_id)
+    elif operation == 'resource-scanners':
+        import scanner_audit
+        scanner_audit.audit()
     else:
         raise RuntimeError('Unsupported resource operation')
