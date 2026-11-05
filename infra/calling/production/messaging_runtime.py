@@ -96,8 +96,11 @@ def nginx_config(tls_ip, store_ip):
     common = ('    access_log off;\n    proxy_http_version 1.1;\n'
         '    proxy_set_header Host $http_host;\n    proxy_set_header X-Forwarded-Proto https;\n'
         '    add_header Cache-Control "private, no-store" always;\n')
+    # Depth 3: the private proxy presents the public chain (leaf, intermediate, root);
+    # nginx's default depth of 1 cannot verify it and answers 502.
     tls = (common + '    proxy_ssl_server_name on;\n    proxy_ssl_name api.cfmeet.com;\n'
-        '    proxy_ssl_verify on;\n    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;\n'
+        '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth 3;\n'
+        '    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;\n'
         '    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n'
         '    proxy_read_timeout 3600;\n    proxy_pass https://' + tls_ip + ':8444;\n')
     return ('# Section 8: device-only realtime ingress; Account owns native REST authentication.\n'
@@ -212,6 +215,36 @@ def signed_grants(shared, key):
         if isinstance(value, str) and value.startswith(prefix) and 'X-Amz-Signature=' in value:
             grants.append(value)
     return grants
+
+
+def ingress_probe():
+    """Public realtime routes reach Messaging and refuse unauthenticated use."""
+    request = urllib.request.Request('https://api.cfmeet.com/v1/realtime/tickets', method='POST',
+                                     data=b'{}', headers={'Content-Type': 'application/json'})
+    try:
+        urllib.request.urlopen(request, timeout=15)
+    except urllib.error.HTTPError as error:
+        assert error.code == 401, 'Realtime ticket route did not reach Messaging: ' + str(error.code)
+    else:
+        raise AssertionError('Unauthenticated realtime ticket issued')
+    return {'realtimeTicketRouteUnauthenticated': 401}
+
+
+def reinstall_ingress(run_id):
+    """Re-applies only the public Messaging ingress (rolled back if its probe fails)."""
+    p.identity()
+    install_ingress(run_id)
+    try:
+        evidence = ingress_probe()
+    except Exception:
+        before = WORK / ('nginx-site-before-' + run_id)
+        Path('/etc/nginx/sites-available/api.cfmeet.com').write_text(before.read_text())
+        previous = WORK / ('nginx-snippet-before-' + run_id)
+        Path('/etc/nginx/snippets/cfmeet-messaging.conf').write_text(previous.read_text() if previous.exists() else '# Messaging ingress rolled back\n')
+        p.run('nginx', '-t'); p.run('systemctl', 'reload', 'nginx')
+        raise
+    p.regression()
+    print(json.dumps({'operation': 'messaging-ingress', 'runId': run_id, **evidence}))
 
 
 def storage_probe(run_id):
@@ -336,6 +369,7 @@ def _configure(sha, run_id, old, env, managed, user, password, mode='quarantine'
         assert scanner_in_use('cfmeet-messaging') == mode, 'Production Messaging scanner mode changed'
         install_ingress(run_id)
         storage_evidence = storage_probe(run_id)
+        storage_evidence.update(ingress_probe())
         p.regression()
         assert p.inspect('cfmeet-messaging')['Image'] == old['Image']
         print(json.dumps({'operation': 'messaging-configure', 'runId': run_id,

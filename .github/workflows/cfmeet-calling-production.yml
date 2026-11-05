@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:

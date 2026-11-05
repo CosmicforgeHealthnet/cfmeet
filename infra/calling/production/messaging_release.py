@@ -88,6 +88,9 @@ def run(operation, sha, run_id):
     elif operation == 'messaging-configure':
         import messaging_runtime
         messaging_runtime.configure(sha, run_id)
+    elif operation == 'messaging-ingress':
+        import messaging_runtime
+        messaging_runtime.reinstall_ingress(run_id)
     elif operation == 'messaging-verify':
         import messaging_acceptance
         messaging_acceptance.execute(sha, run_id)
