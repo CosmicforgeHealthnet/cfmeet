@@ -65,3 +65,38 @@ jobs:
           path: |
             ${{ runner.temp }}/report.json
             ${{ runner.temp }}/livekit.log
+
+  refresh-keys:
+    # Which key signs LiveKit's refreshed tokens on a server shared by two
+    # applications (production LiveKit holds the Meetings and Calling keys)?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        livekit: ["v1.13.9", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install the production acceptance WebRTC client
+        run: python -m pip install -r services/calling/tests/rtc/requirements.txt
+      - name: Start a two-key LiveKit
+        run: |
+          set -euo pipefail
+          docker run -d --name livekit --network host \
+            -v "$PWD/infra/livekit/topology/livekit.two-keys.yaml:/etc/livekit.yaml:ro" \
+            "livekit/livekit-server:${{ matrix.livekit }}" --config /etc/livekit.yaml
+          for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:7880/ >/dev/null && break; sleep 1; done
+          docker image inspect --format '{{index .RepoDigests 0}}' "livekit/livekit-server:${{ matrix.livekit }}"
+          docker logs livekit 2>&1 | grep -m1 -i 'starting livekit' || true
+      - name: Join-only join, server permission grant, record refresh signing keys
+        run: |
+          python infra/livekit/topology/refresh_keys.py 40 "$RUNNER_TEMP/refresh.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: refresh-keys-${{ matrix.livekit }}
+          path: ${{ runner.temp }}/refresh.json
+

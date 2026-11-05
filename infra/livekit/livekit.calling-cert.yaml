@@ -16,6 +16,9 @@ rtc:
   use_external_ip: false
   node_ip: 127.0.0.1
 keys:
+  # Production LiveKit is shared with Meetings: certify the gateway against a
+  # server holding a second application's key (see messaging-section-8-delivery.md).
+  meetings-cert: meetings-cert-only-key-not-a-secret-0123456789
   calling-cert: calling-cert-only-key-not-a-secret-0123456789
 webhook:
   api_key: calling-cert

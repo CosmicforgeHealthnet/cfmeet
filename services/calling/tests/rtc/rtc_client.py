@@ -11,6 +11,7 @@ Commands:
                                                            "remote": [...], "disconnect_reason": ...,
                                                            "can_publish": bool, "can_subscribe": bool}
   {"cmd": "wait_subscribed", "count": n, "timeout": s} -> {"ok": bool, "subscribed": [...]}
+  {"cmd": "refresh_issuers"}                           -> {"ok": true, "issuers": [<key name>, ...]}
   {"cmd": "wait_disconnected", "timeout": s}           -> {"ok": bool, "reason": ...}
   {"cmd": "wait_permission", "publish": bool, "timeout": s} -> {"ok": bool}
   {"cmd": "token"}                                     -> {"token": <latest token the SDK holds>,
@@ -200,6 +201,15 @@ class Client:
         return {"token": self.refreshed[-1] if self.refreshed else self.token,
                 "refreshes": len(self.refreshed)}
 
+    def refresh_issuers(self):
+        """Key NAMES (JWT iss) that signed each refreshed token; never the tokens."""
+        issuers = []
+        for token in self.refreshed:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            issuers.append(json.loads(base64.urlsafe_b64decode(payload)).get("iss"))
+        return {"ok": True, "issuers": issuers}
+
     @staticmethod
     def grant(token):
         payload = token.split(".")[1]
@@ -274,6 +284,8 @@ async def main():
                 out = await client.wait_permission(msg["publish"], msg["timeout"])
             elif cmd == "token":
                 out = client.latest_token()
+            elif cmd == "refresh_issuers":
+                out = client.refresh_issuers()
             elif cmd == "wait_refreshed":
                 out = await client.wait_refreshed(msg["publish"], msg["timeout"])
             elif cmd == "disconnect":
