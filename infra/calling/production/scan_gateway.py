@@ -315,7 +315,10 @@ def probe(image):
     try:
         evidence = json.loads(result.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        evidence = {'pass': False, 'failures': ['probe produced no evidence']}
+        # The probe prints no secret; keep only a short, character-filtered tail.
+        tail = re.sub(r'[^A-Za-z0-9 _.:/=()-]', '', result.stderr[-300:])
+        evidence = {'pass': False, 'failures': ['probe produced no evidence'], 'exitCode': result.returncode,
+                    'stderrTail': tail}
     return evidence, result.returncode == 0 and evidence.get('pass') is True
 
 
@@ -386,6 +389,8 @@ def configure(sha, run_id):
     jwk = release.public_key(key, kid)
     release.save(WORK / 'trust.json', json.dumps(bundle(jwk)), False)
     release.save(WORK / 'clients.json', json.dumps(registry()), False)
+    engine_was_attached = BACKEND_NET in (p.inspect(ENGINE)['NetworkSettings'].get('Networks') or {})
+    route_existed = TLS_MARKER in (p.ROOT / 'tls-proxy' / 'nginx.conf').read_text()
     members = connect_engine(run_id)
     previous = GATEWAY + '-rollback-' + run_id
     existed = GATEWAY in names()
@@ -406,6 +411,12 @@ def configure(sha, run_id):
         if existed:
             p.run('docker', 'rename', previous, GATEWAY)
             p.run('docker', 'start', GATEWAY)
+        else:
+            # First deployment failed: leave nothing behind (route, engine attachment).
+            if not route_existed:
+                apply_tls(remove_tls_route)
+            if not engine_was_attached and BACKEND_NET in (p.inspect(ENGINE)['NetworkSettings'].get('Networks') or {}):
+                subprocess.run(['docker', 'network', 'disconnect', BACKEND_NET, ENGINE], capture_output=True)
         raise
     print(json.dumps({'operation': 'scan-gateway-configure', 'runId': run_id, 'image': image,
                       'verdictKeys': keys, 'ready': ready, 'tlsRouteAdded': route_added,

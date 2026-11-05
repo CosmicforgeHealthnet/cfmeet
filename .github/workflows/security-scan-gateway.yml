@@ -103,4 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --entrypoint sh cfmeet-security-scan-gateway:ci -c 'test ! -e /usr/sbin/clamd && test ! -d /var/lib/clamav && ls /app'
+          for bin in security-scan-gateway security-scan-gateway-keygen security-scan-gateway-probe; do
+            docker run --rm --entrypoint sh cfmeet-security-scan-gateway:ci -c "test -x /app/$bin"
+          done
           docker image inspect cfmeet-security-scan-gateway:ci --format '{{.Size}}'

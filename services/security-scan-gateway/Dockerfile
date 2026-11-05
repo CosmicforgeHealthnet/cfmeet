@@ -13,7 +13,7 @@ COPY packages/service-auth packages/service-auth
 COPY packages/scan-gateway-contract packages/scan-gateway-contract
 COPY services/security-scan-gateway services/security-scan-gateway
 WORKDIR /src/services/security-scan-gateway
-RUN cargo build --release --locked --bin security-scan-gateway --bin security-scan-gateway-keygen
+RUN cargo build --release --locked --bin security-scan-gateway --bin security-scan-gateway-keygen --bin security-scan-gateway-probe
 
 FROM debian:bookworm-slim
 RUN apt-get update \
@@ -23,6 +23,7 @@ RUN useradd --system --uid 10002 --no-create-home --shell /usr/sbin/nologin scan
 WORKDIR /app
 COPY --from=builder /src/services/security-scan-gateway/target/release/security-scan-gateway ./security-scan-gateway
 COPY --from=builder /src/services/security-scan-gateway/target/release/security-scan-gateway-keygen ./security-scan-gateway-keygen
+COPY --from=builder /src/services/security-scan-gateway/target/release/security-scan-gateway-probe ./security-scan-gateway-probe
 USER scan-gateway
 ENV SCAN_GATEWAY_BIND_ADDRESS=0.0.0.0:8099
 EXPOSE 8099
