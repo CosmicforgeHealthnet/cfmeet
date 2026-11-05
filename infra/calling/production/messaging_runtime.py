@@ -200,6 +200,20 @@ def runtime_config(old, env, user, password, managed, checkpoint, redis_password
     return cfg
 
 
+def signed_grants(shared, key):
+    """The signed download grants in `mc share download --json` output. Its `url` field is
+    the plain (unsigned) object URL; only `share` is a grant, and it must be signed."""
+    prefix = 'https://api.cfmeet.com/' + BUCKET + '/' + key + '?'
+    grants = []
+    for line in shared.splitlines():
+        if not line.strip():
+            continue
+        value = json.loads(line).get('share')
+        if isinstance(value, str) and value.startswith(prefix) and 'X-Amz-Signature=' in value:
+            grants.append(value)
+    return grants
+
+
 def storage_probe(run_id):
     ip = p.inspect(storage.NAME)['NetworkSettings']['Networks'][p.NET]['IPAddress']
     user, password = (WORK / 'storage-user').read_text(), (WORK / 'storage-secret').read_text()
@@ -223,13 +237,7 @@ def storage_probe(run_id):
         else: raise AssertionError('Unsigned Messaging object was exposed')
         assert command('cat', 'msgpublic/' + BUCKET + '/' + key).stdout == data
         shared = command('share', 'download', '--json', '--expire', '4s', 'msgpublic/' + BUCKET + '/' + key).stdout
-        def urls(value):
-            if isinstance(value, str) and value.startswith('https://api.cfmeet.com/' + BUCKET + '/'): yield value
-            elif isinstance(value, dict):
-                for item in value.values(): yield from urls(item)
-            elif isinstance(value, list):
-                for item in value: yield from urls(item)
-        grants = [url for line in shared.splitlines() for url in urls(json.loads(line))]
+        grants = signed_grants(shared, key)
         assert len(grants) == 1, 'Expected one bounded object grant'
         with urllib.request.urlopen(grants[0], timeout=15) as response:
             assert response.read().decode() == data

@@ -1,3 +1,4 @@
+import json
 import unittest
 import messaging_release as release
 import messaging_runtime as runtime
@@ -29,6 +30,17 @@ class MessagingInspection(unittest.TestCase):
         self.assertFalse(any('ALLOWED_PROFILE' in key for key in value))
         env['MESSAGING_E2EE_DEVICES_ENABLED'] = 'true'
         with self.assertRaises(AssertionError): runtime.runtime_overrides(env, 'fixture', 'fixture')
+
+    def test_only_the_signed_share_field_counts_as_a_storage_grant(self):
+        key = 'section8-probes/1'
+        base = 'https://api.cfmeet.com/' + runtime.BUCKET + '/' + key
+        line = json.dumps({'status': 'success', 'url': base, 'share': base + '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=ab',
+                           'timeLeft': 4})
+        self.assertEqual(runtime.signed_grants(line, key), [base + '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=ab'])
+        unsigned = json.dumps({'status': 'success', 'url': base, 'share': base + '?X-Amz-Algorithm=AWS4-HMAC-SHA256'})
+        self.assertEqual(runtime.signed_grants(unsigned, key), [])
+        other = json.dumps({'share': 'https://api.cfmeet.com/cfmeet-calling-artifacts/x?X-Amz-Signature=ab'})
+        self.assertEqual(runtime.signed_grants(other, key), [])
 
     def test_ingress_never_exposes_internal_admin_or_metrics_and_rejects_public_upstream(self):
         value = runtime.nginx_config('172.23.0.3', '172.23.0.5')
