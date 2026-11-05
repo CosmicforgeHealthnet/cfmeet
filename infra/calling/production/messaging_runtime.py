@@ -252,6 +252,16 @@ def ingress_diagnostics():
                              '-w', '%{http_code}', '--max-time', '10', '-X', 'POST', 'https://api.cfmeet.com:8444/v1/realtime/tickets'],
                             capture_output=True, text=True)
     out['privateNetworkToPrivateProxy'] = inside.stdout.strip()
+    # The presented chain (public certificate names only) and how each trust source verifies it.
+    for label, trust in (('bundle', ['-CAfile', '/etc/ssl/certs/ca-certificates.crt']), ('directory', ['-CApath', '/etc/ssl/certs'])):
+        r = subprocess.run(['openssl', 's_client', '-connect', tls + ':8444', '-servername', 'api.cfmeet.com', '-showcerts', *trust],
+                           input='', capture_output=True, text=True, timeout=20)
+        names = [re.sub(r'[^A-Za-z0-9 =,.:-]', '', l.strip())[:120] for l in r.stdout.splitlines()
+                 if re.match(r'^\s*\d+ s:|^\s+i:', l)]
+        verify = [l.strip()[:80] for l in r.stdout.splitlines() if 'Verify return code' in l]
+        out['chain_' + label] = {'certificates': names, 'verify': verify[-1:] }
+    r = subprocess.run(['nginx', '-V'], capture_output=True, text=True)
+    out['hostNginx'] = [l for l in (r.stderr + r.stdout).splitlines() if 'version' in l or 'OpenSSL' in l][:2]
     return out
 
 
