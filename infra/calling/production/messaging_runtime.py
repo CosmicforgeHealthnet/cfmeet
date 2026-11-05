@@ -311,6 +311,7 @@ def ingress_diagnostics():
     import media_diagnostics
     out = {}
     log = Path('/var/log/nginx/error.log')
+    log = Path('/var/log/nginx/error.log')
     if log.exists():
         lines = [l for l in log.read_text(errors='replace').splitlines()[-400:] if 'upstream' in l or 'SSL' in l]
         out['hostNginxErrors'] = [media_diagnostics.template(l) for l in lines[-12:]]
@@ -336,6 +337,15 @@ def ingress_diagnostics():
         verify = [l.strip()[:80] for l in r.stdout.splitlines() if 'Verify return code' in l]
         out['chain_' + label] = {'certificates': names, 'verify': verify[-1:] }
     out['nginxVariants'] = nginx_variants(tls)
+    if log.exists():
+        mine = []
+        for l in log.read_text(errors='replace').splitlines()[-2000:]:
+            if '/v1/realtime/tickets' not in l:
+                continue
+            m = re.search(r'upstream: "(\w+)://([\d.]+):(\d+)', l)
+            mine.append({'error': media_diagnostics.template(l),
+                         'upstream': (m.group(1) + ' ' + ('private-proxy' if m.group(2) == tls else 'OTHER-ADDRESS') + ':' + m.group(3)) if m else None})
+        out['realtimeTicketErrors'] = mine[-5:]
     dump = subprocess.run(['nginx', '-T'], capture_output=True, text=True).stdout.splitlines()
     live = []
     for i, line in enumerate(dump):
