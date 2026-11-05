@@ -81,8 +81,17 @@ impl ConnectionDenied {
 /// service against the database; never cached).
 #[async_trait]
 pub trait ConnectionAdmission: Send + Sync + 'static {
+    /// Whether this exact session generation may hold a media connection now, and with
+    /// which server-derived permissions (the authoritative decision, from the database).
+    async fn admitted_permissions(
+        &self,
+        claims: &ConnectionClaims,
+    ) -> Result<super::permissions::MediaPermissions, ConnectionDenied>;
+
     /// Whether this exact session generation may hold a media connection now.
-    async fn admit_connection(&self, claims: &ConnectionClaims) -> Result<(), ConnectionDenied>;
+    async fn admit_connection(&self, claims: &ConnectionClaims) -> Result<(), ConnectionDenied> {
+        self.admitted_permissions(claims).await.map(|_| ())
+    }
 
     /// The media server accepted an admitted (re)connection: apply the session's
     /// server-derived permissions now (join-then-admit, also after a resume).

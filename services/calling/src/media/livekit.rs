@@ -548,12 +548,14 @@ impl LiveKitAdapter {
     /// the Meetings key) a refresh can be unverifiable here. Dropping the connection then
     /// killed ~1 in 4 production media joins. Such a refresh is accepted only as a signal:
     /// it must still be HS256, LiveKit-issued (never edge-issued), unexpired and bound to
-    /// exactly this connection, and the credential is minted from the CONNECTION, join-only,
-    /// never from the unverified token's grants. The caller re-checks admission first.
+    /// exactly this connection, and the credential is minted from the CONNECTION with the
+    /// `admitted` permissions the caller just re-derived from the database (what Calling
+    /// itself applied through UpdateParticipant), never from the unverified token's grants.
     pub fn refreshed_credential(
         &self,
         token: &str,
         connection: &ConnectionClaims,
+        admitted: MediaPermissions,
         now: DateTime<Utc>,
     ) -> Option<String> {
         if let Some(sealed) = self.reseal_refreshed(token, connection, now) {
@@ -579,11 +581,23 @@ impl LiveKitAdapter {
             return None;
         }
         let ttl = (exp - now.timestamp()).min(MAX_RESEALED_TTL_SECONDS);
+        let mut grant = Self::join_only(&connection.resource_name);
+        let mut sources = Vec::new();
+        if admitted.can_publish_audio {
+            sources.push("microphone");
+        }
+        if admitted.can_publish_video {
+            sources.push("camera");
+        }
+        grant["canSubscribe"] = json!(admitted.can_subscribe);
+        grant["canPublish"] = json!(!sources.is_empty());
+        grant["canPublishData"] = json!(admitted.can_publish_data);
+        grant["canPublishSources"] = json!(sources);
         self.sign(
             Signer::Edge,
             Some(&connection.identity),
             Duration::seconds(ttl),
-            Self::join_only(&connection.resource_name),
+            grant,
             Self::generation_attributes(connection.generation),
         )
         .ok()
@@ -1473,7 +1487,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_signed_with_another_livekit_key_keep_the_connection_join_only() {
+    fn refreshes_signed_with_another_livekit_key_keep_the_connection_with_admitted_permissions() {
         let adapter = adapter();
         let room = "cfc-00000000000000000000000000000000";
         let now = Utc::now();
@@ -1496,6 +1510,12 @@ mod tests {
         };
         let connection = claims(room, Some(2));
         let later = now.timestamp() + 600;
+        let admitted = MediaPermissions {
+            can_publish_audio: true,
+            can_publish_video: false,
+            can_publish_data: false,
+            can_subscribe: true,
+        };
         // Our own key: resealed exactly as before (server grant preserved).
         let ours = adapter
             .refreshed_credential(
@@ -1509,12 +1529,13 @@ mod tests {
                     Algorithm::HS256,
                 ),
                 &connection,
+                MediaPermissions::NONE,
                 now,
             )
             .unwrap();
         assert_eq!(decode(&ours)["video"]["canPublish"], true);
-        // Another LiveKit key (e.g. Meetings'): the connection survives, but the minted
-        // credential is join-only and bound to this connection, never the token's grants.
+        // Another LiveKit key (e.g. Meetings'): the connection survives; the credential is
+        // minted for this connection with the ADMITTED permissions, never the token's.
         let other = adapter
             .refreshed_credential(
                 &token(
@@ -1527,14 +1548,39 @@ mod tests {
                     Algorithm::HS256,
                 ),
                 &connection,
+                admitted,
                 now,
             )
             .expect("a refresh signed by another LiveKit key must not drop an admitted connection");
         let minted = decode(&other);
         assert_eq!(minted["iss"], EDGE_ISSUER);
-        assert_eq!(minted["video"]["canPublish"], false);
-        assert_eq!(minted["video"]["canSubscribe"], false);
-        assert_eq!(minted["video"]["roomAdmin"], false);
+        assert_eq!(minted["video"]["canPublish"], true);
+        assert_eq!(minted["video"]["canPublishSources"], json!(["microphone"]));
+        assert_eq!(minted["video"]["canSubscribe"], true);
+        assert_eq!(minted["video"]["canPublishData"], false);
+        assert_eq!(
+            minted["video"]["roomAdmin"], false,
+            "never the unverified token's grant"
+        );
+        // Nothing admitted (e.g. held): the minted credential is join-only.
+        let held = adapter
+            .refreshed_credential(
+                &token(
+                    "meetingskey",
+                    "cfmid_00",
+                    room,
+                    "2",
+                    later,
+                    "another-livekit-secret-0123456789",
+                    Algorithm::HS256,
+                ),
+                &connection,
+                MediaPermissions::NONE,
+                now,
+            )
+            .unwrap();
+        assert_eq!(decode(&held)["video"]["canPublish"], false);
+        assert_eq!(decode(&held)["video"]["canSubscribe"], false);
         assert!(minted["exp"].as_i64().unwrap() <= later);
         assert_eq!(
             adapter.verify_edge_credential(&other, now),
@@ -1600,7 +1646,7 @@ mod tests {
             "not-a-token".to_string(),
         ] {
             assert!(adapter
-                .refreshed_credential(&refused, &connection, now)
+                .refreshed_credential(&refused, &connection, admitted, now)
                 .is_none());
         }
     }

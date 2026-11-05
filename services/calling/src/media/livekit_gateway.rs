@@ -428,11 +428,11 @@ async fn relay(
                     Downstream::Refresh(token) => {
                         // A refreshed (possibly privileged) token is handed over only while
                         // the session is still admitted, and only re-sealed with the edge key.
-                        if admission.admit_connection(&claims).await.is_err() {
+                        let Ok(permissions) = admission.admitted_permissions(&claims).await else {
                             tracing::info!("media gateway closed a connection: no longer admitted at token refresh");
                             break;
-                        }
-                        match adapter.refreshed_credential(&token, &claims, Utc::now()) {
+                        };
+                        match adapter.refreshed_credential(&token, &claims, permissions, Utc::now()) {
                             Some(sealed) => refresh_frame(&sealed),
                             None => {
                                 tracing::warn!("media gateway closed a connection: refreshed token not bound to it");

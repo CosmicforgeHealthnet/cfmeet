@@ -936,7 +936,10 @@ impl AppCallService {
 /// reading the state is a refusal (fail closed).
 #[async_trait::async_trait]
 impl ConnectionAdmission for AppCallService {
-    async fn admit_connection(&self, claims: &ConnectionClaims) -> Result<(), ConnectionDenied> {
+    async fn admitted_permissions(
+        &self,
+        claims: &ConnectionClaims,
+    ) -> Result<MediaPermissions, ConnectionDenied> {
         let decision = self.connection_decision(claims).await;
         let decision = match decision {
             Ok(decision) => decision,
@@ -946,7 +949,7 @@ impl ConnectionAdmission for AppCallService {
             }
         };
         match &decision {
-            Ok(()) => crate::metrics::inc(
+            Ok(_) => crate::metrics::inc(
                 "calling_media_admissions_total",
                 &[("source", "gateway"), ("result", "admitted")],
             ),
@@ -1005,7 +1008,7 @@ impl AppCallService {
     async fn connection_decision(
         &self,
         claims: &ConnectionClaims,
-    ) -> CallResult<Result<(), ConnectionDenied>> {
+    ) -> CallResult<Result<MediaPermissions, ConnectionDenied>> {
         let Some(call_id) = MediaResourceName::call_id(&claims.resource_name) else {
             return Ok(Err(ConnectionDenied::ForeignResource));
         };
@@ -1059,7 +1062,7 @@ impl AppCallService {
             return Ok(Err(ConnectionDenied::SessionRevoked));
         }
         Ok(match admission(Some(facts), claims.generation) {
-            Admission::Admit(_) => Ok(()),
+            Admission::Admit(permissions) => Ok(permissions),
             Admission::Evict(EvictionReason::StaleGeneration) => {
                 Err(ConnectionDenied::StaleGeneration)
             }
