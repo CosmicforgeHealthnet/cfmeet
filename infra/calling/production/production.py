@@ -792,6 +792,9 @@ if __name__ == '__main__':
             communications_release.run(operation, sha, run_id)
         elif operation == 'inspect':
             audit()
+        elif operation.startswith('resource-'):
+            import resource_recovery
+            resource_recovery.run(operation, sha, run_id)
         elif operation == 'media-diagnose':
             import media_diagnostics
             media_diagnostics.run()

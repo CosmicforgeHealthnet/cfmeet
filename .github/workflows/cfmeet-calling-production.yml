@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, messaging-inspect, messaging-configure, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, resource-inventory, resource-recover, messaging-inspect, messaging-configure, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -15,7 +15,7 @@ on:
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
+  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
@@ -87,7 +87,7 @@ jobs:
           IMAGE_SHA: ${{ inputs.image_sha || github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage || "$OPERATION" == media-diagnose ]]; then
+          if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage || "$OPERATION" == media-diagnose || "$OPERATION" == resource-inventory ]]; then
             [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/heads/staging ]]
           else
             [[ "$GITHUB_REF" == refs/heads/main ]]
