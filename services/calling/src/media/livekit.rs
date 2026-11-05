@@ -539,6 +539,57 @@ impl LiveKitAdapter {
         .ok()
     }
 
+    /// The edge credential to hand an admitted connection when LiveKit refreshes its token.
+    ///
+    /// A refresh verifiable with this deployment's LiveKit key is resealed (the server's
+    /// grant is preserved). LiveKit releases before "Sign refresh tokens with the join
+    /// token's API key" (livekit/livekit#5088) sign refreshes with an arbitrary configured
+    /// key, so on a server shared with another application (production LiveKit also holds
+    /// the Meetings key) a refresh can be unverifiable here. Dropping the connection then
+    /// killed ~1 in 4 production media joins. Such a refresh is accepted only as a signal:
+    /// it must still be HS256, LiveKit-issued (never edge-issued), unexpired and bound to
+    /// exactly this connection, and the credential is minted from the CONNECTION, join-only,
+    /// never from the unverified token's grants. The caller re-checks admission first.
+    pub fn refreshed_credential(
+        &self,
+        token: &str,
+        connection: &ConnectionClaims,
+        now: DateTime<Utc>,
+    ) -> Option<String> {
+        if let Some(sealed) = self.reseal_refreshed(token, connection, now) {
+            return Some(sealed);
+        }
+        let header = cf_service_auth::jwt::decode_header(token).ok()?;
+        if header.alg != Algorithm::HS256 || token.len() > 4096 {
+            return None;
+        }
+        let payload = token.split('.').nth(1)?;
+        let claims: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .ok()?,
+        )
+        .ok()?;
+        let issuer = claims.get("iss").and_then(Value::as_str)?;
+        if issuer.is_empty() || issuer == EDGE_ISSUER {
+            return None;
+        }
+        let exp = claims.get("exp").and_then(Value::as_i64)?;
+        if exp <= now.timestamp() || Self::connection_claims(&claims).as_ref() != Some(connection) {
+            return None;
+        }
+        let ttl = (exp - now.timestamp()).min(MAX_RESEALED_TTL_SECONDS);
+        self.sign(
+            Signer::Edge,
+            Some(&connection.identity),
+            Duration::seconds(ttl),
+            Self::join_only(&connection.resource_name),
+            Self::generation_attributes(connection.generation),
+        )
+        .ok()
+        .map(|(sealed, _)| sealed)
+    }
+
     /// Server API token with exactly one administrative grant.
     fn admin_token(&self, video: Value) -> Result<String, MediaProviderError> {
         self.sign(
@@ -1418,6 +1469,139 @@ mod tests {
             refreshed("cfmid_00", room, "2", EDGE),
         ] {
             assert!(adapter.reseal_refreshed(&token, &connection, now).is_none());
+        }
+    }
+
+    #[test]
+    fn refreshes_signed_with_another_livekit_key_keep_the_connection_join_only() {
+        let adapter = adapter();
+        let room = "cfc-00000000000000000000000000000000";
+        let now = Utc::now();
+        let token = |iss: &str,
+                     sub: &str,
+                     room: &str,
+                     gen: &str,
+                     exp: i64,
+                     key: &str,
+                     alg: Algorithm| {
+            cf_service_auth::jwt::encode(
+                &Header::new(alg),
+                &json!({ "iss": iss, "sub": sub, "nbf": now.timestamp(), "exp": exp,
+                         "video": { "roomJoin": true, "room": room, "canPublish": true, "canSubscribe": true,
+                                    "roomAdmin": true },
+                         "attributes": { GENERATION_ATTRIBUTE: gen } }),
+                &EncodingKey::from_secret(key.as_bytes()),
+            )
+            .unwrap()
+        };
+        let connection = claims(room, Some(2));
+        let later = now.timestamp() + 600;
+        // Our own key: resealed exactly as before (server grant preserved).
+        let ours = adapter
+            .refreshed_credential(
+                &token(
+                    "callingkey",
+                    "cfmid_00",
+                    room,
+                    "2",
+                    later,
+                    SECRET,
+                    Algorithm::HS256,
+                ),
+                &connection,
+                now,
+            )
+            .unwrap();
+        assert_eq!(decode(&ours)["video"]["canPublish"], true);
+        // Another LiveKit key (e.g. Meetings'): the connection survives, but the minted
+        // credential is join-only and bound to this connection, never the token's grants.
+        let other = adapter
+            .refreshed_credential(
+                &token(
+                    "meetingskey",
+                    "cfmid_00",
+                    room,
+                    "2",
+                    later,
+                    "another-livekit-secret-0123456789",
+                    Algorithm::HS256,
+                ),
+                &connection,
+                now,
+            )
+            .expect("a refresh signed by another LiveKit key must not drop an admitted connection");
+        let minted = decode(&other);
+        assert_eq!(minted["iss"], EDGE_ISSUER);
+        assert_eq!(minted["video"]["canPublish"], false);
+        assert_eq!(minted["video"]["canSubscribe"], false);
+        assert_eq!(minted["video"]["roomAdmin"], false);
+        assert!(minted["exp"].as_i64().unwrap() <= later);
+        assert_eq!(
+            adapter.verify_edge_credential(&other, now),
+            Ok(connection.clone())
+        );
+        // Still refused: another identity / room / generation, expired, edge-issued, non-HS256, garbage.
+        let foreign = "another-livekit-secret-0123456789";
+        for refused in [
+            token(
+                "meetingskey",
+                "cfmid_01",
+                room,
+                "2",
+                later,
+                foreign,
+                Algorithm::HS256,
+            ),
+            token(
+                "meetingskey",
+                "cfmid_00",
+                "cfc-11111111111111111111111111111111",
+                "2",
+                later,
+                foreign,
+                Algorithm::HS256,
+            ),
+            token(
+                "meetingskey",
+                "cfmid_00",
+                room,
+                "3",
+                later,
+                foreign,
+                Algorithm::HS256,
+            ),
+            token(
+                "meetingskey",
+                "cfmid_00",
+                room,
+                "2",
+                now.timestamp() - 1,
+                foreign,
+                Algorithm::HS256,
+            ),
+            token(
+                EDGE_ISSUER,
+                "cfmid_00",
+                room,
+                "2",
+                later,
+                foreign,
+                Algorithm::HS256,
+            ),
+            token(
+                "meetingskey",
+                "cfmid_00",
+                room,
+                "2",
+                later,
+                foreign,
+                Algorithm::HS512,
+            ),
+            "not-a-token".to_string(),
+        ] {
+            assert!(adapter
+                .refreshed_credential(&refused, &connection, now)
+                .is_none());
         }
     }
 
