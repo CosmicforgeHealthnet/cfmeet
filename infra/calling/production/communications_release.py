@@ -10,6 +10,20 @@ SERVICES = ('cfmeet-platform-access', 'cfmeet-production-backend', 'cfmeet-calli
 
 def inspect_runtime():
     p.identity()
+    # Diagnose failed acceptance without exporting execution logs, tokens or media.
+    for file in sorted((p.ROOT/'production-evidence').glob('api-*/execution.private.log'),key=lambda f:f.stat().st_mtime)[-2:]:
+        text=file.read_text(errors='replace')
+        markers={name:needle in text for name,needle in {
+            'dns_temporary':'Temporary failure in name resolution',
+            'connection_refused':'Connection refused','connection_reset':'Connection reset',
+            'timeout':'timed out','remote_disconnect':'Remote end closed connection',
+            'tls_failure':'CERTIFICATE_VERIFY_FAILED'}.items()}
+        print(json.dumps({'acceptanceTransportDiagnostics':{'run':file.parent.name,'markers':markers}}))
+    names=p.run('docker','ps','-a','--format','{{.Names}}').splitlines()
+    for name in sorted(n for n in names if n.startswith('cfmeet-calling-communications-failed-'))[-2:]:
+        c=p.inspect(name)
+        print(json.dumps({'failedCallingContainer':name,'imageId':c['Image'],'restartCount':c['RestartCount'],
+            'state':{k:c['State'].get(k) for k in ('Status','Running','OOMKilled','ExitCode')}}))
     print(json.dumps({'memory_available_kib':int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:'))),'disk_available_bytes':__import__('shutil').disk_usage(p.ROOT).free}))
     for name in SERVICES:
         c=p.inspect(name); env=p.env_of(c)
