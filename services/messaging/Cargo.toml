@@ -38,6 +38,9 @@ cf-messaging-crypto = { path = "../../packages/messaging-crypto" }
 # Protected attachment storage (private S3-compatible bucket, signed single-object
 # uploads / reads issued only after Messaging authorized the caller).
 cf-object-storage = { path = "../../packages/object-storage" }
+# CosmicForge shared security scan gateway contract (signed verdicts for MANAGED
+# attachment scanning; the gateway itself is a separate service).
+cf-scan-gateway-contract = { path = "../../packages/scan-gateway-contract" }
 # Part VI §55: unified usage facts (attachment STORAGE_BYTE_TIME producer).
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "io-util"] }

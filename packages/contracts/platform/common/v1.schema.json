@@ -141,7 +141,8 @@
         "developer-event.publish",
         "webhook-migration.export",
         "webhook-migration.import",
-        "developer-platform.administer"
+        "developer-platform.administer",
+        "security-scan.submit"
       ]
     }
   }

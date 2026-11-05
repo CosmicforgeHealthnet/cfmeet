@@ -1369,6 +1369,125 @@ async fn real_object_storage_end_to_end() {
         .is_success());
 }
 
+/// MANAGED attachments scanned through the REAL CosmicForge shared security scan gateway
+/// in front of a real clamd (`MESSAGING_TEST_SCAN_GATEWAY_*`, CI): clean → READY and
+/// downloadable, EICAR → QUARANTINED, an unreachable gateway → VERIFYING (never READY).
+#[tokio::test]
+async fn real_scan_gateway_attachment_lifecycle() {
+    use cf_service_auth::{
+        KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner, SystemClock,
+        TokenTtl,
+    };
+    use messaging::attachments::scanner::GatewayScanner;
+    let Ok(url) = std::env::var("MESSAGING_TEST_SCAN_GATEWAY_URL") else {
+        assert!(
+            std::env::var("MESSAGING_SCAN_GATEWAY_REQUIRED").as_deref() != Ok("1"),
+            "MESSAGING_TEST_SCAN_GATEWAY_URL is required"
+        );
+        eprintln!("SKIPPED: MESSAGING_TEST_SCAN_GATEWAY_URL not set");
+        return;
+    };
+    let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} is required"));
+    let keys = std::fs::read_to_string(var("MESSAGING_TEST_SCAN_GATEWAY_KEYS_FILE")).unwrap();
+    let signer = |kid: &str| {
+        let key = ServiceSigningKey::from_pkcs8_pem_file(
+            KeyId::parse(kid).unwrap(),
+            std::path::Path::new(&var("MESSAGING_TEST_SCAN_GATEWAY_SIGNER_KEY_FILE")),
+        )
+        .unwrap();
+        Arc::new(ServiceTokenSigner::new(
+            ServiceId::messaging(),
+            RuntimeEnvironment::Test,
+            key,
+            TokenTtl::default(),
+            Arc::new(SystemClock),
+        ))
+    };
+    let kid = var("MESSAGING_TEST_SCAN_GATEWAY_SIGNER_KID");
+    let gateway = Arc::new(
+        GatewayScanner::new(
+            &url,
+            &keys,
+            signer(&kid),
+            std::time::Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    // Direct contract: a real engine through the gateway.
+    let eicar = [
+        "X5O!P%@AP[4\\PZX54(P^)7CC)7}",
+        "$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+    ]
+    .concat();
+    match gateway.scan(eicar.as_bytes()).await {
+        ScanOutcome::Infected(name) => {
+            assert!(name.to_ascii_lowercase().contains("eicar"), "{name}")
+        }
+        other => panic!("EICAR not detected through the gateway: {other:?}"),
+    }
+    assert_eq!(
+        gateway.scan(b"gateway clean fixture").await,
+        ScanOutcome::Clean
+    );
+
+    // Full MANAGED lifecycle with the gateway as the configured scanner.
+    let store = Arc::new(MemoryObjectStore::new());
+    let (s2, g2) = (store.clone(), gateway.clone());
+    let Some(h) = Harness::build(move |s| {
+        s.storage = s2;
+        s.scanner = g2;
+    })
+    .await
+    else {
+        return;
+    };
+    let e = Env {
+        h,
+        store,
+        scanner: ScriptedScanner::new(ScanOutcome::Clean),
+    };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 2).await;
+    let alice = people[0];
+    let f = e
+        .managed_upload(
+            &c,
+            &conv,
+            alice,
+            "DOCUMENT",
+            "text/plain",
+            "notes.txt",
+            b"gateway scanned notes",
+        )
+        .await;
+    assert_eq!(f.json["state"], "READY", "{}", f.text);
+    assert_eq!(f.json["scan"]["status"], "CLEAN");
+    let ready = f.json["attachmentId"].clone();
+    let r = e.content(&c, &conv, alice, &ready).await;
+    assert!(r.status.is_success(), "{}", r.text);
+    assert_eq!(r.bytes, b"gateway scanned notes".to_vec());
+    let f = e
+        .managed_upload(
+            &c,
+            &conv,
+            alice,
+            "DOCUMENT",
+            "text/plain",
+            "eicar.txt",
+            eicar.as_bytes(),
+        )
+        .await;
+    assert_eq!(f.json["state"], "QUARANTINED", "{}", f.text);
+    assert_eq!(f.json["scan"]["status"], "INFECTED");
+    let q = f.json["attachmentId"].clone();
+    assert_eq!(
+        e.content(&c, &conv, alice, &q).await.reason(),
+        "QUARANTINED"
+    );
+    assert_eq!(e.scanner.calls(), 0, "the scripted scanner is not involved");
+}
+
 /// A real self-hosted clamd (`MESSAGING_TEST_CLAMAV_ADDRESS`) detects the EICAR test file
 /// and passes clean text.
 #[tokio::test]

@@ -27,6 +27,7 @@ on:
       - "services/meeting-service/**"
       - "services/developer-platform/**"
       - "services/api-gateway/**"
+      - "services/security-scan-gateway/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -47,6 +48,7 @@ on:
       - "services/meeting-service/**"
       - "services/developer-platform/**"
       - "services/api-gateway/**"
+      - "services/security-scan-gateway/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -84,6 +86,9 @@ jobs:
           - packages/contracts/validator
           - packages/messaging-crypto
           - services/messaging
+          # CosmicForge shared security scan gateway and its wire contract.
+          - services/security-scan-gateway
+          - packages/scan-gateway-contract
           # Part V K §158: every service lockfile is audited (these four were not).
           - services/platform-access
           - services/sms-gateway
@@ -160,7 +165,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [calling, privacy-relay, telephony, developer-platform, api-gateway]
+        service: [calling, privacy-relay, telephony, developer-platform, api-gateway, security-scan-gateway]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

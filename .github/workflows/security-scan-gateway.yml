@@ -1,0 +1,115 @@
+name: Security scan gateway
+
+# CosmicForge shared security scan gateway (services/security-scan-gateway) and its wire
+# contract (packages/scan-gateway-contract). The gateway loads no signatures: CI runs the
+# official ClamAV image (freshclam-maintained signatures) as the existing engine it
+# fronts, so the EICAR detection, signature-freshness gate and streaming are exercised
+# against a real clamd. Nothing here deploys anything.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/security-scan-gateway/**"
+      - "packages/scan-gateway-contract/**"
+      - "packages/service-auth/**"
+      - "scripts/security-scan/**"
+      - ".github/workflows/security-scan-gateway.yml"
+  pull_request:
+    paths:
+      - "services/security-scan-gateway/**"
+      - "packages/scan-gateway-contract/**"
+      - "packages/service-auth/**"
+      - "scripts/security-scan/**"
+      - ".github/workflows/security-scan-gateway.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: security-scan-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  contract:
+    name: wire contract (fmt / clippy / tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/scan-gateway-contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/scan-gateway-contract -> target
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  gateway:
+    name: gateway (fmt / clippy / tests against a real clamd, EICAR)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/security-scan-gateway
+    env:
+      SCAN_GATEWAY_TEST_CLAMD_ADDRESS: 127.0.0.1:3310
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the official ClamAV engine (downloads current signatures)
+        working-directory: .
+        run: docker run -d --name clamd -p 127.0.0.1:3310:3310 clamav/clamav:1.4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/security-scan-gateway -> target
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Wait for the engine
+        working-directory: .
+        run: |
+          set -euo pipefail
+          command -v nc >/dev/null || sudo apt-get install -y -qq netcat-openbsd >/dev/null
+          for i in $(seq 1 150); do
+            if [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0')" = "PONG" ]; then
+              printf 'zVERSION\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0'; echo; exit 0
+            fi
+            sleep 2
+          done
+          docker logs clamd | tail -50; exit 1
+      - name: Tests (scripted engine for failure modes, real engine for EICAR / clean / 5 MiB)
+        run: cargo test --locked -- --nocapture
+      - name: Real binary end to end (start-ci-gateway.sh, readiness against the real engine)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          (cd services/security-scan-gateway && cargo build --locked --bins)
+          GITHUB_ENV= scripts/security-scan/start-ci-gateway.sh "$PWD/services/security-scan-gateway/target/debug/security-scan-gateway" 127.0.0.1:3310 "$RUNNER_TEMP/scan-gateway"
+          curl -fsS http://127.0.0.1:19199/metrics | grep cosmicforge_scan_backend_up
+          # Unauthenticated scan requests never reach the engine.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/octet-stream' \
+            -H "x-cf-scan-content-sha256: $(printf x | sha256sum | cut -d' ' -f1)" --data-binary x http://127.0.0.1:18099/internal/v1/scans)
+          test "$code" = 401
+          ps -o rss=,cmd= -C security-scan-gateway
+
+  image:
+    name: image build (no push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the gateway image from the repository root
+        run: docker build -f services/security-scan-gateway/Dockerfile -t cfmeet-security-scan-gateway:ci .
+      - name: Image contains no antivirus engine or signature database
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh cfmeet-security-scan-gateway:ci -c 'test ! -e /usr/sbin/clamd && test ! -d /var/lib/clamav && ls /app'
+          docker image inspect cfmeet-security-scan-gateway:ci --format '{{.Size}}'

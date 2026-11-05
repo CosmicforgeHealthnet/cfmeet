@@ -150,14 +150,28 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("no attachment object storage is configured: attachments are disabled");
         }
     }
-    match &config.clamav_address {
-        Some(a) => {
+    match (&config.clamav_address, &config.scan_gateway) {
+        (_, Some(gateway)) => {
+            state.scanner = Arc::new(
+                messaging::attachments::scanner::GatewayScanner::from_files(
+                    &gateway.url,
+                    &gateway.verdict_keys_file,
+                    service_auth.shared_signer(),
+                    gateway.timeout,
+                )
+                .unwrap_or_else(|e| fatal("MESSAGING_SCAN_GATEWAY_*", e)),
+            );
+            tracing::info!(
+                "MANAGED attachments are scanned through the shared security scan gateway"
+            );
+        }
+        (Some(a), None) => {
             state.scanner = Arc::new(messaging::attachments::scanner::ClamAvScanner::new(
                 a.clone(),
                 std::time::Duration::from_secs(60),
             ))
         }
-        None => {
+        (None, None) => {
             tracing::warn!("no attachment scanner is configured: MANAGED attachments requiring scanning stay pending");
         }
     }

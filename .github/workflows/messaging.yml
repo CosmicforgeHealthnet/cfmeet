@@ -25,6 +25,9 @@ on:
       - "services/platform-access/**"
       - "packages/messaging-crypto/**"
       - "packages/object-storage/**"
+      - "packages/scan-gateway-contract/**"
+      - "services/security-scan-gateway/**"
+      - "scripts/security-scan/**"
       - "packages/service-auth/**"
       - "packages/usage-facts/**"
       - "packages/contracts/**"
@@ -39,6 +42,9 @@ on:
       - "services/platform-access/**"
       - "packages/messaging-crypto/**"
       - "packages/object-storage/**"
+      - "packages/scan-gateway-contract/**"
+      - "services/security-scan-gateway/**"
+      - "scripts/security-scan/**"
       - "packages/service-auth/**"
       - "packages/usage-facts/**"
       - "packages/contracts/**"
@@ -277,6 +283,9 @@ jobs:
       OBJECT_STORAGE_TEST_REQUIRED: "1"
       MESSAGING_TEST_CLAMAV_ADDRESS: 127.0.0.1:3310
       MESSAGING_CLAMAV_REQUIRED: "1"
+      # The shared security scan gateway in front of a real engine (official image with
+      # freshclam-maintained signatures, so the gateway's freshness gate is exercised).
+      MESSAGING_SCAN_GATEWAY_REQUIRED: "1"
     defaults:
       run:
         working-directory: services/messaging
@@ -290,6 +299,7 @@ jobs:
           workspaces: |
             services/messaging -> target
             services/platform-access -> target
+            services/security-scan-gateway -> target
           key: test
 
       # The hosted-staging kit (scripts/staging) is Node 22 (global WebSocket, fetch).
@@ -325,9 +335,21 @@ jobs:
           for i in $(seq 1 60); do [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0')" = "PONG" ] && exit 0; sleep 1; done
           cat "$d/clamd.log"; exit 1
 
+      - name: Start the official ClamAV engine for the scan gateway
+        working-directory: .
+        run: docker run -d --name gateway-clamd -p 127.0.0.1:3311:3310 clamav/clamav:1.4
+
       - name: Build Platform Access
         working-directory: services/platform-access
         run: cargo build --workspace --bins --locked
+
+      - name: Build and start the shared security scan gateway (real engine)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          (cd services/security-scan-gateway && cargo build --locked --bins)
+          for i in $(seq 1 150); do [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3311 | tr -d '\0')" = "PONG" ] && break; sleep 2; done
+          scripts/security-scan/start-ci-gateway.sh "$PWD/services/security-scan-gateway/target/debug/security-scan-gateway" 127.0.0.1:3311 "$RUNNER_TEMP/scan-gateway"
 
       # Named gates first (a failure names the gate), then the whole workspace.
       - name: Foundation (C) — probes, authentication boundaries, served contract, caching, startup, migrations

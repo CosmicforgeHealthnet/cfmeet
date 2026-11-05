@@ -34,6 +34,10 @@ pub mod services {
     /// Operator administration tooling. Not a deployable service: an issuer identity
     /// that only Platform Access trusts, for identity administration.
     pub const OPERATOR_CONSOLE: &str = "cfmeet.operator-console";
+    /// CosmicForge shared security scan gateway: authenticated, per-product malware
+    /// scanning in front of an existing ClamAV engine. Receives file bytes only from
+    /// registered callers; owns no storage and no other product's data.
+    pub const SECURITY_SCAN: &str = "cfmeet.security-scan";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -128,6 +132,10 @@ impl ServiceId {
 
     pub fn operator_console() -> Self {
         Self(services::OPERATOR_CONSOLE.to_string())
+    }
+
+    pub fn security_scan() -> Self {
+        Self(services::SECURITY_SCAN.to_string())
     }
 }
 

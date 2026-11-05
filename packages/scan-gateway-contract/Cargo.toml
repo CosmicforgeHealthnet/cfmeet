@@ -1,0 +1,23 @@
+[package]
+name = "cf-scan-gateway-contract"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CosmicForge shared security scan gateway: wire contract, verdict vocabulary and signed-verdict format shared by the gateway and its callers"
+
+# Stand-alone workspace, consumed as a path dependency by the gateway and its callers.
+[workspace]
+
+[lib]
+name = "cf_scan_gateway_contract"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "zeroize", "rand_core"] }
+base64 = "0.22"
+thiserror = "2"
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["getrandom"] }

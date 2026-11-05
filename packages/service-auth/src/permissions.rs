@@ -287,6 +287,11 @@ pub enum InternalPermission {
     /// first-party registration). Operator tooling only.
     #[serde(rename = "developer-platform.administer")]
     DeveloperPlatformAdminister,
+    /// Security scan gateway: submit one file's bytes for malware inspection and receive
+    /// a signed verdict bound to the request and the content digest. Messaging only
+    /// (MANAGED attachments; never PRIVATE_E2EE ciphertext).
+    #[serde(rename = "security-scan.submit")]
+    SecurityScanSubmit,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -801,6 +806,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Administer the developer control plane (organization restriction / suspension, plan versions and assignments, first-party registration); operator tooling only",
     },
+    PermissionDefinition {
+        permission: InternalPermission::SecurityScanSubmit,
+        name: "security-scan.submit",
+        receiver: services::SECURITY_SCAN,
+        grantable_to: &[services::MESSAGING],
+        sensitive: false,
+        description: "Submit one file's bytes for malware inspection; receive a signed verdict bound to the request and digest",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -878,6 +891,7 @@ impl InternalPermission {
         InternalPermission::WebhookMigrationExport,
         InternalPermission::WebhookMigrationImport,
         InternalPermission::DeveloperPlatformAdminister,
+        InternalPermission::SecurityScanSubmit,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1206,7 +1220,28 @@ mod tests {
         "platform-identity.read",
         "sms-bridge.submit",
         "developer-event.publish",
+        "security-scan.submit",
     ];
+
+    #[test]
+    fn security_scan_gateway_receives_only_submissions_from_messaging() {
+        let receiving: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::SECURITY_SCAN)
+            .map(|d| (d.name, d.grantable_to, d.sensitive))
+            .collect();
+        assert_eq!(
+            receiving,
+            [("security-scan.submit", &[services::MESSAGING][..], false)],
+            "the scan gateway receives exactly one non-sensitive operation"
+        );
+        assert!(
+            REGISTRY
+                .iter()
+                .all(|d| !d.grantable_to.contains(&services::SECURITY_SCAN)),
+            "the scan gateway calls no CF Meet service"
+        );
+    }
 
     #[test]
     fn part_vi_developer_platform_and_gateway_flows_are_least_privilege() {

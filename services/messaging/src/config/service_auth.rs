@@ -94,6 +94,11 @@ impl ServiceAuthRuntime {
         &self.signer
     }
 
+    /// The signer, shared (adapters that sign their own non-JSON internal requests).
+    pub fn shared_signer(&self) -> Arc<ServiceTokenSigner> {
+        self.signer.clone()
+    }
+
     pub fn verifier(&self) -> &ServiceTokenVerifier {
         &self.verifier
     }

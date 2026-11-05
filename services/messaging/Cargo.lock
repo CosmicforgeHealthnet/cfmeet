@@ -488,6 +488,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-scan-gateway-contract"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cf-service-auth"
 version = "0.1.0"
 dependencies = [
@@ -2505,6 +2516,7 @@ dependencies = [
  "cf-communications-policy",
  "cf-messaging-crypto",
  "cf-object-storage",
+ "cf-scan-gateway-contract",
  "cf-service-auth",
  "cf-usage-facts",
  "chacha20poly1305 0.10.1",

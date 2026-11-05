@@ -45,7 +45,8 @@
 //! | (unset adapters) | | jobs for that platform end `NOT_CONFIGURED`, never reported as delivered |
 //! | `MESSAGING_ATTACHMENTS_S3_ENDPOINT` … | no | the PRIVATE attachment bucket (`ENDPOINT`, `PUBLIC_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY[_FILE]`, `PATH_STYLE`, `SERVER_SIDE_ENCRYPTION`; see `packages/object-storage`). Unset: attachments fail closed |
 //! | `MESSAGING_MEDIA_PROCESSING` | no | `true` (default) / `false`: server-side thumbnails of READY MANAGED PNG / JPEG images (never PRIVATE_E2EE) |
-//! | `MESSAGING_CLAMAV_ADDRESS` | no | self-hosted clamd `host:port` scanning MANAGED attachments. Unset: scans stay pending (never READY where policy requires scanning) |
+//! | `MESSAGING_CLAMAV_ADDRESS` | no | a dedicated clamd `host:port` scanning MANAGED attachments directly (unauthenticated TCP; local / test and legacy deployments) |
+//! | `MESSAGING_SCAN_GATEWAY_URL` / `MESSAGING_SCAN_GATEWAY_VERDICT_KEYS_FILE` | no | the CosmicForge shared security scan gateway (both, or neither; exclusive with `MESSAGING_CLAMAV_ADDRESS`): its base URL (HTTPS outside local / test) and the public verdict key set `{"keys":[{"kid","x"}]}`. Requests are signed with Messaging's service key; only a signed CLEAN bound to the request and the content digest makes an attachment READY. `MESSAGING_SCAN_GATEWAY_TIMEOUT_MS` (5000–300000, default 75000). Neither scanner set: scans stay pending (never READY where policy requires scanning) |
 //! | `MESSAGING_UPLOAD_INTENT_SECONDS` / `MESSAGING_DOWNLOAD_GRANT_SECONDS` | no | defaults 900 / 60 (residual access window of a grant) |
 //! | `MESSAGING_STORAGE_BUDGET_BYTES` | no | deployment cap of stored bytes per environment (default: none; policies may set lower) |
 //! | `MESSAGING_MANAGED_SCAN_MAX_BYTES` / `MESSAGING_VERIFY_READ_MAX_BYTES` / `MESSAGING_PROXY_DOWNLOAD_MAX_BYTES` | no | defaults 50 MiB / 64 MiB / 32 MiB |
@@ -331,9 +332,19 @@ pub struct MessagingConfig {
     pub attachments: AttachmentSettings,
     pub attachment_store: Option<cf_object_storage::S3Config>,
     pub clamav_address: Option<String>,
+    /// The shared security scan gateway (exclusive with `clamav_address`).
+    pub scan_gateway: Option<ScanGatewaySettings>,
     /// `MESSAGING_PUBLIC_EVENTS_DESTINATION` (Part VI §53).
     pub public_events: crate::webhook_relay::PublicEventsDestination,
     pub log_format: LogFormat,
+}
+
+/// `MESSAGING_SCAN_GATEWAY_*`.
+#[derive(Debug, Clone)]
+pub struct ScanGatewaySettings {
+    pub url: String,
+    pub verdict_keys_file: std::path::PathBuf,
+    pub timeout: Duration,
 }
 
 /// The live push adapters' configuration (files are read and checked at startup).
@@ -935,6 +946,44 @@ impl MessagingConfig {
                 ));
             }
         }
+        let scan_gateway = match (
+            get("MESSAGING_SCAN_GATEWAY_URL"),
+            get("MESSAGING_SCAN_GATEWAY_VERDICT_KEYS_FILE"),
+        ) {
+            (None, None) => None,
+            (Some(url), Some(keys)) => {
+                if clamav_address.is_some() {
+                    return Err(ConfigError::invalid(
+                        "MESSAGING_SCAN_GATEWAY_URL",
+                        "exclusive with MESSAGING_CLAMAV_ADDRESS",
+                    ));
+                }
+                let scheme_ok = url.starts_with("https://") || url.starts_with("http://");
+                if !scheme_ok || url.ends_with('/') || url.contains('?') || url.contains('#') {
+                    return Err(ConfigError::invalid(
+                        "MESSAGING_SCAN_GATEWAY_URL",
+                        "must be an http(s) base URL without path suffix, query or fragment",
+                    ));
+                }
+                Some(ScanGatewaySettings {
+                    url,
+                    verdict_keys_file: keys.into(),
+                    timeout: Duration::from_millis(bounded(
+                        &get,
+                        "MESSAGING_SCAN_GATEWAY_TIMEOUT_MS",
+                        75_000,
+                        5_000,
+                        300_000,
+                    )? as u64),
+                })
+            }
+            _ => {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_SCAN_GATEWAY_URL",
+                    "MESSAGING_SCAN_GATEWAY_URL and MESSAGING_SCAN_GATEWAY_VERDICT_KEYS_FILE are set together",
+                ))
+            }
+        };
         use crate::webhook_relay::PublicEventsDestination;
         let public_events = match get(PublicEventsDestination::VARIABLE) {
             None => PublicEventsDestination::default(),
@@ -982,6 +1031,7 @@ impl MessagingConfig {
             attachments,
             attachment_store,
             clamav_address,
+            scan_gateway,
             public_events,
             log_format,
         })

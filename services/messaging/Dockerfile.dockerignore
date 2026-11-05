@@ -6,6 +6,7 @@
 !packages/usage-facts
 !packages/messaging-crypto
 !packages/object-storage
+!packages/scan-gateway-contract
 !packages/contracts/messaging
 !services/messaging
 

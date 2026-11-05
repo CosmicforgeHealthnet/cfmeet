@@ -22,6 +22,8 @@ COPY packages/communications-policy packages/communications-policy
 COPY packages/usage-facts packages/usage-facts
 COPY packages/messaging-crypto packages/messaging-crypto
 COPY packages/object-storage packages/object-storage
+# Shared scan gateway wire contract (signed verdicts); not the gateway itself.
+COPY packages/scan-gateway-contract packages/scan-gateway-contract
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging

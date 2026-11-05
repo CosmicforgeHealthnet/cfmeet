@@ -1,0 +1,14 @@
+# Build-context filter for services/security-scan-gateway/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!packages/scan-gateway-contract
+!services/security-scan-gateway
+
+# Never send build output, local configuration or key material.
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
