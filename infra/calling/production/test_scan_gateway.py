@@ -81,8 +81,17 @@ class PrivateRoute(unittest.TestCase):
         self.assertNotIn('9199', route)
         self.assertNotIn('/metrics', route)
         self.assertIn('proxy_request_buffering off', route)
-        self.assertIn('client_max_body_size 26m', route)
+        self.assertIn('client_max_body_size 25m', route)
+        self.assertEqual(25 * 1024 * 1024, g.STREAM_MAX_BYTES)
         self.assertTrue(once.rstrip().endswith('}'))
+
+    def test_an_outdated_route_is_replaced_not_kept(self):
+        old = g.tls_route(NGINX).replace('client_max_body_size 25m', 'client_max_body_size 26m')
+        new = g.tls_route(old)
+        self.assertIn('client_max_body_size 25m', new)
+        self.assertNotIn('26m', new)
+        self.assertEqual(new.count(g.TLS_MARKER), 1)
+        self.assertEqual(new, g.tls_route(NGINX))
 
     def test_route_removal_restores_the_original_and_ports_are_never_shared(self):
         self.assertEqual(g.remove_tls_route(g.tls_route(NGINX)).strip(), NGINX.strip())

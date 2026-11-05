@@ -37,7 +37,8 @@ TLS_PORT = 8449
 TLS_MARKER = '  # COSMICFORGE SCAN GATEWAY PRIVATE ROUTE'
 URL = 'https://api.cfmeet.com:' + str(TLS_PORT)
 VERDICT_KID = 'scan-verdict-20261105'
-# The engine's own StreamMaxLength is 25M (audit 42077986241). Never exceed it.
+# The engine's own StreamMaxLength is 25M (audit 42077986241). Never exceed it. nginx
+# enforces the same 25m so an oversized body is refused before it is proxied.
 STREAM_MAX_BYTES = 25 * 1024 * 1024
 BACKEND_CONCURRENCY = 2              # of the engine's MaxThreads 8
 MAX_SIGNATURE_AGE_HOURS = 72
@@ -173,12 +174,12 @@ def run_args(name, image, work):
 def tls_route(text):
     """The private TLS route Messaging uses (scan + readiness only; never metrics)."""
     assert text.count(TLS_MARKER) <= 1
-    if TLS_MARKER in text:
-        return text
+    # An existing route is replaced by the current definition (idempotent when equal).
+    text = remove_tls_route(text)
     assert f'listen {TLS_PORT} ' not in text and f'listen {TLS_PORT};' not in text, 'TLS port already used'
     common = (f'set $peer {GATEWAY}:8099; proxy_pass http://$peer$request_uri; proxy_http_version 1.1; '
               'proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; ')
-    route = (f'  server {{ listen {TLS_PORT} ssl; server_name api.cfmeet.com; client_max_body_size 26m; '
+    route = (f'  server {{ listen {TLS_PORT} ssl; server_name api.cfmeet.com; client_max_body_size 25m; '
              'access_log off; '
              f'location = /internal/v1/scans {{ limit_except POST {{ deny all; }} {common}'
              'proxy_request_buffering off; proxy_buffering off; proxy_read_timeout 120s; proxy_send_timeout 120s; } '
@@ -195,7 +196,8 @@ def remove_tls_route(text):
         return text
     i = lines.index(TLS_MARKER)
     assert lines[i + 1].lstrip().startswith(f'server {{ listen {TLS_PORT} ssl;')
-    return '\n'.join(lines[:i] + lines[i + 2:]) + '\n'
+    out = '\n'.join(lines[:i] + lines[i + 2:])
+    return out + '\n' if text.endswith('\n') else out
 
 
 def apply_tls(transform):
