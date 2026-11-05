@@ -1,0 +1,26 @@
+# Isolated reproduction of the PRODUCTION LiveKit network topology (CI only).
+#
+# Mirrors the inspected production facts (media-diagnose): LiveKit in a Docker
+# bridge network, advertising the host address (node_ip), ICE-TCP on 7881, the
+# 50000-60000 WebRTC UDP range NOT published, embedded TURN on 3478/udp.
+# The key pair is a well-known test-only credential, never a deployment secret.
+# __NODE_IP__ and __UDP_MUX__ are substituted by the workflow.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: false
+  node_ip: __NODE_IP__
+__UDP_MUX__
+keys:
+  topology-test: topology-test-only-key-not-a-secret-0123456789
+room:
+  auto_create: true
+  empty_timeout: 30
+turn:
+  enabled: true
+  domain: turn.topology.invalid
+  udp_port: 3478
+logging:
+  level: info

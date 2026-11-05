@@ -1,0 +1,67 @@
+name: Calling media topology reproduction
+
+# Isolated reproduction of the production LiveKit network topology on a GitHub
+# runner: no production access, no secrets, test-only LiveKit key. Compares the
+# inspected production topology (Docker bridge, WebRTC UDP range unpublished,
+# container-to-host UDP refused as by the VPS firewall) with the corrected
+# single-port UDP topology, using the production acceptance RTC client.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, staging]
+    paths:
+      - infra/livekit/topology/**
+      - services/calling/tests/rtc/**
+      - .github/workflows/calling-media-topology.yml
+
+permissions: { contents: read }
+
+jobs:
+  topology:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [production-bridge, udp-mux-bridge]
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install the production acceptance WebRTC client
+        run: python -m pip install -r services/calling/tests/rtc/requirements.txt
+      - name: Start LiveKit in the selected topology
+        env:
+          TOPOLOGY: ${{ matrix.topology }}
+        run: |
+          set -euo pipefail
+          node_ip=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}')
+          echo "NODE_IP=$node_ip" >> "$GITHUB_ENV"
+          mux=''; extra=()
+          if [ "$TOPOLOGY" = udp-mux-bridge ]; then mux='  udp_port: 7882'; extra=(-p 7882:7882/udp); fi
+          sed -e "s/__NODE_IP__/$node_ip/" -e "s/^__UDP_MUX__$/$mux/" infra/livekit/topology/livekit.topology.yaml > "$RUNNER_TEMP/livekit.yaml"
+          cat "$RUNNER_TEMP/livekit.yaml"
+          # The VPS firewall (default deny, ESTABLISHED allowed) refuses NEW UDP from
+          # containers to the host; Docker-published ports are DNATed before it.
+          sudo iptables -I INPUT -i docker0 -p udp -m conntrack --ctstate NEW -j DROP
+          # Exactly the production published set (+7882/udp only when corrected).
+          docker run -d --name livekit --network bridge \
+            -p 7880:7880 -p 7881:7881 -p 3478:3478/udp -p 5349:5349 "${extra[@]}" \
+            -v "$RUNNER_TEMP/livekit.yaml:/etc/livekit.yaml:ro" \
+            livekit/livekit-server:v1.13.9 --config /etc/livekit.yaml
+          for _ in $(seq 1 60); do curl -fsS "http://$node_ip:7880/" >/dev/null && exit 0; sleep 1; done
+          docker logs livekit; exit 1
+      - name: Real two-party connect and bidirectional audio trials
+        run: python infra/livekit/topology/trials.py --url "ws://$NODE_IP:7880" --trials 30 --topology "${{ matrix.topology }}" --report "$RUNNER_TEMP/report.json"
+      - name: Server connection types and assertions
+        run: |
+          docker logs livekit > "$RUNNER_TEMP/livekit.log" 2>&1
+          python infra/livekit/topology/check.py "$RUNNER_TEMP/report.json" "$RUNNER_TEMP/livekit.log" "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: media-topology-${{ matrix.topology }}
+          path: |
+            ${{ runner.temp }}/report.json
+            ${{ runner.temp }}/livekit.log
