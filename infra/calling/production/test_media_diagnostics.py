@@ -57,5 +57,12 @@ class Redaction(unittest.TestCase):
         self.assertEqual(d.safe_fields('no json here'),{})
 
 
+    def test_timeline_fields_drop_identifiers_and_addresses(self):
+        fields={'room':'cfc-1','pID':'PA_x','participant':'cfmid_ab12','reason':'JOIN_TIMEOUT','connectionType':'tcp',
+                'remote':'203.0.113.7:5','reconnect':False,'durationMs':15012,'clientInfo':{'os':'linux'},'sid':'abc123def',
+                'address':'203.0.113.7','port':50123}
+        self.assertEqual(d.timeline_fields(fields),{'reason':'JOIN_TIMEOUT','connectionType':'tcp','reconnect':False,'durationMs':15012})
+
+
 if __name__=='__main__':
     unittest.main()

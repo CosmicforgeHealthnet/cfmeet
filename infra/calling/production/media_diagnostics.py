@@ -522,9 +522,55 @@ def media_path_facts(public_ip):
         emit('livekitConnectionTypes', {'run': run, 'image': image, 'outcome': outcome, 'counts': dict(types)})
 
 
+_NUMERIC_KEYS = re.compile(r'(?i)duration|rtt|attempt|count|elapsed|ms$|seconds$|protocol$|version$')
+TIMELINE_RUNS = ('41794968776', '41977529784', '41992435685', '41981794294', '41798927157')
+
+
+def timeline_fields(fields):
+    """Enum-like strings, booleans and named numeric timings only."""
+    out = {}
+    for key, value in fields.items():
+        if key in ('room', 'roomID', 'participant', 'pID', 'participantID', 'trackID', 'remote_addr', 'remote', 'nodeIP'):
+            continue
+        if isinstance(value, bool):
+            out[key] = value
+        elif isinstance(value, (int, float)) and _NUMERIC_KEYS.search(key):
+            out[key] = value
+        elif isinstance(value, str) and _SAFE_VALUE.match(value):
+            out[key] = value
+    return out
+
+
+def livekit_timelines():
+    for run, image, outcome, start, end, stage in WINDOWS:
+        if run not in TIMELINE_RUNS:
+            continue
+        output = sh('docker', 'logs', '--timestamps', '--since', start + 'Z', '--until', end + 'Z', 'lk-server', timeout=120) or ''
+        people, rooms, events, base = {}, {}, [], None
+        for line in output.splitlines():
+            if '.api' in line.split('{', 1)[0] or 'stats worker' in line:
+                continue
+            when, _ = stamp(line)
+            tail = line[line.find('{'):] if '{' in line else ''
+            try:
+                fields = json.loads(tail) if tail else {}
+            except ValueError:
+                fields = {}
+            participant = fields.get('pID') or fields.get('participant')
+            if not participant:
+                continue
+            label = people.setdefault(participant, 'p%d' % len(people))
+            room = rooms.setdefault(fields.get('roomID') or fields.get('room') or '-', 'r%d' % len(rooms))
+            base = base or when
+            events.append([round((when - base).total_seconds(), 2) if when and base else None, room, label,
+                           template(line), timeline_fields(fields)])
+        emit('livekitTimeline', {'run': run, 'image': image, 'outcome': outcome, 'stage': stage,
+                                 'participants': len(people), 'events': events[:160]})
+
+
 def run():
     public_ip = socket.gethostbyname('api.cfmeet.com')
-    for step in (lambda: media_path_facts(public_ip), host_resources, kernel_events, sysstat_history, container_resources,
+    for step in (livekit_timelines, lambda: media_path_facts(public_ip), host_resources, kernel_events, sysstat_history, container_resources,
                  network_state, lambda: livekit_config(public_ip), active_media, lambda: probe_latency(public_ip), window_logs, client_logs):
         try:
             step()
