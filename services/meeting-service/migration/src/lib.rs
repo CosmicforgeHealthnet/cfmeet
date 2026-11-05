@@ -27,6 +27,7 @@ mod m20261019_000001_unified_messaging_integration;
 mod m20261020_000001_unified_messaging_scoped_chat;
 mod m20261101_000001_platform_environment_meetings;
 mod m20261103_000001_communications_account_authority;
+mod m20261105_000001_communications_meeting_facade;
 
 pub mod phase2_backfill;
 
@@ -81,6 +82,54 @@ impl MigratorTrait for CommunicationsMigrator {
 }
 
 /// Read-only readiness for the independently versioned additive integration.
+/// Sections 9-23 Meetings facade (Hub-initiated instant meetings). A SEPARATE history:
+/// the previously deployed image requires the exact Communications set above, so it
+/// still starts after this additive migration is applied (rollback safety).
+pub struct CommunicationsFacadeMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for CommunicationsFacadeMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261105_000001_communications_meeting_facade::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("account_communications_facade_migrations").into_iden()
+    }
+}
+/// Exactly the known facade history has been applied.
+pub async fn communications_facade_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.account_communications_facade_migrations') IS NOT NULL AS present"
+                .to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM account_communications_facade_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = CommunicationsFacadeMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
 pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {

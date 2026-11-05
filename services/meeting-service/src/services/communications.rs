@@ -2,7 +2,7 @@
 use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     models::users,
-    services::actor::ActorContext,
+    services::actor::{ActorContext, ActorKind, RegisteredActor},
     state::AppState,
 };
 use axum::{
@@ -16,9 +16,9 @@ use axum::{
 use cf_communications_policy::{Dispatch, Scope, VerifiedAccount};
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
-    ApplicationEnvironmentKind, DelegatedPlatformContext, KeyId, OutboundServiceRequest,
-    RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner, ServiceTokenVerifier,
-    SystemClock, TokenTtl, TrustPolicy,
+    ApplicationEnvironmentKind, DelegatedPlatformContext, DelegatedPrincipalKind, KeyId,
+    OutboundServiceRequest, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner,
+    ServiceTokenVerifier, SystemClock, TokenTtl, TrustPolicy,
 };
 use sea_orm::{ConnectionTrait, DbBackend, EntityTrait, Statement, TransactionTrait};
 use serde_json::{json, Value};
@@ -329,14 +329,35 @@ pub fn internal_routes() -> Router<AppState> {
             "/internal/v1/accounts/communications/backfill",
             post(backfill),
         )
+        .route(INSTANT_MEETING_PATH, post(instant_meeting))
+        .route(RESOLVE_MEETING_PATH, post(resolve_meeting))
 }
+/// MT-1 (Sections 9–23): the Hub starts an instant meeting owned by the delegated user.
+pub const INSTANT_MEETING_PATH: &str = "/internal/v1/communications/meetings/instant";
+/// MT-2 (Sections 9–23): the Hub resolves a meeting code to public references.
+pub const RESOLVE_MEETING_PATH: &str = "/internal/v1/communications/meetings/resolve";
 fn internal_scope<'a>(state: &'a AppState, headers: &HeaderMap) -> ApiResult<&'a Bridge> {
+    verified_scope(
+        state,
+        headers,
+        cf_service_auth::InternalPermission::CommunicationsAccountRead,
+    )
+    .map(|(bridge, _)| bridge)
+}
+/// Signed caller with `permission` in this receiver's trust policy, delegated to the
+/// governed personal scope (any other scope is 404). Returns the delegated initiating
+/// principal when the hop carries one.
+fn verified_scope<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+    permission: cf_service_auth::InternalPermission,
+) -> ApiResult<(&'a Bridge, Option<(Uuid, DelegatedPrincipalKind)>)> {
     let bridge = state.communications.as_deref().ok_or_else(unavailable)?;
     let ctx = bridge
         .verifier
         .verify_headers(headers)
         .map_err(|_| ApiError::Unauthorized("Internal authentication failed".into()))?;
-    ctx.require_permission(cf_service_auth::InternalPermission::CommunicationsAccountRead)
+    ctx.require_permission(permission)
         .map_err(|_| ApiError::Forbidden("Internal permission denied".into()))?;
     let scope = ctx
         .delegated_platform_context()
@@ -344,7 +365,220 @@ fn internal_scope<'a>(state: &'a AppState, headers: &HeaderMap) -> ApiResult<&'a
     if Scope::of(scope) != Scope::of(&bridge.scope) {
         return Err(ApiError::domain(ErrorCode::EndpointNotFound, "Not found"));
     }
-    Ok(bridge)
+    let initiating = scope
+        .initiating_principal()
+        .map(|p| (p.principal_id, p.principal_kind));
+    Ok((bridge, initiating))
+}
+fn denied() -> ApiError {
+    ApiError::domain(
+        ErrorCode::PermissionDenied,
+        "The operation is not permitted",
+    )
+}
+fn account_id(reference: &str) -> ApiResult<Uuid> {
+    reference
+        .strip_prefix("cfmeet-user:")
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or_else(|| ApiError::domain(ErrorCode::ValidationError, "Invalid account reference"))
+}
+/// The registered actor the Hub acts for: the delegated initiating principal must be a
+/// native CF user equal to `principal_id`, and `account_reference` must be the active,
+/// non-guest account Account maps to that principal (`communication_principal_links`).
+/// Anything else is 403 — the Hub never acts for another user.
+async fn delegated_actor(
+    state: &AppState,
+    headers: &HeaderMap,
+    permission: cf_service_auth::InternalPermission,
+    principal_id: Uuid,
+    account_reference: &str,
+) -> ApiResult<ActorContext> {
+    let (bridge, initiating) = verified_scope(state, headers, permission)?;
+    if initiating != Some((principal_id, DelegatedPrincipalKind::NativeCfUser)) {
+        return Err(denied());
+    }
+    let user_id = account_id(account_reference)?;
+    let link = state.db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
+        "SELECT principal_id FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1 AND environment_id=$2",
+        [user_id.into(),bridge.scope.application_environment_id().into()])).await?;
+    let linked = link
+        .map(|r| r.try_get::<Uuid>("", "principal_id"))
+        .transpose()?;
+    if linked != Some(principal_id) {
+        return Err(denied());
+    }
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .filter(|u| {
+            !matches!(
+                u.status,
+                users::UserStatus::Inactive | users::UserStatus::Suspended
+            ) && u.role != users::UserRole::Guest
+        })
+        .ok_or_else(denied)?;
+    // Same identity rule as `resolve_actor` for a verified session of this account.
+    let email_verified = user.auth_type == users::AuthType::Google
+        || (user.status == users::UserStatus::Active && state.require_email_verification);
+    let verified_organizations = state
+        .organization_directory
+        .organizations_for_user(user.id)
+        .await;
+    Ok(ActorContext {
+        kind: ActorKind::RegisteredUser(RegisteredActor {
+            user_id: user.id,
+            display_name: user.username.clone(),
+            verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
+            platform_admin: user.role == users::UserRole::Admin,
+            // The Hub reaches this route only for a session the Account relay verified
+            // against the revocation store (`relay` refuses unchecked sessions).
+            revocation_checked: true,
+        }),
+        verified_organizations,
+        request_id: crate::middleware::request_id::current_request_id(),
+        client_kind: None,
+    })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InstantMeeting {
+    principal_id: Uuid,
+    account_reference: String,
+    idempotency_key: Uuid,
+    title: Option<String>,
+}
+/// MT-1: the same domain path as `POST /api/v2/instant-meetings`, acting as the mapped
+/// account (ownership, v2 enablement and space validation unchanged). Idempotent per
+/// (account, key): a replay returns the first meeting and never creates another.
+async fn instant_meeting(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<InstantMeeting>,
+) -> ApiResult<Json<Value>> {
+    let actor = delegated_actor(
+        &state,
+        &headers,
+        cf_service_auth::InternalPermission::MeetingCommunicationsCreate,
+        body.principal_id,
+        &body.account_reference,
+    )
+    .await?;
+    if body.title.as_ref().is_some_and(|t| t.chars().count() > 120) {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "title must be at most 120 characters",
+        ));
+    }
+    let user_id = actor.user_id().ok_or_else(denied)?;
+    // Serialize concurrent requests for one (account, key) for the lifetime of this
+    // transaction; the lock is released on commit, rollback or a dropped connection.
+    let txn = state.db.begin().await?;
+    txn.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT pg_advisory_xact_lock(hashtextextended('communication_instant_meetings:'||$1::text||':'||$2::text,0))",
+        [user_id.into(), body.idempotency_key.into()],
+    ))
+    .await?;
+    let existing = txn.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
+        "SELECT meeting_space_id,conference_id FROM communication_instant_meetings WHERE user_id=$1 AND idempotency_key=$2",
+        [user_id.into(),body.idempotency_key.into()])).await?;
+    if let Some(row) = existing {
+        txn.commit().await?;
+        let space_id: Uuid = row.try_get("", "meeting_space_id")?;
+        let conference_id: Uuid = row.try_get("", "conference_id")?;
+        let space = crate::models::meeting_spaces::Entity::find_by_id(space_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(crate::services::meeting_core::not_found_space)?;
+        return Ok(Json(instant_result(&space, conference_id, true)));
+    }
+    let (space, conference) = state
+        .meeting
+        .spaces
+        .create_instant(
+            &actor,
+            crate::dto::v2::InstantMeetingRequest {
+                title: body.title,
+                ..Default::default()
+            },
+        )
+        .await?;
+    txn.execute(Statement::from_sql_and_values(DbBackend::Postgres,
+        "INSERT INTO communication_instant_meetings(user_id,idempotency_key,meeting_space_id,conference_id) VALUES($1,$2,$3,$4)",
+        [user_id.into(),body.idempotency_key.into(),space.id.into(),conference.id.into()])).await?;
+    txn.commit().await?;
+    Ok(Json(instant_result(&space, conference.id, false)))
+}
+fn instant_result(
+    space: &crate::models::meeting_spaces::Model,
+    conference_id: Uuid,
+    replayed: bool,
+) -> Value {
+    json!({"schemaVersion":1,"meetingSpaceId":space.id,"conferenceId":conference_id,"meetingCode":space.meeting_code,"createdAt":space.created_at,"replayed":replayed})
+}
+
+/// The Hub's coarse view of a persistent space role: OWNER, HOST, PARTICIPANT (any other
+/// membership role) or NONE.
+fn public_role(role: Option<crate::domain::Role>) -> &'static str {
+    match role {
+        Some(crate::domain::Role::Owner) => "OWNER",
+        Some(crate::domain::Role::Host) => "HOST",
+        Some(_) => "PARTICIPANT",
+        None => "NONE",
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveMeeting {
+    principal_id: Uuid,
+    account_reference: String,
+    meeting_code: String,
+}
+/// MT-2: resolve a meeting code for the delegated user. Public references only — never a
+/// passcode, invitation, participant token or media credential. `shareable` only for the
+/// owner or a host of the space.
+async fn resolve_meeting(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ResolveMeeting>,
+) -> ApiResult<Json<Value>> {
+    let actor = delegated_actor(
+        &state,
+        &headers,
+        cf_service_auth::InternalPermission::MeetingCommunicationsRead,
+        body.principal_id,
+        &body.account_reference,
+    )
+    .await?;
+    let code = body.meeting_code.trim();
+    if code.len() > 64 {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "meetingCode is invalid",
+        ));
+    }
+    // Codes only: space or legacy UUIDs are not shareable references.
+    if !crate::services::secrets::is_v2_meeting_code(&code.to_ascii_lowercase())
+        && !crate::services::secrets::is_legacy_meeting_code(&code.to_ascii_uppercase())
+    {
+        return Err(crate::services::meeting_core::not_found_space());
+    }
+    let resolution = state.meeting.compat.resolve(code).await?;
+    let view = state
+        .meeting
+        .spaces
+        .view_of(&actor, resolution.space)
+        .await?;
+    let response = crate::handlers::v2::views::space(&view);
+    let role = public_role(view.viewer_role);
+    let latest = view
+        .latest_conference
+        .as_ref()
+        .map(|c| json!({"id":c.id,"status":c.status,"scheduledStartAt":c.scheduled_start_at}));
+    Ok(Json(
+        json!({"schemaVersion":1,"meetingSpaceId":response.id,"meetingCode":response.meeting_code,"title":response.title,"shareable":matches!(role,"OWNER"|"HOST"),"role":role,"latestConference":latest}),
+    ))
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -493,4 +727,48 @@ pub async fn require_fresh_credentials(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Role;
+
+    #[test]
+    fn only_owner_and_host_are_distinguished_roles() {
+        assert_eq!(public_role(Some(Role::Owner)), "OWNER");
+        assert_eq!(public_role(Some(Role::Host)), "HOST");
+        for r in [
+            Role::CoHost,
+            Role::Moderator,
+            Role::Presenter,
+            Role::Participant,
+            Role::Viewer,
+        ] {
+            assert_eq!(public_role(Some(r)), "PARTICIPANT");
+        }
+        assert_eq!(public_role(None), "NONE");
+    }
+
+    #[test]
+    fn account_references_are_cfmeet_user_uuids() {
+        let id = Uuid::new_v4();
+        assert_eq!(account_id(&format!("cfmeet-user:{id}")).unwrap(), id);
+        for bad in [id.to_string(), format!("user:{id}"), "cfmeet-user:x".into()] {
+            assert!(account_id(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn mt_bodies_refuse_unknown_fields() {
+        let p = Uuid::new_v4();
+        let ok = json!({"principalId":p,"accountReference":"cfmeet-user:x","idempotencyKey":p});
+        assert!(serde_json::from_value::<InstantMeeting>(ok.clone()).is_ok());
+        let mut extra = ok;
+        extra["ownerUserId"] = json!(p);
+        assert!(serde_json::from_value::<InstantMeeting>(extra).is_err());
+        let resolve =
+            json!({"principalId":p,"accountReference":"r","meetingCode":"c","passcode":"1"});
+        assert!(serde_json::from_value::<ResolveMeeting>(resolve).is_err());
+    }
 }

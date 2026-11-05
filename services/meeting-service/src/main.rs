@@ -136,6 +136,12 @@ async fn main() -> anyhow::Result<()> {
         {
             panic!("Account Communications integration migration is required");
         }
+        if !migration::communications_facade_ready(&state.db)
+            .await
+            .expect("Communications facade migration readiness")
+        {
+            panic!("Account Communications facade migration is required");
+        }
         let communications_state = state.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
