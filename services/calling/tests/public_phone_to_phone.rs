@@ -230,7 +230,7 @@ async fn a_protected_caller_reaches_a_protected_callee_through_one_call() {
     assert_eq!(cmd["media"], "NONE");
     assert_eq!(cmd["destination"]["contactReference"], json!(x.b));
     assert!(
-        cmd.to_string().find(&x.a.to_string()).is_none(),
+        !cmd.to_string().contains(&x.a.to_string()),
         "the caller is never the destination"
     );
     assert_eq!(x.privacy.grants()[0].1.call_leg_id, leg_b);

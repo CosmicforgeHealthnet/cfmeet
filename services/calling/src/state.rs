@@ -86,6 +86,12 @@ pub struct AppState {
     /// Application calling orchestration (§20–§25).
     pub app: Arc<AppCallService>,
     pub communications: Option<cf_communications_policy::PolicyClient>,
+    /// `CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID` (non-secret id): the API credential of
+    /// the governed personal scope's first-party service account that Hub-launched app
+    /// calls are attributed to. Re-verified live with Platform Access on every launch
+    /// (the delegated-authority path of a gateway-forwarded request); unset → launches
+    /// fail closed with 503.
+    pub communications_launch_credential: Option<uuid::Uuid>,
     /// Media connection gateway (none when application media is disabled).
     pub media_gateway: Option<Arc<dyn MediaConnectionGateway>>,
     /// Internal service authentication (separate from customer credentials).
@@ -180,6 +186,7 @@ impl AppState {
             signaling: SignalingAuthority::new(runtime.signaling_keys, db.clone(), clock.clone()),
             app,
             communications: None,
+            communications_launch_credential: None,
             media_gateway,
             service_auth,
             privacy_relay: runtime.privacy_relay,

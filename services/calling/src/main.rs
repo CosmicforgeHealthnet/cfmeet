@@ -473,7 +473,16 @@ async fn main() -> anyhow::Result<()> {
     if personal.is_some() && !calling_migration::communications_ready(&state.db).await? {
         anyhow::bail!("Communications integration migration is required");
     }
+    let launch_credential = match std::env::var("CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID") {
+        Ok(value) if personal.is_some() => Some(
+            uuid::Uuid::parse_str(value.trim())
+                .map_err(|_| anyhow::anyhow!("CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID must be a UUID"))?,
+        ),
+        Ok(_) => anyhow::bail!("CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID requires the personal Communications scope"),
+        Err(_) => None,
+    };
     state = state.with_communications(personal);
+    state.communications_launch_credential = launch_credential;
     state.legacy_usage_retired = config.legacy_usage_retired;
     tracing::info!(
         legacy_usage_authority = if config.legacy_usage_retired {

@@ -285,6 +285,9 @@ pub struct Peers {
     /// The Developer Platform: the webhook migration export and rollback only
     /// (`webhook-migration.export`, `webhook-migration.import`; Part VI §53).
     pub developer_platform: Arc<ServiceTokenSigner>,
+    /// The Communications Hub: `calling-communications.read`, `.apply` and `.launch`
+    /// (the private owner interfaces of src/communications.rs).
+    pub communications: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -335,6 +338,7 @@ pub fn service_auth_fixture_targeting(
     let messaging_key = service_key("messaging-test-1");
     let api_gateway_key = service_key("api-gateway-test-1");
     let developer_platform_key = service_key("developer-platform-test-1");
+    let communications_key = service_key("communications-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -382,6 +386,15 @@ pub fn service_auth_fixture_targeting(
                     cf_service_auth::services::DEVELOPER_PLATFORM,
                     vec![developer_platform_key.public_jwk()],
                     &["webhook-migration.export", "webhook-migration.import"],
+                ),
+                (
+                    cf_service_auth::services::COMMUNICATIONS,
+                    vec![communications_key.public_jwk()],
+                    &[
+                        "calling-communications.read",
+                        "calling-communications.apply",
+                        "calling-communications.launch",
+                    ],
                 ),
             ],
         ),
@@ -473,6 +486,13 @@ pub fn service_auth_fixture_targeting(
             ServiceId::developer_platform(),
             env,
             developer_platform_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        communications: Arc::new(ServiceTokenSigner::new(
+            ServiceId::communications(),
+            env,
+            communications_key,
             TokenTtl::default(),
             shared.clone(),
         )),

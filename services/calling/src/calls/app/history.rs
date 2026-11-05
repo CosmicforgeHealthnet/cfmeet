@@ -279,6 +279,20 @@ pub fn history_statement(
     destination: Option<Destination>,
     limit: u64,
 ) -> sea_orm::Statement {
+    history_statement_for(scope, principal, query, filter, destination, None, limit)
+}
+
+/// [`history_statement`], optionally confined to the given Calls (the participation
+/// read): the same derivation, scope and principal condition, never another query.
+fn history_statement_for(
+    scope: CallScope,
+    principal: PrincipalId,
+    query: &ListCallsQuery,
+    filter: HistoryFilter,
+    destination: Option<Destination>,
+    call_ids: Option<&[Uuid]>,
+    limit: u64,
+) -> sea_orm::Statement {
     let mut values = scope_values(scope);
     values.push(principal.as_uuid().into());
     let mut sql = format!(
@@ -321,6 +335,10 @@ pub fn history_statement(
         "p.call_id",
     );
     push_call_filters(&mut sql, &mut values, query, destination);
+    if let Some(ids) = call_ids {
+        values.push(ids.to_vec().into());
+        sql.push_str(&format!(" AND p.call_id = ANY(${})", values.len()));
+    }
     if let Some(direction) = filter.direction {
         sql.push_str(match direction {
             HistoryDirection::Outbound => " AND p.role = 'INITIATOR'",
@@ -341,6 +359,45 @@ pub fn history_statement(
         limit + 1
     ));
     stmt(&sql, values)
+}
+
+/// History entries of the rows of [`history_statement_for`] (participation derived by
+/// the statement; counterparts and labels are added by `enrich`).
+fn history_entries(rows: &[QueryResult]) -> CallResult<Vec<HistoryEntry>> {
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let call: Call = calls::Model::from_query_result(row, "")
+            .map_err(|_| CallError::Database {
+                summary: "history call row".into(),
+                connectivity: false,
+            })?
+            .into();
+        let role: String = get(row, "h_role")?;
+        let outcome: String = get(row, "h_outcome")?;
+        entries.push(HistoryEntry {
+            call,
+            participation: Participation {
+                participant_id: get(row, "h_participant_id")?,
+                direction: if role == "INITIATOR" {
+                    HistoryDirection::Outbound
+                } else {
+                    HistoryDirection::Inbound
+                },
+                outcome: ParticipantOutcome::parse(&outcome).ok_or(CallError::Database {
+                    summary: "history outcome".into(),
+                    connectivity: false,
+                })?,
+                added_at: get(row, "h_added_at")?,
+                answered_at: get(row, "h_answered_at")?,
+                left_at: get(row, "h_left_at")?,
+            },
+            counterparts: Vec::new(),
+            enterprise: None,
+            voicemail: None,
+            recording_available: false,
+        });
+    }
+    Ok(entries)
 }
 
 impl AppCallService {
@@ -369,45 +426,41 @@ impl AppCallService {
         } else {
             None
         };
-        let mut entries = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let call: Call = calls::Model::from_query_result(row, "")
-                .map_err(|_| CallError::Database {
-                    summary: "history call row".into(),
-                    connectivity: false,
-                })?
-                .into();
-            let role: String = get(row, "h_role")?;
-            let outcome: String = get(row, "h_outcome")?;
-            entries.push(HistoryEntry {
-                call,
-                participation: Participation {
-                    participant_id: get(row, "h_participant_id")?,
-                    direction: if role == "INITIATOR" {
-                        HistoryDirection::Outbound
-                    } else {
-                        HistoryDirection::Inbound
-                    },
-                    outcome: ParticipantOutcome::parse(&outcome).ok_or(CallError::Database {
-                        summary: "history outcome".into(),
-                        connectivity: false,
-                    })?,
-                    added_at: get(row, "h_added_at")?,
-                    answered_at: get(row, "h_answered_at")?,
-                    left_at: get(row, "h_left_at")?,
-                },
-                counterparts: Vec::new(),
-                enterprise: None,
-                voicemail: None,
-                recording_available: false,
-            });
-        }
+        let mut entries = history_entries(&rows)?;
         self.enrich(scope, principal, &mut entries).await?;
         Ok(HistoryPage {
             principal_id: principal,
             entries,
             next_cursor,
         })
+    }
+
+    /// `principal`'s entries for the given Calls of `scope` (at most one per Call, newest
+    /// first): exactly the history derivation and enrichment, confined to `call_ids`.
+    /// Calls the principal does not take part in, and Calls of another scope, are absent.
+    pub async fn call_participation(
+        &self,
+        scope: CallScope,
+        principal: PrincipalId,
+        call_ids: &[Uuid],
+    ) -> CallResult<Vec<HistoryEntry>> {
+        if call_ids.is_empty() || call_ids.len() as u64 > ListCallsQuery::MAX_LIMIT {
+            return Err(CallError::Validation("callIds must hold 1 to 100 Calls"));
+        }
+        // One participant row per principal per Call (uq_call_participants_call_principal).
+        let statement = history_statement_for(
+            scope,
+            principal,
+            &ListCallsQuery::default(),
+            HistoryFilter::default(),
+            None,
+            Some(call_ids),
+            call_ids.len() as u64,
+        );
+        let rows = self.db().query_all(statement).await?;
+        let mut entries = history_entries(&rows)?;
+        self.enrich(scope, principal, &mut entries).await?;
+        Ok(entries)
     }
 
     /// One page of the Calls of `scope` routed through an enterprise `destination`
