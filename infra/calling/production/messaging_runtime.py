@@ -28,6 +28,10 @@ SCANNER = 'cfmeet-messaging-clamav'
 SCANNER_TAG = 'clamav/clamav:1.5.4'
 
 
+def available_kib():
+    return int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
+
+
 def protected_file(name, make):
     path = WORK / name
     recovery = p.ROOT / 'key-recovery' / 'messaging' / name
@@ -187,6 +191,20 @@ def runtime_overrides(env, user, redis_password):
     }
 
 
+def runtime_config(old, env, user, password, managed, checkpoint, redis_password):
+    """The configured production container: the EXACT running image plus dependencies."""
+    cfg = release.clone(old, 'cfmeet-messaging', old['Image'], runtime_overrides(env, user, redis_password), False)
+    release.add_mount(cfg, managed, '/run/messaging/managed.ring')
+    release.add_mount(cfg, password, '/run/messaging/storage.secret')
+    mounts = cfg['HostConfig'].setdefault('Mounts', [])
+    if not any(m.get('Target') == '/var/lib/messaging-kt' for m in mounts):
+        mounts.append({'Type': 'bind', 'Source': str(checkpoint), 'Target': '/var/lib/messaging-kt', 'ReadOnly': False})
+    cfg['HostConfig']['Memory'] = old['HostConfig'].get('Memory') or 1024 * 1024 * 1024
+    cfg['HostConfig']['NanoCpus'] = old['HostConfig'].get('NanoCpus') or 2000000000
+    cfg['HostConfig']['LogConfig'] = {'Type': 'json-file', 'Config': {'max-size': '20m', 'max-file': '5'}}
+    return cfg
+
+
 def storage_probe(run_id):
     ip = p.inspect(storage.NAME)['NetworkSettings']['Networks'][p.NET]['IPAddress']
     user, password = (WORK / 'storage-user').read_text(), (WORK / 'storage-secret').read_text()
@@ -255,25 +273,30 @@ def configure(sha, run_id):
     assert not old['HostConfig']['PortBindings']
     baseline = messaging_release.database_summary()
     assert (WORK / 'managed.ring').exists() or baseline['conversations'] == 0, 'Cannot invent a keyring for existing content'
-    available = int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
+    available = available_kib()
     # Official Docker guidance requires 3 GiB for standard signatures/reloads:
     # https://docs.clamav.net/manual/Installing/Docker.html#memory-ram-requirements
     assert available >= 4 * 1024 * 1024, 'Insufficient memory for scanner plus production headroom'
     managed = protected_file('managed.ring', lambda: 'messaging-20261105 ' + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=') + '\n')
     user, password = storage_identity()
+    created_scanner = SCANNER not in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
+    try:
+        return _configure(sha, run_id, old, env, managed, user, password)
+    except Exception:
+        # A scanner created by this failed run must not keep reserving memory next
+        # to Calling/LiveKit. Stop it (retained for diagnosis); never touch one
+        # that existed before this run.
+        if created_scanner and SCANNER in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines():
+            subprocess.run(['docker', 'stop', '--time', '20', SCANNER], capture_output=True)
+        raise
+
+
+def _configure(sha, run_id, old, env, managed, user, password):
+    import messaging_release
     scanner_evidence = scanner()
     checkpoint = WORK / 'kt-checkpoints'
     checkpoint.mkdir(exist_ok=True, mode=0o700); os.chown(checkpoint, 10001, 10001)
-    overrides = runtime_overrides(env, user, p.secret('calling-capture-redis-password'))
-    cfg = release.clone(old, 'cfmeet-messaging', old['Image'], overrides, False)
-    release.add_mount(cfg, managed, '/run/messaging/managed.ring')
-    release.add_mount(cfg, password, '/run/messaging/storage.secret')
-    mounts = cfg['HostConfig'].setdefault('Mounts', [])
-    if not any(m.get('Target') == '/var/lib/messaging-kt' for m in mounts):
-        mounts.append({'Type': 'bind', 'Source': str(checkpoint), 'Target': '/var/lib/messaging-kt', 'ReadOnly': False})
-    cfg['HostConfig']['Memory'] = old['HostConfig'].get('Memory') or 1024 * 1024 * 1024
-    cfg['HostConfig']['NanoCpus'] = old['HostConfig'].get('NanoCpus') or 2000000000
-    cfg['HostConfig']['LogConfig'] = {'Type': 'json-file', 'Config': {'max-size': '20m', 'max-file': '5'}}
+    cfg = runtime_config(old, env, user, password, managed, checkpoint, p.secret('calling-capture-redis-password'))
     candidate = 'cfmeet-messaging-config-candidate-' + run_id
     test = copy.deepcopy(cfg)
     test['HostConfig']['PortBindings'] = {}

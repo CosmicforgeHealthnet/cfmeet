@@ -424,10 +424,108 @@ def client_logs():
                                   'files': len(files), 'flagged_files': len(flagged), 'samples': summary})
 
 
+_SAFE_VALUE = re.compile(r'^[A-Za-z_]{1,24}$')
+_FIELD_KEYS = ('connectionType', 'reason', 'protocol', 'candidateType', 'iceConnectionType', 'transport', 'isTCP', 'selectedCandidatePair')
+
+
+def safe_fields(line):
+    """Whitelisted enum-like LiveKit fields only (e.g. connectionType=udp)."""
+    tail = line[line.find('{'):] if '{' in line else ''
+    try:
+        fields = json.loads(tail) if tail else {}
+    except ValueError:
+        return {}
+    out = {}
+    for key in _FIELD_KEYS:
+        value = fields.get(key)
+        if isinstance(value, bool):
+            out[key] = value
+        elif isinstance(value, str):
+            out[key] = value if _SAFE_VALUE.match(value) else '<v>'
+    return out
+
+
+def stun_probe(address, port):
+    """One STUN Binding Request: a read-only reachability check. No allocation."""
+    request = bytes.fromhex('0001000021124a42') + os.urandom(12)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(2)
+        try:
+            s.sendto(request, (address, port))
+            data = s.recv(512)
+            return 'STUN_RESPONSE' if data[:2] in (bytes.fromhex('0101'), bytes.fromhex('0111')) else 'OTHER_RESPONSE'
+        except ConnectionRefusedError:
+            return 'ICMP_PORT_UNREACHABLE'
+        except socket.timeout:
+            return 'NO_RESPONSE'
+
+
+def media_path_facts(public_ip):
+    container = json.loads(sh('docker', 'inspect', 'lk-server') or '[{}]')[0]
+    bindings = {port: sorted({(b.get('HostIp') or '*') == '*' or b.get('HostIp') in ('0.0.0.0', '::') for b in (v or [])})
+                for port, v in (container.get('HostConfig', {}).get('PortBindings') or {}).items()}
+    pid = container.get('State', {}).get('Pid')
+    listeners = {}
+    if pid and shutil.which('nsenter'):
+        for proto, flag in (('udp', '-Hulpn'), ('tcp', '-Htlpn')):
+            output = sh('nsenter', '-t', str(pid), '-n', 'ss', flag) or ''
+            ports = sorted({int(line.split()[3].rsplit(':', 1)[1]) for line in output.splitlines()
+                            if len(line.split()) > 3 and line.split()[3].rsplit(':', 1)[-1].isdigit()})
+            listeners[proto] = {'count': len(ports), 'min': ports[0] if ports else None, 'max': ports[-1] if ports else None,
+                                'well_known': [x for x in ports if x < 10000]}
+    daemon = Path('/etc/docker/daemon.json')
+    daemon_cfg = json.loads(daemon.read_text()) if daemon.exists() else {}
+    nat = sh('iptables', '-t', 'nat', '-S', 'DOCKER') or ''
+    rules = sorted({(m.group(1), m.group(2)) for m in re.finditer(r'-p (udp|tcp) .*?--dport (\S+)', nat)})
+    import yaml
+    config = yaml.safe_load(Path('/opt/livekit/livekit.yaml').read_text()) or {}
+    turn = config.get('turn') or {}
+    rtc = config.get('rtc') or {}
+    probes = {}
+    for label, port in (('rtc_range_start', rtc.get('port_range_start') or 50000), ('turn_udp', turn.get('udp_port') or 3478),
+                        ('rtc_udp_mux_7882', 7882)):
+        probes[label] = stun_probe(public_ip, int(port))
+    emit('mediaPathFacts', {'livekit_published_ports_all_interfaces': bindings,
+        'livekit_listeners_in_container': listeners,
+        'docker_userland_proxy': daemon_cfg.get('userland-proxy', 'default(true)'),
+        'docker_iptables': daemon_cfg.get('iptables', 'default(true)'),
+        'docker_nat_dnat_rules': [list(r) for r in rules],
+        'turn': {'relay_range_start': turn.get('relay_range_start'), 'relay_range_end': turn.get('relay_range_end'),
+                 'domain_configured': bool(turn.get('domain')), 'tls_cert_configured': bool(turn.get('cert_file'))},
+        'host_stun_probe_to_public_address': probes})
+    ufw = sh('ufw', 'status', 'verbose') or ''
+    emit('firewallPolicy', [redact(line) for line in ufw.splitlines() if line.startswith(('Status', 'Default', 'Logging'))])
+    kernel = sh('journalctl', '-k', '--since', '2026-11-04', '-o', 'cat', '--no-pager', '-g', 'UFW BLOCK', timeout=90) or ''
+    blocks = collections.Counter()
+    for line in kernel.splitlines():
+        f = dict(x.split('=', 1) for x in line.split() if '=' in x)
+        source = f.get('SRC', '')
+        try:
+            import ipaddress
+            private = ipaddress.ip_address(source).is_private
+        except ValueError:
+            private = None
+        dport = f.get('DPT', '-')
+        bucket = dport if not dport.isdigit() or int(dport) < 10000 else ('50000-60000' if 50000 <= int(dport) <= 60000 else 'ephemeral>=10000')
+        blocks[(f.get('IN', '').rstrip('0123456789') or '-', f.get('PROTO', '-'), bucket,
+                'private_src' if private else 'public_src', 'to_self_public' if f.get('DST') == public_ip else 'other_dst')] += 1
+    emit('ufwBlocksSince20261104', [list(k) + [v] for k, v in blocks.most_common(25)])
+    connection = collections.Counter(); never = collections.Counter()
+    for run, image, outcome, start, end, stage in WINDOWS:
+        output = sh('docker', 'logs', '--since', start + 'Z', '--until', end + 'Z', 'lk-server', timeout=120) or ''
+        types = collections.Counter()
+        for line in output.splitlines():
+            if 'participant active' in line:
+                types[json.dumps(safe_fields(line), sort_keys=True)] += 1
+            if 'short ice connection' in line or 'TURN allocation quota' in line or 'without connection' in line:
+                types[template(line) + ' ' + json.dumps(safe_fields(line), sort_keys=True)] += 1
+        emit('livekitConnectionTypes', {'run': run, 'image': image, 'outcome': outcome, 'counts': dict(types)})
+
+
 def run():
     public_ip = socket.gethostbyname('api.cfmeet.com')
-    for step in (host_resources, kernel_events, sysstat_history, container_resources, network_state,
-                 lambda: livekit_config(public_ip), active_media, lambda: probe_latency(public_ip), window_logs, client_logs):
+    for step in (lambda: media_path_facts(public_ip), host_resources, kernel_events, sysstat_history, container_resources,
+                 network_state, lambda: livekit_config(public_ip), active_media, lambda: probe_latency(public_ip), window_logs, client_logs):
         try:
             step()
         except Exception as error:

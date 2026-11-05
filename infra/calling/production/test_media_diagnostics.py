@@ -50,5 +50,12 @@ class Redaction(unittest.TestCase):
             self.assertLess(start,end);self.assertIn(outcome,('PASS','FAIL'))
 
 
+    def test_only_enum_like_livekit_fields_are_exported(self):
+        line=('2026-11-05T08:14:07Z\tINFO\tlivekit\trtc/participant.go:1\tparticipant active\t{"connectionType":"tcp",'
+              '"room":"call-9f1b2c3d-1111-4222-8333-444455556666","participant":"PA_abcDEF123","remote":"203.0.113.7:51234","reason":"a b"}')
+        self.assertEqual(d.safe_fields(line),{'connectionType':'tcp','reason':'<v>'})
+        self.assertEqual(d.safe_fields('no json here'),{})
+
+
 if __name__=='__main__':
     unittest.main()
