@@ -46,7 +46,7 @@ def execute(sha, run_id, scope, stage, verification=False):
     p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
     # The test client receives only fixture account credentials and a bounded
     # customer credential. No owner DB password or internal service key.
-    command=['docker','run','--rm','--name','cfmeet-communications-client-'+run_id,'--network',p.NET if stage else 'bridge','--memory','768m','--cpus','1',
+    command=['docker','run','--rm','--name','cfmeet-communications-client-'+run_id,'--network',p.NET if stage else 'host','--memory','768m','--cpus','1',
         '--mount',f'type=bind,src={folder},dst=/result',
         '--mount',f'type=bind,src={Path(__file__).resolve()},dst=/acceptance.py,readonly',
         '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',

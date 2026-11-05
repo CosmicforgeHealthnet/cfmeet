@@ -204,7 +204,10 @@ def _run(run_id,feature='enterprise'):
     base=json.loads(p.run('docker','image','inspect','python:3.12-slim'))[0]['RepoDigests'][0]
     tag='cfmeet-calling-api-probe:'+hashlib.sha256((source/'Probe.Dockerfile').read_bytes()+base.encode()).hexdigest()[:20]
     p.run('docker','build','--network','default','--build-arg','PYTHON_IMAGE='+base,'-f',str(source/'Probe.Dockerfile'),'-t',tag,str(source))
-    command=['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','bridge','--memory','768m','--cpus','1',
+    # Local acceptance keeps the real public HTTPS/WSS origins while avoiding
+    # Docker NAT/hairpin as a variable in SFU and TLS connection establishment.
+    # Only this non-root, scoped fixture client shares the host network.
+    command=['docker','run','--rm','--name','cfmeet-calling-api-probe','--network','host','--memory','768m','--cpus','1',
         '--tmpfs','/tmp:rw,nosuid,size=256m,uid=10001,gid=10001','--mount',f'type=bind,src={root},dst=/result',
         '--mount',f'type=bind,src={source}/api_client.py,dst=/api_client.py,readonly',
         '--mount',f'type=bind,src={source}/rtc_client.py,dst=/rtc_client.py,readonly',
