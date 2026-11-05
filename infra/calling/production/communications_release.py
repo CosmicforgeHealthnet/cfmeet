@@ -193,13 +193,31 @@ def isolate_stage_messaging_state(cfg, ring, checkpoint):
     # A candidate must not write the production KT checkpoint or accidentally load
     # a duplicate, earlier production keyring environment entry.
     values=dict(item.split('=',1) for item in cfg['Env'])
+    # Cloning production after dependency configuration must not connect isolated
+    # fixtures to production attachments, push providers or Redis pub/sub (whose
+    # channels are shared even across Redis database numbers).
+    removed_files={value for key,value in values.items() if key.startswith((
+        'MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS')) and key.endswith('_FILE')}
+    for key in list(values):
+        if key.startswith(('MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS')) or key in (
+            'MESSAGING_REALTIME_REDIS_URL', 'MESSAGING_CLAMAV_ADDRESS'):
+            del values[key]
+    values['MESSAGING_PUSH_PROVIDER']='none'
+    values['MESSAGING_KT_LOG_ID']='cfmeet.messaging:isolated-release-test'
+    values['MESSAGING_KT_CHECKPOINT_FILE']='/var/lib/messaging-kt/checkpoint.json'
     values['MESSAGING_MANAGED_KEYRING_FILE']='/run/communications/managed.ring'
     cfg['Env']=[key+'='+value for key,value in values.items()]
     mounts=cfg['HostConfig'].setdefault('Mounts',[])
-    mounts[:]=[m for m in mounts if m.get('Target')!='/run/messaging/managed.ring']
+    mounts[:]=[m for m in mounts if m.get('Target') not in removed_files | {'/run/messaging/managed.ring'}]
+    binds=cfg['HostConfig'].get('Binds',[])
+    cfg['HostConfig']['Binds']=[b for b in binds if b.split(':')[1] not in removed_files | {'/run/messaging/managed.ring'}]
     for mount in mounts:
         if mount.get('Target')=='/var/lib/messaging-kt':
             mount['Source']=str(checkpoint)
+            mount['ReadOnly']=False
+            break
+    else:
+        mounts.append(dict(Type='bind',Source=str(checkpoint),Target='/var/lib/messaging-kt',ReadOnly=False))
     add_mount(cfg,ring,'/run/communications/managed.ring')
 
 def configured(service,sha,stage,scope,db=None):

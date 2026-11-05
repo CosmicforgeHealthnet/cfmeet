@@ -24,13 +24,22 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
             self.assertEqual(creates,[('credential','create')])
             self.assertEqual(json.loads((work/'stage-context.private.json').read_text()),value)
     def test_staging_never_writes_production_checkpoint_or_loads_its_managed_keyring(self):
-        cfg={'Env':['KEEP=preserved','MESSAGING_MANAGED_KEYRING_FILE=/run/messaging/managed.ring'],
+        cfg={'Env':['KEEP=preserved','MESSAGING_MANAGED_KEYRING_FILE=/run/messaging/managed.ring',
+                'MESSAGING_REALTIME_REDIS_URL=redis://private-production',
+                'MESSAGING_ATTACHMENTS_S3_SECRET_ACCESS_KEY_FILE=/run/production-storage',
+                'MESSAGING_PUSH_PROVIDER=fcm','MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE=/run/production-push'],
             'HostConfig':{'Mounts':[{'Type':'bind','Source':'/production/checkpoint','Target':'/var/lib/messaging-kt','ReadOnly':False},
+                {'Type':'bind','Source':'/production/storage','Target':'/run/production-storage','ReadOnly':True},
+                {'Type':'bind','Source':'/production/push','Target':'/run/production-push','ReadOnly':True},
                 {'Type':'bind','Source':'/production/managed','Target':'/run/messaging/managed.ring','ReadOnly':True}]}}
         release.isolate_stage_messaging_state(cfg,'/stage/ring','/stage/checkpoint')
         self.assertIn('KEEP=preserved',cfg['Env'])
         self.assertEqual(sum(item.startswith('MESSAGING_MANAGED_KEYRING_FILE=') for item in cfg['Env']),1)
         self.assertNotIn('/production',str(cfg))
+        self.assertNotIn('redis://',str(cfg))
+        self.assertNotIn('MESSAGING_ATTACHMENTS_S3_',str(cfg))
+        self.assertIn('MESSAGING_PUSH_PROVIDER=none',cfg['Env'])
+        self.assertIn('MESSAGING_KT_LOG_ID=cfmeet.messaging:isolated-release-test',cfg['Env'])
         self.assertIn('/stage/checkpoint',str(cfg['HostConfig']['Mounts']))
     def original(self):
         return {'Id':'a'*64,'Image':'sha256:old','Config':{'Image':'old:tag','Env':['KEEP=original','DATABASE_URL=private'],
