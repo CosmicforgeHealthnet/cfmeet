@@ -209,7 +209,7 @@ def isolate_stage_messaging_state(cfg, ring, checkpoint):
     cfg['Env']=[key+'='+value for key,value in values.items()]
     mounts=cfg['HostConfig'].setdefault('Mounts',[])
     mounts[:]=[m for m in mounts if m.get('Target') not in removed_files | {'/run/messaging/managed.ring'}]
-    binds=cfg['HostConfig'].get('Binds',[])
+    binds=cfg['HostConfig'].get('Binds') or []
     cfg['HostConfig']['Binds']=[b for b in binds if b.split(':')[1] not in removed_files | {'/run/messaging/managed.ring'}]
     for mount in mounts:
         if mount.get('Target')=='/var/lib/messaging-kt':

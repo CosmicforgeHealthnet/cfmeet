@@ -28,7 +28,7 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
                 'MESSAGING_REALTIME_REDIS_URL=redis://private-production',
                 'MESSAGING_ATTACHMENTS_S3_SECRET_ACCESS_KEY_FILE=/run/production-storage',
                 'MESSAGING_PUSH_PROVIDER=fcm','MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE=/run/production-push'],
-            'HostConfig':{'Mounts':[{'Type':'bind','Source':'/production/checkpoint','Target':'/var/lib/messaging-kt','ReadOnly':False},
+            'HostConfig':{'Binds':None,'Mounts':[{'Type':'bind','Source':'/production/checkpoint','Target':'/var/lib/messaging-kt','ReadOnly':False},
                 {'Type':'bind','Source':'/production/storage','Target':'/run/production-storage','ReadOnly':True},
                 {'Type':'bind','Source':'/production/push','Target':'/run/production-push','ReadOnly':True},
                 {'Type':'bind','Source':'/production/managed','Target':'/run/messaging/managed.ring','ReadOnly':True}]}}
