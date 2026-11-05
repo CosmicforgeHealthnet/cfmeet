@@ -63,6 +63,8 @@ class FakeDocker:
         self.commands.append(args)
         if args[:3] == ('docker', 'ps', '-a'):
             return '\n'.join(self.by_name)
+        if args[:2] == ('docker', 'ps'):
+            return '\n'.join(n for n, c in self.by_name.items() if c['State']['Running'])
         if args[:2] == ('docker', 'rename'):
             self.by_name[args[3]] = self.by_name.pop(args[2])
         elif args[:2] == ('docker', 'stop'):
@@ -88,7 +90,7 @@ class Base(unittest.TestCase):
         root = Path(self.folder.name)
         self.messaging_work = root / 'messaging'; self.comm_work = root / 'communications'
         self.messaging_work.mkdir(); self.comm_work.mkdir()
-        for name in ('managed.ring', 'storage-secret'):
+        for name in ('managed.ring', 'storage-secret', 'scan-verdict-keys.json'):
             (self.messaging_work / name).write_text('fixture-' + name)
             (self.messaging_work / name).chmod(0o600)
         for name in ('messaging.trust.json', 'stage-managed.ring'):
@@ -98,9 +100,10 @@ class Base(unittest.TestCase):
         for target in (release.os, runtime.os):
             patcher = patch.object(target, 'chown'); patcher.start(); self.addCleanup(patcher.stop)
 
-    def configured_cfg(self, old):
+    def configured_cfg(self, old, scan=True):
         return runtime.runtime_config(old, release.p.env_of(old), 'cfmeet-msg-user', self.messaging_work / 'storage-secret',
-            self.messaging_work / 'managed.ring', self.messaging_work / 'kt-checkpoints', PRODUCTION_REDIS_PASSWORD)
+            self.messaging_work / 'managed.ring', self.messaging_work / 'kt-checkpoints', PRODUCTION_REDIS_PASSWORD,
+            self.messaging_work / 'scan-verdict-keys.json' if scan else None)
 
 
 class Persistence(Base):
@@ -114,12 +117,34 @@ class Persistence(Base):
         for key, value in runtime.runtime_overrides(env(old), 'cfmeet-msg-user', PRODUCTION_REDIS_PASSWORD).items():
             self.assertEqual(values[key], value)
         self.assertEqual(mounts(cfg['HostConfig']), {
+            '/run/messaging/scan-verdict-keys.json': (str(self.messaging_work / 'scan-verdict-keys.json'), True),
             '/run/messaging/managed.ring': (str(self.messaging_work / 'managed.ring'), True),
             '/run/messaging/storage.secret': (str(self.messaging_work / 'storage-secret'), True),
             '/var/lib/messaging-kt': (str(self.messaging_work / 'kt-checkpoints'), False)})
         self.assertEqual(cfg['HostConfig']['Binds'], old['HostConfig']['Binds'])
         self.assertEqual(cfg['HostConfig']['LogConfig']['Config'], {'max-size': '20m', 'max-file': '5'})
         self.assertGreater(cfg['HostConfig']['Memory'], 0); self.assertGreater(cfg['HostConfig']['NanoCpus'], 0)
+        # The shared gateway over its private TLS route; never a dedicated engine.
+        self.assertEqual(values['MESSAGING_SCAN_GATEWAY_URL'], 'https://api.cfmeet.com:8449')
+        self.assertEqual(values['MESSAGING_MANAGED_SCAN_MAX_BYTES'], str(25 * 1024 * 1024))
+        self.assertNotIn('MESSAGING_CLAMAV_ADDRESS', values)
+        self.assertNotIn('clamav', json.dumps(cfg).lower().replace('clamav-gateway', ''))
+
+    def test_quarantine_mode_configures_no_scanner_and_switching_modes_never_leaves_two(self):
+        old = running_messaging(); old['Config']['Env'].append('MESSAGING_CLAMAV_ADDRESS=cfmeet-messaging-clamav:3310')
+        quarantined = self.configured_cfg(old, scan=False)
+        values = env(quarantined)
+        self.assertFalse(any(k.startswith('MESSAGING_SCAN_GATEWAY_') for k in values))
+        self.assertNotIn('MESSAGING_CLAMAV_ADDRESS', values)
+        self.assertNotIn('/run/messaging/scan-verdict-keys.json', mounts(quarantined['HostConfig']))
+        # gateway -> quarantine removes the gateway variables and key mount.
+        gateway = as_container(self.configured_cfg(running_messaging()), 'sha256:a')
+        back = self.configured_cfg(gateway, scan=False)
+        self.assertFalse(any(k.startswith('MESSAGING_SCAN_GATEWAY_') for k in env(back)))
+        self.assertNotIn('/run/messaging/scan-verdict-keys.json', mounts(back['HostConfig']))
+        # quarantine -> gateway adds exactly one key mount.
+        again = self.configured_cfg(as_container(back, 'sha256:b'))
+        self.assertEqual(list(mounts(again['HostConfig'])).count('/run/messaging/scan-verdict-keys.json'), 1)
 
     def test_configure_refuses_production_e2ee(self):
         old = running_messaging(); old['Config']['Env'][1] = 'MESSAGING_E2EE_DEVICES_ENABLED=true'
@@ -189,7 +214,7 @@ class Persistence(Base):
             return {}
         with patch.object(release.p, 'run', side_effect=docker.run), patch.object(release.p, 'inspect', side_effect=docker.inspect), \
              patch.object(release.p, 'docker_api', side_effect=docker.api), patch.object(release, 'wait'), \
-             patch.object(runtime, 'scanner', return_value={}), patch.object(runtime, 'dependency_probe', side_effect=probe), \
+             patch.object(runtime, 'scanner_in_use', return_value='quarantine'), patch.object(runtime, 'dependency_probe', side_effect=probe), \
              patch.object(release.p, 'secret', return_value=PRODUCTION_REDIS_PASSWORD), self.assertRaises(RuntimeError):
             runtime._configure('0' * 40, '77', old, release.p.env_of(old), self.messaging_work / 'managed.ring',
                                'cfmeet-msg-user', self.messaging_work / 'storage-secret')
@@ -201,30 +226,36 @@ class Persistence(Base):
         journal = json.loads((self.messaging_work / 'runtime-rollback-77.private.json').read_text())
         self.assertEqual(journal['original']['Id'], snapshot['Id'])
 
-    def outer_configure(self, scanner_existed):
-        names = ['cfmeet-messaging'] + (['cfmeet-messaging-clamav'] if scanner_existed else [])
-        docker = FakeDocker({n: {'State': {'Running': True}} for n in names})
-        def fail(*args):
-            docker.by_name.setdefault('cfmeet-messaging-clamav', {'State': {'Running': True}})
-            raise RuntimeError('ClamAV readiness failed')
-        baseline = self.comm_work / 'messaging-baseline-1.json'; baseline.write_text('{}')
-        stopped = []
+    def outer_configure(self, running, mode=('quarantine', {})):
+        docker = FakeDocker({n: {'State': {'Running': True}} for n in running})
+        (self.comm_work / 'messaging-baseline-1.json').write_text('{}')
+        seen = {}
+        def configure_inner(*args):
+            seen['mode'] = args[7]
+            raise RuntimeError('stop after the outer gates')
         with patch.object(runtime.p, 'ROOT', Path(self.folder.name)), patch.object(runtime.p, 'identity'), \
              patch.object(runtime.p, 'inspect', return_value=running_messaging()), \
              patch.object(runtime.p, 'run', side_effect=docker.run), patch.object(runtime, 'available_kib', return_value=8 * 2**20), \
              patch('messaging_release.database_summary', return_value={'conversations': 0}), \
+             patch.object(runtime, 'scanner_mode', return_value=mode), \
              patch.object(runtime, 'storage_identity', return_value=('user', self.messaging_work / 'storage-secret')), \
-             patch.object(runtime, '_configure', side_effect=fail), \
-             patch.object(runtime.subprocess, 'run', side_effect=lambda args, **kw: stopped.append(args)), \
-             self.assertRaises(RuntimeError):
+             patch.object(runtime, '_configure', side_effect=configure_inner), \
+             self.assertRaises((RuntimeError, AssertionError)) as raised:
             runtime.configure('0' * 40, '78')
-        return stopped
+        return docker.commands, seen.get('mode'), raised.exception
 
-    def test_failed_configure_stops_a_scanner_it_created(self):
-        self.assertEqual(self.outer_configure(False), [['docker', 'stop', '--time', '20', 'cfmeet-messaging-clamav']])
+    def test_configure_never_starts_an_antivirus_engine(self):
+        for mode in (('quarantine', {}), ('gateway', {'url': 'https://api.cfmeet.com:8449'})):
+            commands, chosen, _ = self.outer_configure(['cfmeet-messaging'], mode)
+            self.assertEqual(chosen, mode[0])
+            text = json.dumps(commands)
+            self.assertNotIn('clamav/clamav', text)
+            self.assertFalse(any(c[:2] in (('docker', 'run'), ('docker', 'create'), ('docker', 'pull')) for c in commands))
 
-    def test_failed_configure_never_touches_a_preexisting_scanner(self):
-        self.assertEqual(self.outer_configure(True), [])
+    def test_configure_refuses_while_a_retired_dedicated_scanner_runs(self):
+        _, chosen, error = self.outer_configure(['cfmeet-messaging', 'cfmeet-messaging-clamav'])
+        self.assertIsNone(chosen)
+        self.assertIsInstance(error, AssertionError)
 
     def headroom(self, available_kib):
         docker = FakeDocker({'cfmeet-messaging': {'State': {'Running': True}}})
@@ -233,27 +264,30 @@ class Persistence(Base):
              patch.object(runtime.p, 'inspect', return_value=running_messaging()), patch.object(runtime.p, 'run', side_effect=docker.run), \
              patch('messaging_release.database_summary', return_value={'conversations': 0}), \
              patch.object(runtime, 'available_kib', return_value=available_kib), \
+             patch.object(runtime, 'scanner_mode', return_value=('quarantine', {})), \
              patch.object(runtime, 'storage_identity', side_effect=RuntimeError('past the headroom gate')) as storage:
             with self.assertRaises((AssertionError, RuntimeError)) as raised:
                 runtime.configure('0' * 40, '79')
         return type(raised.exception), storage.called
 
-    def test_configure_refuses_without_memory_headroom(self):
-        # 4.72 GiB is the measured minimum MemAvailable on the production VPS (sysstat).
-        for available in (3 * 2**20, int(4.72 * 2**20), int(6.4 * 2**20)):
+    def test_configure_refuses_without_release_and_media_headroom(self):
+        for available in (2 * 2**20, 3 * 2**20, int(3.4 * 2**20)):
             self.assertEqual(self.headroom(available), (AssertionError, False), available)
 
-    def test_configure_proceeds_only_with_scanner_release_and_media_headroom(self):
-        self.assertEqual(runtime.SCANNER_HEADROOM_KIB, 6656 * 1024)
-        self.assertEqual(self.headroom(7 * 2**20), (RuntimeError, True))
+    def test_configure_proceeds_at_the_measured_vps_minimum_without_scanner_memory(self):
+        # 4.72 GiB is the measured minimum MemAvailable on the production VPS (sysstat);
+        # it was refused while a dedicated 3 GiB scanner was part of the configuration.
+        self.assertEqual(runtime.HEADROOM_KIB, 3584 * 1024)
+        for available in (int(4.72 * 2**20), int(5.02 * 2**20)):
+            self.assertEqual(self.headroom(available), (RuntimeError, True), available)
 
 
 # Every runtime dependency must be explicitly classified for isolated staging.
 STAGE_DROPPED = {'MESSAGING_REALTIME_REDIS_URL', 'MESSAGING_CLAMAV_ADDRESS'}
-STAGE_DROPPED_PREFIXES = ('MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS')
+STAGE_DROPPED_PREFIXES = ('MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS', 'MESSAGING_SCAN_GATEWAY_')
 STAGE_REPLACED = {'MESSAGING_MANAGED_KEYRING_FILE': '/run/communications/managed.ring',
                   'MESSAGING_KT_CHECKPOINT_FILE': '/var/lib/messaging-kt/checkpoint.json'}
-STAGE_SAFE = {'MESSAGING_E2EE_DEVICES_ENABLED', 'MESSAGING_METRICS_ADDRESS'}
+STAGE_SAFE = {'MESSAGING_E2EE_DEVICES_ENABLED', 'MESSAGING_METRICS_ADDRESS', 'MESSAGING_MANAGED_SCAN_MAX_BYTES'}
 
 
 class StagingIsolation(Base):
@@ -289,6 +323,8 @@ class StagingIsolation(Base):
         self.assertEqual(stage_mounts['/run/communications/managed.ring'], (str(self.comm_work / 'stage-managed.ring'), True))
         self.assertNotIn('/run/messaging/managed.ring', stage_mounts)
         self.assertNotIn('/run/messaging/storage.secret', stage_mounts)
+        self.assertNotIn('/run/messaging/scan-verdict-keys.json', stage_mounts)
+        self.assertFalse(any(k.startswith('MESSAGING_SCAN_GATEWAY_') for k in values))
         self.assertEqual(cfg['HostConfig']['PortBindings'], {})
         self.assertEqual(cfg['HostConfig']['Memory'], 768 * 1024 * 1024)
         self.assertEqual(cfg['NetworkingConfig']['EndpointsConfig'][NET], {'Aliases': ['cfmeet-comm-stage-messaging']})

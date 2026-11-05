@@ -161,7 +161,8 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .unwrap_or_else(|e| fatal("MESSAGING_SCAN_GATEWAY_*", e)),
             );
-            tracing::info!(
+            // warn: always visible; messaging-configure reads it to prove the active scanner.
+            tracing::warn!(
                 "MANAGED attachments are scanned through the shared security scan gateway"
             );
         }

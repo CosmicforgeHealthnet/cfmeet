@@ -15,7 +15,8 @@ DEPENDENCIES = {
     'managed_encryption': ('MESSAGING_MANAGED_KEYRING_FILE',),
     'redis': ('MESSAGING_REALTIME_REDIS_URL',),
     'attachment_storage': ('MESSAGING_ATTACHMENTS_S3_ENDPOINT', 'MESSAGING_ATTACHMENTS_S3_BUCKET'),
-    'malware_scanner': ('MESSAGING_CLAMAV_ADDRESS',),
+    # The shared security scan gateway (no dedicated CF Meet antivirus engine).
+    'malware_scanner': ('MESSAGING_SCAN_GATEWAY_URL', 'MESSAGING_SCAN_GATEWAY_VERDICT_KEYS_FILE'),
     'metrics_listener': ('MESSAGING_METRICS_ADDRESS',),
     'apns': ('MESSAGING_PUSH_APNS_KEY_FILE', 'MESSAGING_PUSH_APNS_KEY_ID', 'MESSAGING_PUSH_APNS_TEAM_ID', 'MESSAGING_PUSH_APNS_TOPIC'),
     'fcm': ('MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE',),

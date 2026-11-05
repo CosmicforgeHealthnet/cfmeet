@@ -21,8 +21,14 @@ path = "src/main.rs"
 name = "security-scan-gateway-keygen"
 path = "src/bin/keygen.rs"
 
+# On-host acceptance probe (signs as a registered caller with that caller's own key).
+[[bin]]
+name = "security-scan-gateway-probe"
+path = "src/bin/probe.rs"
+
 [dependencies]
 cf-service-auth = { path = "../../packages/service-auth" }
+http = "1"
 cf-scan-gateway-contract = { path = "../../packages/scan-gateway-contract" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "io-util"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio"] }
@@ -36,10 +42,10 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+# Probe binary only (the gateway itself makes no outbound HTTP call).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
-http = "1"
 
 [profile.release]
 codegen-units = 1

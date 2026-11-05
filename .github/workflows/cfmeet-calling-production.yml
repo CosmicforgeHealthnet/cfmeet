@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, resource-inventory, resource-scanners, resource-recover, messaging-inspect, messaging-configure, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -15,7 +15,7 @@ on:
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
+  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
@@ -42,12 +42,32 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
       - name: Authenticate for existing core images
-        if: inputs.operation == 'communications-stage' || inputs.operation == 'communications-release'
+        if: inputs.operation == 'communications-stage' || inputs.operation == 'communications-release' || inputs.operation == 'scan-gateway-configure'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Transfer the exact security scan gateway image through SSH
+        if: inputs.operation == 'scan-gateway-configure'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          IMAGE_SHA: ${{ inputs.image_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git diff --exit-code "$IMAGE_SHA" "$GITHUB_SHA" -- services/security-scan-gateway packages/service-auth packages/scan-gateway-contract
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cfmeet-security-scan-gateway:$IMAGE_SHA"
+          docker pull "$image"
+          revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
+          [[ "$revision" == "$IMAGE_SHA" ]]
+          docker image inspect --format 'digests={{json .RepoDigests}} id={{.Id}} size={{.Size}}' "$image"
+          expected_id=$(docker image inspect --format '{{.Id}}' "$image")
+          cached_id=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "docker image inspect --format '{{.Id}}' '$image' 2>/dev/null" || true)
+          if [[ "$cached_id" != "$expected_id" ]]; then
+            docker save "$image" | gzip -1 | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12 "$VPS_USER@$VPS_HOST" 'gzip -dc | docker load'
+          fi
       - name: Transfer exact Communications release images through SSH
         if: inputs.operation == 'communications-stage' || inputs.operation == 'communications-release'
         env:

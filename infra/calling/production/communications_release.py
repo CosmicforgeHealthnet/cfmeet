@@ -255,10 +255,12 @@ def isolate_stage_messaging_state(cfg, ring, checkpoint):
     # Cloning production after dependency configuration must not connect isolated
     # fixtures to production attachments, push providers or Redis pub/sub (whose
     # channels are shared even across Redis database numbers).
+    # Nor to the shared scan gateway: isolated candidates are not registered callers, and
+    # their MANAGED fixtures must not consume another product's engine capacity.
     removed_files={value for key,value in values.items() if key.startswith((
-        'MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS')) and key.endswith('_FILE')}
+        'MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS', 'MESSAGING_SCAN_GATEWAY_')) and key.endswith('_FILE')}
     for key in list(values):
-        if key.startswith(('MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS')) or key in (
+        if key.startswith(('MESSAGING_ATTACHMENTS_S3_', 'MESSAGING_PUSH_', 'MESSAGING_KT_WITNESS', 'MESSAGING_SCAN_GATEWAY_')) or key in (
             'MESSAGING_REALTIME_REDIS_URL', 'MESSAGING_CLAMAV_ADDRESS'):
             del values[key]
     values['MESSAGING_PUSH_PROVIDER']='none'

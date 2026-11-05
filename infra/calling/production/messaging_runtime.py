@@ -23,17 +23,23 @@ import storage_encryption as storage
 
 WORK = p.ROOT / 'messaging'
 BUCKET = 'cfmeet-messaging-attachments'
-SCANNER = 'cfmeet-messaging-clamav'
-# Official Cisco Talos release, 2026-08-07. Resolve and record immutable registry digest.
-SCANNER_TAG = 'clamav/clamav:1.5.4'
-# Measured capacity rule (docs/operations/messaging-section-8-delivery.md): the
-# scanner's hard limit covers ClamAV's documented daily-reload double load; a
+# MANAGED attachments are scanned by the CosmicForge shared security scan gateway in
+# front of an EXISTING production ClamAV (scan_gateway.py). CF Meet never starts its own
+# antivirus engine on the shared VPS: the 3 GiB dedicated daemon is removed from this
+# configuration. Without a ready gateway the configuration runs in QUARANTINE mode:
+# MANAGED attachments requiring scanning stay VERIFYING (never READY unscanned).
+SCAN_KEYS_TARGET = '/run/messaging/scan-verdict-keys.json'
+# The engine's StreamMaxLength (25M) bounds what can be scanned; larger MANAGED files
+# are refused as TOO_LARGE_TO_SCAN rather than delivered unscanned.
+MANAGED_SCAN_MAX_BYTES = 25 * 1024 * 1024
+# Measured capacity rule (docs/operations/messaging-section-8-delivery.md): a
 # coordinated release still needs its own 3 GiB for isolated candidates, plus a
-# reserve for Calling/LiveKit media. Never start the scanner below this headroom.
-SCANNER_MEMORY_MIB = 3072
+# reserve for Calling/LiveKit media. No scanner memory is reserved any more.
 RELEASE_MARGIN_MIB = 3072
 MEDIA_RESERVE_MIB = 512
-SCANNER_HEADROOM_KIB = (SCANNER_MEMORY_MIB + RELEASE_MARGIN_MIB + MEDIA_RESERVE_MIB) * 1024
+HEADROOM_KIB = (RELEASE_MARGIN_MIB + MEDIA_RESERVE_MIB) * 1024
+# Retired names, kept only so a failed earlier run can be recognized and never reused.
+RETIRED_SCANNER = 'cfmeet-messaging-clamav'
 
 
 def available_kib():
@@ -128,62 +134,32 @@ def install_ingress(run_id):
         raise
 
 
-def scanner():
-    names = p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
-    if SCANNER not in names:
-        p.run('docker', 'pull', SCANNER_TAG)
-        image = json.loads(p.run('docker', 'image', 'inspect', SCANNER_TAG))[0]
-        digest = next(x for x in image['RepoDigests'] if x.startswith('clamav/clamav@sha256:'))
-        p.run('docker', 'volume', 'create', 'cfmeet-messaging-clamav-db')
-        p.run('docker', 'run', '-d', '--name', SCANNER, '--network', p.NET,
-              '--restart', 'unless-stopped', '--memory', str(SCANNER_MEMORY_MIB) + 'm', '--cpus', '1',
-              '--cpu-shares', '256',
-              '--label', 'com.cfmeet.messaging.scanner=section8',
-              '--log-opt', 'max-size=20m', '--log-opt', 'max-file=3',
-              '--mount', 'type=volume,src=cfmeet-messaging-clamav-db,dst=/var/lib/clamav', digest)
-    c = p.inspect(SCANNER)
-    assert c['Config'].get('Labels', {}).get('com.cfmeet.messaging.scanner') == 'section8'
-    assert not c['HostConfig']['PortBindings'], 'Scanner must stay private'
-    for _ in range(120):
-        result = subprocess.run(['docker', 'exec', SCANNER, 'clamdscan', '--ping=1'], capture_output=True)
-        if result.returncode == 0: break
-        time.sleep(2)
-    else: raise RuntimeError('ClamAV readiness failed; no scan result is certified')
-    version = p.run('docker', 'exec', SCANNER, 'clamdscan', '--version')
-    # Bundled engine readiness alone is insufficient: require recent signature data.
-    date = version.rsplit('/', 1)[-1].strip()
-    stamp = datetime.datetime.strptime(date, '%a %b %d %H:%M:%S %Y').replace(tzinfo=datetime.timezone.utc)
-    age = (datetime.datetime.now(datetime.timezone.utc) - stamp).total_seconds()
-    assert 0 <= age <= 72 * 3600, 'ClamAV signatures need refresh; managed scanning remains unaccepted'
-    # Exercise the actual private TCP service, including its malware refusal. EICAR
-    # is the standard harmless antivirus test string; no customer attachment is used.
-    probe = r'''
-import socket, struct
-def scan(data):
-    with socket.create_connection(('cfmeet-messaging-clamav', 3310), timeout=10) as s:
-        s.sendall(b'zINSTREAM\0' + struct.pack('!I', len(data)) + data + b'\0\0\0\0')
-        result = b''
-        while b'\0' not in result:
-            chunk = s.recv(4096)
-            if not chunk: break
-            result += chunk
-        return result
-assert b': OK' in scan(b'CF Meet isolated scanner acceptance')
-assert b'FOUND' in scan(b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*')
-'''
-    checked = subprocess.run(['docker', 'run', '--rm', '--network', p.NET,
-        '--memory', '128m', '--cpus', '1', 'python:3.12-slim', 'python', '-c', probe],
-        capture_output=True, timeout=40)
-    assert checked.returncode == 0, 'Live ClamAV clean/EICAR acceptance failed'
-    return {'imageId': c['Image'], 'registryDigests': json.loads(p.run('docker', 'image', 'inspect', c['Image']))[0].get('RepoDigests', []),
-            'signatureAgeSeconds': int(age), 'privateTcpCleanScan': 'PASS', 'eicarDenied': 'PASS'}
+def scanner_mode():
+    """`gateway` when the shared scan gateway answers ready over its private TLS route;
+    otherwise `quarantine` (no scanner variables: MANAGED scans stay pending)."""
+    import scan_gateway
+    keys = scan_gateway.WORK / 'verdict-keys.json'
+    if scan_gateway.GATEWAY not in p.run('docker', 'ps', '--format', '{{.Names}}').splitlines() or not keys.is_file():
+        return 'quarantine', {'reason': 'scan gateway not deployed'}
+    try:
+        ready = scan_gateway.readiness(scan_gateway.URL)
+    except (RuntimeError, ValueError):
+        return 'quarantine', {'reason': 'scan gateway unreachable'}
+    if ready.get('status') != 'ready':
+        return 'quarantine', {'reason': 'scan gateway not ready', 'ready': ready}
+    return 'gateway', {'url': scan_gateway.URL, 'ready': ready, 'verdictKeys': str(keys)}
 
 
-def runtime_overrides(env, user, redis_password):
+def runtime_overrides(env, user, redis_password, scan='gateway'):
     assert env.get('CF_RUNTIME_ENVIRONMENT') == 'production'
     assert env.get('MESSAGING_E2EE_DEVICES_ENABLED', 'false') == 'false', 'Production cryptographic guard required'
     assert not env.get('MESSAGING_MANAGED_KEYRING_FILE') or env['MESSAGING_MANAGED_KEYRING_FILE'] == '/run/messaging/managed.ring'
-    return {
+    assert scan in ('gateway', 'quarantine')
+    scanner = {'MESSAGING_SCAN_GATEWAY_URL': 'https://api.cfmeet.com:8449',
+               'MESSAGING_SCAN_GATEWAY_VERDICT_KEYS_FILE': SCAN_KEYS_TARGET,
+               'MESSAGING_SCAN_GATEWAY_TIMEOUT_MS': '75000'} if scan == 'gateway' else {}
+    return {**scanner,
+        'MESSAGING_MANAGED_SCAN_MAX_BYTES': str(MANAGED_SCAN_MAX_BYTES),
         'MESSAGING_E2EE_DEVICES_ENABLED': 'false',
         'MESSAGING_MANAGED_KEYRING_FILE': '/run/messaging/managed.ring',
         'MESSAGING_ATTACHMENTS_S3_ENDPOINT': 'http://cfmeet-calling-artifacts:9000',
@@ -194,15 +170,25 @@ def runtime_overrides(env, user, redis_password):
         'MESSAGING_ATTACHMENTS_S3_PATH_STYLE': 'true',
         'MESSAGING_ATTACHMENTS_S3_SERVER_SIDE_ENCRYPTION': 'AES256',
         'MESSAGING_REALTIME_REDIS_URL': 'redis://:' + quote(redis_password, safe='') + '@cfmeet-calling-redis:6379/0',
-        'MESSAGING_CLAMAV_ADDRESS': SCANNER + ':3310',
         'MESSAGING_METRICS_ADDRESS': '0.0.0.0:9197',
         'MESSAGING_KT_CHECKPOINT_FILE': '/var/lib/messaging-kt/checkpoint.json',
     }
 
 
-def runtime_config(old, env, user, password, managed, checkpoint, redis_password):
+def runtime_config(old, env, user, password, managed, checkpoint, redis_password, scan_keys=None):
     """The configured production container: the EXACT running image plus dependencies."""
-    cfg = release.clone(old, 'cfmeet-messaging', old['Image'], runtime_overrides(env, user, redis_password), False)
+    scan = 'gateway' if scan_keys else 'quarantine'
+    cfg = release.clone(old, 'cfmeet-messaging', old['Image'], runtime_overrides(env, user, redis_password, scan), False)
+    # Never two scanners, and never a scanner from a previous mode.
+    values = dict(item.split('=', 1) for item in cfg['Env'])
+    values.pop('MESSAGING_CLAMAV_ADDRESS', None)
+    if scan == 'quarantine':
+        for key in [k for k in values if k.startswith('MESSAGING_SCAN_GATEWAY_')]:
+            del values[key]
+    cfg['Env'] = [k + '=' + v for k, v in values.items()]
+    cfg['HostConfig']['Mounts'] = [m for m in cfg['HostConfig'].get('Mounts') or [] if m.get('Target') != SCAN_KEYS_TARGET]
+    if scan_keys:
+        release.add_mount(cfg, scan_keys, SCAN_KEYS_TARGET)
     release.add_mount(cfg, managed, '/run/messaging/managed.ring')
     release.add_mount(cfg, password, '/run/messaging/storage.secret')
     mounts = cfg['HostConfig'].setdefault('Mounts', [])
@@ -282,32 +268,39 @@ def configure(sha, run_id):
     assert not old['HostConfig']['PortBindings']
     baseline = messaging_release.database_summary()
     assert (WORK / 'managed.ring').exists() or baseline['conversations'] == 0, 'Cannot invent a keyring for existing content'
-    available = available_kib()
-    # Official Docker guidance: minimum 3 GiB, ~2.4 GiB during daily reloads:
-    # https://docs.clamav.net/manual/Installing/Docker.html#memory-ram-requirements
-    scanner_present = SCANNER in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
-    assert scanner_present or available >= SCANNER_HEADROOM_KIB, \
-        'Insufficient memory for scanner peak, coordinated-release margin and media reserve'
+    # No antivirus engine is started: only the coordinated-release margin and the media
+    # reserve must remain available.
+    assert available_kib() >= HEADROOM_KIB, 'Insufficient memory for coordinated-release margin and media reserve'
+    assert RETIRED_SCANNER not in p.run('docker', 'ps', '--format', '{{.Names}}').splitlines(), \
+        'A dedicated CF Meet scanner is running; it is retired by the shared gateway'
+    mode, scan_evidence = scanner_mode()
     managed = protected_file('managed.ring', lambda: 'messaging-20261105 ' + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=') + '\n')
     user, password = storage_identity()
-    created_scanner = SCANNER not in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
-    try:
-        return _configure(sha, run_id, old, env, managed, user, password)
-    except Exception:
-        # A scanner created by this failed run must not keep reserving memory next
-        # to Calling/LiveKit. Stop it (retained for diagnosis); never touch one
-        # that existed before this run.
-        if created_scanner and SCANNER in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines():
-            subprocess.run(['docker', 'stop', '--time', '20', SCANNER], capture_output=True)
-        raise
+    return _configure(sha, run_id, old, env, managed, user, password, mode, scan_evidence)
 
 
-def _configure(sha, run_id, old, env, managed, user, password):
+def scanner_in_use(container):
+    """Which scanner the running binary actually configured (its own startup line)."""
+    logs = subprocess.run(['docker', 'logs', '--tail', '400', container], capture_output=True, text=True, timeout=30)
+    text = logs.stdout + logs.stderr
+    if 'scanned through the shared security scan gateway' in text:
+        return 'gateway'
+    if 'no attachment scanner is configured' in text:
+        return 'quarantine'
+    return 'unknown'
+
+
+def _configure(sha, run_id, old, env, managed, user, password, mode='quarantine', scan_evidence=None):
     import messaging_release
-    scanner_evidence = scanner()
+    import scan_gateway
+    scanner_evidence = {'mode': mode, **(scan_evidence or {})}
     checkpoint = WORK / 'kt-checkpoints'
     checkpoint.mkdir(exist_ok=True, mode=0o700); os.chown(checkpoint, 10001, 10001)
-    cfg = runtime_config(old, env, user, password, managed, checkpoint, p.secret('calling-capture-redis-password'))
+    scan_keys = None
+    if mode == 'gateway':
+        scan_keys = WORK / 'scan-verdict-keys.json'
+        release.save(scan_keys, (scan_gateway.WORK / 'verdict-keys.json').read_text(), False)
+    cfg = runtime_config(old, env, user, password, managed, checkpoint, p.secret('calling-capture-redis-password'), scan_keys)
     candidate = 'cfmeet-messaging-config-candidate-' + run_id
     test = copy.deepcopy(cfg)
     test['HostConfig']['PortBindings'] = {}
@@ -318,6 +311,11 @@ def _configure(sha, run_id, old, env, managed, user, password):
     try:
         release.wait(candidate, 'messaging')
         dependency_probe(candidate)
+        active = scanner_in_use(candidate)
+        # An image without gateway support would silently run unscanned-pending; refuse
+        # to call that "gateway". Quarantine is truthful either way.
+        assert active == mode, 'Messaging image did not configure the expected scanner: ' + active
+        scanner_evidence['activeInCandidate'] = active
         p.run('docker', 'stop', '--time', '20', candidate)
         p.write_private(WORK / ('runtime-rollback-' + run_id + '.private.json'), json.dumps({'original': old, 'previous': previous,
             'workflowSha': Path(__file__).resolve().parent.name, 'requestedImageSha': sha}))
@@ -327,6 +325,7 @@ def _configure(sha, run_id, old, env, managed, user, password):
         release.start('cfmeet-messaging', cfg)
         release.wait('cfmeet-messaging', 'messaging')
         dependency_evidence = dependency_probe('cfmeet-messaging')
+        assert scanner_in_use('cfmeet-messaging') == mode, 'Production Messaging scanner mode changed'
         install_ingress(run_id)
         storage_evidence = storage_probe(run_id)
         p.regression()

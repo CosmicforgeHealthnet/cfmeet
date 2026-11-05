@@ -784,7 +784,10 @@ if __name__ == '__main__':
     os.umask(0o077)
     try:
         operation, sha, run_id = sys.argv[1:]
-        if operation.startswith('messaging-'):
+        if operation.startswith('scan-gateway-'):
+            import scan_gateway
+            scan_gateway.run(operation, sha, run_id)
+        elif operation.startswith('messaging-'):
             import messaging_release
             messaging_release.run(operation, sha, run_id)
         elif operation.startswith('communications-'):
