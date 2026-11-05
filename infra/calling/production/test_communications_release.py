@@ -61,7 +61,13 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
     def test_cutover_preserves_loopback_ingress_mounts_startup_and_networks(self):
         old=self.original()
         candidate=release.clone(old,'cfmeet-production-backend','sha256:new',{'NEW':'configured'},False)
-        self.assertEqual(candidate['HostConfig'],old['HostConfig'])
+        host=dict(candidate['HostConfig']);log=host.pop('LogConfig')
+        self.assertEqual(host,{k:v for k,v in old['HostConfig'].items() if k!='LogConfig'})
+        self.assertEqual(log,{'Type':'json-file','Config':{'max-size':'20m','max-file':'5'}})
+        old['HostConfig']['LogConfig']={'Type':'json-file','Config':{'max-size':'50m'}}
+        self.assertEqual(release.clone(old,'n','sha256:new',{},False)['HostConfig']['LogConfig'],old['HostConfig']['LogConfig'])
+        old['HostConfig']['LogConfig']={'Type':'journald','Config':{}}
+        self.assertEqual(release.clone(old,'n','sha256:new',{},False)['HostConfig']['LogConfig'],{'Type':'journald','Config':{}})
         self.assertEqual(candidate['Cmd'],old['Config']['Cmd'])
         self.assertEqual(candidate['Entrypoint'],old['Config']['Entrypoint'])
         self.assertEqual(candidate['User'],old['Config']['User'])

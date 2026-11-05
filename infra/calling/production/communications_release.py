@@ -215,6 +215,11 @@ def clone(c,name,img,overrides,stage):
     e=p.env_of(c);e.update(overrides);cfg['Env']=[k+'='+v for k,v in e.items()]
     cfg['HostConfig']=copy.deepcopy(c['HostConfig'])
     assert not cfg['HostConfig'].get('AutoRemove'),'Rollback requires persistent container'
+    # Bounded json-file logs for every container a release (re)creates; an existing
+    # explicit log configuration is kept. Never forces a restart on its own.
+    log=cfg['HostConfig'].get('LogConfig') or {}
+    if log.get('Type','json-file')=='json-file' and not log.get('Config'):
+        cfg['HostConfig']['LogConfig']={'Type':'json-file','Config':{'max-size':'20m','max-file':'5'}}
     if stage:
         cfg['HostConfig']['PortBindings']={}
         cfg['HostConfig']['RestartPolicy']={'Name':'unless-stopped','MaximumRetryCount':0}

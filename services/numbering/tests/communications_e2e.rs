@@ -3287,18 +3287,20 @@ async fn voice_journeys_across_the_sip_edge_telephony_privacy_relay_numbering_an
         &format!("SELECT routing_revision::text FROM number_resources WHERE id = '{dcn}'"),
     )
     .await;
-    assert_eq!(
-        one(
-            &st.telephony_db,
-            &format!(
-                "SELECT l.status || '/' || l.route_class || '/' || l.dcn_number_resource_id::text || '/' || \
-                 l.dcn_routing_revision || '/' || r.interconnect_class FROM telephony_legs l \
-                 JOIN telecom_routes r ON r.id = l.route_id WHERE l.calling_call_id = '{call_a}'"
-            )
-        )
-        .await,
-        format!("RINGING/PSTN_TO_APP/{dcn}/{revision}/SYNTHETIC_TEST")
-    );
+    // Telephony persists its leg (with Calling's call id) only after Calling's offer
+    // response, while Calling may already ring the endpoint (services/telephony/src/
+    // inbound.rs `accept_dcn_inbound`). Wait for that committed leg, then require the
+    // exact same evidence.
+    eventually(
+        &st.telephony_db,
+        &format!(
+            "SELECT l.status || '/' || l.route_class || '/' || l.dcn_number_resource_id::text || '/' || \
+             l.dcn_routing_revision || '/' || r.interconnect_class FROM telephony_legs l \
+             JOIN telecom_routes r ON r.id = l.route_id WHERE l.calling_call_id = '{call_a}'"
+        ),
+        &format!("RINGING/PSTN_TO_APP/{dcn}/{revision}/SYNTHETIC_TEST"),
+    )
+    .await;
     assert_eq!(
         one(
             &st.calling_db,
