@@ -140,6 +140,31 @@ async def join(call,index,video=False):
     raise AssertionError('Real client media join failed after two fresh credentials')
 
 
+def connect_failure(error):
+    # Redacted category only: the raw SDK text can echo URLs or token fragments.
+    text=str(error or '');name=text.split(':',1)[0]
+    refused=any(m in text for m in ('401','403','nauthorized','orbidden','not admitted'))
+    return {'error_class':name if name.isidentifier() and name[:1].isupper() else 'RTC_ERROR','category':'REFUSED' if refused else 'TRANSPORT'}
+
+
+async def reconnect(gateway,token):
+    # The current server-refreshed credential must be admitted again. An
+    # authorization refusal fails at once; a transport fault gets one more
+    # attempt with the same credential. Every failure is kept in the evidence.
+    for attempt in range(2):
+        room=await MediaClient.start();ROOMS.append(room)
+        joined=await room.cmd('connect',url=gateway,token=token)
+        if joined.get('ok'):
+            room.url=gateway;room.identity=joined['identity']
+            return room
+        failure=connect_failure(joined.get('error'))
+        REPORT.setdefault('media_reconnect_failures',[]).append(dict(failure,attempt=attempt+1))
+        await room.disconnect()
+        if failure['category']=='REFUSED':break
+        await asyncio.sleep(1)
+    raise AssertionError('Current session reconnect refused')
+
+
 async def publish(room,video=False):
     # Wait for Calling's server-side admission, never inject provider events or grants.
     assert (await room.cmd('wait_permission',publish=True,timeout=15)).get('ok'), 'Calling did not admit media permissions after real join'
@@ -227,8 +252,7 @@ async def main():
                 assert refreshed.get('ok'), 'No current server-refreshed reconnect token'
                 current=await b.cmd('token');gateway=b.url
                 await b.disconnect();await asyncio.sleep(2)
-                b=await MediaClient.start();ROOMS.append(b)
-                assert (await b.cmd('connect',url=gateway,token=current['token'])).get('ok'), 'Current session reconnect refused'
+                b=await reconnect(gateway,current['token'])
                 await publish(b);await received_media(a);await received_media(b)
                 REPORT['checks']['real_media_reconnection']='PASS'
                 await command(call,'hold');assert (await call_view(call))['state']=='HELD'
