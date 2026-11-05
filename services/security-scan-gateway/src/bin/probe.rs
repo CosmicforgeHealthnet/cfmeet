@@ -278,10 +278,12 @@ async fn main() {
             &mut evidence,
         );
         let a = probe.scan(base, vec![0u8; max_bytes + 1]).await;
+        // Refused before the body is read: an HTTP 413, or (directly, without the TLS
+        // proxy) a connection closed while the client is still uploading. Never a verdict.
         check(
             format!("{label} oversized_rejected"),
-            a.status == 413,
-            json!(a.status),
+            a.status == 413 || (a.status == 0 && !base.starts_with("https://")),
+            json!({"status": a.status, "refusal": if a.status == 413 { "http_413" } else { "connection_closed_before_upload_completed" }}),
             &mut evidence,
         );
 
