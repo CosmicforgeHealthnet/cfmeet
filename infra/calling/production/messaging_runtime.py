@@ -97,10 +97,12 @@ def nginx_config(tls_ip, store_ip):
     common = ('    access_log off;\n    proxy_http_version 1.1;\n'
         '    proxy_set_header Host $http_host;\n    proxy_set_header X-Forwarded-Proto https;\n'
         '    add_header Cache-Control "private, no-store" always;\n')
-    # Depth 3: the private proxy presents the public chain (leaf, intermediate, root);
-    # nginx's default depth of 1 cannot verify it and answers 502.
+    # Depth 5: the private proxy presents Let's Encrypt's Generation Y chain
+    # (leaf, YE1, Root YE cross-signed by ISRG Root X2, X2 cross-signed by X1), measured
+    # by messaging-ingress 42109430743. nginx's default depth 1, and 3, cannot reach a
+    # trusted root and answer 502; verification against the system roots is unchanged.
     tls = (common + '    proxy_ssl_server_name on;\n    proxy_ssl_name api.cfmeet.com;\n'
-        '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth 3;\n'
+        '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth 5;\n'
         '    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;\n'
         '    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n'
         '    proxy_read_timeout 3600;\n    proxy_pass https://' + tls_ip + ':8444;\n')

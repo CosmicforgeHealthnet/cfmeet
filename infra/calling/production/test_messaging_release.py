@@ -49,6 +49,6 @@ class MessagingInspection(unittest.TestCase):
         self.assertNotIn('/metrics', value)
         self.assertNotIn('/v1/messaging/policy', value)
         self.assertIn('proxy_ssl_verify on;', value)
-        self.assertEqual(value.count('proxy_ssl_verify_depth 3;'), 2)
+        self.assertEqual(value.count('proxy_ssl_verify_depth 5;'), 2)
         self.assertIn('access_log off;', value)
         with self.assertRaises(AssertionError): runtime.nginx_config('8.8.8.8', '172.23.0.5')
