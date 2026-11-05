@@ -226,15 +226,26 @@ class Persistence(Base):
     def test_failed_configure_never_touches_a_preexisting_scanner(self):
         self.assertEqual(self.outer_configure(True), [])
 
-    def test_configure_refuses_without_memory_headroom(self):
+    def headroom(self, available_kib):
+        docker = FakeDocker({'cfmeet-messaging': {'State': {'Running': True}}})
+        (self.comm_work / 'messaging-baseline-1.json').write_text('{}')
         with patch.object(runtime.p, 'ROOT', Path(self.folder.name)), patch.object(runtime.p, 'identity'), \
-             patch.object(runtime.p, 'inspect', return_value=running_messaging()), \
+             patch.object(runtime.p, 'inspect', return_value=running_messaging()), patch.object(runtime.p, 'run', side_effect=docker.run), \
              patch('messaging_release.database_summary', return_value={'conversations': 0}), \
-             patch.object(runtime, 'available_kib', return_value=3 * 2**20), \
-             patch.object(runtime, 'storage_identity') as storage, self.assertRaises(AssertionError):
-            (self.comm_work / 'messaging-baseline-1.json').write_text('{}')
-            runtime.configure('0' * 40, '79')
-        storage.assert_not_called()
+             patch.object(runtime, 'available_kib', return_value=available_kib), \
+             patch.object(runtime, 'storage_identity', side_effect=RuntimeError('past the headroom gate')) as storage:
+            with self.assertRaises((AssertionError, RuntimeError)) as raised:
+                runtime.configure('0' * 40, '79')
+        return type(raised.exception), storage.called
+
+    def test_configure_refuses_without_memory_headroom(self):
+        # 4.72 GiB is the measured minimum MemAvailable on the production VPS (sysstat).
+        for available in (3 * 2**20, int(4.72 * 2**20), int(6.4 * 2**20)):
+            self.assertEqual(self.headroom(available), (AssertionError, False), available)
+
+    def test_configure_proceeds_only_with_scanner_release_and_media_headroom(self):
+        self.assertEqual(runtime.SCANNER_HEADROOM_KIB, 6656 * 1024)
+        self.assertEqual(self.headroom(7 * 2**20), (RuntimeError, True))
 
 
 # Every runtime dependency must be explicitly classified for isolated staging.

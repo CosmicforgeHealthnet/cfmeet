@@ -26,6 +26,14 @@ BUCKET = 'cfmeet-messaging-attachments'
 SCANNER = 'cfmeet-messaging-clamav'
 # Official Cisco Talos release, 2026-08-07. Resolve and record immutable registry digest.
 SCANNER_TAG = 'clamav/clamav:1.5.4'
+# Measured capacity rule (docs/operations/messaging-section-8-delivery.md): the
+# scanner's hard limit covers ClamAV's documented daily-reload double load; a
+# coordinated release still needs its own 3 GiB for isolated candidates, plus a
+# reserve for Calling/LiveKit media. Never start the scanner below this headroom.
+SCANNER_MEMORY_MIB = 3072
+RELEASE_MARGIN_MIB = 3072
+MEDIA_RESERVE_MIB = 512
+SCANNER_HEADROOM_KIB = (SCANNER_MEMORY_MIB + RELEASE_MARGIN_MIB + MEDIA_RESERVE_MIB) * 1024
 
 
 def available_kib():
@@ -128,7 +136,8 @@ def scanner():
         digest = next(x for x in image['RepoDigests'] if x.startswith('clamav/clamav@sha256:'))
         p.run('docker', 'volume', 'create', 'cfmeet-messaging-clamav-db')
         p.run('docker', 'run', '-d', '--name', SCANNER, '--network', p.NET,
-              '--restart', 'unless-stopped', '--memory', '3072m', '--cpus', '1.5',
+              '--restart', 'unless-stopped', '--memory', str(SCANNER_MEMORY_MIB) + 'm', '--cpus', '1',
+              '--cpu-shares', '256',
               '--label', 'com.cfmeet.messaging.scanner=section8',
               '--log-opt', 'max-size=20m', '--log-opt', 'max-file=3',
               '--mount', 'type=volume,src=cfmeet-messaging-clamav-db,dst=/var/lib/clamav', digest)
@@ -274,9 +283,11 @@ def configure(sha, run_id):
     baseline = messaging_release.database_summary()
     assert (WORK / 'managed.ring').exists() or baseline['conversations'] == 0, 'Cannot invent a keyring for existing content'
     available = available_kib()
-    # Official Docker guidance requires 3 GiB for standard signatures/reloads:
+    # Official Docker guidance: minimum 3 GiB, ~2.4 GiB during daily reloads:
     # https://docs.clamav.net/manual/Installing/Docker.html#memory-ram-requirements
-    assert available >= 4 * 1024 * 1024, 'Insufficient memory for scanner plus production headroom'
+    scanner_present = SCANNER in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
+    assert scanner_present or available >= SCANNER_HEADROOM_KIB, \
+        'Insufficient memory for scanner peak, coordinated-release margin and media reserve'
     managed = protected_file('managed.ring', lambda: 'messaging-20261105 ' + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=') + '\n')
     user, password = storage_identity()
     created_scanner = SCANNER not in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
