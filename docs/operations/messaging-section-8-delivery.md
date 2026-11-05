@@ -462,3 +462,183 @@ Also recommended:
 | Production E2EE | **BLOCKED** | Issue 13 open; no independent assessment or owner approval |
 | Phone OTP, off-server DR | **DEFERRED** | Owner decision |
 
+## Gateway release and Messaging capacity recovery — 2026-11-05 (final phase)
+
+### Outcome
+
+**The corrected backend is DEPLOYED.** Production now runs the images built from `914c6c0`,
+which contain the media-gateway refresh fix (`9f61237` + `4ca0cb5`) and the PSTN e2e ordering
+fix. The release passed on its first and only attempt, with no rollback; independent
+verification passed. **`messaging-configure` stays NO-GO**: measured headroom is 5.02 GiB
+available against the 6.5 GiB gate. Production E2EE stays disabled, MANAGED is not used as a
+replacement, and phone OTP and off-server disaster recovery remain DEFERRED.
+
+### Commits
+
+| Commit | Content |
+|---|---|
+| `9f61237`, `4ca0cb5` | Gateway: a refresh LiveKit signed with another API key no longer drops an admitted connection. The fallback credential carries the database-admitted permissions |
+| `914c6c0` | **Image source.** Scoped `resource-recover`, bounded release logs (json-file 20 MB × 5 when unset), PSTN leg ordering in `communications_e2e` |
+| `d980689`, later | Spare Meetings image rule, memory-by-owner inventory, this report. Infra and docs only: service code is identical to `914c6c0` (`git diff 914c6c0 -- services packages` is empty) |
+
+### Gateway security review
+
+- **Frame source:** refresh frames arrive only on the gateway's own upstream connection to
+  LiveKit. Clients cannot inject downstream frames; client simulate requests are dropped.
+- **Re-admission first:** every refresh re-runs the authoritative database admission
+  (`admitted_permissions`: AUTHORIZED session, current generation, live call state,
+  Communications policy for personal calls). Any refusal closes the connection.
+- **Verified path:** a refresh verifiable with Calling's key is resealed exactly as before.
+- **Fallback path:** an unverifiable refresh is only a signal. It must be HS256, LiveKit-issued
+  (never edge-issued), unexpired, and bound to the same room, identity and current generation
+  (stale generations are refused). The credential is minted from the connection with the
+  database-admitted permissions. The token's own grants (`roomAdmin`, `canPublish`, …) are never
+  copied, and the credential is join-only when nothing is admitted.
+- **No escalation path:** an edge credential only ever yields room, identity and generation to
+  the gateway. LiveKit receives a fresh 30 s join-only upstream token, and media rights are
+  applied server-side from the database.
+- **Revocation:** a removed session's saved refreshed token is still refused (401) through the
+  gateway and directly at LiveKit, in all three certification rounds.
+
+### PSTN ringing assertion (pre-existing defect, fixed)
+
+Telephony's `accept_dcn_inbound` (`services/telephony/src/inbound.rs`) calls Calling's
+`offer_dcn_inbound`, and Calling creates the call and rings the endpoint. Only after Calling's
+response does Telephony insert the leg with `calling_call_id` and move it to RINGING, in one
+transaction. The e2e test read the leg once, immediately after observing the invitation, and
+got an empty row. It now waits with the suite's bounded `eventually()` helper and requires the
+**identical** `RINGING/PSTN_TO_APP/<dcn>/<revision>/SYNTHETIC_TEST` value. Communications
+end-to-end journeys passed on `914c6c0` on both main
+([42020871918](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42020871918)) and
+staging ([42020869086](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42020869086)).
+Main had failed three times before. The Chromium web-client job of Unified Messaging remains
+the separate known frontend failure (out of scope).
+
+### Images (built by [42020907394](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42020907394) from `914c6c0216b18f16f8ca4e73f54935eea3a8dccf`)
+
+| Service | Registry digest | Image ID on VPS |
+|---|---|---|
+| calling | `sha256:11a8d79a0669b9676309f3ad9a3395013f8433736178da5331e69323079493d6` | `sha256:822ed097af5f42fa34f0a4220720aa5ed868534ab28f56e06919769e1da95400` |
+| messaging | `sha256:c4762273b871358a3969e1fca0a20f077f1829d4493039e48f61ef9c6d4cc682` | `sha256:d3d4bb186c4bea8c720d4785b677128f98ebc33f1d937d26e84493d2002a0bd2` |
+| communications | `sha256:b517ca1fd08dd77443ab3d9f1550066325bbff82cbedda0f08cff548fa6b4410` | `sha256:b39b7908dbd199a97fff4669aeacf128efb8bfccb14fd75633311b04184c5626` |
+| meeting-service | `sha256:5f4ff8ccdbf5bb6841b2e1f2430eeba9828aaf164119f07a075d3447a545fe1e` | `sha256:9cb00a9bd2281dc2b82434929d8b44fbbf517a1f99aacf0b5b91709d0989eec8` |
+| platform-access | `sha256:a2e164489177f736446cbee25b01d638b7d7647f88f6d9caa64afd0b3ae657b4` | `sha256:ffa0920f5f0000a88bccaabebf6fcfecebd17abaf7240605dea0ab70434127e8` |
+| api-gateway (built, not deployed) | `sha256:acbe2b046ab1552aee3f933ad4ffd045828503f94d5cf4684a24239928d6fffd` | — |
+
+LiveKit is unchanged: v1.13.9, `sha256:d0c04791…`, two keys.
+
+### CI for the released code
+
+- **On the service code, at `4ca0cb5`** (the only service-tree change since then is the e2e
+  test): Calling RTC certification on a two-key LiveKit (main and staging), Calling service,
+  Enterprise calling certification, Telephony, Privacy Relay, Communications Hub, Part VI
+  cross-service, and Dependency and image security all PASS.
+- **On `914c6c0`:** Communications end-to-end (main and staging), Numbering service, Part VI
+  cross-service, Dependency and image security, Compose config and the image build all PASS.
+
+### Production deployment evidence
+
+| Step | Run | Result |
+|---|---|---|
+| `communications-stage` on the exact digests (isolated databases, no published ports, production two-key LiveKit) | [42024930198](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42024930198) | **14/14 PASS**: native voice/video ringing, accept and **bidirectional real frames**; direct-conversation reuse and managed message (isolated TEST application only); contacts, block/unblock, ID rotation, Meetings available |
+| **One** controlled `communications-release` | [42025871400](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42025871400) | **PASS, no rollback.** Communications 16/16 in `production`. Enterprise 21/21: voice/video real media, `real_media_reconnection`, hold/resume, camera denial, decline, cancel, missed history, group, IVR, `transferred_party_removed_from_media`, `internal_transfer_real_media`, extensions, ring groups, queues, tenant isolation, scope denial. **No media join or reconnect retries were needed.** One harness `GET /v1/calls/…` read timed out once and was recovered by the bounded read retry (writes are never replayed). Regression (Meetings health, TLS readiness, both LiveKit keys) PASS |
+| Independent `communications-verify` | [42027660513](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42027660513) | **14/14 PASS** in production with new fixtures; running image IDs equal the accepted release |
+| `messaging-inspect` | [42028131735](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42028131735) | Messaging image `d3d4bb18…`, source `914c6c0`; E2EE false; log rotation 20 MB × 5 applied by the release; dependencies unchanged (not configured); 0 devices, 0 conversations, 0 dead outbox |
+
+Feature flags after the release are unchanged: app and new calls, enterprise, recording and
+voicemail enabled; public inbound/outbound, callback relay and synthetic interconnect disabled.
+The previous `787bb9a` containers are retained as `*-communications-rollback-42025871400` for
+rollback.
+
+Device revocation: Calling cross-endpoint credential denial and removed-session refusal pass
+(enterprise acceptance and certification). Messaging device enrollment and revocation are not
+production-testable because production E2EE devices stay disabled; they are covered by the
+isolated Messaging suites only. **BLOCKED** for production, per the E2EE gate.
+
+### Resource recovery ([42020871662](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42020871662), [42028326692](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42028326692))
+
+Before acting, inventory [42020369672](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42020369672)
+recorded the starting state.
+
+**What changed:**
+
+- **Stopped (retained, never removed):** the 5 `cfmeet-comm-stage-*` candidates, verified at
+  run time: candidate label, no published ports, 0 active stage calls, 0 active stage database
+  sessions. They were stopped again after the release's stage run restarted them.
+- **Removed (never forced):** 14 CF Meet image tags.
+  - 7 old `cfmeet-meeting-service:prod-*` builds.
+  - Stale media/API probe images (rebuilt on demand from their content hash).
+  - The unused 2.55 GiB `cfmeet-calling-web-probe:1.56.1`.
+
+  Only CF Meet-owned images that were unused and unreferenced by any rollback journal, evidence
+  record or env file. The first run also removed `prod-6c39351` (25 Oct), the newest *unused*
+  Meetings build, which the rule intended to keep as a spare. Meetings rollback was unaffected
+  (it uses retained rollback containers, whose images are preserved), and the rule is corrected
+  in `d980689`.
+- **Log rotation:** a validated `copytruncate` logrotate rule (100 MB × 5, compressed, no
+  restarts) for the long-lived `lk-server`, `cfmeet-core-db`, `cfmeet-core-tls`,
+  `cfmeet-calling-loopback`, `cfmeet-calling-redis` and `cfmeet-calling-artifacts`. Containers
+  recreated by releases now get Docker json-file rotation.
+
+**Kept:**
+
+- All running production containers.
+- 50 failed, 10 rollback and 32 retired containers as deployment evidence.
+- Volumes, secrets and evidence files.
+- Every other product's containers and images: 154 unused tagged and about 600 dangling images
+  are not CF Meet's. Their roughly 45 GB reclaimable is an owner decision across products.
+
+| Measurement | Before (inventory) | After cleanup | After release + cleanup |
+|---|---|---|---|
+| MemAvailable | 4.84 GiB | 4.99 GiB | **5.02 GiB** |
+| Disk free | 29.52 GiB (84.7%) | 30.58 GiB (84.1%) | 30.09 GiB (84.4%) |
+| CF Meet real container memory | — | — | 0.71 GiB |
+| Other products' container memory | — | — | 4.51 GiB (ClamAV daemons 0.93 + 0.92 + 0.67 GiB) |
+| Load average (6 vCPU) | 4.5–6.0 | 4.8–5.3 | 4.5–5.7 |
+| Swap used | 0.3 GiB | 0.3 GiB | 0.3 GiB |
+
+Stopping the stage candidates freed little memory because they were idle (their 768 MiB values
+are limits, not reservations). CF Meet already uses under 1 GiB of real memory, so no further
+CF Meet-side reallocation can create the missing headroom.
+
+### Messaging capacity decision
+
+Gate: scanner limit 3 GiB + coordinated-release margin 3 GiB + media reserve 0.5 GiB =
+**6.5 GiB available**. Measured: 5.02 GiB after cleanup; 4.72 GiB under the post-release
+workload and the 2-day sysstat minimum. **Deficit: 1.5–1.8 GiB.** One other product's ClamAV was
+at 11.75% CPU during measurement (consistent with its own reload): overlapping reload peaks are
+real.
+
+Options considered, none of which changes another product's security boundary:
+
+- **Low-memory scanner mode** (`ConcurrentDatabaseReload no`, 2 GiB limit). The requirement
+  becomes 5.5 GiB, still above 5.02 GiB, so it is insufficient.
+- **Sharing another product's clamd.** It crosses product isolation, so it is rejected.
+- **Configuring storage, Redis and metrics without a scanner.** This needs a new scanner-optional
+  configure path. MANAGED attachments would then stay VERIFYING (fail closed), so it is limited
+  value. It is an owner decision and not implemented.
+
+Configuration survival remains **TESTED** (13 persistence tests). This release preserved
+Messaging's environment and mounts and added log rotation as designed.
+
+**Decision: `messaging-configure` NO-GO.** Minimum additional RAM is **+2 GiB**: it covers the
+1.8 GiB deficit at the measured minimum, with no margin for growth. **Recommended +4 GiB
+(16 GiB total)**, giving about 9 GiB available, about 6 GiB remaining at a scanner reload peak,
+and a coordinated release still possible. After an upgrade, rerun `resource-inventory`. Run
+`messaging-configure` only when it reports at least 6.5 GiB available; the gate enforces this
+anyway. Push providers remain BLOCKED on credentials; production E2EE remains BLOCKED (issue 13).
+
+### Status summary
+
+| Item | Status |
+|---|---|
+| Media-gateway refresh fix | IMPLEMENTED, TESTED, **DEPLOYED** (`914c6c0` images) |
+| PSTN e2e ordering fix | IMPLEMENTED, TESTED |
+| Transfer completion and reconnect acceptance | TESTED in production (release 42025871400) |
+| Scoped resource recovery and log rotation | IMPLEMENTED, executed on the VPS |
+| Messaging dependencies (storage, ClamAV, Redis, metrics) | BLOCKED: capacity (+2 GiB minimum, +4 GiB recommended) |
+| Push providers | BLOCKED: credentials |
+| Production PRIVATE_E2EE | BLOCKED: independent assessment and owner approval |
+| Phone OTP, off-server DR | DEFERRED |
+| Section 8 | **PARTIALLY COMPLETE.** Calling media restored and the backend released; Messaging infrastructure activation waits on capacity |
+
