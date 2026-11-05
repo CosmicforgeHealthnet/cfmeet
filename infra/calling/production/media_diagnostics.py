@@ -277,6 +277,11 @@ def livekit_config(public_ip):
         'memory_limit_mib': (host.get('Memory') or 0) // 2**20, 'cpus': (host.get('NanoCpus') or 0) / 1e9,
         'image': container.get('Image'), 'started': container.get('State', {}).get('StartedAt', '')[:19],
         'restart_count': container.get('RestartCount')})
+    image = json.loads(sh('docker', 'image', 'inspect', container.get('Image', '')) or '[{}]')[0]
+    version = sh('docker', 'exec', 'lk-server', '/livekit-server', '--version') or ''
+    emit('livekitVersion', {'repo_tags': image.get('RepoTags'), 'repo_digests': image.get('RepoDigests'),
+        'created': (image.get('Created') or '')[:19], 'version_output': re.sub(r'[^A-Za-z0-9 ._-]', '', version.strip())[:80],
+        'labels': {k: v for k, v in ((image.get('Config') or {}).get('Labels') or {}).items() if 'version' in k.lower()}})
     startup = (sh('docker', 'logs', '--tail', '4000', 'lk-server', timeout=90) or '').splitlines()
     facts = {}
     for line in startup:
