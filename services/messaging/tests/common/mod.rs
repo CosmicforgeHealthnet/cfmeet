@@ -326,6 +326,8 @@ pub struct Peers {
     pub gateway: Arc<ServiceTokenSigner>,
     /// The API Gateway's name with a key Messaging's bundle does not list.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
+    /// The Communications Hub, trusted with `messaging-communications.read` / `.apply`.
+    pub communications: Arc<ServiceTokenSigner>,
 }
 
 /// The API Gateway's permissions in Messaging's bundle.
@@ -334,6 +336,17 @@ pub const GATEWAY_PERMISSIONS: &[&str] = &["messaging-request.forward"];
 fn gateway_key() -> &'static ServiceSigningKey {
     static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
     KEY.get_or_init(|| key("api-gateway-test-1"))
+}
+
+/// The Communications Hub's permissions in Messaging's bundle.
+pub const COMMUNICATIONS_PERMISSIONS: &[&str] = &[
+    "messaging-communications.read",
+    "messaging-communications.apply",
+];
+
+fn communications_key() -> &'static ServiceSigningKey {
+    static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| key("communications-test-1"))
 }
 
 pub const MEETING_PERMISSIONS: &[&str] =
@@ -371,6 +384,7 @@ pub fn peers() -> Peers {
         rogue_meeting: signer(ServiceId::meeting_service(), &key("meeting-rogue-1")),
         gateway: signer(ServiceId::api_gateway(), gateway_key()),
         rogue_gateway: signer(ServiceId::api_gateway(), &key("api-gateway-rogue-1")),
+        communications: signer(ServiceId::communications(), communications_key()),
     }
 }
 
@@ -399,6 +413,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
             issuer(cf_service_auth::services::PRIVACY_RELAY, p, &["messaging-context-authority.apply"]),
             issuer(cf_service_auth::services::SMS_GATEWAY, s, &["messaging-sms-bridge.deliver"]),
             issuer(cf_service_auth::services::API_GATEWAY, gateway_key(), GATEWAY_PERMISSIONS),
+            issuer(cf_service_auth::services::COMMUNICATIONS, communications_key(), COMMUNICATIONS_PERMISSIONS),
         ],
     })
     .to_string();

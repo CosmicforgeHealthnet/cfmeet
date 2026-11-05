@@ -1,4 +1,5 @@
 //! Personal relationship policy. Messaging remains the conversation and security owner.
+mod owner;
 use crate::{
     conversations::service::ConversationRow,
     error::{Error, ErrorCode, Result},
@@ -159,6 +160,24 @@ pub fn routes() -> Router<AppState> {
         .route("/communications/capabilities", post(capabilities))
         .route("/communications/common-groups", post(common_groups))
         .route("/communications/events", post(event))
+        // Sections 9–23 owner interfaces (MS-1 … MS-7): read-only views and the
+        // canonical device / push mutations, for the delegated user only.
+        .route(
+            "/communications/conversations/access",
+            post(owner::conversation_access),
+        )
+        .route(
+            "/communications/conversations/attachments",
+            post(owner::conversation_attachments),
+        )
+        .route(
+            "/communications/storage-summary",
+            post(owner::storage_summary),
+        )
+        .route("/communications/devices/verify", post(owner::device_verify))
+        .route("/communications/devices/revoke", post(owner::device_revoke))
+        .route("/communications/devices/push", post(owner::device_push))
+        .route("/communications/push-status", post(owner::push_status))
 }
 async fn own(
     state: &AppState,

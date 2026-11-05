@@ -891,11 +891,11 @@ pub struct ListQuery {
     pub cursor: Option<String>,
 }
 
-fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
+pub(crate) fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
     URL_SAFE_NO_PAD.encode(format!("{}|{}", t.timestamp_micros(), id))
 }
 
-fn decode_cursor(c: &str) -> Option<(DateTime<Utc>, Uuid)> {
+pub(crate) fn decode_cursor(c: &str) -> Option<(DateTime<Utc>, Uuid)> {
     let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(c).ok()?).ok()?;
     let (t, id) = raw.split_once('|')?;
     Some((
