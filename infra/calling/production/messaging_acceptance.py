@@ -48,6 +48,18 @@ class MessagingJourney(Journey):
                 self.hub(a, '/contacts/' + contact['contactId'], 'DELETE')
 
     def run(self):
+        swagger = self.request('meeting-service', '/api-docs/messaging.json')
+        operations = [operation for item in swagger['paths'].values() for method, operation in item.items()
+                      if method in ('get', 'post', 'put', 'patch', 'delete', 'options', 'head')]
+        assert len(operations) == 80
+        assert sum('x-cfmeet-native-path' in operation for operation in operations) == 71
+        assert swagger['info']['version'] == '1.14.0'
+        assert not any(path.startswith('/internal/') for path in swagger['paths'])
+        self.report['servedSwagger'] = {'version': swagger['info']['version'], 'operations': len(operations), 'nativeBindings': 71}
+        self.done('served_consumer_swagger_matches_native_backend_contract')
+        for path in ('/metrics', '/internal/v1/communications/policy/check', '/v1/messaging/policy'):
+            self.request('meeting-service', path, expected=(404,))
+        self.done('private_admin_and_metrics_not_publicly_routed')
         self.request('meeting-service', '/api/v2/messaging/me', expected=(401,))
         self.done('anonymous_native_messaging_denied')
         a, b = self.accounts()

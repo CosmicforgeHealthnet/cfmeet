@@ -76,6 +76,7 @@ def inspect_runtime(sha, run_id):
     target = p.ROOT / 'communications' / ('messaging-baseline-' + run_id + '.json')
     p.write_private(target, json.dumps(receipt, sort_keys=True))
     print(json.dumps(receipt, sort_keys=True))
+    return receipt
 
 
 def run(operation, sha, run_id):
@@ -87,7 +88,8 @@ def run(operation, sha, run_id):
     elif operation == 'messaging-verify':
         import messaging_acceptance
         messaging_acceptance.execute(sha, run_id)
-        inspect_runtime(sha, run_id)
+        receipt = inspect_runtime(sha, run_id)
+        assert all(code == 200 for code in receipt['privateProbes'].values()), 'Messaging probes failed'
         p.regression()
     else:
         raise AssertionError('Unsupported Messaging operation')

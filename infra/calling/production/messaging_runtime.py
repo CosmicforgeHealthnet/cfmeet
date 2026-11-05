@@ -231,6 +231,20 @@ def storage_probe(run_id):
             'expiredGrantDenied': 'PASS', 'callingBucketDenied': 'PASS', 'physicalProbeDeletion': 'PASS'}
 
 
+def dependency_probe(container):
+    p.redis_ping_from(container)
+    def get(port, path):
+        return p.run('docker', 'run', '--rm', '--network', p.NET, 'curlimages/curl:8.12.1',
+            '-fsS', '--max-time', '15', 'http://' + container + ':' + str(port) + path)
+    ready = json.loads(get(8097, '/ready'))
+    assert ready['realtime']['broker'] == 'redis' and ready['realtime']['presence'] == 'redis'
+    assert ready['e2eeDevices'] == 'disabled'
+    assert 'messaging_db_pool_connections' in get(9197, '/metrics')
+    assert not p.inspect(container)['HostConfig']['PortBindings'], 'Messaging must stay private'
+    return {'authenticatedRedis': 'PASS', 'redisBrokerAndPresence': 'PASS',
+            'privateMetrics': 'PASS', 'privateServicePorts': 'PASS'}
+
+
 def configure(sha, run_id):
     import messaging_release
     assert any((p.ROOT / 'communications').glob('messaging-baseline-*.json')), 'Published baseline required'
@@ -267,6 +281,7 @@ def configure(sha, run_id):
     replaced = False
     try:
         release.wait(candidate, 'messaging')
+        dependency_probe(candidate)
         p.run('docker', 'stop', '--time', '20', candidate)
         p.write_private(WORK / ('runtime-rollback-' + run_id + '.private.json'), json.dumps({'original': old, 'previous': previous, 'workflowSha': sha}))
         p.run('docker', 'rename', 'cfmeet-messaging', previous)
@@ -274,6 +289,7 @@ def configure(sha, run_id):
         replaced = True
         release.start('cfmeet-messaging', cfg)
         release.wait('cfmeet-messaging', 'messaging')
+        dependency_evidence = dependency_probe('cfmeet-messaging')
         install_ingress(run_id)
         storage_evidence = storage_probe(run_id)
         p.regression()
@@ -281,6 +297,7 @@ def configure(sha, run_id):
         print(json.dumps({'operation': 'messaging-configure', 'runId': run_id,
             'imageIdPreserved': old['Image'], 'productionE2eeEnabled': False,
             'managedPersonalPolicyChanged': False, 'scanner': scanner_evidence, 'storage': storage_evidence,
+            'dependencies': dependency_evidence,
             'offServerRecovery': 'DEFERRED_BY_OWNER', 'rollbackContainer': previous}))
         messaging_release.inspect_runtime(sha, run_id)
     except Exception:
