@@ -152,6 +152,41 @@ def write_private(path, data):
     path.chmod(0o600)
 
 
+def accepting_nginx_workers(pidfile=Path('/run/nginx.pid')):
+    """PIDs of the host nginx workers that still accept new connections. A worker of a
+    replaced generation retitles itself 'worker process is shutting down' when it
+    stops accepting."""
+    master = pidfile.read_text().strip()
+    assert master.isdigit(), 'Host nginx master PID unavailable'
+    listing = subprocess.run(['ps', '--ppid', master, '-o', 'pid=,args='], capture_output=True, text=True).stdout
+    workers = set()
+    for line in listing.splitlines():
+        pid, _, title = line.strip().partition(' ')
+        if pid.isdigit() and title.strip() == 'nginx: worker process':
+            workers.add(int(pid))
+    return workers
+
+
+def reload_host_nginx(timeout=60, pidfile=Path('/run/nginx.pid'),
+                      reload=('systemctl', 'reload', 'nginx'), test=('nginx', '-t')):
+    """Reload host nginx and return only when every worker accepting connections runs
+    the new configuration. `systemctl reload` merely signals the master: a request sent
+    right after it is still served by the previous generation. Every messaging-ingress
+    probe from 42108003678 to 42113422356 hit the old generation this way."""
+    run(*test)
+    before = accepting_nginx_workers(pidfile)
+    assert before, 'Host nginx has no accepting workers'
+    run(*reload)
+    deadline = time.monotonic() + timeout
+    while True:
+        now = accepting_nginx_workers(pidfile)
+        if now and not now & before:
+            return sorted(now)
+        if time.monotonic() > deadline:
+            raise RuntimeError('Host nginx did not complete the reload')
+        time.sleep(0.2)
+
+
 def current_rooms():
     e = env_of(inspect('cfmeet-production-backend'))
     return lk_request('RoomService/ListRooms', {}, e['LIVEKIT_API_KEY'],

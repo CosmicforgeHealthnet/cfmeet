@@ -93,21 +93,134 @@ def storage_identity():
 
 
 UPSTREAM_TRUST = Path('/etc/nginx/cfmeet-messaging-upstream-ca.pem')
+SYSTEM_BUNDLE = Path('/etc/ssl/certs/ca-certificates.crt')
+SITE = Path('/etc/nginx/sites-available/api.cfmeet.com')
+SITE_LINK = Path('/etc/nginx/sites-enabled/api.cfmeet.com')
+SNIPPET = Path('/etc/nginx/snippets/cfmeet-messaging.conf')
+NO_INGRESS = '# previous configuration had no Messaging ingress\n'
+# The private proxy presents Let's Encrypt's Generation Y chain: leaf, YE1, Root YE
+# cross-signed by ISRG Root X2, and X2 cross-signed by X1. The trust anchor (X2 in the
+# system store) sits two intermediates above the leaf. nginx's default depth of 1 refuses
+# this chain with "unable to get local issuer certificate", the exact live 502. Depth 2 is
+# the measured minimum (host nginx 1.24, OpenSSL 3.0.13, 2026-11-05); 5 leaves margin.
+UPSTREAM_VERIFY_DEPTH = 5
+UPSTREAM_NAME = 'api.cfmeet.com'
+# Host nginx reaches the private TLS proxy through a loopback-only TCP relay. The relay
+# resolves the proxy by its Docker name on every connection and never terminates TLS:
+# host nginx still verifies the proxy's own chain and name. No Docker address is written
+# into the host configuration, so the route survives a proxy restart or a host reboot.
+RELAY = 'cfmeet-messaging-ingress'
+RELAY_NET = 'cfmeet-messaging-ingress-net'
+RELAY_PORT = 18444
+RELAY_UPSTREAM = 'cfmeet-core-tls:8444'
 
 
-def verifies(tls_ip, ca_file):
-    r = subprocess.run(['openssl', 's_client', '-connect', tls_ip + ':8444', '-servername', 'api.cfmeet.com',
+def relay_conf():
+    return WORK / 'ingress-relay.conf'
+
+
+def relay_config():
+    return ('daemon off;\nworker_processes 1;\npid /tmp/nginx.pid;\nerror_log stderr warn;\n'
+        'events { worker_connections 512; }\n'
+        '# TCP passthrough only: TLS runs end to end between host nginx and the private proxy.\n'
+        'stream {\n    resolver 127.0.0.11 valid=10s ipv6=off;\n'
+        '    server {\n        listen 8444;\n        set $peer ' + RELAY_UPSTREAM + ';\n'
+        '        proxy_pass $peer;\n        proxy_connect_timeout 5s;\n        proxy_timeout 3600s;\n    }\n}\n')
+
+
+def relay_create_args(image, config=None):
+    """The relay container: loopback-only port, read-only, no capabilities, non-root,
+    bounded memory, CPU, processes and logs. `image` is the private proxy's own nginx."""
+    return ['docker', 'create', '--name', RELAY, '--restart', 'unless-stopped',
+        '--network', RELAY_NET, '--publish', '127.0.0.1:%d:8444' % RELAY_PORT,
+        '--read-only', '--tmpfs', '/tmp:rw,size=1m', '--cap-drop', 'ALL',
+        '--security-opt', 'no-new-privileges', '--user', '101:101',
+        '--memory', '32m', '--pids-limit', '32', '--cpus', '0.25',
+        '--log-opt', 'max-size=5m', '--log-opt', 'max-file=2',
+        '--mount', 'type=bind,src=%s,dst=/etc/nginx/nginx.conf,readonly' % (config or relay_conf()),
+        '--entrypoint', 'nginx', image, '-e', 'stderr', '-c', '/etc/nginx/nginx.conf']
+
+
+def relay_matches(container, image):
+    host = container['HostConfig']
+    return (container['State']['Running'] and container['Image'] == image
+        and host.get('PortBindings') == {'8444/tcp': [{'HostIp': '127.0.0.1', 'HostPort': str(RELAY_PORT)}]}
+        and set(container['NetworkSettings']['Networks']) == {RELAY_NET, p.NET}
+        and bool(host.get('ReadonlyRootfs')) and host.get('CapDrop') == ['ALL'])
+
+
+def ensure_relay(run_id):
+    """Reuses an identical running relay (no interruption); otherwise replaces it and
+    keeps the previous one stopped for rollback."""
+    image = p.inspect('cfmeet-core-tls')['Image']
+    text = relay_config()
+    names = p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
+    current = p.inspect(RELAY) if RELAY in names else None
+    conf_before = relay_conf().read_text() if relay_conf().is_file() else None
+    if current and conf_before == text and relay_matches(current, image):
+        return {'relay': 'reused', 'previous': None, 'confBefore': conf_before}
+    previous = None
+    if current:
+        previous = RELAY + '-previous-' + run_id
+        p.run('docker', 'rename', RELAY, previous)
+        p.run('docker', 'stop', '--time', '5', previous)
+    state = {'relay': 'created', 'previous': previous, 'confBefore': conf_before}
+    try:
+        relay_conf().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        relay_conf().write_text(text); relay_conf().chmod(0o644)
+        if RELAY_NET not in p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines():
+            p.run('docker', 'network', 'create', RELAY_NET)
+        p.run(*relay_create_args(image))
+        p.run('docker', 'network', 'connect', p.NET, RELAY)
+        p.run('docker', 'start', RELAY)
+        assert relay_matches(p.inspect(RELAY), image), 'Messaging ingress relay is not confined as required'
+    except Exception:
+        restore_relay(state)
+        raise
+    return state
+
+
+def restore_relay(state):
+    if state['relay'] == 'reused':
+        return
+    if RELAY in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines():
+        p.run('docker', 'rm', '-f', RELAY)
+    if state['confBefore'] is not None:
+        relay_conf().write_text(state['confBefore'])
+    if state['previous']:
+        p.run('docker', 'rename', state['previous'], RELAY)
+        p.run('docker', 'start', RELAY)
+
+
+def wait_for_relay(timeout=30):
+    """The relay answers with the private proxy's TLS handshake (Docker DNS resolved)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        r = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:%d' % RELAY_PORT, '-servername', UPSTREAM_NAME],
+                           input='', capture_output=True, text=True, timeout=20)
+        if 'BEGIN CERTIFICATE' in r.stdout or 'Server certificate' in r.stdout:
+            return
+        if time.monotonic() > deadline:
+            raise RuntimeError('Messaging ingress relay did not reach the private proxy')
+        time.sleep(1)
+
+
+def verifies(ca_file, depth=UPSTREAM_VERIFY_DEPTH):
+    """Verifies the private proxy through the relay exactly as host nginx will: the same
+    name, SNI, depth and trust file."""
+    r = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:%d' % RELAY_PORT, '-servername', UPSTREAM_NAME,
+                        '-verify_hostname', UPSTREAM_NAME, '-verify_depth', str(depth),
                         '-verify_return_error', '-no-CApath', '-CAfile', str(ca_file)],
                        input='', capture_output=True, text=True, timeout=20)
     return r.returncode == 0 and 'Verify return code: 0 (ok)' in r.stdout
 
 
-def upstream_trust(tls_ip):
+def upstream_trust():
     """The system roots nginx verifies the private proxy against: the system bundle when it
     alone verifies the presented chain, else every system certificate in /etc/ssl/certs
     (where a newer root may exist outside the bundle). Never a private or pinned key."""
-    bundle = Path('/etc/ssl/certs/ca-certificates.crt')
-    if verifies(tls_ip, bundle):
+    bundle = SYSTEM_BUNDLE
+    if verifies(bundle):
         return bundle, 'system-bundle'
     seen, pems = set(), []
     for item in sorted(Path('/etc/ssl/certs').glob('*.pem')):
@@ -120,25 +233,22 @@ def upstream_trust(tls_ip):
             pems.append(text.strip() + '\n')
     candidate = UPSTREAM_TRUST.with_suffix('.candidate')
     candidate.write_text(''.join(pems)); candidate.chmod(0o644)
-    assert verifies(tls_ip, candidate), 'System certificates do not verify the private proxy chain'
+    assert verifies(candidate), 'System certificates do not verify the private proxy chain'
     candidate.replace(UPSTREAM_TRUST)
     return UPSTREAM_TRUST, 'system-directory'
 
 
-def nginx_config(tls_ip, store_ip, trust='/etc/ssl/certs/ca-certificates.crt'):
-    assert ipaddress.ip_address(tls_ip).is_private and ipaddress.ip_address(store_ip).is_private
+def nginx_config(store_ip, trust=SYSTEM_BUNDLE):
+    # The attachment route keeps its existing, separately verified storage address.
+    assert ipaddress.ip_address(store_ip).is_private
     common = ('    access_log off;\n    proxy_http_version 1.1;\n'
         '    proxy_set_header Host $http_host;\n    proxy_set_header X-Forwarded-Proto https;\n'
         '    add_header Cache-Control "private, no-store" always;\n')
-    # Depth 5: the private proxy presents Let's Encrypt's Generation Y chain
-    # (leaf, YE1, Root YE cross-signed by ISRG Root X2, X2 cross-signed by X1), measured
-    # by messaging-ingress 42109430743. nginx's default depth 1, and 3, cannot reach a
-    # trusted root and answer 502; verification against the system roots is unchanged.
-    tls = (common + '    proxy_ssl_server_name on;\n    proxy_ssl_name api.cfmeet.com;\n'
-        '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth 5;\n'
+    tls = (common + '    proxy_ssl_server_name on;\n    proxy_ssl_name ' + UPSTREAM_NAME + ';\n'
+        '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth ' + str(UPSTREAM_VERIFY_DEPTH) + ';\n'
         '    proxy_ssl_trusted_certificate ' + str(trust) + ';\n'
         '    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n'
-        '    proxy_read_timeout 3600;\n    proxy_pass https://' + tls_ip + ':8444;\n')
+        '    proxy_read_timeout 3600;\n    proxy_pass https://127.0.0.1:' + str(RELAY_PORT) + ';\n')
     return ('# Section 8: device-only realtime ingress; Account owns native REST authentication.\n'
         'location = /v1/realtime {\n    limit_except GET { deny all; }\n' + tls + '}\n'
         'location = /v1/realtime/tickets {\n    limit_except POST OPTIONS { deny all; }\n' + tls + '}\n'
@@ -148,31 +258,39 @@ def nginx_config(tls_ip, store_ip, trust='/etc/ssl/certs/ca-certificates.crt'):
 
 
 def install_ingress(run_id):
-    tls = p.inspect('cfmeet-core-tls')['NetworkSettings']['Networks'][p.NET]['IPAddress']
+    """Installs the relay and the host routes. Returns only when every accepting host
+    nginx worker serves the new routes; restores everything itself on failure. The
+    returned relay state lets later checks roll the installation back."""
     store = p.inspect(storage.NAME)['NetworkSettings']['Networks'][p.NET]['IPAddress']
-    site = Path('/etc/nginx/sites-enabled/api.cfmeet.com').resolve()
-    assert site == Path('/etc/nginx/sites-available/api.cfmeet.com')
-    before = site.read_text()
+    assert SITE_LINK.resolve() == SITE
+    before = SITE.read_text()
     include = 'include /etc/nginx/snippets/cfmeet-messaging.conf;'
     anchor = 'include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
     assert before.count(anchor) == 1 and before.count(include) <= 1
-    snippet = Path('/etc/nginx/snippets/cfmeet-messaging.conf')
-    old = snippet.read_text() if snippet.exists() else None
+    old = SNIPPET.read_text() if SNIPPET.exists() else None
     p.write_private(WORK / ('nginx-site-before-' + run_id), before)
     if old is not None: p.write_private(WORK / ('nginx-snippet-before-' + run_id), old)
-    trust, source = upstream_trust(tls)
-    print(json.dumps({'messagingIngressUpstreamTrust': source}), flush=True)
+    relay = ensure_relay(run_id)
     try:
-        snippet.write_text(nginx_config(tls, store, trust))
-        if include not in before: site.write_text(before.replace(anchor, anchor + '\n    ' + include))
-        p.run('nginx', '-t')
-        p.run('systemctl', 'reload', 'nginx')
+        wait_for_relay()
+        trust, source = upstream_trust()
+        print(json.dumps({'messagingIngressUpstreamTrust': source, 'relay': relay['relay']}), flush=True)
+        SNIPPET.write_text(nginx_config(store, trust))
+        if include not in before: SITE.write_text(before.replace(anchor, anchor + '\n    ' + include))
+        p.reload_host_nginx()
     except Exception:
-        site.write_text(before)
-        if old is not None: snippet.write_text(old)
-        else: snippet.write_text('# previous configuration had no Messaging ingress\n')
-        p.run('nginx', '-t'); p.run('systemctl', 'reload', 'nginx')
+        restore_ingress(run_id, relay)
         raise
+    return relay
+
+
+def restore_ingress(run_id, relay):
+    """The exact previous host routes, then the previous relay."""
+    SITE.write_text((WORK / ('nginx-site-before-' + run_id)).read_text())
+    previous = WORK / ('nginx-snippet-before-' + run_id)
+    SNIPPET.write_text(previous.read_text() if previous.exists() else NO_INGRESS)
+    p.reload_host_nginx()
+    restore_relay(relay)
 
 
 def scanner_mode():
@@ -255,135 +373,114 @@ def signed_grants(shared, key):
     return grants
 
 
-def ingress_probe():
-    """Public realtime routes reach Messaging and refuse unauthenticated use."""
-    request = urllib.request.Request('https://api.cfmeet.com/v1/realtime/tickets', method='POST',
-                                     data=b'{}', headers={'Content-Type': 'application/json'})
+def joined_headers(response):
+    """Lower-cased response headers; a repeated header keeps every value, comma-joined."""
+    headers = {}
+    for name, value in response.getheaders():
+        name = name.lower()
+        headers[name] = headers[name] + ', ' + value if name in headers else value
+    return headers
+
+
+def public_request(method, path, headers=None, body=None, host=UPSTREAM_NAME, port=443):
+    """One request over verified public HTTPS (HTTP/1.1): status, lower-cased headers, body."""
+    import http.client
+    import ssl
+    connection = http.client.HTTPSConnection(host, port, timeout=15, context=ssl.create_default_context())
     try:
-        urllib.request.urlopen(request, timeout=15)
-    except urllib.error.HTTPError as error:
-        assert error.code == 401, 'Realtime ticket route did not reach Messaging: ' + str(error.code)
-    else:
-        raise AssertionError('Unauthenticated realtime ticket issued')
-    return {'realtimeTicketRouteUnauthenticated': 401}
+        connection.request(method, path, body=body, headers=headers or {})
+        response = connection.getresponse()
+        return response.status, joined_headers(response), response.read(65536)
+    finally:
+        connection.close()
 
 
-def nginx_variants(tls):
-    """The host's own nginx binary, loopback only, briefly: which upstream TLS settings verify."""
-    import tempfile
-    variants = {
-        'depth5_bundle': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
-        'depth5_bundle_no_sni': 'proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
-        'depth9_bundle_tls13': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 9; proxy_ssl_protocols TLSv1.3; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
-        'verify_off_control': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify off;',
+def messaging_refusal(answer, status, reason=None, code='AUTHENTICATION_FAILED'):
+    """`answer` is Messaging's own refusal (its error envelope) served through the realtime
+    location, not an nginx error page. Messaging sends `no-store`; only the realtime
+    location adds `private, no-store`."""
+    got, headers, raw = answer
+    assert got == status, 'Realtime route answered %d, expected %d from Messaging' % (got, status)
+    assert 'private' in headers.get('cache-control', ''), 'Response did not pass the realtime location'
+    error = json.loads(raw)['error']
+    assert error['code'] == code, 'Unexpected Messaging error code'
+    if reason: assert error.get('reason') == reason, 'Unexpected Messaging refusal reason'
+    if status == 401: assert 'cf-meet-messaging' in headers.get('www-authenticate', '')
+    return status
+
+
+def ingress_probe(request=public_request):
+    """The public realtime routes reach Messaging over verified TLS and refuse every
+    unauthenticated or forged use. A valid ticket needs an enrolled device, which the
+    production E2EE guard refuses (issue 13), so issuance is not attempted here."""
+    json_post = {'Content-Type': 'application/json'}
+    forged = 'CF-Client-Token ' + secrets.token_urlsafe(32)
+    evidence = {
+        'ticketUnauthenticated': messaging_refusal(request('POST', '/v1/realtime/tickets', json_post, b'{}'), 401),
+        'ticketForgedClientToken': messaging_refusal(request('POST', '/v1/realtime/tickets',
+            dict(json_post, Authorization=forged), b'{}'), 401),
+        'ticketRefusedOrigin': messaging_refusal(request('POST', '/v1/realtime/tickets',
+            dict(json_post, Authorization=forged, Origin='https://origin-refused.invalid'), b'{}'), 401, 'ORIGIN_NOT_ALLOWED'),
     }
-    results = {}
-    with tempfile.TemporaryDirectory() as prefix:
-        servers, port = [], 18471
-        for name, directives in variants.items():
-            servers.append(f'server {{ listen 127.0.0.1:{port}; location / {{ proxy_pass https://{tls}:8444; {directives} }} }}')
-            results[name] = port; port += 1
-        Path(prefix, 'logs').mkdir()
-        conf = Path(prefix, 'nginx.conf')
-        conf.write_text('pid ' + prefix + '/nginx.pid; error_log ' + prefix + '/logs/error.log info; events {} '
-                        'http { access_log off; client_body_temp_path ' + prefix + '; proxy_temp_path ' + prefix + '; '
-                        + ' '.join(servers) + ' }')
-        start = subprocess.run(['nginx', '-p', prefix, '-c', str(conf)], capture_output=True, text=True)
-        if start.returncode:
-            return {'start': re.sub(r'[^A-Za-z0-9 :./()-]', '', start.stderr)[:200]}
-        try:
-            for name, port in results.items():
-                r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', '-X', 'POST',
-                                    f'http://127.0.0.1:{port}/v1/realtime/tickets'], capture_output=True, text=True)
-                results[name] = r.stdout.strip()
-            import media_diagnostics
-            errors = Path(prefix, 'logs', 'error.log').read_text(errors='replace').splitlines()
-            results['errors'] = [media_diagnostics.template(l) for l in errors if 'upstream' in l or 'SSL' in l][-6:]
-        finally:
-            subprocess.run(['nginx', '-p', prefix, '-c', str(conf), '-s', 'quit'], capture_output=True)
-            time.sleep(1)
-    return results
+    status, headers, _ = request('OPTIONS', '/v1/realtime/tickets',
+        {'Origin': 'https://origin-refused.invalid', 'Access-Control-Request-Method': 'POST'})
+    assert status == 403 and 'access-control-allow-origin' not in headers, 'Refused origin preflight was allowed'
+    evidence['ticketPreflightRefusedOrigin'] = status
+    status, _, _ = request('DELETE', '/v1/realtime/tickets')
+    assert status == 403, 'Realtime ticket route accepted another method'
+    evidence['ticketOtherMethodDenied'] = status
+    def upgrade(protocols):
+        headers = {'Upgrade': 'websocket', 'Connection': 'Upgrade', 'Sec-WebSocket-Version': '13',
+                   'Sec-WebSocket-Key': base64.b64encode(secrets.token_bytes(16)).decode()}
+        if protocols: headers['Sec-WebSocket-Protocol'] = protocols
+        answer = request('GET', '/v1/realtime', headers)
+        assert answer[0] != 101, 'Realtime WebSocket upgraded without a valid ticket'
+        return answer
+    evidence['websocketNoTicket'] = messaging_refusal(upgrade('cfmeet.messaging.v1'), 401, 'TICKET_REQUIRED')
+    # A well-formed (64 hex) unknown ticket is refused by Messaging's ticket store lookup.
+    evidence['websocketForgedTicket'] = messaging_refusal(
+        upgrade('cfmeet.messaging.v1, cfmeet.ticket.' + secrets.token_hex(32)), 401, 'INVALID_TICKET')
+    evidence['websocketNoSubprotocol'] = messaging_refusal(upgrade(None), 400, 'SUBPROTOCOL_REQUIRED', 'VALIDATION_ERROR')
+    evidence['validTicketIssuance'] = 'NOT_RUN_PRODUCTION_E2EE_DEVICE_ENROLLMENT_DISABLED'
+    return evidence
 
 
 def ingress_diagnostics():
-    """Where the public realtime route fails: redacted host nginx errors and the private
-    hops tested separately (status codes only)."""
+    """Where the public realtime route fails (status codes and redacted log templates)."""
     import media_diagnostics
     out = {}
     log = Path('/var/log/nginx/error.log')
-    log = Path('/var/log/nginx/error.log')
     if log.exists():
-        lines = [l for l in log.read_text(errors='replace').splitlines()[-400:] if 'upstream' in l or 'SSL' in l]
-        out['hostNginxErrors'] = [media_diagnostics.template(l) for l in lines[-12:]]
-    tls = p.inspect('cfmeet-core-tls')['NetworkSettings']['Networks'][p.NET]['IPAddress']
-    def code(*args):
-        r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', *args],
-                           capture_output=True, text=True)
-        return r.stdout.strip() or ('error:' + re.sub(r'[^A-Za-z0-9 :().-]', '', r.stderr)[:120])
-    out['hostToPrivateProxy'] = code('-X', 'POST', '--resolve', 'api.cfmeet.com:8444:' + tls,
-                                     'https://api.cfmeet.com:8444/v1/realtime/tickets')
-    out['hostToPrivateProxyNoVerify'] = code('-k', '-X', 'POST', 'https://' + tls + ':8444/v1/realtime/tickets')
-    inside = subprocess.run(['docker', 'run', '--rm', '--network', p.NET, 'curlimages/curl:8.12.1', '-sS', '-o', '/dev/null',
-                             '-w', '%{http_code}', '--max-time', '10', '-X', 'POST', 'https://api.cfmeet.com:8444/v1/realtime/tickets'],
-                            capture_output=True, text=True)
-    out['privateNetworkToPrivateProxy'] = inside.stdout.strip()
-    # The presented chain (public certificate names only) and how each trust source verifies it.
-    for label, trust in (('bundle_only', ['-no-CApath', '-CAfile', '/etc/ssl/certs/ca-certificates.crt']),
-                         ('directory', ['-CApath', '/etc/ssl/certs'])):
-        r = subprocess.run(['openssl', 's_client', '-connect', tls + ':8444', '-servername', 'api.cfmeet.com', '-showcerts', *trust],
-                           input='', capture_output=True, text=True, timeout=20)
-        names = [re.sub(r'[^A-Za-z0-9 =,.:-]', '', l.strip())[:120] for l in r.stdout.splitlines()
-                 if re.match(r'^\s*\d+ s:|^\s+i:', l)]
-        verify = [l.strip()[:80] for l in r.stdout.splitlines() if 'Verify return code' in l]
-        out['chain_' + label] = {'certificates': names, 'verify': verify[-1:] }
-    out['nginxVariants'] = nginx_variants(tls)
-    if log.exists():
-        mine = []
-        for l in log.read_text(errors='replace').splitlines()[-2000:]:
-            if '/v1/realtime/tickets' not in l:
-                continue
-            m = re.search(r'upstream: "(\w+)://([\d.]+):(\d+)', l)
-            mine.append({'error': media_diagnostics.template(l),
-                         'upstream': (m.group(1) + ' ' + ('private-proxy' if m.group(2) == tls else 'OTHER-ADDRESS') + ':' + m.group(3)) if m else None})
-        out['realtimeTicketErrors'] = mine[-5:]
-    dump = subprocess.run(['nginx', '-T'], capture_output=True, text=True).stdout.splitlines()
-    live = []
-    for i, line in enumerate(dump):
-        if 'location = /v1/realtime/tickets' in line:
-            live.append([re.sub(r'\d+\.\d+\.\d+\.\d+', '<ip>', l.strip())[:100] for l in dump[i:i + 16]
-                         if 'proxy_ssl' in l or 'proxy_pass' in l or 'location' in l])
-    out['liveConfigRealtimeTickets'] = live
-    out['liveSslDirectives'] = sorted({re.sub(r'/[^ ;]*', '<path>', l.strip())[:100] for l in dump
-                                       if re.match(r'\s*(proxy_ssl|ssl_|openssl|env )', l)})[:40]
-    out['liveIncludes'] = [l.strip()[:100] for l in dump if 'cfmeet-messaging.conf' in l][:6]
-    out['liveServerNames'] = sorted({l.strip()[:80] for l in dump if l.strip().startswith('server_name') and 'cfmeet' in l})[:10]
-    ps = subprocess.run(['ps', '-C', 'nginx', '-o', 'pid=,ppid=,lstart=,args='], capture_output=True, text=True).stdout
-    out['nginxProcesses'] = [' '.join(l.split()[:8])[:120] for l in ps.splitlines()][:8]
-    pidfile = Path('/run/nginx.pid')
-    out['pidFile'] = pidfile.read_text().strip() if pidfile.exists() else None
-    listeners = subprocess.run(['ss', '-ltnp', 'sport = :443'], capture_output=True, text=True).stdout
-    out['port443Owners'] = sorted({m for m in re.findall(r'users:\(\("([^"]+)"', listeners)})
-    r = subprocess.run(['nginx', '-V'], capture_output=True, text=True)
-    out['hostNginx'] = [l for l in (r.stderr + r.stdout).splitlines() if 'version' in l or 'OpenSSL' in l][:2]
+        lines = [l for l in log.read_text(errors='replace').splitlines()[-2000:] if '/v1/realtime' in l]
+        out['realtimeErrors'] = [media_diagnostics.template(l) for l in lines[-6:]]
+    r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', '-X', 'POST',
+                        '--resolve', '%s:%d:127.0.0.1' % (UPSTREAM_NAME, RELAY_PORT),
+                        'https://%s:%d/v1/realtime/tickets' % (UPSTREAM_NAME, RELAY_PORT)], capture_output=True, text=True)
+    out['hostToRelayVerified'] = r.stdout.strip() or 'error'
+    out['relayVerifiesAtNginxDepth'] = verifies(SYSTEM_BUNDLE)
+    names = p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines()
+    out['relayRunning'] = RELAY in names and p.inspect(RELAY)['State']['Running']
+    snippet = SNIPPET.read_text() if SNIPPET.exists() else ''
+    out['liveRealtimeDirectives'] = sorted({re.sub(r'\d+\.\d+\.\d+\.\d+', '<ip>', l.strip()) for l in snippet.splitlines()
+                                           if 'proxy_ssl' in l or 'proxy_pass https' in l})
+    out['acceptingWorkers'] = len(p.accepting_nginx_workers())
     return out
 
 
 def reinstall_ingress(run_id):
-    """Re-applies only the public Messaging ingress (rolled back if its probe fails)."""
+    """Re-applies only the public Messaging ingress; restores the exact previous routes
+    and relay if any probe or the regression fails."""
     p.identity()
-    install_ingress(run_id)
+    relay = install_ingress(run_id)
     try:
         evidence = ingress_probe()
+        p.regression()
     except Exception:
         print(json.dumps({'messagingIngressDiagnostics': ingress_diagnostics()}), flush=True)
-        before = WORK / ('nginx-site-before-' + run_id)
-        Path('/etc/nginx/sites-available/api.cfmeet.com').write_text(before.read_text())
-        previous = WORK / ('nginx-snippet-before-' + run_id)
-        Path('/etc/nginx/snippets/cfmeet-messaging.conf').write_text(previous.read_text() if previous.exists() else '# Messaging ingress rolled back\n')
-        p.run('nginx', '-t'); p.run('systemctl', 'reload', 'nginx')
+        restore_ingress(run_id, relay)
         raise
-    p.regression()
-    print(json.dumps({'operation': 'messaging-ingress', 'runId': run_id, **evidence}))
+    print(json.dumps({'operation': 'messaging-ingress', 'runId': run_id, 'relay': relay['relay'],
+                      'upstreamVerifyDepth': UPSTREAM_VERIFY_DEPTH, **evidence}))
 
 
 def storage_probe(run_id):
@@ -488,6 +585,7 @@ def _configure(sha, run_id, old, env, managed, user, password, mode='quarantine'
     release.start(candidate, test)
     previous = 'cfmeet-messaging-runtime-rollback-' + run_id
     replaced = False
+    relay = None
     try:
         release.wait(candidate, 'messaging')
         dependency_probe(candidate)
@@ -506,7 +604,7 @@ def _configure(sha, run_id, old, env, managed, user, password, mode='quarantine'
         release.wait('cfmeet-messaging', 'messaging')
         dependency_evidence = dependency_probe('cfmeet-messaging')
         assert scanner_in_use('cfmeet-messaging') == mode, 'Production Messaging scanner mode changed'
-        install_ingress(run_id)
+        relay = install_ingress(run_id)
         storage_evidence = storage_probe(run_id)
         storage_evidence.update(ingress_probe())
         p.regression()
@@ -524,10 +622,7 @@ def _configure(sha, run_id, old, env, managed, user, password, mode='quarantine'
                 p.run('docker', 'rename', 'cfmeet-messaging', 'cfmeet-messaging-runtime-failed-' + run_id)
             p.run('docker', 'rename', previous, 'cfmeet-messaging'); p.run('docker', 'start', 'cfmeet-messaging')
             release.wait('cfmeet-messaging', 'messaging')
-        before = WORK / ('nginx-site-before-' + run_id)
-        if before.exists():
-            Path('/etc/nginx/sites-available/api.cfmeet.com').write_text(before.read_text())
-            previous_snippet = WORK / ('nginx-snippet-before-' + run_id)
-            Path('/etc/nginx/snippets/cfmeet-messaging.conf').write_text(previous_snippet.read_text() if previous_snippet.exists() else '# Messaging ingress rolled back\n')
-            p.run('nginx', '-t'); p.run('systemctl', 'reload', 'nginx')
+        # install_ingress restores its own failures; later failures restore it here.
+        if relay is not None:
+            restore_ingress(run_id, relay)
         raise

@@ -43,7 +43,7 @@ class MessagingInspection(unittest.TestCase):
         self.assertEqual(runtime.signed_grants(other, key), [])
 
     def test_ingress_never_exposes_internal_admin_or_metrics_and_rejects_public_upstream(self):
-        value = runtime.nginx_config('172.23.0.3', '172.23.0.5')
+        value = runtime.nginx_config('172.23.0.5')
         self.assertEqual(value.count('location '), 3)
         self.assertNotIn('/internal', value)
         self.assertNotIn('/metrics', value)
@@ -51,4 +51,4 @@ class MessagingInspection(unittest.TestCase):
         self.assertIn('proxy_ssl_verify on;', value)
         self.assertEqual(value.count('proxy_ssl_verify_depth 5;'), 2)
         self.assertIn('access_log off;', value)
-        with self.assertRaises(AssertionError): runtime.nginx_config('8.8.8.8', '172.23.0.5')
+        with self.assertRaises(AssertionError): runtime.nginx_config('8.8.8.8')
