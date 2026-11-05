@@ -139,6 +139,7 @@ async fn resolve_principal(
                 target_principal_id: target.principal_id,
                 credential_issued_at: None,
                 credential_principal_id: None,
+                conversation_id: None,
             },
         )
         .await?;

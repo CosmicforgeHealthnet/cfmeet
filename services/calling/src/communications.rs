@@ -91,6 +91,7 @@ impl AppCallService {
                         target_principal_id: *target,
                         credential_issued_at: None,
                         credential_principal_id: None,
+                        conversation_id: None,
                     },
                 )
                 .await
@@ -169,6 +170,7 @@ impl AppCallService {
                         target_principal_id: target,
                         credential_issued_at: evidence.map(|x| x.1),
                         credential_principal_id: evidence.map(|x| x.0),
+                        conversation_id: None,
                     },
                 )
                 .await

@@ -708,5 +708,6 @@ pub fn check(
         target_principal_id: b.principal_id,
         credential_issued_at: None,
         credential_principal_id: None,
+        conversation_id: None,
     }
 }

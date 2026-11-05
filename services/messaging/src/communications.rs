@@ -105,6 +105,7 @@ pub async fn require(
                 target_principal_id: target,
                 credential_issued_at: ctx.personal_session_issued_at,
                 credential_principal_id: ctx.personal_session_issued_at.map(|_| actor),
+                conversation_id: None,
             },
         )
         .await

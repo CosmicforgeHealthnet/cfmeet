@@ -1079,5 +1079,37 @@ async fn private_owner_and_operator_routes_are_scoped_deduplicated_and_audited()
             .unwrap()
             .allowed
     );
+    // Per-conversation mute belongs to the recipient and applies only to that chat.
+    h.state.put_notification_preferences(&b.profile, json!({"expectedVersion":1,"directMessages":true,"groupMessages":true,"incomingCalls":true,"missedCalls":true,"contactRequests":true,"groupInvitations":true,"meetingInvitations":true}), Uuid::new_v4()).await.unwrap();
+    let chat = conversation(&h, "DIRECT", &[&a, &b], 1);
+    let other_chat = conversation(&h, "DIRECT", &[&a, &b], 1);
+    h.state.put_conversation_preferences(&h.delegated(&b.account), &b.profile, chat, json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4()).await.unwrap();
+    let mut in_chat = check(Action::MessageNotification, &a.profile, &b.profile);
+    in_chat.conversation_id = Some(chat);
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &in_chat)
+            .await
+            .unwrap()
+            .allowed
+    );
+    in_chat.conversation_id = Some(other_chat);
+    assert!(
+        h.state
+            .check_policy(&h.scope, &in_chat)
+            .await
+            .unwrap()
+            .allowed
+    );
+    assert!(
+        h.state
+            .check_policy(
+                &h.scope,
+                &check(Action::MessageNotification, &a.profile, &b.profile)
+            )
+            .await
+            .unwrap()
+            .allowed
+    );
     h.close().await;
 }

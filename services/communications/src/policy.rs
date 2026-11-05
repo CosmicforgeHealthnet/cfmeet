@@ -167,6 +167,14 @@ impl State {
                 "group"
             };
             allowed = allowed && global.as_ref().is_none_or(|g| g[key] != false);
+            // The recipient's per-conversation mute (MENTIONS cannot be inferred from
+            // opaque ciphertext, so it suppresses ordinary pushes too).
+            if let Some(conversation) = check.conversation_id {
+                let muted: Option<Value> = store::one(&self.store.db,
+                    "SELECT jsonb_build_object('muted',notifications<>'ALL' AND (muted_until IS NULL OR muted_until>now())) doc FROM communication_conversation_preferences WHERE owner_profile_id=$1 AND conversation_id=$2",
+                    vec![target.id.into(), conversation.into()]).await?;
+                allowed = allowed && muted.is_none_or(|m| m["muted"] != true);
+            }
         }
         Ok(Decision {
             schema_version: 1,

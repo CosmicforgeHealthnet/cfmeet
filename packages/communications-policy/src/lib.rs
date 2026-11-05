@@ -79,6 +79,10 @@ pub struct PolicyCheck {
     pub credential_issued_at: Option<i64>,
     #[serde(default)]
     pub credential_principal_id: Option<Uuid>,
+    /// Canonical Messaging conversation of a delayed notification, so the recipient's
+    /// per-conversation mute applies. Omitted (older callers) means no conversation rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

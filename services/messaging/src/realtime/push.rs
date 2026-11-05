@@ -287,6 +287,7 @@ struct Job {
     environment_id: Uuid,
     event_payload: Value,
     context_class: String,
+    conversation_id: Uuid,
 }
 
 /// Reauthorize delayed notifications. The scope comes from the committed owner event,
@@ -357,6 +358,7 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
                 target_principal_id: job.recipient_principal_id,
                 credential_issued_at: None,
                 credential_principal_id: None,
+                conversation_id: Some(job.conversation_id),
             },
         )
         .await
@@ -378,7 +380,7 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
         "WITH due AS (SELECT id FROM messaging_push_jobs WHERE status = 'PENDING' AND next_attempt_at <= $1 \
              AND (lease_expires_at IS NULL OR lease_expires_at <= $1) ORDER BY next_attempt_at LIMIT $2 FOR UPDATE SKIP LOCKED) \
          UPDATE messaging_push_jobs j SET lease_token = $3, lease_expires_at = $4 FROM due WHERE j.id = due.id \
-         RETURNING j.id, j.attempts, j.payload, j.expires_at, \
+         RETURNING j.id, j.attempts, j.payload, j.expires_at, j.conversation_id, \
            (SELECT platform FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS platform, \
            (SELECT push_handle FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS push_handle, \
            (SELECT enabled FROM messaging_push_registrations r WHERE r.id = j.registration_id) AS enabled, \
