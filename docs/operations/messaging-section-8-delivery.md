@@ -275,3 +275,176 @@ attempt rolled back. Production keeps `787bb9a`; Messaging is registry digest
 **Section 8 is PARTIALLY COMPLETE.** Engineering work is IMPLEMENTED and TESTED in CI and
 in isolated staging. The production rollout, production dependency activation and
 production E2EE are not done. Sections 9–10 are not started.
+
+## Media-signaling timeout root cause, capacity and release readiness — 2026-11-05 (continued)
+
+No production-changing operation ran in this phase: no `messaging-configure`, no
+`communications-release`, no container, firewall or LiveKit change. Production still runs
+the verified `787bb9a` images. Evidence comes from read-only `media-diagnose` runs
+[42008205649](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42008205649),
+[42009330067](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42009330067),
+[42010061145](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42010061145) and
+[42012266631](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012266631).
+They print only redacted message templates, counts, timings and resource figures (unit-tested
+redaction), plus isolated GitHub-runner reproductions. Status of this work: IMPLEMENTED and
+TESTED in CI; not DEPLOYED.
+
+### Measured VPS state (read-only)
+
+| Area | Measurement |
+|---|---|
+| Host | 6 vCPU, 11.7 GiB RAM, 4 GiB swap (~0.3 GiB used, swappiness 10), uptime 425 h, cgroup v2, Docker 29.1.3 |
+| Memory | MemAvailable 5.0 GiB now; sysstat minimum 4.72 GiB across both days; memory PSI 0; no swap-in/out in any window |
+| CPU | load ~4–5; idle ≥ 54% in every failure window (sysstat); steal 0; iowait ≤ 4.6%; CPU PSI "some" avg300 16% (contention, not saturation) |
+| OOM / kernel | 0 OOM kills, 0 conntrack-full, 0 hung tasks since 2026-11-01 |
+| Disk | / 84.7% used, 29.5 GiB free; images 144 GB (45.6 GB reclaimable); 107 exited containers, 60 retained failed/rollback containers |
+| Workload | 76 running containers from several products; existing ClamAV daemons `admin-server-mail-clamav` and `admin-server-staging-mail-clamav` at ~949 MiB each (3 GiB limits), plus `karrygo-media-scanner` at 683 MiB |
+| Network | UDP InErrors/RcvbufErrors 0, NoPorts 4616; TCP ListenOverflows 0, ListenDrops 85; conntrack 1148/262144; hop latency p50/max: public TLS 0.10/0.25 s, gateway 401 upgrade 0.07/0.10 s, loopback Calling 0.008 s, LiveKit 0.003 s |
+| Active calls | 0 at inspection |
+| LiveKit | v1.13.9, `livekit/livekit-server@sha256:d0c04791bf63ca8dcea123571827d56ba9504bd57c8d5de60ee03b5408cc3154`; Docker bridge network; published 3478/udp, 5349/tcp, 7880/tcp, 7881/tcp; rtc 50000–60000/udp **not published**; `use_external_ip` true; node_ip = public DNS address; embedded TURN enabled; **two API keys** (Meetings and Calling) |
+| Log rotation | none on `lk-server`, `cfmeet-calling`, `cfmeet-messaging`, `cfmeet-core-db` and most other CF Meet containers |
+
+### Correlation of the failed releases
+
+LiveKit per-window counts (`starting RTC session` / `participant active` / never connected).
+Each never-connected participant was removed with reason `SIGNAL_SOURCE_CLOSE`:
+
+| Run | Image | Outcome | Sessions / active / never connected |
+|---|---|---|---|
+| 41794968776 | 787bb9a | FAIL | 4 / 2 / 2 |
+| 41795985590 | 787bb9a | PASS (control) | 31 / 24 / 7 |
+| 41972828392 | 0a5d9dd | FAIL | 17 / 14 / 3 |
+| 41975667093 | 0a5d9dd | FAIL | 29 / 23 / 6 |
+| 41977529784 | 0a5d9dd | FAIL | 7 / 3 / 4 |
+| 41979206960 | 787bb9a | PASS (control) | 26 / 19 / 7 |
+| 41980193898 | 0a5d9dd | FAIL | 21 / 16 / 5 |
+| 41981794294 | 0a5d9dd | FAIL | 9 / 6 / 3 |
+| 41992435685 | 0a5d9dd | FAIL | 2 / 0 / 2 |
+
+About 20–30% of media joins never connect, in passing and failing runs and with both images.
+**The `0a5d9dd` candidate did not introduce the defect.** Enterprise acceptance often still
+passed because `join()` retries with a fresh credential. The Communications harness has no
+retry, so one dropped join failed the release. The two 429 failures (public-ID rotation rate
+limit) and the URLError/extension timeouts are separate, transient harness or rate-limit
+events; they are not counted as this defect.
+
+Anonymized per-participant LiveKit timelines show the exact stage. The sequence is
+`starting RTC session` → Calling's admission `UpdateParticipant` (+0.04–0.17 s) →
+`participant closing reason=SIGNAL_SOURCE_CLOSE, sessionDuration 0` (+0.1–0.4 s), before any
+ICE. Successful joins show `UpdateParticipant` → `participant active` instead. nginx recorded
+the WebSocket upgrades (101), so signaling worked. The client SDK then waited for
+`wait_pc_connection timed out` (15.7 s) and retried, past the acceptance's 20 s connect budget.
+Ruled out by measurement: CPU, memory, swap or OOM pressure; disk; TLS, nginx or loopback
+latency; connection limits; active calls; and the Communications policy service (no admission
+refusals logged in those windows).
+
+### Root cause
+
+Production LiveKit is shared with Meetings and holds two API keys. LiveKit v1.13.9 signs
+**refreshed participant tokens with an arbitrary configured key**: the first entry of a Go map.
+The upstream fix, [livekit/livekit#5088](https://github.com/livekit/livekit/pull/5088)
+"Sign refresh tokens with the join token's API key", merged on 2026-10-28 and is not in any
+image used here. LiveKit refreshes at session start and again after Calling's admission
+permission grant. Calling's media gateway can verify only Calling's key, so when a refresh was
+signed with the Meetings key it **closed the signaling relay**. Why it is intermittent: the
+map's first entry varies per call. Roughly 1/8 of refreshes pick the less-favoured key, so two
+refreshes per join give 1 − (7/8)² ≈ 23%, matching the 20–30% observed.
+
+Isolated reproduction (no production access): run
+[42012267771](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012267771)
+`refresh-keys`. It used the identical production image digest `sha256:d0c04791…`, a
+Calling-key join-only join and a server permission grant. 67/80 refreshes were signed with the
+other application's key, and 39/40 joins received at least one. The current `latest` image
+(`sha256:25cd902d…`) gave 70/80 and 40/40. The skew is mirrored relative to production (which
+key the map favours depends on the key names), but the defect is the same. CI never saw it
+because the certification LiveKit had a single key.
+
+Not the root cause, but recorded: LiveKit's WebRTC UDP range is unpublished in bridge mode, so
+host-network clients fall back to ICE-TCP 7881. The UFW default deny also blocked container →
+host UDP (29 blocks to 50000–60000, 20 to 3478 since 2026-11-04). The isolated replica of that
+exact topology ([42009530386](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42009530386))
+connected 30/30 with bidirectional audio (p50 0.44 s) over TCP, and the UDP-mux variant 30/30
+(p50 0.38 s). It degrades media quality for real users (TCP/TURN-TLS instead of UDP) and is a
+recommended follow-up, not a release blocker. TURN allocation-quota messages after 06:15 on
+5 Nov come from the host-network acceptance client gathering candidates on dozens of Docker
+bridges.
+
+### Repairs
+
+| Repair | Commit | Status |
+|---|---|---|
+| Gateway refresh handling: reseal refreshes verifiable with Calling's key as before. Otherwise accept a refresh only if HS256, LiveKit-issued (never edge-issued), unexpired and bound to the same room, identity and generation, and mint an edge credential from the connection with the **admitted permissions re-derived from the database** (never the unverified token's grants; join-only when nothing is admitted). Admission is re-checked at every refresh; both relay exits are now logged | `9f61237`, `4ca0cb5` | IMPLEMENTED, TESTED (unit, clippy); certification below |
+| Certification LiveKit holds a second application key, so the real gateway is certified against the production key layout | `36fe5ef` | IMPLEMENTED |
+| Isolated topology and refresh-key reproductions; `rtc_client` `refresh_issuers` (key names only) | `36fe5ef` | TESTED |
+| Read-only `media-diagnose` operation (resources, kernel, sysstat, containers, network, LiveKit facts/version/timelines, nginx, SDK templates) with redaction tests | `6594575`…`be363bb` | TESTED |
+| Reconnect harness diagnostics (classified, redacted) and transfer completion checks (earlier) | `0eb2f18`, `0d92389` | TESTED |
+
+Acceptance thresholds are unchanged: the 20 s connect budget, real-media frame checks,
+authorization denials, transfer removal, reconnect and rollback criteria. No test was relaxed;
+the refreshed-token re-entry security test is unchanged.
+
+### Messaging configuration preservation verdict
+
+**PRESERVED (TESTED).** `messaging-configure` builds the configured container through the new
+pure `runtime_config()`: the exact running image, production E2EE=false, keyring,
+storage-secret and KT-checkpoint mounts, S3/Redis/ClamAV/metrics/checkpoint environment, memory
+and CPU limits, and log rotation. A later coordinated release clones the running container, so
+all of it carries forward unchanged with only the image and the Communications URLs, trust
+bundle and personal scope replaced. Rollback renames the *same* original container back into
+place, and the failed candidate is retained.
+
+`test_messaging_config_persistence.py` (13 tests) proves:
+
+- configure output;
+- refusal of E2EE;
+- retention across one and repeated image replacements without drift;
+- exact-container rollback after a failed release and after a failed configure (by container
+  identity);
+- isolated staging receives no production keyring, storage secret, Redis URL, ClamAV, S3, push
+  or production KT checkpoint, uses an isolated KT log ID, a stage database and a 768 MiB limit,
+  and leaves the production definition untouched;
+- every runtime dependency is explicitly classified for staging.
+
+Mutation checks confirmed that the tests fail if staging keeps Redis, if rollback starts the
+wrong container, or if a release drops mounts. Repair: a scanner created by a failed configure
+run is now stopped (retained for diagnosis) instead of holding memory.
+
+### ClamAV capacity
+
+Documented by [ClamAV](https://docs.clamav.net/manual/Installing/Docker.html): about 1.2 GiB to
+load signatures; about 2.4 GiB briefly during each daily reload (old and new signatures
+overlap); freshclam test loads add more; minimum 3 GiB, 4 GiB preferred.
+`ConcurrentDatabaseReload no` avoids the doubling but blocks scans during reload. Messaging
+fails closed (attachments stay VERIFYING and retry), so that mode is safe. Measured on this
+host, the other products' daemons sit at ~949 MiB each.
+
+At the measured minimum of 4.72 GiB available:
+
+- **Default mode:** a CF Meet daemon peaking around 2.4 GiB plus freshclam leaves about 1.3 GiB.
+- **Low-memory mode:** it still leaves under the 3 GiB that a coordinated release requires for
+  isolated candidates (`stage_release` refuses below that).
+
+**Adequate headroom is not demonstrated.** The configure gate now requires scanner limit
+3 GiB + release margin 3 GiB + media reserve 0.5 GiB (6.5 GiB available) unless a scanner
+already exists. It caps the scanner at 1 CPU with low CPU shares (tests cover 3, 4.72 and
+6.4 GiB refused; 7 GiB proceeds). Safe capacity options, owner decision:
+
+1. Add RAM, to at least 16 GiB.
+2. Reclaim memory: about 5 idle `cfmeet-comm-stage-*` candidates still run with 768 MiB limits.
+3. Share one host clamd across products.
+4. Run the CF Meet scanner in `ConcurrentDatabaseReload no` mode after option 1 or 2.
+
+Also recommended:
+
+- Docker log rotation for CF Meet containers.
+- Pruning the 45.6 GB of reclaimable images (disk at 84.7%).
+
+### GO / NO-GO
+
+| Operation | Decision | Basis |
+|---|---|---|
+| `messaging-configure` | **NO-GO** | Scanner headroom not demonstrated (4.72–5.0 GiB available vs 6.5 GiB required); the gate now refuses it. Push credentials absent. Attachment storage, Redis and metrics could be configured without the scanner, but that requires a scanner-optional configure path that does not exist yet; none is claimed |
+| Next coordinated release (`communications-stage` then `communications-release`) | **CONDITIONAL GO, not yet** | The root cause is fixed in Calling code at `4ca0cb5`, so the `0a5d9dd` images cannot be released: they contain the defect. Required in order: (1) certification green on the two-key LiveKit; (2) a new immutable image set built from ≥ `4ca0cb5`; (3) isolated `communications-stage` PASS on those digests; (4) then one controlled `communications-release` with its automatic rollback. No retry-until-green |
+| Production E2EE | **BLOCKED** | Issue 13 open; no independent assessment or owner approval |
+| Phone OTP, off-server DR | **DEFERRED** | Owner decision |
+
