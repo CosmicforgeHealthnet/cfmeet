@@ -46,6 +46,25 @@ pub enum InternalPermission {
     CallingCommunicationsApply,
     #[serde(rename = "messaging-communications.apply")]
     MessagingCommunicationsApply,
+    /// Calling: start one app call for the delegated initiating principal after the Hub
+    /// resolved an accepted contact or conversation. Calling still re-checks policy.
+    #[serde(rename = "calling-communications.launch")]
+    CallingCommunicationsLaunch,
+    /// Communications: receive owner lifecycle references (ids and states only).
+    #[serde(rename = "communications-events.publish")]
+    CommunicationsEventsPublish,
+    /// Communications: read-only operational metrics and readiness detail.
+    #[serde(rename = "communications-observability.read")]
+    CommunicationsObservabilityRead,
+    /// Communications: suspend or restore a personal profile (operator only, audited).
+    #[serde(rename = "communications-profile.suspend")]
+    CommunicationsProfileSuspend,
+    /// Meeting Service: resolve whether the delegated user may share one meeting.
+    #[serde(rename = "meeting-communications.read")]
+    MeetingCommunicationsRead,
+    /// Meeting Service: create one instant meeting owned by the delegated user.
+    #[serde(rename = "meeting-communications.create")]
+    MeetingCommunicationsCreate,
 
     /// Privacy Relay: authorize a communication.
     #[serde(rename = "communication.authorize")]
@@ -317,6 +336,12 @@ pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::MessagingCommunicationsRead, name: "messaging-communications.read", receiver: services::MESSAGING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current Messaging blocks, security readiness and mutually visible groups" },
     PermissionDefinition { permission: InternalPermission::CallingCommunicationsApply, name: "calling-communications.apply", receiver: services::CALLING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Receive deduplicated personal policy and session-revocation events" },
     PermissionDefinition { permission: InternalPermission::MessagingCommunicationsApply, name: "messaging-communications.apply", receiver: services::MESSAGING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Receive deduplicated personal policy and session-revocation events" },
+    PermissionDefinition { permission: InternalPermission::CallingCommunicationsLaunch, name: "calling-communications.launch", receiver: services::CALLING, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Start an app call for the delegated initiating principal; Calling re-checks personal policy" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsEventsPublish, name: "communications-events.publish", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING, services::MEETING_SERVICE], sensitive: false, description: "Publish deduplicated owner lifecycle references (ids and states, never content)" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsObservabilityRead, name: "communications-observability.read", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: false, description: "Read Communications operational metrics and readiness; no personal data" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsProfileSuspend, name: "communications-profile.suspend", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: true, description: "Suspend or restore one personal Communications profile with an audited reason" },
+    PermissionDefinition { permission: InternalPermission::MeetingCommunicationsRead, name: "meeting-communications.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Resolve a meeting the delegated user may share; returns public meeting references only" },
+    PermissionDefinition { permission: InternalPermission::MeetingCommunicationsCreate, name: "meeting-communications.create", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Create one instant meeting owned by the delegated user under existing Meetings rules" },
 
     PermissionDefinition {
         permission: InternalPermission::CommunicationAuthorize,
@@ -831,6 +856,12 @@ impl InternalPermission {
         InternalPermission::MessagingCommunicationsRead,
         InternalPermission::CallingCommunicationsApply,
         InternalPermission::MessagingCommunicationsApply,
+        InternalPermission::CallingCommunicationsLaunch,
+        InternalPermission::CommunicationsEventsPublish,
+        InternalPermission::CommunicationsObservabilityRead,
+        InternalPermission::CommunicationsProfileSuspend,
+        InternalPermission::MeetingCommunicationsRead,
+        InternalPermission::MeetingCommunicationsCreate,
         InternalPermission::CommunicationAuthorize,
         InternalPermission::CommunicationContextRead,
         InternalPermission::ProtectedContactResolveForExecution,
@@ -1213,6 +1244,7 @@ mod tests {
     const MESSAGING_GRANTS: &[&str] = &[
         "communications-policy.check",
         "communications-block.apply",
+        "communications-events.publish",
         "communication-context.read",
         "platform-event.publish",
         "platform-credential.authenticate",
@@ -1355,6 +1387,8 @@ mod tests {
             received,
             [
                 "communications-account.read",
+                "meeting-communications.read",
+                "meeting-communications.create",
                 "meeting-request.forward",
                 "user-session.verify"
             ]
