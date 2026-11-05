@@ -1,5 +1,7 @@
 import asyncio
 import json
+import http.client
+import ssl
 import math
 from pathlib import Path
 import time
@@ -44,29 +46,39 @@ class MediaClient:
 
 async def request(method,path,body=None,token=None,expected=(200,201)):
     REPORT['last_request']={'method':method,'path':path}
+    phase={}
+    headers={'Authorization':'Bearer '+(token or TOKEN),'Content-Type':'application/json','Idempotency-Key':str(uuid.uuid4())}
+    encoded=json.dumps(body).encode() if body is not None else None
     def send():
-        req=urllib.request.Request('https://api.cfmeet.com'+path,method=method,
-            data=json.dumps(body).encode() if body is not None else None,
-            headers={'Authorization':'Bearer '+(token or TOKEN),'Content-Type':'application/json','Idempotency-Key':str(uuid.uuid4())})
+        connection=http.client.HTTPSConnection('api.cfmeet.com',timeout=25,context=ssl.create_default_context())
         try:
-            with urllib.request.urlopen(req,timeout=25) as response: return response.status,json.load(response)
-        except urllib.error.HTTPError as error:
-            try: value=json.loads(error.read())
-            except Exception:value={}
-            return error.code,value
+            phase['stage']='connect'
+            connection.connect()  # TLS validation completes before any HTTP bytes.
+            phase['stage']='request'
+            connection.request(method,path,body=encoded,headers=headers)
+            phase['stage']='response'
+            response=connection.getresponse()
+            raw=response.read()
+            try:value=json.loads(raw)
+            except ValueError:
+                if 200<=response.status<300:raise
+                value={}
+            return response.status,value
+        finally:connection.close()
     for attempt in range(3):
         try:
             status,value=await asyncio.to_thread(send)
             break
-        except urllib.error.URLError as error:
-            reason=getattr(error,'reason',None)
+        except (OSError,http.client.HTTPException,urllib.error.URLError) as error:
+            reason=getattr(error,'reason',error)
             number=getattr(reason,'errno',None)
             REPORT.setdefault('transport_failures',[]).append({'method':method,'path':path,
                 'attempt':attempt+1,'reasonClass':type(reason).__name__,
+                'stage':phase.get('stage','connect'),
                 'errno':number if isinstance(number,int) else None})
-            # Read-only network recovery, not an HTTP/security assertion retry.
-            # Never replay a mutation whose outcome is ambiguous.
-            if method!='GET' or attempt==2:raise
+            # Before TLS connects no HTTP request was sent, including for writes.
+            # After transmission only reads may repeat. HTTP denials never retry.
+            if attempt==2 or method!='GET' and phase.get('stage')!='connect':raise
             await asyncio.sleep(.25*(2**attempt))
     if status not in expected:
         REPORT['failed_request']={'method':method,'path':path,'status':status,'code':value.get('error',{}).get('code')}
