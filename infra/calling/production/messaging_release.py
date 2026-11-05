@@ -1,5 +1,6 @@
 """Section 8 operations in the existing VPS workflow. Never emit secrets/content."""
 import json
+from pathlib import Path
 from urllib.parse import urlsplit
 import production as p
 
@@ -53,7 +54,8 @@ def inspect_runtime(sha, run_id):
     env = p.env_of(c)
     image = json.loads(p.run('docker', 'image', 'inspect', c['Image']))[0]
     db = urlsplit(env['DATABASE_URL'])
-    receipt = {'schemaVersion': 1, 'operation': 'messaging-inspect', 'workflowSha': sha,
+    receipt = {'schemaVersion': 1, 'operation': 'messaging-inspect',
+        'workflowSha': Path(__file__).resolve().parent.name, 'requestedImageSha': sha,
         'runId': run_id, 'imageId': c['Image'],
         'imageSource': image['Config'].get('Labels', {}).get('org.opencontainers.image.revision'),
         'registryDigests': image.get('RepoDigests', []),

@@ -283,7 +283,8 @@ def configure(sha, run_id):
         release.wait(candidate, 'messaging')
         dependency_probe(candidate)
         p.run('docker', 'stop', '--time', '20', candidate)
-        p.write_private(WORK / ('runtime-rollback-' + run_id + '.private.json'), json.dumps({'original': old, 'previous': previous, 'workflowSha': sha}))
+        p.write_private(WORK / ('runtime-rollback-' + run_id + '.private.json'), json.dumps({'original': old, 'previous': previous,
+            'workflowSha': Path(__file__).resolve().parent.name, 'requestedImageSha': sha}))
         p.run('docker', 'rename', 'cfmeet-messaging', previous)
         p.run('docker', 'stop', '--time', '30', previous)
         replaced = True

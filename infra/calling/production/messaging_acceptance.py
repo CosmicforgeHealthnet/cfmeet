@@ -60,6 +60,9 @@ class MessagingJourney(Journey):
         for path in ('/metrics', '/internal/v1/communications/policy/check', '/v1/messaging/policy'):
             self.request('meeting-service', path, expected=(404,))
         self.done('private_admin_and_metrics_not_publicly_routed')
+        self.request('meeting-service', '/v1/realtime/tickets', 'POST', {}, expected=(401,))
+        self.request('meeting-service', '/v1/realtime', expected=(400, 401, 426))
+        self.done('public_realtime_routes_present_and_unauthenticated_access_denied')
         self.request('meeting-service', '/api/v2/messaging/me', expected=(401,))
         self.done('anonymous_native_messaging_denied')
         a, b = self.accounts()
@@ -137,7 +140,7 @@ def execute(sha, run_id):
         '--mount', f'type=bind,src={source},dst=/scripts,readonly', 'python:3.12-slim',
         'python', '/scripts/messaging_acceptance.py'], capture_output=True, timeout=240)
     report = json.loads((folder / 'report.json').read_text()) if (folder / 'report.json').is_file() else {'failure': 'client produced no evidence'}
-    report.update(workflowSha=source.parent.name, requestedImageSha=sha, runId=run_id, environment='production')
+    report.update(workflowSha=source.name, requestedImageSha=sha, runId=run_id, environment='production')
     report['images'] = {name: p.inspect(container)['Image'] for name, container in dict(release.OWNERS, communications='cfmeet-communications').items()}
     p.write_private(folder / 'receipt.json', json.dumps(report, sort_keys=True))
     print(json.dumps(report, sort_keys=True))
