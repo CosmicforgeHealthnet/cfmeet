@@ -328,7 +328,9 @@ def stage_admin(sha,*args):
 
 def stage_scope(sha):
     file=WORK/'stage-context.private.json'
-    if file.exists():return json.loads(file.read_text())
+    # Persistent scope/account identities are reusable; the one-day credential is
+    # not. Mint a bounded credential for each acceptance run instead of replaying
+    # a cached secret that may have expired since the previous milestone.
     db='cfmeet_comm_stage_platform_access'
     if db_sql(db,"SELECT count(*) FROM platform_tenants WHERE slug='communications-stage';")=='0':
         stage_admin(sha,'tenant','create','--slug','communications-stage','--name','Isolated Communications acceptance','--classification','first-party')

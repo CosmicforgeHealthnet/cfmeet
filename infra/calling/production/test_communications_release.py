@@ -1,10 +1,28 @@
 import copy
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 import communications_release as release
 
 
 class CommunicationsRuntimePreservation(unittest.TestCase):
+    def test_staging_renews_expired_acceptance_credential_without_recreating_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            work=Path(folder)
+            cached={'tenantId':'preserved','token':'expired-fixture'}
+            (work/'stage-context.private.json').write_text(json.dumps(cached))
+            def sql(db, query):
+                return json.dumps({'tenantId':'preserved'}) if 'json_build_object' in query else '1'
+            with patch.object(release,'WORK',work), patch.object(release,'db_sql',side_effect=sql), \
+                 patch.object(release,'stage_admin',return_value={'secret':'fresh-fixture'}) as admin:
+                value=release.stage_scope('a'*40)
+            self.assertEqual(value['tenantId'],'preserved')
+            self.assertEqual(value['token'],'fresh-fixture')
+            creates=[call.args[1:3] for call in admin.call_args_list if call.args[2]=='create']
+            self.assertEqual(creates,[('credential','create')])
+            self.assertEqual(json.loads((work/'stage-context.private.json').read_text()),value)
     def test_staging_never_writes_production_checkpoint_or_loads_its_managed_keyring(self):
         cfg={'Env':['KEEP=preserved','MESSAGING_MANAGED_KEYRING_FILE=/run/messaging/managed.ring'],
             'HostConfig':{'Mounts':[{'Type':'bind','Source':'/production/checkpoint','Target':'/var/lib/messaging-kt','ReadOnly':False},
