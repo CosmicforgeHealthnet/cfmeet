@@ -272,17 +272,16 @@ def nginx_variants(tls):
     """The host's own nginx binary, loopback only, briefly: which upstream TLS settings verify."""
     import tempfile
     variants = {
-        'depth5_bundle': 'proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
-        'depth5_bundle_no_sni_name': 'proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt; proxy_ssl_server_name off;',
-        'depth9_bundle_tls13': 'proxy_ssl_verify on; proxy_ssl_verify_depth 9; proxy_ssl_protocols TLSv1.3; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
-        'verify_off_control': 'proxy_ssl_verify off;',
+        'depth5_bundle': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+        'depth5_bundle_no_sni': 'proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+        'depth9_bundle_tls13': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify on; proxy_ssl_verify_depth 9; proxy_ssl_protocols TLSv1.3; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+        'verify_off_control': 'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; proxy_ssl_verify off;',
     }
     results = {}
     with tempfile.TemporaryDirectory() as prefix:
         servers, port = [], 18471
         for name, directives in variants.items():
-            servers.append(f'server {{ listen 127.0.0.1:{port}; location / {{ proxy_pass https://{tls}:8444; '
-                           f'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; {directives} }} }}')
+            servers.append(f'server {{ listen 127.0.0.1:{port}; location / {{ proxy_pass https://{tls}:8444; {directives} }} }}')
             results[name] = port; port += 1
         Path(prefix, 'logs').mkdir()
         conf = Path(prefix, 'nginx.conf')
