@@ -92,7 +92,40 @@ def storage_identity():
     return user.read_text(), password
 
 
-def nginx_config(tls_ip, store_ip):
+UPSTREAM_TRUST = Path('/etc/nginx/cfmeet-messaging-upstream-ca.pem')
+
+
+def verifies(tls_ip, ca_file):
+    r = subprocess.run(['openssl', 's_client', '-connect', tls_ip + ':8444', '-servername', 'api.cfmeet.com',
+                        '-verify_return_error', '-no-CApath', '-CAfile', str(ca_file)],
+                       input='', capture_output=True, text=True, timeout=20)
+    return r.returncode == 0 and 'Verify return code: 0 (ok)' in r.stdout
+
+
+def upstream_trust(tls_ip):
+    """The system roots nginx verifies the private proxy against: the system bundle when it
+    alone verifies the presented chain, else every system certificate in /etc/ssl/certs
+    (where a newer root may exist outside the bundle). Never a private or pinned key."""
+    bundle = Path('/etc/ssl/certs/ca-certificates.crt')
+    if verifies(tls_ip, bundle):
+        return bundle, 'system-bundle'
+    seen, pems = set(), []
+    for item in sorted(Path('/etc/ssl/certs').glob('*.pem')):
+        target = item.resolve()
+        if target in seen or not target.is_file():
+            continue
+        seen.add(target)
+        text = target.read_text(errors='replace')
+        if 'BEGIN CERTIFICATE' in text and 'PRIVATE KEY' not in text:
+            pems.append(text.strip() + '\n')
+    candidate = UPSTREAM_TRUST.with_suffix('.candidate')
+    candidate.write_text(''.join(pems)); candidate.chmod(0o644)
+    assert verifies(tls_ip, candidate), 'System certificates do not verify the private proxy chain'
+    candidate.replace(UPSTREAM_TRUST)
+    return UPSTREAM_TRUST, 'system-directory'
+
+
+def nginx_config(tls_ip, store_ip, trust='/etc/ssl/certs/ca-certificates.crt'):
     assert ipaddress.ip_address(tls_ip).is_private and ipaddress.ip_address(store_ip).is_private
     common = ('    access_log off;\n    proxy_http_version 1.1;\n'
         '    proxy_set_header Host $http_host;\n    proxy_set_header X-Forwarded-Proto https;\n'
@@ -103,7 +136,7 @@ def nginx_config(tls_ip, store_ip):
     # trusted root and answer 502; verification against the system roots is unchanged.
     tls = (common + '    proxy_ssl_server_name on;\n    proxy_ssl_name api.cfmeet.com;\n'
         '    proxy_ssl_verify on;\n    proxy_ssl_verify_depth 5;\n'
-        '    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;\n'
+        '    proxy_ssl_trusted_certificate ' + str(trust) + ';\n'
         '    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n'
         '    proxy_read_timeout 3600;\n    proxy_pass https://' + tls_ip + ':8444;\n')
     return ('# Section 8: device-only realtime ingress; Account owns native REST authentication.\n'
@@ -127,8 +160,10 @@ def install_ingress(run_id):
     old = snippet.read_text() if snippet.exists() else None
     p.write_private(WORK / ('nginx-site-before-' + run_id), before)
     if old is not None: p.write_private(WORK / ('nginx-snippet-before-' + run_id), old)
+    trust, source = upstream_trust(tls)
+    print(json.dumps({'messagingIngressUpstreamTrust': source}), flush=True)
     try:
-        snippet.write_text(nginx_config(tls, store))
+        snippet.write_text(nginx_config(tls, store, trust))
         if include not in before: site.write_text(before.replace(anchor, anchor + '\n    ' + include))
         p.run('nginx', '-t')
         p.run('systemctl', 'reload', 'nginx')
@@ -255,7 +290,8 @@ def ingress_diagnostics():
                             capture_output=True, text=True)
     out['privateNetworkToPrivateProxy'] = inside.stdout.strip()
     # The presented chain (public certificate names only) and how each trust source verifies it.
-    for label, trust in (('bundle', ['-CAfile', '/etc/ssl/certs/ca-certificates.crt']), ('directory', ['-CApath', '/etc/ssl/certs'])):
+    for label, trust in (('bundle_only', ['-no-CApath', '-CAfile', '/etc/ssl/certs/ca-certificates.crt']),
+                         ('directory', ['-CApath', '/etc/ssl/certs'])):
         r = subprocess.run(['openssl', 's_client', '-connect', tls + ':8444', '-servername', 'api.cfmeet.com', '-showcerts', *trust],
                            input='', capture_output=True, text=True, timeout=20)
         names = [re.sub(r'[^A-Za-z0-9 =,.:-]', '', l.strip())[:120] for l in r.stdout.splitlines()
