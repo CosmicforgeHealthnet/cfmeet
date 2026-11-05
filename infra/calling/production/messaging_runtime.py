@@ -268,6 +268,44 @@ def ingress_probe():
     return {'realtimeTicketRouteUnauthenticated': 401}
 
 
+def nginx_variants(tls):
+    """The host's own nginx binary, loopback only, briefly: which upstream TLS settings verify."""
+    import tempfile
+    variants = {
+        'depth5_bundle': 'proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+        'depth5_bundle_no_sni_name': 'proxy_ssl_verify on; proxy_ssl_verify_depth 5; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt; proxy_ssl_server_name off;',
+        'depth9_bundle_tls13': 'proxy_ssl_verify on; proxy_ssl_verify_depth 9; proxy_ssl_protocols TLSv1.3; proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+        'verify_off_control': 'proxy_ssl_verify off;',
+    }
+    results = {}
+    with tempfile.TemporaryDirectory() as prefix:
+        servers, port = [], 18471
+        for name, directives in variants.items():
+            servers.append(f'server {{ listen 127.0.0.1:{port}; location / {{ proxy_pass https://{tls}:8444; '
+                           f'proxy_ssl_server_name on; proxy_ssl_name api.cfmeet.com; {directives} }} }}')
+            results[name] = port; port += 1
+        Path(prefix, 'logs').mkdir()
+        conf = Path(prefix, 'nginx.conf')
+        conf.write_text('pid ' + prefix + '/nginx.pid; error_log ' + prefix + '/logs/error.log info; events {} '
+                        'http { access_log off; client_body_temp_path ' + prefix + '; proxy_temp_path ' + prefix + '; '
+                        + ' '.join(servers) + ' }')
+        start = subprocess.run(['nginx', '-p', prefix, '-c', str(conf)], capture_output=True, text=True)
+        if start.returncode:
+            return {'start': re.sub(r'[^A-Za-z0-9 :./()-]', '', start.stderr)[:200]}
+        try:
+            for name, port in results.items():
+                r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', '-X', 'POST',
+                                    f'http://127.0.0.1:{port}/v1/realtime/tickets'], capture_output=True, text=True)
+                results[name] = r.stdout.strip()
+            import media_diagnostics
+            errors = Path(prefix, 'logs', 'error.log').read_text(errors='replace').splitlines()
+            results['errors'] = [media_diagnostics.template(l) for l in errors if 'upstream' in l or 'SSL' in l][-6:]
+        finally:
+            subprocess.run(['nginx', '-p', prefix, '-c', str(conf), '-s', 'quit'], capture_output=True)
+            time.sleep(1)
+    return results
+
+
 def ingress_diagnostics():
     """Where the public realtime route fails: redacted host nginx errors and the private
     hops tested separately (status codes only)."""
@@ -298,6 +336,7 @@ def ingress_diagnostics():
                  if re.match(r'^\s*\d+ s:|^\s+i:', l)]
         verify = [l.strip()[:80] for l in r.stdout.splitlines() if 'Verify return code' in l]
         out['chain_' + label] = {'certificates': names, 'verify': verify[-1:] }
+    out['nginxVariants'] = nginx_variants(tls)
     r = subprocess.run(['nginx', '-V'], capture_output=True, text=True)
     out['hostNginx'] = [l for l in (r.stderr + r.stdout).splitlines() if 'version' in l or 'OpenSSL' in l][:2]
     return out
