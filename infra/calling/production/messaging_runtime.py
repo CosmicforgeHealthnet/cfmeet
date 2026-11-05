@@ -124,7 +124,7 @@ def scanner():
         digest = next(x for x in image['RepoDigests'] if x.startswith('clamav/clamav@sha256:'))
         p.run('docker', 'volume', 'create', 'cfmeet-messaging-clamav-db')
         p.run('docker', 'run', '-d', '--name', SCANNER, '--network', p.NET,
-              '--restart', 'unless-stopped', '--memory', '1536m', '--cpus', '1.5',
+              '--restart', 'unless-stopped', '--memory', '3072m', '--cpus', '1.5',
               '--label', 'com.cfmeet.messaging.scanner=section8',
               '--log-opt', 'max-size=20m', '--log-opt', 'max-file=3',
               '--mount', 'type=volume,src=cfmeet-messaging-clamav-db,dst=/var/lib/clamav', digest)
@@ -256,7 +256,9 @@ def configure(sha, run_id):
     baseline = messaging_release.database_summary()
     assert (WORK / 'managed.ring').exists() or baseline['conversations'] == 0, 'Cannot invent a keyring for existing content'
     available = int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))
-    assert available >= 3 * 1024 * 1024, 'Insufficient memory for bounded scanner/candidate acceptance'
+    # Official Docker guidance requires 3 GiB for standard signatures/reloads:
+    # https://docs.clamav.net/manual/Installing/Docker.html#memory-ram-requirements
+    assert available >= 4 * 1024 * 1024, 'Insufficient memory for scanner plus production headroom'
     managed = protected_file('managed.ring', lambda: 'messaging-20261105 ' + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=') + '\n')
     user, password = storage_identity()
     scanner_evidence = scanner()
