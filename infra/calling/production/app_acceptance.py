@@ -1,5 +1,6 @@
 """Real, isolated CF Meet API test accounts. Secrets stay on VPS."""
 import json
+import re
 import secrets
 import urllib.request
 import uuid
@@ -12,12 +13,15 @@ def api(path,body):
     with urllib.request.urlopen(request,timeout=30) as response: return json.load(response)
 
 
-def accounts():
-    path=p.SECRETS/'calling-acceptance-accounts.json'
+def accounts(namespace=None,count=3):
+    assert count in (2,3)
+    if namespace is not None:
+        assert re.fullmatch(r'[a-z0-9-]{1,64}',namespace), 'Invalid controlled fixture namespace'
+    path=p.SECRETS/('cfmeet-acceptance-'+namespace+'.json' if namespace else 'calling-acceptance-accounts.json')
     if path.exists(): return json.loads(path.read_text())
     values=[]
     suffix=uuid.uuid4().hex[:8]
-    for letter in ('a','b','c'):
+    for letter in ('a','b','c')[:count]:
         name='cfmeet_accept_'+letter+'_'+suffix
         values.append(dict(username=name,email=name+'@example.invalid',password='Aa1!'+secrets.token_urlsafe(28)))
     p.write_private(path,json.dumps(values))

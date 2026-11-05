@@ -21,7 +21,9 @@ def execute(sha, run_id, scope, stage, verification=False):
         accounts=[]
     else:
         import app_acceptance
-        accounts=app_acceptance.accounts()[:2]
+        # Mutation limits belong to real accounts and must survive failed releases.
+        # Each run gets isolated actors; never reset their production rate limits.
+        accounts=app_acceptance.accounts('communications-'+run_id,count=2)
     ports=release.STAGE_TLS if stage else release.PROD_TLS
     context=dict(sha=sha,stage=stage,verification=verification,scope=scope,accounts=accounts,
         urls={k:'https://api.cfmeet.com:'+str(v) for k,v in ports.items()})

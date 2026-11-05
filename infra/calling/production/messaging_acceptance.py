@@ -130,7 +130,7 @@ def execute(sha, run_id):
     scope['token'] = release.credential(scope)
     folder = p.ROOT / 'messaging' / ('acceptance-' + run_id)
     folder.mkdir(mode=0o700, parents=True, exist_ok=False)
-    context = {'accounts': app_acceptance.accounts()[:2], 'scope': scope,
+    context = {'accounts': app_acceptance.accounts('messaging-'+run_id,count=2), 'scope': scope,
         'urls': {'meeting-service': 'https://api.cfmeet.com', 'messaging': 'https://api.cfmeet.com:8444'}}
     p.write_private(folder / 'context.private.json', json.dumps(context))
     os.chown(folder, 10001, 10001); os.chown(folder / 'context.private.json', 10001, 10001)
