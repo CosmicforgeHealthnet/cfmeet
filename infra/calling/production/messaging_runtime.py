@@ -353,6 +353,8 @@ def ingress_diagnostics():
             live.append([re.sub(r'\d+\.\d+\.\d+\.\d+', '<ip>', l.strip())[:100] for l in dump[i:i + 16]
                          if 'proxy_ssl' in l or 'proxy_pass' in l or 'location' in l])
     out['liveConfigRealtimeTickets'] = live
+    out['liveSslDirectives'] = sorted({re.sub(r'/[^ ;]*', '<path>', l.strip())[:100] for l in dump
+                                       if re.match(r'\s*(proxy_ssl|ssl_|openssl|env )', l)})[:40]
     out['liveIncludes'] = [l.strip()[:100] for l in dump if 'cfmeet-messaging.conf' in l][:6]
     out['liveServerNames'] = sorted({l.strip()[:80] for l in dump if l.strip().startswith('server_name') and 'cfmeet' in l})[:10]
     ps = subprocess.run(['ps', '-C', 'nginx', '-o', 'pid=,ppid=,lstart=,args='], capture_output=True, text=True).stdout
