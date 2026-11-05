@@ -10,6 +10,46 @@ SERVICES = ('cfmeet-platform-access', 'cfmeet-production-backend', 'cfmeet-calli
 
 def inspect_runtime():
     p.identity()
+    import shutil, socket, ipaddress
+    public_ip=socket.gethostbyname('api.cfmeet.com')
+    if shutil.which('ufw'):
+        result=__import__('subprocess').run(['ufw','status','numbered'],capture_output=True,text=True)
+        print(json.dumps({'httpsFirewallRules':[line.strip() for line in result.stdout.splitlines() if '443' in line]}))
+    if shutil.which('fail2ban-client'):
+        result=__import__('subprocess').run(['fail2ban-client','status'],capture_output=True,text=True)
+        listing=result.stdout.split('Jail list:')[-1].strip() if 'Jail list:' in result.stdout else ''
+        for jail in [name.strip() for name in listing.split(',') if name.strip()]:
+            result=__import__('subprocess').run(['fail2ban-client','status',jail],capture_output=True,text=True)
+            banned=result.stdout.split('Banned IP list:')[-1].strip().split() if 'Banned IP list:' in result.stdout else []
+            print(json.dumps({'firewallJail':jail,'selfPublicAddressBanned':public_ip in banned,
+                'privateAddressesBanned':sum(ipaddress.ip_address(ip).is_private for ip in banned)}))
+    probe=r'''
+import socket, ssl, json, time
+addresses=sorted({row[4][0] for row in socket.getaddrinfo('api.cfmeet.com',443,type=socket.SOCK_STREAM)})
+results=[]
+for address in addresses:
+    for attempt in range(5):
+        before=time.monotonic(); stage='connect'
+        try:
+            with socket.create_connection((address,443),timeout=8) as s:
+                stage='tls'
+                with ssl.create_default_context().wrap_socket(s,server_hostname='api.cfmeet.com') as tls:
+                    stage='response'; tls.sendall(b'GET /health HTTP/1.1\r\nHost: api.cfmeet.com\r\nConnection: close\r\n\r\n')
+                    first=tls.recv(512).split(b'\r\n',1)[0].split()
+                    results.append({'address':address,'attempt':attempt+1,'status':int(first[1]),'seconds':round(time.monotonic()-before,3)})
+        except Exception as error:results.append({'address':address,'attempt':attempt+1,'stage':stage,'errorClass':type(error).__name__})
+print(json.dumps({'publicHttpsFromDockerBridge':results}))
+'''
+    result=__import__('subprocess').run(['docker','run','--rm','--network','bridge','--memory','128m','--cpus','1',
+        'python:3.12-slim','python','-c',probe],capture_output=True,text=True,timeout=120)
+    if result.returncode==0: print(result.stdout.strip())
+    else: print(json.dumps({'publicHttpsFromDockerBridge':'probe failed; private details retained'}))
+    error_log=Path('/var/log/nginx/error.log')
+    if error_log.exists():
+        tail='\n'.join(error_log.read_text(errors='replace').splitlines()[-3000:])
+        print(json.dumps({'nginxErrorMarkers':{key:tail.count(value) for key,value in {
+            'rate_limit':'limiting requests','connection_limit':'limiting connections','upstream_timeout':'upstream timed out',
+            'worker_connection_exhaustion':'worker_connections are not enough','tls_handshake':'SSL_do_handshake() failed'}.items()}}))
     # Diagnose failed acceptance without exporting execution logs, tokens or media.
     for file in sorted((p.ROOT/'production-evidence').glob('api-*/execution.private.log'),key=lambda f:f.stat().st_mtime)[-2:]:
         text=file.read_text(errors='replace')
