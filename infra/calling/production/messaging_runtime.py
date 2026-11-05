@@ -10,6 +10,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import subprocess
@@ -230,6 +231,30 @@ def ingress_probe():
     return {'realtimeTicketRouteUnauthenticated': 401}
 
 
+def ingress_diagnostics():
+    """Where the public realtime route fails: redacted host nginx errors and the private
+    hops tested separately (status codes only)."""
+    import media_diagnostics
+    out = {}
+    log = Path('/var/log/nginx/error.log')
+    if log.exists():
+        lines = [l for l in log.read_text(errors='replace').splitlines()[-400:] if 'upstream' in l or 'SSL' in l]
+        out['hostNginxErrors'] = [media_diagnostics.template(l) for l in lines[-12:]]
+    tls = p.inspect('cfmeet-core-tls')['NetworkSettings']['Networks'][p.NET]['IPAddress']
+    def code(*args):
+        r = subprocess.run(['curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', *args],
+                           capture_output=True, text=True)
+        return r.stdout.strip() or ('error:' + re.sub(r'[^A-Za-z0-9 :().-]', '', r.stderr)[:120])
+    out['hostToPrivateProxy'] = code('-X', 'POST', '--resolve', 'api.cfmeet.com:8444:' + tls,
+                                     'https://api.cfmeet.com:8444/v1/realtime/tickets')
+    out['hostToPrivateProxyNoVerify'] = code('-k', '-X', 'POST', 'https://' + tls + ':8444/v1/realtime/tickets')
+    inside = subprocess.run(['docker', 'run', '--rm', '--network', p.NET, 'curlimages/curl:8.12.1', '-sS', '-o', '/dev/null',
+                             '-w', '%{http_code}', '--max-time', '10', '-X', 'POST', 'https://api.cfmeet.com:8444/v1/realtime/tickets'],
+                            capture_output=True, text=True)
+    out['privateNetworkToPrivateProxy'] = inside.stdout.strip()
+    return out
+
+
 def reinstall_ingress(run_id):
     """Re-applies only the public Messaging ingress (rolled back if its probe fails)."""
     p.identity()
@@ -237,6 +262,7 @@ def reinstall_ingress(run_id):
     try:
         evidence = ingress_probe()
     except Exception:
+        print(json.dumps({'messagingIngressDiagnostics': ingress_diagnostics()}), flush=True)
         before = WORK / ('nginx-site-before-' + run_id)
         Path('/etc/nginx/sites-available/api.cfmeet.com').write_text(before.read_text())
         previous = WORK / ('nginx-snippet-before-' + run_id)
