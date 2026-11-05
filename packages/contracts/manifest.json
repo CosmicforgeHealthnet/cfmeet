@@ -927,18 +927,18 @@
     },
     {
       "id": "cfmeet.communications.http-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "communications/http/v1.openapi.json",
       "owner": "communications",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy."
+      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed."
     },
     {
       "id": "cfmeet.communications.public-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "bundled/public/communications/v1.openapi.json",
       "owner": "communications",
@@ -961,40 +961,40 @@
     },
     {
       "id": "cfmeet.calling.communications-internal",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "calling/communications-internal/v1.openapi.json",
       "owner": "calling",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by calling; no consumer credential or copied data authority."
+      "description": "Private signed Communications integration owned by calling; no consumer credential or copied data authority. 1.1.0: Sections 9–23 Calling owner interfaces — POST /internal/v1/communications/calls (calling-communications.launch; the canonical app-call creation path for the delegated user, Hub-namespaced idempotency), /calls/participation and /calls/history (calling-communications.read; canonical history entries), /endpoints/verify (read) and /endpoints/revoke (calling-communications.apply; canonical revoke)."
     },
     {
       "id": "cfmeet.messaging.communications-internal",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "messaging/communications-internal/v1.openapi.json",
       "owner": "messaging",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by messaging; no consumer credential or copied data authority."
+      "description": "Private signed Communications integration owned by messaging; no consumer credential or copied data authority. 1.1.0: Sections 9–23 owner interfaces MS-1 … MS-7 (conversation access, member-visible attachment metadata, storage summary, device verify / revoke, device push registration, push status) for the delegated NATIVE_CF_USER only."
     },
     {
       "id": "cfmeet.meeting-service.communications-internal",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "meeting-service/communications-internal/v1.openapi.json",
       "owner": "meeting-service",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by meeting-service; no consumer credential or copied data authority."
+      "description": "Private signed Communications integration owned by meeting-service; no consumer credential or copied data authority. 1.1.0: Sections 9–23 meeting facade — POST /internal/v1/communications/meetings/instant (meeting-communications.create; canonical instant meeting owned by the delegated user, idempotent per account and key) and /resolve (meeting-communications.read; public references, shareable only for owner / host)."
     },
     {
       "id": "cfmeet.communications.swagger-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "bundled/communications/http/v1.openapi.json",
       "owner": "communications",

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet meeting-service private Communications integration",
-    "version": "1.0.0",
-    "description": "Private backend interfaces for Sections 4\u20137. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.1.0",
+    "description": "Private backend interfaces for Sections 4\u20137 and the Sections 9\u201323 meeting facade (MT-1, MT-2). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
     {
@@ -247,6 +247,242 @@
           }
         }
       }
+    },
+    "/internal/v1/communications/meetings/instant": {
+      "post": {
+        "operationId": "createCommunicationsInstantMeeting",
+        "summary": "Start an instant meeting owned by the delegated user",
+        "description": "Start an instant meeting owned by the delegated user. Runs the same domain path as POST /api/v2/instant-meetings acting as the mapped account: the space is owned by that user and Meetings rules (v2 enablement, validation) apply; the conference is LIVE immediately. Idempotent per (account, idempotencyKey): a replay returns the first meeting with replayed=true and creates nothing; the title of a replay is ignored. Private signed service traffic only; the delegated tenant, application and environment must match the governed personal scope (any other scope is 404). Permission meeting-communications.create is granted only by the receiving service trust policy to cfmeet.communications. principalId must equal the delegated NATIVE_CF_USER initiating principal and accountReference must be the active account Account maps to that principal (communication_principal_links); otherwise 403. Guest admission, joins, media credentials and meeting chat are unchanged and independent of the Hub.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting-communications.create",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstantMeetingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, principal / account mismatch, or inactive account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown meeting code or unavailable delegated scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meeting state conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstantMeeting"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/meetings/resolve": {
+      "post": {
+        "operationId": "resolveCommunicationsMeeting",
+        "summary": "Resolve a meeting code to public references",
+        "description": "Resolve a meeting code to public references. Returns public references only: never a passcode, invitation, participant token or media credential. shareable is true only when the user owns or hosts the space; role is the user's persistent space role (OWNER, HOST, PARTICIPANT for any other membership role, NONE). The title is withheld (null) on strict security profiles unless the user may view the full space. Only meeting codes resolve; other identifiers are 404. Private signed service traffic only; the delegated tenant, application and environment must match the governed personal scope (any other scope is 404). Permission meeting-communications.read is granted only by the receiving service trust policy to cfmeet.communications. principalId must equal the delegated NATIVE_CF_USER initiating principal and accountReference must be the active account Account maps to that principal (communication_principal_links); otherwise 403. Guest admission, joins, media credentials and meeting chat are unchanged and independent of the Hub.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveMeetingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, principal / account mismatch, or inactive account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown meeting code or unavailable delegated scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meeting state conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveMeeting"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -434,6 +670,199 @@
         "required": [
           "schemaVersion",
           "error"
+        ]
+      },
+      "InstantMeeting": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountReference": {
+            "type": "string",
+            "pattern": "^cfmeet-user:[0-9a-f-]{36}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "principalId",
+          "accountReference",
+          "idempotencyKey"
+        ]
+      },
+      "InstantMeetingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingCode": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "meetingSpaceId",
+          "conferenceId",
+          "meetingCode",
+          "createdAt",
+          "replayed"
+        ]
+      },
+      "ResolveMeeting": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountReference": {
+            "type": "string",
+            "pattern": "^cfmeet-user:[0-9a-f-]{36}$"
+          },
+          "meetingCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "principalId",
+          "accountReference",
+          "meetingCode"
+        ]
+      },
+      "ResolveMeetingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingCode": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shareable": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "HOST",
+              "PARTICIPANT",
+              "NONE"
+            ]
+          },
+          "latestConference": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "CREATED",
+                      "PREPARING",
+                      "WAITING",
+                      "LIVE",
+                      "ENDING",
+                      "ENDED",
+                      "CANCELLED",
+                      "FAILED"
+                    ]
+                  },
+                  "scheduledStartAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "scheduledStartAt"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "meetingSpaceId",
+          "meetingCode",
+          "title",
+          "shareable",
+          "role",
+          "latestConference"
         ]
       }
     }
