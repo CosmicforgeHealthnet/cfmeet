@@ -44,7 +44,9 @@ async fn queued_push_is_not_delivered_after_member_departure() {
     let Some(rt) = Rt::start().await else { return };
     let h = &rt.h;
     let c = h.customer(ALL_SCOPES);
-    let (conversation, mut alice, bob) = h.e2ee_direct(&c).await;
+    let (conversation, mut members) = h.e2ee_group(&c, 2).await;
+    let bob = members.pop().unwrap();
+    let mut alice = members.pop().unwrap();
     queued(&rt, &c, &conversation, &mut alice, &bob).await;
     let r = h
         .send(
