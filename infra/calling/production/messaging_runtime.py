@@ -336,6 +336,21 @@ def ingress_diagnostics():
         verify = [l.strip()[:80] for l in r.stdout.splitlines() if 'Verify return code' in l]
         out['chain_' + label] = {'certificates': names, 'verify': verify[-1:] }
     out['nginxVariants'] = nginx_variants(tls)
+    dump = subprocess.run(['nginx', '-T'], capture_output=True, text=True).stdout.splitlines()
+    live = []
+    for i, line in enumerate(dump):
+        if 'location = /v1/realtime/tickets' in line:
+            live.append([re.sub(r'\d+\.\d+\.\d+\.\d+', '<ip>', l.strip())[:100] for l in dump[i:i + 16]
+                         if 'proxy_ssl' in l or 'proxy_pass' in l or 'location' in l])
+    out['liveConfigRealtimeTickets'] = live
+    out['liveIncludes'] = [l.strip()[:100] for l in dump if 'cfmeet-messaging.conf' in l][:6]
+    out['liveServerNames'] = sorted({l.strip()[:80] for l in dump if l.strip().startswith('server_name') and 'cfmeet' in l})[:10]
+    ps = subprocess.run(['ps', '-C', 'nginx', '-o', 'pid=,ppid=,lstart=,args='], capture_output=True, text=True).stdout
+    out['nginxProcesses'] = [' '.join(l.split()[:8])[:120] for l in ps.splitlines()][:8]
+    pidfile = Path('/run/nginx.pid')
+    out['pidFile'] = pidfile.read_text().strip() if pidfile.exists() else None
+    listeners = subprocess.run(['ss', '-ltnp', 'sport = :443'], capture_output=True, text=True).stdout
+    out['port443Owners'] = sorted({m for m in re.findall(r'users:\(\("([^"]+)"', listeners)})
     r = subprocess.run(['nginx', '-V'], capture_output=True, text=True)
     out['hostNginx'] = [l for l in (r.stderr + r.stdout).splitlines() if 'version' in l or 'OpenSSL' in l][:2]
     return out
