@@ -120,8 +120,25 @@ def protected_shas(all_containers):
     return shas
 
 
+def memory_by_owner(all_containers):
+    """docker stats once: real usage by owner, scanner daemons, and the largest CF Meet users."""
+    units = {'B': 1, 'KiB': 2**10, 'MiB': 2**20, 'GiB': 2**30}
+    owned = {name(c): cfmeet_container(c) for c in all_containers}
+    usage = []
+    for line in sh('docker', 'stats', '--no-stream', '--format', '{{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}', timeout=120).splitlines():
+        n, mem, cpu = line.split('\t')
+        m = re.match(r'([\d.]+)\s*([KMG]?i?B)', mem.split('/')[0].strip())
+        usage.append((float(m.group(1)) * units.get(m.group(2), 1) if m else 0, n, cpu))
+    scanners = [[n, gib(b), cpu] for b, n, cpu in usage if 'clamav' in n or 'scanner' in n]
+    return {'cfmeet_gib': gib(sum(b for b, n, _ in usage if owned.get(n))),
+            'other_products_gib': gib(sum(b for b, n, _ in usage if not owned.get(n))),
+            'running_containers': len(usage), 'scanner_daemons': scanners,
+            'largest_cfmeet': [[n, gib(b), cpu] for b, n, cpu in sorted(usage, reverse=True) if owned.get(n)][:8]}
+
+
 def inventory():
     all_containers = containers()
+    emit('memoryByOwner', memory_by_owner(all_containers))
     all_images = images()
     used = {c['Image'] for c in all_containers}
     emit('capacity', memory())
