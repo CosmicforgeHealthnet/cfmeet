@@ -31,7 +31,8 @@ class RemovableImages(unittest.TestCase):
         patcher = patch.object(r, 'ROOT', root); patcher.start(); self.addCleanup(patcher.stop)
 
     def test_only_unused_unreferenced_cfmeet_images_are_selected(self):
-        containers = [container('cfmeet-calling', 'sha256:run', 'ghcr.io/cosmicforgehealthnet/cfmeet-calling:' + SHA_RUNNING)]
+        containers = [container('cfmeet-calling', 'sha256:run', 'ghcr.io/cosmicforgehealthnet/cfmeet-calling:' + SHA_RUNNING),
+                      container('cfmeet-production-backend-rollback-1', 'sha256:inuse-meetings', running=False)]
         images = [
             image('sha256:run', ['ghcr.io/cosmicforgehealthnet/cfmeet-calling:' + SHA_RUNNING]),
             image('sha256:rollback', ['ghcr.io/cosmicforgehealthnet/cfmeet-messaging:' + SHA_ROLLBACK]),
@@ -41,6 +42,7 @@ class RemovableImages(unittest.TestCase):
             image('sha256:journal', ['cfmeet-meeting-service:prod-534af95'], created='2026-10-20'),
             image('sha256:old', ['cfmeet-meeting-service:prod-fd757bc'], created='2026-10-06'),
             image('sha256:newest', ['cfmeet-meeting-service:prod-6c39351'], created='2026-10-25'),
+            image('sha256:inuse-meetings', ['cfmeet-meeting-service:prod-9999999'], created='2026-10-30'),
             image('sha256:latest', ['cfmeet-meeting-service:prod-latest'], created='2026-10-01'),
             image('sha256:probe', ['cfmeet-calling-web-probe:1.56.1']),
             image('sha256:shared', ['cfmeet-calling-api-probe:aa9d', 'ghcr.io/cosmicforgehealthnet/cfmeet-calling:' + SHA_ROLLBACK]),

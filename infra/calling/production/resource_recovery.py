@@ -180,7 +180,9 @@ def removable_images(all_containers, all_images):
     used = {c['Image'] for c in all_containers}
     shas = protected_shas(all_containers)
     text = referenced_text()
-    meetings = sorted((i for i in all_images if any(t.startswith('cfmeet-meeting-service:prod-') for t in i.get('RepoTags') or [])),
+    # The newest UNUSED Meetings build stays as a spare fallback (in-use ones are kept anyway).
+    meetings = sorted((i for i in all_images if i['Id'] not in used
+                       and any(t.startswith('cfmeet-meeting-service:prod-') for t in i.get('RepoTags') or [])),
                       key=lambda i: i.get('Created', ''))
     keep = {meetings[-1]['Id']} if meetings else set()
     tags = []
