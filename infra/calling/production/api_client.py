@@ -54,7 +54,20 @@ async def request(method,path,body=None,token=None,expected=(200,201)):
             try: value=json.loads(error.read())
             except Exception:value={}
             return error.code,value
-    status,value=await asyncio.to_thread(send)
+    for attempt in range(3):
+        try:
+            status,value=await asyncio.to_thread(send)
+            break
+        except urllib.error.URLError as error:
+            reason=getattr(error,'reason',None)
+            number=getattr(reason,'errno',None)
+            REPORT.setdefault('transport_failures',[]).append({'method':method,'path':path,
+                'attempt':attempt+1,'reasonClass':type(reason).__name__,
+                'errno':number if isinstance(number,int) else None})
+            # Read-only network recovery, not an HTTP/security assertion retry.
+            # Never replay a mutation whose outcome is ambiguous.
+            if method!='GET' or attempt==2:raise
+            await asyncio.sleep(.25*(2**attempt))
     if status not in expected:
         REPORT['failed_request']={'method':method,'path':path,'status':status,'code':value.get('error',{}).get('code')}
         raise AssertionError('Calling API request failed')
