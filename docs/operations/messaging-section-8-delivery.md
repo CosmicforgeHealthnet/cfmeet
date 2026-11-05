@@ -393,6 +393,9 @@ the refreshed-token re-entry security test is unchanged.
 | LiveKit refresh-key reproduction (production digest), topology replicas | [42012267771](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012267771) | PASS (evidence above) |
 | Calling unit tests `media::` (21), `cargo fmt --check`, `cargo clippy --all-targets -D warnings` | local, `4ca0cb5` | PASS |
 | Production tooling unit tests (redaction, persistence, transfer, reconnect, gates) | local, `9bbcc3a` | PASS (65 tests) |
+| Full CI on `4ca0cb5` (main) | Calling service 42013987273, Enterprise calling certification 42013987261, Dependency and image security 42013987359, Privacy Relay 42013987220, Telephony 42013987244, Communications Hub 42013987235, Part VI cross-service 42013987320 | **PASS** |
+| Communications end-to-end journeys on `4ca0cb5` | main [42013987468](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42013987468) FAIL; staging [42013982061](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42013982061) PASS on the identical commit | **Pre-existing intermittent defect, not this change.** The same assertion (`numbering/tests/communications_e2e.rs:3290`, Telephony leg read as empty right after the PSTN invitation rings, before any media or token refresh) failed before this work on `b8c3de3` ([41865047465](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/41865047465)). Likely a read-before-write race in the test; not fixed here (outside the media-signaling scope) |
+| Unified Messaging integration journeys on `4ca0cb5` | [42013987269](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42013987269) | Both real-process backend jobs PASS; the shipped web client in Chromium job FAIL, the known frontend failure recorded in the baseline (frontend out of scope) |
 
 ### Messaging configuration preservation verdict
 
