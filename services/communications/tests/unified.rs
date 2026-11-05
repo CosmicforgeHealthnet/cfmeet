@@ -526,7 +526,14 @@ async fn calls_launch_through_policy_once_and_project_safe_timeline_cards() {
         .await
         .unwrap();
     assert_eq!(tb["data"][0]["call"]["outcome"], "MISSED");
-    // Calling outage: the page is served and marked stale, never fabricated.
+    // Calling outage: a card due for refresh is served and marked stale, never fabricated.
+    execute(
+        &h.state.store.db,
+        "UPDATE communication_timeline_entries SET refreshed_at='epoch' WHERE viewer_profile_id=$1",
+        vec![b.profile.id.into()],
+    )
+    .await
+    .unwrap();
     h.world.write().unwrap().calling_down = true;
     let tb = h
         .state
