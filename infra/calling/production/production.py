@@ -792,6 +792,9 @@ if __name__ == '__main__':
             communications_release.run(operation, sha, run_id)
         elif operation == 'inspect':
             audit()
+        elif operation == 'media-diagnose':
+            import media_diagnostics
+            media_diagnostics.run()
         elif operation == 'compatibility':
             import api_acceptance
             print(json.dumps({'backend_compatibility':api_acceptance.compatibility()}))
