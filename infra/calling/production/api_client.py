@@ -130,7 +130,9 @@ async def join(call,index,video=False):
         credential=await request('POST','/v1/calling/sessions/'+session['sessionId']+'/media-credentials',{},token=DEVICES[index]['token'])
         room=await MediaClient.start();ROOMS.append(room);room.url=credential['url']
         joined=await room.cmd('connect',url=credential['url'],token=credential['token'])
-        if joined.get('ok'):return room,session['sessionId']
+        if joined.get('ok'):
+            room.identity=joined['identity']
+            return room,session['sessionId']
         error_class=joined.get('error','').split(':',1)[0]
         REPORT.setdefault('media_join_failures',[]).append({'endpoint_index':index,'attempt':attempt+1,
             'error_class':error_class if error_class.isidentifier() else 'RTC_ERROR'})
@@ -148,6 +150,25 @@ async def publish(room,video=False):
 
 async def received_media(room,video=False):
     assert (await room.cmd('verify_received',kind='video' if video else 'audio',timeout=12)).get('ok'), 'Remote playable media not received'
+
+
+async def transferred_media(call,caller,departing,target):
+    # Admission, canonical transfer completion and provider removal are distinct
+    # asynchronous facts. Never select the departing party's stopped audio track.
+    for _ in range(120):
+        if (await call_view(call))['state']=='CONNECTED':break
+        await asyncio.sleep(.25)
+    else:raise AssertionError('Transfer did not return to CONNECTED')
+    assert (await departing.cmd('wait_disconnected',timeout=30)).get('ok'), 'Transferred party retained media access'
+    for _ in range(40):
+        first=await caller.cmd('status'); second=await target.cmd('status')
+        if first.get('connected') and second.get('connected') and \
+            departing.identity not in first.get('remote',[]) and \
+            target.identity in first.get('remote',[]) and caller.identity in second.get('remote',[]):break
+        await asyncio.sleep(.25)
+    else:raise AssertionError('Transferred media peer identities did not converge')
+    await received_media(target);await received_media(caller)
+    REPORT['checks']['transferred_party_removed_from_media']='PASS'
 
 
 async def connected(call,kind='VOICE',target=None):
@@ -295,11 +316,8 @@ async def main():
         REPORT['phase']='internal_transfer';call=await dial(extension=str(number));a,b=await connected(call)
         view=await call_view(call);participant=next(x['participantId'] for x in view['participants'] if x['principalId']==PEOPLE[1])
         await command(call,'transfer',{'transferringParticipantId':participant,'targetExtension':str(number+3)})
-        await answer(call,2);c,_=await join(call,2);await publish(c);await received_media(c);await received_media(a)
-        for _ in range(30):
-            if (await call_view(call))['state']=='CONNECTED':break
-            await asyncio.sleep(.5)
-        else:raise AssertionError('Transfer did not return to CONNECTED')
+        await answer(call,2);c,_=await join(call,2);await publish(c)
+        await transferred_media(call,a,b,c)
         REPORT['checks']['internal_transfer_real_media']='PASS';await finish(call)
         for room in (a,b,c):await room.disconnect()
         for offset,label in [(0,'extensions'),(1,'ring_groups'),(2,'queues')]:
