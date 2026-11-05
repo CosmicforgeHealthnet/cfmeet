@@ -682,3 +682,113 @@ vs 28174) and its `freshclam.dat` is 156 h old, although `Checks 12`. If its dat
 
 No public Messaging API changed. The gateway API is internal only and absent from consumer
 Swagger. No frontend, mobile, Vercel or `frontend.yml` change.
+
+### Deployment (production, 2026-11-05)
+
+| Step | Run | Result |
+|---|---|---|
+| Image set `eeaf61a` (incl. gateway) | [42092034545](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42092034545) | built, revision-labelled |
+| Gateway image `3637794` (probe refusal fix) | [42098873874](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42098873874) | built |
+| `scan-gateway-configure` attempts | 42091033220, 42094833977, 42095995749 | FAILED and rolled back each time: probe missing from image; oversized body → 502 via nginx; direct oversized refusal seen as a closed upload. Each fixed in code, never by relaxing a check |
+| `communications-stage` `eeaf61a` | [42097040034](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42097040034) | PASS |
+| One controlled `communications-release` `eeaf61a` | [42098810080](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42098810080) | **PASS, no rollback**. Previous containers retained as `*-communications-rollback-42098810080` |
+| `scan-gateway-configure` `3637794` | [42102547990](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42102547990) | **PASS 26/26**, regression PASS |
+| `messaging-configure` | 42103449496 | FAILED in the storage probe (two URLs counted as grants); rolled back to the exact previous container and nginx |
+| `messaging-configure` | [42104592956](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42104592956) | **PASS**: scanner mode `gateway` (active in the running binary), storage, Redis, metrics, keyring, KT checkpoint; regression PASS; rollback container `cfmeet-messaging-runtime-rollback-42104592956` |
+| `communications-verify` | [42105498094](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105498094) | PASS |
+| `resource-inventory` | [42105503611](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105503611) | PASS (stage candidates found running after the stage run; stopped by `resource-recover`) |
+| `messaging-verify` | [42105526737](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105526737) | **FAILED**: Swagger, admin/metrics not public PASS; public `POST /v1/realtime/tickets` 502 (see "Open defect") |
+| Independent `scan-gateway-verify` | [42113919022](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42113919022) | **PASS 26/26**, regression PASS |
+
+Running images (`docker inspect` image IDs, from the verify receipts): messaging
+`sha256:60608afbfc61…` (registry `ghcr.io/cosmicforgehealthnet/cfmeet-messaging@sha256:11f4aa7581bb40355263f84970830638de83ee25d57bfb8f7efad2b2482ca365`),
+calling `sha256:4ca17362520f…`, communications `sha256:b90ada269a7b…`, meeting-service
+`sha256:0be1b722742c…`, platform-access `sha256:d7189f63d6aa…`, security scan gateway
+`sha256:3cc6f387f958…` (`cfmeet-security-scan-gateway:3637794dd997f02a8dca26f44b4b3f7af3d8b683`).
+Verdict public key: `scan-verdict-20261105` / `1H7LXDzDHbeusoZ4etnNXOIPg9QrKKGm-Vanv2pjX-s`.
+
+### Production acceptance of the shared scanner (42102547990, 42113919022)
+
+Each run checks both paths (`cosmicforge-scan-gateway:8099` and Messaging's
+`https://api.cfmeet.com:8449`), signing with Messaging's own service key.
+
+| Check | Result |
+|---|---|
+| Unauthenticated, other-environment, replayed tokens | 401 ×3 per path |
+| Clean fixture | CLEAN, signature and binding verified (request, caller, environment, digest, length) |
+| EICAR | INFECTED `Eicar-Test-Signature`, signed and bound |
+| Digest mismatch / empty / oversized (25 MiB + 1) | 422 / 422 / 413 (unsigned) |
+| 10 sequential small scans | p50 10–25 ms, p95 12–72 ms, all CLEAN |
+| Burst of 6 × 512 KiB in parallel | 6 CLEAN, 0 OVERLOADED, max 51–499 ms |
+| 25 MiB − 1 KiB file | CLEAN in 314–366 ms |
+| Engine port from CF Meet's network (`admin-server-mail-clamav:3310`, alias) | unreachable |
+| Backend network members | `admin-server-mail-clamav`, `cosmicforge-scan-gateway` only |
+| Gateway published ports | none |
+
+Resources measured around each probe run: gateway peak **8 MiB** of its 64 MiB limit
+(1 MiB idle), 0.4–0.6 CPU-seconds. Mail engine memory 949–951 MiB before and after
+(limit 3072, peak 1849), **0 OOM kills**, healthy; 1.0–1.4 engine CPU-seconds. LiveKit
+0.08–0.26 CPU-seconds in the same window. Host MemAvailable 4.95–5.09 GiB, swap
+unchanged at 0.29 GiB. **Additional host memory reserved: none**: the dedicated 3 GiB
+daemon and the 6.5 GiB gate are gone.
+
+Signature freshness: the mail engine moved from daily 28173 (60.7 h) to **28174** (13 h)
+during the session. The earlier stale-signature concern is resolved for now. The
+gateway still enforces 72 h.
+
+Failure and rollback evidence: three gateway configure failures and one Messaging configure
+failure in production each rolled back automatically, leaving the previous state.
+Messaging returned to its exact previous container and nginx. The CI suites exercise engine
+outage, stale signatures, timeouts, overload, malformed replies, truncation and replay.
+
+### Messaging attachment lifecycle
+
+- CI ([Messaging 42085103681](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42085103681),
+  `MESSAGING_SCAN_GATEWAY_REQUIRED=1`): the real gateway in front of the real ClamAV
+  engine. A clean MANAGED file goes READY and downloads byte-exact; EICAR goes QUARANTINED
+  and is never downloadable; an unavailable scanner gives VERIFYING. 23/23 attachment
+  tests.
+- Production: storage probe PASS (encrypted upload/download, private bucket, unsigned
+  denied, signed grant works, expired grant denied, Calling bucket denied, probe object
+  deleted). The scanner is active in the running binary.
+- A production MANAGED attachment through the public API was **not** run. Personal MANAGED
+  conversations are deliberately refused (422, "managed not activated as personal E2EE
+  substitute"), and no isolated production application fixture is attached to Messaging
+  attachments. It is not claimed.
+
+### Open defect: public realtime route
+
+`messaging-configure` activated the existing public realtime ingress (`/v1/realtime`,
+`/v1/realtime/tickets` → private proxy `:8444`). It answers **502**: host nginx 1.24
+(OpenSSL 3.0.13) rejects the private proxy's Let's Encrypt Generation Y chain (leaf, YE1,
+Root YE cross-signed by X2, X2 cross-signed by X1) with "unable to get local issuer
+certificate".
+
+Evidence, all from `messaging-ingress` diagnostics (42108774026 … 42113422356):
+
+- `openssl s_client` with the bundle alone, and with the directory, returns code 0.
+- `curl` from the host returns 401.
+- A loopback nginx using the same binary and the same directives returns 401.
+- The live `nginx -T` shows the expected directives (depth 5, system bundle); workers
+  reload; nothing unusual is inherited.
+
+Root cause: not yet identified. It fails closed (no access), and no client can use realtime
+while production E2EE devices are disabled. `messaging-verify` fails on this check.
+Status: **IMPLEMENTED_NEEDS_REPAIR**. Next step: compare the live master's environment
+(systemd) with the loopback instance, or move this hop off TLS deliberately and in review.
+
+### Final status
+
+| Item | Status |
+|---|---|
+| Shared security scan gateway (auth, isolation, limits, streaming, signed verdicts, metrics) | IMPLEMENTED, TESTED, **DEPLOYED, VERIFIED** |
+| Scanner backend: existing production mail ClamAV through a dedicated internal network | DEPLOYED, VERIFIED (owner unaffected: healthy, 0 OOM, memory unchanged) |
+| No new antivirus engine, no host memory reservation | VERIFIED |
+| Messaging `GatewayScanner` (signed CLEAN only) | IMPLEMENTED, TESTED, **DEPLOYED** (release 42098810080) |
+| Messaging attachment storage, Redis realtime broker/presence, private metrics, managed keyring, KT checkpoint | **DEPLOYED, VERIFIED** (messaging-configure 42104592956) |
+| Managed attachment lifecycle through the real gateway | TESTED (CI); production API journey not run (no isolated managed fixture) |
+| Public realtime route | **IMPLEMENTED_NEEDS_REPAIR** (502, fails closed) |
+| Calling / Meetings / LiveKit | regression PASS after every change; release acceptance PASS |
+| Production PRIVATE_E2EE | **BLOCKED_EXTERNAL** (issue 13); devices disabled |
+| Push providers | **BLOCKED_EXTERNAL** (no credentials) |
+| Phone OTP, phone matching, carrier calling, off-server DR | **DEFERRED** |

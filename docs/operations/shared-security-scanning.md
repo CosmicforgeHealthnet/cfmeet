@@ -30,6 +30,10 @@ cfmeet-messaging ──HTTPS──▶ cfmeet-core-tls :8449 ──▶ cosmicforg
   `cfmeet-core-private` (checked by the probe on every verify).
 - CF Meet containers cannot open the engine's raw port; only the gateway can.
 
+## Production state (2026-11-05)
+
+Deployed by `scan-gateway-configure` [42102547990](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42102547990), independently verified by [42113919022](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42113919022): 26/26 checks, gateway peak 8 MiB, engine unchanged (949 MiB, 0 OOM). Messaging uses it in mode `gateway` since `messaging-configure` [42104592956](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42104592956). Evidence: [Section 8 delivery record](messaging-section-8-delivery.md#shared-security-scanning-and-messaging-infrastructure-activation--2026-11-05).
+
 ## Why this engine (audit `resource-scanners`, runs 42077171046 and 42077986241)
 
 | Engine | Owner / class | Limit | Peak | Memory events | Reload | Threads | Stream | Decision |
@@ -47,7 +51,7 @@ do not double memory (scans wait during a reload; the gateway fails closed meanw
 
 | Limit | Value | Why |
 |---|---|---|
-| Gateway memory / CPU | 64 MiB, 0.5 CPU, 64 pids, low CPU shares | measured ~13 MiB resident after a 25 MiB stream |
+| Gateway memory / CPU | 64 MiB, 0.5 CPU, 64 pids, low CPU shares | production peak 8 MiB, ~0.5 CPU-seconds per acceptance run |
 | Engine concurrency used by all products | 2 of 8 threads | the mail owner keeps ≥ 6 |
 | Per-product concurrency | `maxConcurrent` (CF Meet: 2) | per-product slot is taken first, so one product cannot hold another's |
 | Per-product rate | `maxPerMinute` (CF Meet: 120) | bounds retry storms |
@@ -64,6 +68,7 @@ do not double memory (scans wait during a reload; the gateway fails closed meanw
 | `scan-gateway-configure` with `image_sha` | Transfers the exact gateway image (revision label checked), re-checks the engine, creates/keeps the verdict key, writes trust bundle + registry from Messaging's **current** service key, attaches the engine to `cosmicforge-scan-backend`, (re)creates the gateway, adds the `:8449` route, then runs `scan-gateway-verify`. Idempotent. A previous gateway is kept as `cosmicforge-scan-gateway-rollback-<run>` and restored if anything fails |
 | `scan-gateway-verify` | Live acceptance through both the private name and the TLS route, plus resource deltas (gateway, engine, LiveKit CPU seconds; host memory) and regression |
 | `scan-gateway-disable` | Stops the gateway (kept), removes the `:8449` route, detaches the engine from the backend network. Messaging fails closed (MANAGED attachments stay `VERIFYING`) |
+| `messaging-ingress` | Re-applies only Messaging's public ingress and probes it; prints redacted diagnostics and rolls back if the probe fails |
 | `messaging-configure` | Chooses scanner mode `gateway` (gateway ready over TLS) or `quarantine` (no scanner; MANAGED attachments stay pending). Never starts an antivirus engine; the old 6.5 GiB gate is replaced by release margin + media reserve (3.5 GiB) |
 
 Configure order for a new image: build images → `scan-gateway-configure` → coordinated
