@@ -20,7 +20,11 @@ from pathlib import Path
 
 CONFIG_KEYS = ('TCPSocket', 'TCPAddr', 'LocalSocket', 'MaxThreads', 'MaxQueue', 'StreamMaxLength',
                'MaxScanSize', 'MaxFileSize', 'ConcurrentDatabaseReload', 'ReadTimeout',
-               'CommandReadTimeout', 'IdleTimeout', 'SelfCheck', 'MaxConnectionQueueLength')
+               'CommandReadTimeout', 'IdleTimeout', 'SelfCheck', 'MaxConnectionQueueLength',
+               'AlertExceedsMax', 'AlertEncrypted', 'AlertEncryptedArchive', 'ScanArchive', 'MaxRecursion',
+               'MaxFiles', 'TemporaryDirectory', 'StreamMinPort', 'StreamMaxPort')
+FRESHCLAM_KEYS = ('Checks', 'DatabaseMirror', 'PrivateMirror', 'ScriptedUpdates', 'NotifyClamd', 'TestDatabases',
+                  'ConnectTimeout', 'ReceiveTimeout')
 CONFIG_PATHS = ('/etc/clamav/clamd.conf', '/etc/clamd.conf', '/usr/local/etc/clamd.conf', '/etc/clamd.d/scan.conf')
 BENIGN = b'CosmicForge shared scanner capacity audit: harmless fixed bytes\n' * 64
 
@@ -80,6 +84,16 @@ def clamd_config(n):
                 if len(parts) == 2 and parts[0] in CONFIG_KEYS:
                     found[parts[0]] = re.sub(r'[^A-Za-z0-9 ./:_-]', '', parts[1])[:60]
             break
+    rc, out, _ = sh('docker', 'exec', n, 'cat', '/etc/clamav/freshclam.conf', timeout=20)
+    if rc == 0:
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0] in FRESHCLAM_KEYS:
+                found['freshclam.' + parts[0]] = re.sub(r'[^A-Za-z0-9 ./:_-]', '', parts[1])[:60]
+    # freshclam keeps its CDN cool-down state in freshclam.dat; report presence/mtime only.
+    rc, out, _ = sh('docker', 'exec', n, 'sh', '-c', 'stat -c %Y /var/lib/clamav/freshclam.dat 2>/dev/null', timeout=20)
+    if rc == 0 and out.strip().isdigit():
+        found['freshclam.dat_age_h'] = round((time.time() - int(out.strip())) / 3600, 1)
     return found or {'path': 'unreadable'}
 
 
