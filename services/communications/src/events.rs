@@ -357,6 +357,7 @@ impl State {
             "DELETE FROM communication_outbox WHERE seq IN(SELECT seq FROM communication_outbox WHERE state='DELIVERED' AND delivered_at<now()-interval '30 days' LIMIT 1000)",
             "DELETE FROM communication_audit WHERE seq IN(SELECT seq FROM communication_audit WHERE created_at<now()-interval '365 days' LIMIT 1000)",
             "DELETE FROM communication_profile_reports WHERE id IN(SELECT id FROM communication_profile_reports WHERE created_at<now()-interval '365 days' LIMIT 1000)",
+            "DELETE FROM communication_changes WHERE seq IN(SELECT seq FROM communication_changes WHERE created_at<now()-interval '30 days' LIMIT 1000)",
         ] {execute(&self.store.db,sql,vec![]).await?;}
         let txn = self.store.begin().await?;
         let pairs:Vec<Value>=rows(&txn,"SELECT to_jsonb(c) doc FROM communication_connections c WHERE state='REQUEST_PENDING' AND EXISTS(SELECT 1 FROM communication_contact_requests r WHERE r.connection_id=c.id AND r.state='PENDING' AND r.expires_at<=now()) ORDER BY c.id LIMIT 100 FOR UPDATE OF c SKIP LOCKED",vec![]).await?;

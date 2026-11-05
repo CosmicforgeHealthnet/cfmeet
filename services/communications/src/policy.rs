@@ -96,6 +96,9 @@ impl State {
         {
             return Ok(deny(DecisionReason::AccountInactive, version));
         }
+        if self.held(&actor).await? || self.held(&target).await? {
+            return Ok(deny(DecisionReason::AccountInactive, version));
+        }
         if let Some(issued) = check.credential_issued_at {
             let credential_owner = if check.credential_principal_id == Some(actor.principal_id) {
                 &actor
@@ -154,6 +157,16 @@ impl State {
                     .as_ref()
                     .and_then(|v| v["notifications"].as_str()),
             );
+            // The recipient's account-wide switches (Section 12.3); absent row = enabled.
+            let global: Option<Value> = store::one(&self.store.db,
+                "SELECT jsonb_build_object('direct',direct_messages,'group',group_messages) doc FROM communication_notification_preferences WHERE profile_id=$1",
+                vec![target.id.into()]).await?;
+            let key = if check.action == Action::MessageNotification {
+                "direct"
+            } else {
+                "group"
+            };
+            allowed = allowed && global.as_ref().is_none_or(|g| g[key] != false);
         }
         Ok(Decision {
             schema_version: 1,
@@ -165,6 +178,16 @@ impl State {
             },
             policy_version: version,
         })
+    }
+    /// An active operator hold on this profile (Section 16 suspension).
+    pub async fn held(&self, p: &Profile) -> Result<bool> {
+        let v: Option<Value> = store::one(
+            &self.store.db,
+            "SELECT jsonb_build_object('active',active) doc FROM communication_operator_holds WHERE profile_id=$1",
+            vec![p.id.into()],
+        )
+        .await?;
+        Ok(v.is_some_and(|v| v["active"] == true))
     }
     pub async fn capabilities(&self, scope: &DelegatedPlatformContext, p: &Profile) -> Value {
         let mut calling = json!({"available":false,"reason":"BACKEND_UNAVAILABLE"});
@@ -214,7 +237,7 @@ impl State {
                 }
             }
         }
-        if p.activation_state != Activation::Active {
+        if p.activation_state != Activation::Active || self.held(p).await.unwrap_or(true) {
             calling = json!({"available":false,"reason":"ACCOUNT_INACTIVE"});
             messaging =
                 json!({"available":false,"reason":"ACCOUNT_INACTIVE","securityReady":false});

@@ -251,7 +251,7 @@ class Journey:
         self.request('communications','/internal/v1/communications/policy/check','POST',{},expected=(401,) if self.c['stage'] else (404,))
         swagger=self.request('meeting-service','/api-docs/communications.json')
         operations=[v for path,item in swagger['paths'].items() for verb,v in item.items() if verb in ('get','put','post','patch','delete')]
-        assert len(operations)==29 and not any('/internal/' in x for x in swagger['paths'])
+        assert len(operations)==73 and not any('/internal/' in x for x in swagger['paths'])
         self.done('authenticated_ingress_private_policy_and_public_swagger')
         a,b=self.accounts()
         capabilities=self.hub(a,'/me/capabilities')

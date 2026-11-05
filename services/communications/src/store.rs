@@ -267,6 +267,19 @@ impl Store {
         execute(db,"UPDATE communication_idempotency SET response=$4 WHERE owner_profile_id=$1 AND operation=$2 AND key=$3",vec![p.id.into(),operation.into(),key.into(),response.into()]).await?;
         Ok(())
     }
+    /// Append one entry to the owner's monotonic change feed (same transaction as the
+    /// change itself, so a committed change always has a feed entry).
+    pub async fn change<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        profile: Uuid,
+        domain: &str,
+        resource: Option<Uuid>,
+        version: Option<i64>,
+    ) -> Result<()> {
+        execute(db,"INSERT INTO communication_changes(profile_id,domain,resource_id,resource_version) VALUES($1,$2,$3,$4)",vec![profile.into(),domain.into(),resource.into(),version.into()]).await?;
+        Ok(())
+    }
     pub fn public_profile(public_id: String, p: &Profile, relationship: String) -> Json {
         json!({"schemaVersion":1,"cfMeetId":public_id,"displayName":p.display_name,"avatarReference":p.avatar_reference,"relationship":relationship})
     }

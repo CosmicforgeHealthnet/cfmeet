@@ -26,6 +26,18 @@ pub enum Error {
     RecentAuthentication,
     #[error("dependency unavailable")]
     Unavailable,
+    #[error("the resource already exists")]
+    Duplicate,
+    #[error("this action is not allowed")]
+    ActionNotAllowed,
+    #[error("a required backend dependency is not configured")]
+    DependencyNotConfigured,
+    #[error("personal communications are not activated for this account")]
+    NotActivated,
+    #[error("a limit or policy rule rejected the request")]
+    PolicyValidation,
+    #[error("the canonical owner rejected the request")]
+    Owner { status: u16, code: &'static str },
     #[error("database operation failed")]
     Database(#[from] sea_orm::DbErr),
 }
@@ -43,6 +55,12 @@ impl Error {
             Self::RateLimited => "RATE_LIMITED",
             Self::RecentAuthentication => "RECENT_AUTHENTICATION_REQUIRED",
             Self::Unavailable | Self::Database(_) => "COMMUNICATIONS_UNAVAILABLE",
+            Self::Duplicate => "ALREADY_EXISTS",
+            Self::ActionNotAllowed => "ACTION_NOT_ALLOWED",
+            Self::DependencyNotConfigured => "DEPENDENCY_NOT_CONFIGURED",
+            Self::NotActivated => "COMMUNICATIONS_NOT_ACTIVATED",
+            Self::PolicyValidation => "POLICY_VALIDATION_FAILED",
+            Self::Owner { code, .. } => code,
         }
     }
     pub fn status(&self) -> StatusCode {
@@ -51,9 +69,18 @@ impl Error {
             Self::Forbidden | Self::RecentAuthentication => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Validation => StatusCode::BAD_REQUEST,
-            Self::Version | Self::Idempotency | Self::Pending => StatusCode::CONFLICT,
+            Self::Version | Self::Idempotency | Self::Pending | Self::Duplicate => {
+                StatusCode::CONFLICT
+            }
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-            Self::Unavailable | Self::Database(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Unavailable | Self::Database(_) | Self::DependencyNotConfigured => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+            Self::ActionNotAllowed | Self::NotActivated => StatusCode::FORBIDDEN,
+            Self::PolicyValidation => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Owner { status, .. } => {
+                StatusCode::from_u16(*status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE)
+            }
         }
     }
 }

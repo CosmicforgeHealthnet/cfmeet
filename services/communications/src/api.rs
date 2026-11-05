@@ -46,6 +46,34 @@ pub fn app(state: State) -> Router {
             post(crate::events::replay),
         )
         .route("/internal/v1/communications/metrics", get(metrics))
+        .route(
+            "/internal/v1/communications/events/:family",
+            post(crate::internal::owner_event),
+        )
+        .route(
+            "/internal/v1/communications/readiness",
+            get(crate::internal::readiness),
+        )
+        .route(
+            "/internal/v1/communications/reconciliation/range",
+            post(crate::internal::reconcile),
+        )
+        .route(
+            "/internal/v1/communications/admin/metrics",
+            get(crate::internal::admin_metrics),
+        )
+        .route(
+            "/internal/v1/communications/admin/suspend",
+            post(crate::internal::suspend),
+        )
+        .route(
+            "/internal/v1/communications/verification/callback",
+            post(crate::internal::phone_deferred),
+        )
+        .route(
+            "/internal/v1/communications/admin/phone-recovery",
+            post(crate::internal::phone_deferred),
+        )
         .fallback(|| async { Error::NotFound })
         .layer(from_fn_with_state(state.clone(), auth::middleware));
     Router::new()
@@ -199,16 +227,44 @@ async fn dispatch(
         }
     }
 }
-fn body(request: &Dispatch) -> Value {
+pub(crate) fn body(request: &Dispatch) -> Value {
     request.body.clone().unwrap_or_else(|| json!({}))
 }
-fn key(request: &Dispatch) -> Result<Uuid> {
+pub(crate) fn key(request: &Dispatch) -> Result<Uuid> {
     request.idempotency_key.ok_or(Error::Validation)
 }
-fn id(value: &str) -> Result<Uuid> {
+pub(crate) fn id(value: &str) -> Result<Uuid> {
     Uuid::parse_str(value).map_err(|_| Error::NotFound)
 }
-fn page(request: &Dispatch) -> Result<(i64, Uuid)> {
+/// Media pages use the owner's opaque cursor, not a Hub UUID.
+fn media_page(request: &Dispatch) -> Result<(i64, Option<String>)> {
+    if request
+        .query
+        .keys()
+        .any(|k| !matches!(k.as_str(), "limit" | "cursor"))
+    {
+        return Err(Error::Validation);
+    }
+    let limit = request
+        .query
+        .get("limit")
+        .map(|v| v.parse::<i64>())
+        .transpose()
+        .map_err(|_| Error::Validation)?
+        .unwrap_or(30);
+    if !(1..=100).contains(&limit) {
+        return Err(Error::Validation);
+    }
+    let cursor = request.query.get("cursor").cloned();
+    if cursor
+        .as_deref()
+        .is_some_and(|c| c.is_empty() || c.len() > 256 || !c.bytes().all(|b| b.is_ascii_graphic()))
+    {
+        return Err(Error::Validation);
+    }
+    Ok((limit, cursor))
+}
+pub(crate) fn page(request: &Dispatch) -> Result<(i64, Uuid)> {
     if request
         .query
         .keys()
@@ -326,6 +382,129 @@ async fn dispatch_inner(
                 data.push(json!({"cfMeetId":v["cfMeetId"],"blocked":true}));
             }
             Ok(json!({"schemaVersion":1,"data":data,"nextCursor":if more {last} else {None}}))
+        }
+        // ---- Sections 9-23 (unified Communications) ----
+        ("GET", ["bootstrap"]) => s.bootstrap(scope, p).await,
+        ("GET", ["inbox"]) => {
+            let (n, c) = page(&r)?;
+            s.inbox(p, n, c).await
+        }
+        ("GET", ["activity"]) => s.activity(scope, p, &r.query).await,
+        ("GET", ["sync"]) => s.changes(p, &r.query, false).await,
+        ("GET", ["events"]) => s.changes(p, &r.query, true).await,
+        ("GET", ["calls", "history"]) => s.call_history(scope, p, &r.query).await,
+        ("GET", ["calls", call, "context"]) => s.call_context(scope, p, id(call)?).await,
+        ("POST", ["contacts", contact, "calls"]) => {
+            s.call_contact(scope, p, id(contact)?, body(&r)).await
+        }
+        ("GET", ["contacts", "favorites"]) => s.list_favorites(p).await,
+        ("PUT", ["contacts", contact, "favorite"]) => {
+            s.set_favorite(p, id(contact)?, true, body(&r), key(&r)?)
+                .await
+        }
+        ("DELETE", ["contacts", contact, "favorite"]) => {
+            s.set_favorite(p, id(contact)?, false, body(&r), key(&r)?)
+                .await
+        }
+        ("GET", ["contact-lists"]) => s.list_lists(p).await,
+        ("POST", ["contact-lists"]) => s.create_list(p, body(&r), key(&r)?).await,
+        ("GET", ["contact-lists", list]) => {
+            let (n, c) = page(&r)?;
+            s.get_list(p, id(list)?, n, c).await
+        }
+        ("PATCH", ["contact-lists", list]) => s.patch_list(p, id(list)?, body(&r), key(&r)?).await,
+        ("DELETE", ["contact-lists", list]) => {
+            s.delete_list(p, id(list)?, body(&r), key(&r)?).await
+        }
+        ("PUT", ["contact-lists", list, "members", contact]) => {
+            s.set_list_member(p, id(list)?, id(contact)?, true, key(&r)?)
+                .await
+        }
+        ("DELETE", ["contact-lists", list, "members", contact]) => {
+            s.set_list_member(p, id(list)?, id(contact)?, false, key(&r)?)
+                .await
+        }
+        ("GET", ["conversations", conversation, "timeline"]) => {
+            s.timeline(scope, p, id(conversation)?, &r.query).await
+        }
+        ("GET", ["conversations", conversation, "context"]) => {
+            s.conversation_context(scope, p, id(conversation)?).await
+        }
+        ("POST", ["conversations", conversation, "calls"]) => {
+            s.call_conversation(scope, p, id(conversation)?, body(&r))
+                .await
+        }
+        ("GET", ["conversations", conversation, "media"]) => {
+            let (limit, cursor) = media_page(&r)?;
+            s.conversation_media(scope, p, id(conversation)?, limit, cursor)
+                .await
+        }
+        ("GET", ["conversations", conversation, "preferences"]) => {
+            s.get_conversation_preferences(scope, p, id(conversation)?)
+                .await
+        }
+        ("PUT", ["conversations", conversation, "preferences"]) => {
+            s.put_conversation_preferences(scope, p, id(conversation)?, body(&r), key(&r)?)
+                .await
+        }
+        ("POST", ["conversations", conversation, "clear-for-me"]) => {
+            s.clear_for_me(scope, p, id(conversation)?, body(&r), key(&r)?)
+                .await
+        }
+        ("GET", ["conversations", conversation, "shared-groups"]) => {
+            s.conversation_shared_groups(scope, p, id(conversation)?)
+                .await
+        }
+        ("POST", ["conversations", conversation, "meetings", "instant"]) => {
+            s.instant_meeting(scope, p, id(conversation)?, body(&r))
+                .await
+        }
+        ("POST", ["conversations", conversation, "meetings", "share"]) => {
+            s.share_meeting(scope, p, id(conversation)?, body(&r)).await
+        }
+        ("GET", ["conversations", conversation, "meetings"]) => {
+            let (n, c) = page(&r)?;
+            s.conversation_meetings(scope, p, id(conversation)?, n, c)
+                .await
+        }
+        ("GET", ["saved-messages"]) => {
+            let (n, c) = page(&r)?;
+            s.list_saved(scope, p, n, c).await
+        }
+        ("POST", ["saved-messages"]) => s.save_message(scope, p, body(&r), key(&r)?).await,
+        ("DELETE", ["saved-messages", saved]) => s.delete_saved(p, id(saved)?, key(&r)?).await,
+        ("GET", ["me", "notification-preferences"]) => s.get_notification_preferences(p).await,
+        ("PUT", ["me", "notification-preferences"]) => {
+            s.put_notification_preferences(p, body(&r), key(&r)?).await
+        }
+        ("GET", ["me", "storage-summary"]) => s.storage_summary(scope, p).await,
+        ("GET", ["me", "notification-delivery-status"]) => s.delivery_status(scope, p).await,
+        ("GET", ["me", "recovery-state"]) => s.recovery_state(scope, p).await,
+        ("GET", ["devices"]) => s.list_devices(p).await,
+        ("POST", ["devices", "link"]) => s.link_device(scope, p, body(&r), key(&r)?).await,
+        ("PUT", ["devices", device, "push"]) => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct Push {
+                registration: Value,
+            }
+            let push: Push = serde_json::from_value(body(&r)).map_err(|_| Error::Validation)?;
+            s.device_push(scope, p, id(device)?, Some(push.registration), key(&r)?)
+                .await
+        }
+        ("DELETE", ["devices", device, "push"]) => {
+            s.device_push(scope, p, id(device)?, None, key(&r)?).await
+        }
+        ("POST", ["devices", device, "revoke"]) => {
+            s.revoke_device(scope, p, id(device)?, body(&r), key(&r)?)
+                .await
+        }
+        ("GET", ["devices", device, "sync-state"]) => {
+            s.device_sync_state(p, id(device)?, None).await
+        }
+        ("PUT", ["devices", device, "sync-state"]) => {
+            s.device_sync_state(p, id(device)?, Some((body(&r), key(&r)?)))
+                .await
         }
         ("GET", ["contacts"]) => {
             let (n, c) = page(&r)?;

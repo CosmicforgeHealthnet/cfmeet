@@ -34,7 +34,24 @@ pub async fn middleware(
         "/internal/v1/communications/block-events" => InternalPermission::CommunicationsBlockApply,
         "/internal/v1/communications/backfill"
         | "/internal/v1/communications/replay"
-        | "/internal/v1/communications/metrics" => InternalPermission::CommunicationsBackfill,
+        | "/internal/v1/communications/metrics"
+        | "/internal/v1/communications/reconciliation/range"
+        | "/internal/v1/communications/admin/phone-recovery"
+        | "/internal/v1/communications/verification/callback" => {
+            InternalPermission::CommunicationsBackfill
+        }
+        "/internal/v1/communications/events/calling"
+        | "/internal/v1/communications/events/messaging"
+        | "/internal/v1/communications/events/meetings"
+        | "/internal/v1/communications/events/devices" => {
+            InternalPermission::CommunicationsEventsPublish
+        }
+        "/internal/v1/communications/readiness" | "/internal/v1/communications/admin/metrics" => {
+            InternalPermission::CommunicationsObservabilityRead
+        }
+        "/internal/v1/communications/admin/suspend" => {
+            InternalPermission::CommunicationsProfileSuspend
+        }
         _ => return Error::NotFound.into_response(),
     };
     if ctx.require_permission(permission).is_err() {

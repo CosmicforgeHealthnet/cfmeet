@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 36,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 528,
+    "PUBLIC_CUSTOMER": 572,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -24,6 +24,19 @@
       "forwardHeaders": []
     },
     {
+      "id": "communications.listCommunicationsActivity",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/activity",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/activity",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "communications.listCommunicationsBlocks",
       "domain": "communications",
       "method": "GET",
@@ -31,6 +44,136 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/communications/blocks",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getCommunicationsBootstrap",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/bootstrap",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/bootstrap",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listCommunicationsCallHistory",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/calls/history",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/calls/history",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getCommunicationsCallContext",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/calls/{callId}/context",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/calls/{callId}/context",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listContactLists",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/contact-lists",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.createContactList",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/contact-lists",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.deleteContactList",
+      "domain": "communications",
+      "method": "DELETE",
+      "pattern": "/api/v2/communications/contact-lists/{listId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists/{listId}",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getContactList",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/contact-lists/{listId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists/{listId}",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.updateContactList",
+      "domain": "communications",
+      "method": "PATCH",
+      "pattern": "/api/v2/communications/contact-lists/{listId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists/{listId}",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.removeContactListMember",
+      "domain": "communications",
+      "method": "DELETE",
+      "pattern": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.addContactListMember",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -128,6 +271,19 @@
       "forwardHeaders": []
     },
     {
+      "id": "communications.listFavoriteContacts",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/contacts/favorites",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contacts/favorites",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "communications.removeCommunicationsContact",
       "domain": "communications",
       "method": "DELETE",
@@ -167,6 +323,19 @@
       "forwardHeaders": []
     },
     {
+      "id": "communications.startContactCall",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/contacts/{contactId}/calls",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contacts/{contactId}/calls",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "communications.listCommunicationsCommonGroups",
       "domain": "communications",
       "method": "GET",
@@ -174,6 +343,266 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/communications/contacts/{contactId}/common-groups",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.removeFavoriteContact",
+      "domain": "communications",
+      "method": "DELETE",
+      "pattern": "/api/v2/communications/contacts/{contactId}/favorite",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contacts/{contactId}/favorite",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.addFavoriteContact",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/contacts/{contactId}/favorite",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/contacts/{contactId}/favorite",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.startConversationCall",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/calls",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/calls",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.clearConversationForMe",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/clear-for-me",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/clear-for-me",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getConversationContext",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/context",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/context",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listConversationMedia",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/media",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/media",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listConversationMeetings",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/meetings",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/meetings",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.createConversationInstantMeeting",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/meetings/instant",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/meetings/instant",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.shareConversationMeeting",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/meetings/share",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/meetings/share",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getConversationPreferences",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.updateConversationPreferences",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listConversationSharedGroups",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/shared-groups",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/shared-groups",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getConversationTimeline",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/conversations/{conversationId}/timeline",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/conversations/{conversationId}/timeline",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listCommunicationsDevices",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/devices",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.linkCommunicationsDevice",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/devices/link",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/link",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.removeCommunicationsDevicePush",
+      "domain": "communications",
+      "method": "DELETE",
+      "pattern": "/api/v2/communications/devices/{deviceId}/push",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/{deviceId}/push",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.registerCommunicationsDevicePush",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/devices/{deviceId}/push",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/{deviceId}/push",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.revokeCommunicationsDevice",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/devices/{deviceId}/revoke",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/{deviceId}/revoke",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getCommunicationsDeviceSyncState",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.acknowledgeCommunicationsDeviceSync",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/devices/{deviceId}/sync-state",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -200,6 +629,32 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/communications/discovery/public-id/resolve",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listCommunicationsEvents",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/events",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/events",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getCommunicationsInboxOverlay",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/inbox",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/inbox",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -271,6 +726,45 @@
       "forwardHeaders": []
     },
     {
+      "id": "communications.getNotificationDeliveryStatus",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/me/notification-delivery-status",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/me/notification-delivery-status",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getNotificationPreferences",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/me/notification-preferences",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/me/notification-preferences",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.updateNotificationPreferences",
+      "domain": "communications",
+      "method": "PUT",
+      "pattern": "/api/v2/communications/me/notification-preferences",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/me/notification-preferences",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "communications.getCommunicationsPrivacy",
       "domain": "communications",
       "method": "GET",
@@ -336,6 +830,32 @@
       "forwardHeaders": []
     },
     {
+      "id": "communications.getCommunicationsRecoveryState",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/me/recovery-state",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/me/recovery-state",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.getStorageSummary",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/me/storage-summary",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/me/storage-summary",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
       "id": "communications.getCommunicationsPublicProfile",
       "domain": "communications",
       "method": "GET",
@@ -382,6 +902,58 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/communications/profiles/{cfMeetId}/reports",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.listSavedMessages",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/saved-messages",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/saved-messages",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.saveMessage",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/saved-messages",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/saved-messages",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.deleteSavedMessage",
+      "domain": "communications",
+      "method": "DELETE",
+      "pattern": "/api/v2/communications/saved-messages/{savedId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/saved-messages/{savedId}",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.syncCommunicationsChanges",
+      "domain": "communications",
+      "method": "GET",
+      "pattern": "/api/v2/communications/sync",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/sync",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -8945,9 +9517,97 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "listCommunicationsActivity",
+      "method": "GET",
+      "path": "/api/v2/communications/activity",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "listCommunicationsBlocks",
       "method": "GET",
       "path": "/api/v2/communications/blocks",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getCommunicationsBootstrap",
+      "method": "GET",
+      "path": "/api/v2/communications/bootstrap",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listCommunicationsCallHistory",
+      "method": "GET",
+      "path": "/api/v2/communications/calls/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getCommunicationsCallContext",
+      "method": "GET",
+      "path": "/api/v2/communications/calls/{callId}/context",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listContactLists",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "createContactList",
+      "method": "POST",
+      "path": "/api/v2/communications/contact-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "deleteContactList",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getContactList",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "updateContactList",
+      "method": "PATCH",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "removeContactListMember",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "addContactListMember",
+      "method": "PUT",
+      "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -9009,6 +9669,14 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "listFavoriteContacts",
+      "method": "GET",
+      "path": "/api/v2/communications/contacts/favorites",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "removeCommunicationsContact",
       "method": "DELETE",
       "path": "/api/v2/communications/contacts/{contactId}",
@@ -9033,9 +9701,177 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "startContactCall",
+      "method": "POST",
+      "path": "/api/v2/communications/contacts/{contactId}/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "listCommunicationsCommonGroups",
       "method": "GET",
       "path": "/api/v2/communications/contacts/{contactId}/common-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "removeFavoriteContact",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contacts/{contactId}/favorite",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "addFavoriteContact",
+      "method": "PUT",
+      "path": "/api/v2/communications/contacts/{contactId}/favorite",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "startConversationCall",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "clearConversationForMe",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/clear-for-me",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getConversationContext",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/context",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listConversationMedia",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/media",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listConversationMeetings",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "createConversationInstantMeeting",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings/instant",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "shareConversationMeeting",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings/share",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getConversationPreferences",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "updateConversationPreferences",
+      "method": "PUT",
+      "path": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listConversationSharedGroups",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/shared-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getConversationTimeline",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/timeline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listCommunicationsDevices",
+      "method": "GET",
+      "path": "/api/v2/communications/devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "linkCommunicationsDevice",
+      "method": "POST",
+      "path": "/api/v2/communications/devices/link",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "removeCommunicationsDevicePush",
+      "method": "DELETE",
+      "path": "/api/v2/communications/devices/{deviceId}/push",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "registerCommunicationsDevicePush",
+      "method": "PUT",
+      "path": "/api/v2/communications/devices/{deviceId}/push",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "revokeCommunicationsDevice",
+      "method": "POST",
+      "path": "/api/v2/communications/devices/{deviceId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getCommunicationsDeviceSyncState",
+      "method": "GET",
+      "path": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "acknowledgeCommunicationsDeviceSync",
+      "method": "PUT",
+      "path": "/api/v2/communications/devices/{deviceId}/sync-state",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -9052,6 +9888,22 @@
       "operationId": "resolveCommunicationsPublicId",
       "method": "POST",
       "path": "/api/v2/communications/discovery/public-id/resolve",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listCommunicationsEvents",
+      "method": "GET",
+      "path": "/api/v2/communications/events",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getCommunicationsInboxOverlay",
+      "method": "GET",
+      "path": "/api/v2/communications/inbox",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -9097,6 +9949,30 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "getNotificationDeliveryStatus",
+      "method": "GET",
+      "path": "/api/v2/communications/me/notification-delivery-status",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getNotificationPreferences",
+      "method": "GET",
+      "path": "/api/v2/communications/me/notification-preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "updateNotificationPreferences",
+      "method": "PUT",
+      "path": "/api/v2/communications/me/notification-preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "getCommunicationsPrivacy",
       "method": "GET",
       "path": "/api/v2/communications/me/privacy",
@@ -9137,6 +10013,22 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "getCommunicationsRecoveryState",
+      "method": "GET",
+      "path": "/api/v2/communications/me/recovery-state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "getStorageSummary",
+      "method": "GET",
+      "path": "/api/v2/communications/me/storage-summary",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "getCommunicationsPublicProfile",
       "method": "GET",
       "path": "/api/v2/communications/profiles/{cfMeetId}",
@@ -9164,6 +10056,38 @@
       "operationId": "reportCommunicationsProfile",
       "method": "POST",
       "path": "/api/v2/communications/profiles/{cfMeetId}/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "listSavedMessages",
+      "method": "GET",
+      "path": "/api/v2/communications/saved-messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "saveMessage",
+      "method": "POST",
+      "path": "/api/v2/communications/saved-messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "deleteSavedMessage",
+      "method": "DELETE",
+      "path": "/api/v2/communications/saved-messages/{savedId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
+      "operationId": "syncCommunicationsChanges",
+      "method": "GET",
+      "path": "/api/v2/communications/sync",
       "class": "PUBLIC_CUSTOMER"
     },
     {

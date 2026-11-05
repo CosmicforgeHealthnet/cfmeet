@@ -2179,6 +2179,12 @@ export namespace Communications {
     phoneVerificationRequired: false;
   };
   export type ActivationState = "ACCOUNT_CREATED" | "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
+  export type ActivityPage = {
+    schemaVersion: 1;
+    projectionVersion?: number;
+    data: Array<TimelineEntry>;
+    nextCursor: string | null;
+  };
   export type BackendCapability = {
     available: boolean;
     reason: "AVAILABLE" | "DISABLED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
@@ -2199,6 +2205,57 @@ export namespace Communications {
     data: Array<BlockMetadata>;
     nextCursor: string | null;
   };
+  export type Bootstrap = {
+    schemaVersion: 1;
+    me: { [key: string]: unknown };
+    capabilities: Capabilities;
+    privacy?: { [key: string]: unknown };
+    notificationPreferences?: NotificationPreferences;
+    counts: { [key: string]: unknown };
+    sync: { [key: string]: unknown };
+    areas?: { [key: string]: unknown };
+  };
+  export type CallEntry = {
+    schemaVersion?: 1;
+    callId: string;
+    kind: string;
+    state: string;
+    terminal?: boolean;
+    direction?: "INCOMING" | "OUTGOING";
+    outcome?: string;
+    missed: boolean;
+    createdAt?: string;
+    answeredAt?: string | null;
+    endedAt?: string | null;
+    durationMs?: number | null;
+    counterparts: Array<Participant>;
+    conversationId?: string | null;
+    origin?: string;
+    actions?: { [key: string]: unknown };
+  };
+  export type CallHistoryPage = {
+    schemaVersion: 1;
+    data: Array<CallEntry>;
+    nextCursor: string | null;
+  };
+  export type CallLaunch = {
+    kind: "VOICE" | "VIDEO";
+    clientRequestId: string;
+    /** The caller's own ACTIVE Calling endpoint. */
+    endpointId: string;
+  };
+  export type CallLaunched = {
+    schemaVersion: 1;
+    callId: string;
+    kind: string;
+    state: string;
+    version?: number;
+    origin: "CONTACT" | "CONVERSATION";
+    conversationId?: string | null;
+    contactId?: string | null;
+    replayed: boolean;
+    next?: string;
+  };
   export type Capabilities = {
     schemaVersion: 1;
     activationState: ActivationState;
@@ -2212,6 +2269,38 @@ export namespace Communications {
       independent: true;
       authorization: "EXISTING_MEETING_RULES";
     };
+  };
+  export type Change = {
+    position: number;
+    domain: string;
+    resourceId?: string | null;
+    resourceVersion?: number | null;
+    changedAt: string;
+  };
+  export type Changes = {
+    schemaVersion: 1;
+    resyncRequired: boolean;
+    reason?: string;
+    latestPosition: number;
+    oldestRetainedPosition?: number;
+    data: Array<Change>;
+    nextPosition: number;
+    hasMore?: boolean;
+    acknowledgement?: string;
+    snapshot?: string;
+  };
+  export type ClearForMe = {
+    /** Defaults to the current last message sequence. */
+    throughSequence?: number;
+  };
+  export type ClearedForMe = {
+    schemaVersion: 1;
+    conversationId: string;
+    clearedThroughSequence: number;
+    clearedAt?: string;
+    version?: number;
+    scope?: string;
+    canonicalHistoryUnchanged?: boolean;
   };
   export type CommonGroup = {
     conversationId: string;
@@ -2233,6 +2322,39 @@ export namespace Communications {
     favorite: boolean;
     notifications: "ALL" | "MUTED" | "MENTIONS";
     version: number;
+  };
+  export type ContactList = {
+    schemaVersion?: 1;
+    listId: string;
+    name: string;
+    position?: number;
+    memberCount: number;
+    version: number;
+    updatedAt?: string;
+    members?: Array<{ [key: string]: unknown }>;
+    nextCursor?: string | null;
+  };
+  export type ContactListCreate = {
+    name: string;
+    position?: number;
+  };
+  export type ContactListMembership = {
+    schemaVersion: 1;
+    listId: string;
+    contactId: string;
+    member: boolean;
+    version?: number;
+    memberCount?: number;
+  };
+  export type ContactListUpdate = {
+    expectedVersion: number;
+    name?: string;
+    position?: number;
+  };
+  export type ContactLists = {
+    schemaVersion: 1;
+    data: Array<ContactList>;
+    limit?: number;
   };
   export type ContactPatch = {
     expectedVersion: number;
@@ -2267,15 +2389,127 @@ export namespace Communications {
     data: Array<Contact>;
     nextCursor: string | null;
   };
+  export type ConversationContext = {
+    schemaVersion: 1;
+    conversationId: string;
+    contextClass: string;
+    securityProfile?: string;
+    lifecycleState?: string;
+    lastSequence?: number;
+    memberCount?: number;
+    retentionSeconds?: number | null;
+    role?: string | null;
+    counterpart?: Participant | null;
+    preferences?: ConversationPreferences;
+    clearedThroughSequence?: number;
+    clearedAt?: string | null;
+    linkedMeetings?: number;
+    actions: { [key: string]: unknown };
+    security?: { [key: string]: unknown };
+  };
+  export type ConversationPreferences = {
+    schemaVersion: 1;
+    conversationId: string;
+    notifications: "ALL" | "MENTIONS" | "MUTED";
+    mutedUntil?: string | null;
+    effectiveNotifications?: string;
+    mediaAutoDownload?: "ALWAYS" | "WIFI" | "NEVER";
+    version: number;
+    deviceLocal?: Array<string>;
+    disappearingMessages?: { [key: string]: unknown };
+  };
+  export type ConversationPreferencesUpdate = {
+    /** 0 creates the first version. */
+    expectedVersion: number;
+    notifications: "ALL" | "MENTIONS" | "MUTED";
+    mutedUntil?: string | null;
+    mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER";
+  };
+  export type Deleted = {
+    schemaVersion: 1;
+    deleted: boolean;
+  };
+  export type DeliveryStatus = {
+    schemaVersion: 1;
+    providers: { [key: string]: unknown };
+    devices?: Array<{ [key: string]: unknown }>;
+    pendingJobs?: number;
+    deadJobs?: number;
+    callRinging?: { [key: string]: unknown };
+    preferences?: NotificationPreferences;
+    physicalDeviceAcceptance?: string;
+  };
+  export type Device = {
+    deviceId: string;
+    platform: "IOS" | "ANDROID" | "WEB" | "DESKTOP";
+    label?: string | null;
+    state: "ACTIVE" | "REVOKED";
+    chatDeviceId?: string | null;
+    callEndpointId?: string | null;
+    push?: { [key: string]: unknown };
+    acknowledgedSyncPosition?: number;
+    revokedAt?: string | null;
+    revocationReason?: string | null;
+    version?: number;
+    createdAt?: string;
+  };
+  export type DeviceLink = {
+    platform: "IOS" | "ANDROID" | "WEB" | "DESKTOP";
+    label?: string;
+    /** Existing Messaging device owned by the caller. */
+    chatDeviceId?: string;
+    /** Existing Calling endpoint owned by the caller. */
+    callEndpointId?: string;
+  };
+  export type DevicePush = {
+    /** Exactly the Messaging push-registration body. The token is passed through and never stored by the Hub. */
+    registration: { [key: string]: unknown };
+  };
+  export type DeviceResult = {
+    schemaVersion: 1;
+    device: Device;
+    linked?: boolean;
+    alreadyRevoked?: boolean;
+    effects?: { [key: string]: unknown };
+  };
+  export type DeviceRevoke = {
+    reason: "USER_REQUESTED" | "COMPROMISED";
+  };
+  export type Devices = {
+    schemaVersion: 1;
+    data: Array<Device>;
+    limit?: number;
+  };
   export type Error = {
     schemaVersion: 1;
     error: {
-      code: "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "NOT_FOUND" | "VALIDATION_ERROR" | "VERSION_CONFLICT" | "IDEMPOTENCY_CONFLICT" | "REQUEST_PENDING" | "RATE_LIMITED" | "RECENT_AUTHENTICATION_REQUIRED" | "COMMUNICATIONS_UNAVAILABLE";
+      code: "AUTHENTICATION_REQUIRED" | "PERMISSION_DENIED" | "NOT_FOUND" | "VALIDATION_ERROR" | "VERSION_CONFLICT" | "IDEMPOTENCY_CONFLICT" | "REQUEST_PENDING" | "RATE_LIMITED" | "RECENT_AUTHENTICATION_REQUIRED" | "COMMUNICATIONS_UNAVAILABLE" | "ALREADY_EXISTS" | "ACTION_NOT_ALLOWED" | "DEPENDENCY_NOT_CONFIGURED" | "COMMUNICATIONS_NOT_ACTIVATED" | "POLICY_VALIDATION_FAILED" | "TARGET_UNAVAILABLE" | "E2EE_NOT_AVAILABLE" | "E2EE_DEVICES_DISABLED" | "ENDPOINT_NOT_ACTIVE" | "GROUP_TOO_LARGE" | "MEETING_V2_DISABLED" | "COMMUNICATIONS_POLICY_UNAVAILABLE";
       message: string;
     };
   };
   export type ExpectedVersion = {
     expectedVersion: number;
+  };
+  export type Favorite = {
+    rank?: number;
+  };
+  export type FavoriteResult = {
+    schemaVersion: 1;
+    contactId: string;
+    favorite: boolean;
+    favoriteRank?: number | null;
+    version: number;
+  };
+  export type FavoritesList = {
+    schemaVersion: 1;
+    data: Array<{ [key: string]: unknown }>;
+    limit?: number;
+  };
+  export type InboxPage = {
+    schemaVersion: 1;
+    data: Array<{ [key: string]: unknown }>;
+    nextCursor: string | null;
+    membership?: string;
   };
   export type Invite = {
     schemaVersion: 1;
@@ -2315,6 +2549,79 @@ export namespace Communications {
     schemaVersion: 1;
     data: Array<InviteMetadata>;
     nextCursor: string | null;
+  };
+  export type MediaItem = {
+    attachmentId: string;
+    messageId?: string | null;
+    state?: string;
+    sizeBytes?: number;
+    mediaClass: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "OTHER" | "ENCRYPTED";
+    createdAt?: string;
+  };
+  export type MediaPage = {
+    schemaVersion: 1;
+    conversationId?: string;
+    data: Array<MediaItem>;
+    nextCursor: string | null;
+    download?: string;
+  };
+  export type MeetingInstant = {
+    clientRequestId: string;
+    title?: string;
+  };
+  export type MeetingLink = {
+    schemaVersion?: 1;
+    linkId: string;
+    conversationId: string;
+    meetingSpaceId?: string;
+    meetingCode: string;
+    origin: "INSTANT" | "SHARED";
+    linkedAt?: string;
+    linkedByViewer?: boolean;
+    conferenceId?: string | null;
+    join?: { [key: string]: unknown };
+  };
+  export type MeetingLinksPage = {
+    schemaVersion: 1;
+    conversationId?: string;
+    data: Array<MeetingLink>;
+    nextCursor: string | null;
+  };
+  export type MeetingShare = {
+    clientRequestId: string;
+    meetingCode: string;
+  };
+  export type NotificationPreferences = {
+    schemaVersion: 1;
+    version: number;
+    directMessages?: boolean;
+    groupMessages?: boolean;
+    incomingCalls?: boolean;
+    missedCalls?: boolean;
+    contactRequests?: boolean;
+    groupInvitations?: boolean;
+    meetingInvitations?: boolean;
+    securityEvents?: true;
+    payloadPolicy?: "ROUTING_METADATA_ONLY";
+  };
+  export type NotificationPreferencesUpdate = {
+    directMessages: boolean;
+    groupMessages: boolean;
+    incomingCalls: boolean;
+    missedCalls: boolean;
+    contactRequests: boolean;
+    groupInvitations: boolean;
+    meetingInvitations: boolean;
+    expectedVersion: number;
+  };
+  export type Participant = {
+    self: boolean;
+    known?: boolean;
+    cfMeetId?: string;
+    displayName?: string;
+    relationship?: RelationshipState;
+    contactId?: string | null;
+    alias?: string | null;
   };
   export type PermittedActions = {
     requestConnection: boolean;
@@ -2371,6 +2678,17 @@ export namespace Communications {
     relationship: RelationshipState | "SELF";
     permittedActions?: PermittedActions;
   };
+  export type RecoveryState = {
+    schemaVersion: 1;
+    activationState: ActivationState;
+    cfMeetId?: string;
+    devices?: { [key: string]: unknown };
+    sync?: { [key: string]: unknown };
+    messaging?: { [key: string]: unknown };
+    calls?: { [key: string]: unknown };
+    contacts?: { [key: string]: unknown };
+    phoneRecovery: { [key: string]: unknown };
+  };
   export type RelationshipState = "NONE" | "REQUEST_PENDING" | "CONNECTED" | "BLOCKED" | "REVOKED";
   export type ReportCreate = {
     reason: "SPAM" | "HARASSMENT" | "IMPERSONATION" | "OTHER";
@@ -2385,6 +2703,70 @@ export namespace Communications {
     data: Array<ContactRequest>;
     nextCursor: string | null;
   };
+  export type SaveMessage = {
+    conversationId: string;
+    messageId: string;
+  };
+  export type SavedMessage = {
+    schemaVersion?: 1;
+    savedId: string;
+    conversationId: string;
+    messageId: string;
+    messageSequence?: number;
+    savedAt?: string;
+    available: boolean;
+    unavailableReason?: null | "CLEARED_FOR_ME" | "DELETED" | "EXPIRED" | "HIDDEN_FOR_ME" | "NOT_FOUND" | "NOT_A_MEMBER";
+  };
+  export type SavedMessagesPage = {
+    schemaVersion: 1;
+    data: Array<SavedMessage>;
+    nextCursor: string | null;
+  };
+  export type SharedGroups = {
+    schemaVersion: 1;
+    groups: Array<CommonGroup>;
+    available?: boolean;
+  };
+  export type StorageSummary = {
+    schemaVersion: 1;
+    messaging: { [key: string]: unknown };
+    savedMessages?: { [key: string]: unknown };
+    deviceCache?: { [key: string]: unknown };
+  };
+  export type SyncAck = {
+    acknowledgedPosition: number;
+  };
+  export type SyncState = {
+    schemaVersion: 1;
+    deviceId: string;
+    acknowledgedPosition: number;
+    latestPosition: number;
+    oldestRetainedPosition?: number;
+    resyncRequired: boolean;
+  };
+  export type Timeline = {
+    schemaVersion: 1;
+    projectionVersion: number;
+    conversationId?: string;
+    clearedThroughSequence?: number;
+    stale: boolean;
+    data: Array<TimelineEntry>;
+    nextCursor: string | null;
+    merge?: string;
+  };
+  export type TimelineEntry = {
+    entryId: string;
+    kind: "CALL" | "MEETING_INVITATION";
+    source?: string;
+    sourceId?: string;
+    conversationId?: string;
+    occurredAt: string;
+    anchorSequence?: number | null;
+    sourceVersion?: number;
+    refreshedAt?: string;
+    call?: { [key: string]: unknown } | null;
+    meeting?: { [key: string]: unknown } | null;
+  };
 
   /** Typed parameters and response of every REST operation of this domain. */
   export interface Operations {
@@ -2392,6 +2774,21 @@ export namespace Communications {
     acceptCommunicationsContactRequest: {
       params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
       response: ContactRequest;
+    };
+    /** PUT /api/v2/communications/devices/{deviceId}/sync-state; auth MEETING_SESSION; retry IDEMPOTENT */
+    acknowledgeCommunicationsDeviceSync: {
+      params: { path: { deviceId: string }; body: SyncAck; idempotencyKey?: string };
+      response: SyncState;
+    };
+    /** PUT /api/v2/communications/contact-lists/{listId}/members/{contactId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    addContactListMember: {
+      params: { path: { listId: string; contactId: string }; idempotencyKey?: string };
+      response: ContactListMembership;
+    };
+    /** PUT /api/v2/communications/contacts/{contactId}/favorite; auth MEETING_SESSION; retry IDEMPOTENT */
+    addFavoriteContact: {
+      params: { path: { contactId: string }; body: Favorite; idempotencyKey?: string };
+      response: FavoriteResult;
     };
     /** PUT /api/v2/communications/profiles/{cfMeetId}/block; auth MEETING_SESSION; retry IDEMPOTENT */
     blockCommunicationsProfile: {
@@ -2403,6 +2800,11 @@ export namespace Communications {
       params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
       response: ContactRequest;
     };
+    /** POST /api/v2/communications/conversations/{conversationId}/clear-for-me; auth MEETING_SESSION; retry IDEMPOTENT */
+    clearConversationForMe: {
+      params: { path: { conversationId: string }; body: ClearForMe; idempotencyKey?: string };
+      response: ClearedForMe;
+    };
     /** POST /api/v2/communications/contact-requests; auth MEETING_SESSION; retry IDEMPOTENT */
     createCommunicationsContactRequest: {
       params: { body: PublicIdResolve; idempotencyKey?: string };
@@ -2413,15 +2815,45 @@ export namespace Communications {
       params: { body: InviteCreate; idempotencyKey?: string };
       response: Invite;
     };
+    /** POST /api/v2/communications/contact-lists; auth MEETING_SESSION; retry IDEMPOTENT */
+    createContactList: {
+      params: { body: ContactListCreate; idempotencyKey?: string };
+      response: ContactList;
+    };
+    /** POST /api/v2/communications/conversations/{conversationId}/meetings/instant; auth MEETING_SESSION; retry IDEMPOTENT */
+    createConversationInstantMeeting: {
+      params: { path: { conversationId: string }; body: MeetingInstant; idempotencyKey?: string };
+      response: MeetingLink;
+    };
     /** POST /api/v2/communications/contact-requests/{requestId}/decline; auth MEETING_SESSION; retry IDEMPOTENT */
     declineCommunicationsContactRequest: {
       params: { path: { requestId: string }; body: ExpectedVersion; idempotencyKey?: string };
       response: ContactRequest;
     };
+    /** DELETE /api/v2/communications/contact-lists/{listId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    deleteContactList: {
+      params: { path: { listId: string }; body: ExpectedVersion; idempotencyKey?: string };
+      response: Deleted;
+    };
+    /** DELETE /api/v2/communications/saved-messages/{savedId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    deleteSavedMessage: {
+      params: { path: { savedId: string }; idempotencyKey?: string };
+      response: Deleted;
+    };
     /** GET /api/v2/communications/activation; auth MEETING_SESSION; retry SAFE */
     getCommunicationsActivation: {
       params: {};
       response: Activation;
+    };
+    /** GET /api/v2/communications/bootstrap; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsBootstrap: {
+      params: {};
+      response: Bootstrap;
+    };
+    /** GET /api/v2/communications/calls/{callId}/context; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsCallContext: {
+      params: { path: { callId: string } };
+      response: CallEntry;
     };
     /** GET /api/v2/communications/me/capabilities; auth MEETING_SESSION; retry SAFE */
     getCommunicationsCapabilities: {
@@ -2432,6 +2864,17 @@ export namespace Communications {
     getCommunicationsContact: {
       params: { path: { contactId: string } };
       response: Contact;
+    };
+    /** GET /api/v2/communications/devices/{deviceId}/sync-state; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsDeviceSyncState: {
+      params: { path: { deviceId: string } };
+      response: SyncState;
+    };
+    /** GET /api/v2/communications/inbox; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsInboxOverlay: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: InboxPage;
+      item: NonNullable<(InboxPage)["data"]>[number];
     };
     /** GET /api/v2/communications/me/privacy; auth MEETING_SESSION; retry SAFE */
     getCommunicationsPrivacy: {
@@ -2458,11 +2901,70 @@ export namespace Communications {
       params: { idempotencyKey?: string };
       response: Invite;
     };
+    /** GET /api/v2/communications/me/recovery-state; auth MEETING_SESSION; retry SAFE */
+    getCommunicationsRecoveryState: {
+      params: {};
+      response: RecoveryState;
+    };
+    /** GET /api/v2/communications/contact-lists/{listId}; auth MEETING_SESSION; retry SAFE */
+    getContactList: {
+      params: { path: { listId: string }; query?: { limit?: number; cursor?: string } };
+      response: ContactList;
+      item: NonNullable<(ContactList)["members"]>[number];
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/context; auth MEETING_SESSION; retry SAFE */
+    getConversationContext: {
+      params: { path: { conversationId: string } };
+      response: ConversationContext;
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/preferences; auth MEETING_SESSION; retry SAFE */
+    getConversationPreferences: {
+      params: { path: { conversationId: string } };
+      response: ConversationPreferences;
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/timeline; auth MEETING_SESSION; retry SAFE */
+    getConversationTimeline: {
+      params: { path: { conversationId: string }; query?: { limit?: number; cursor?: string } };
+      response: Timeline;
+      item: NonNullable<(Timeline)["data"]>[number];
+    };
+    /** GET /api/v2/communications/me/notification-delivery-status; auth MEETING_SESSION; retry SAFE */
+    getNotificationDeliveryStatus: {
+      params: {};
+      response: DeliveryStatus;
+    };
+    /** GET /api/v2/communications/me/notification-preferences; auth MEETING_SESSION; retry SAFE */
+    getNotificationPreferences: {
+      params: {};
+      response: NotificationPreferences;
+    };
+    /** GET /api/v2/communications/me/storage-summary; auth MEETING_SESSION; retry SAFE */
+    getStorageSummary: {
+      params: {};
+      response: StorageSummary;
+    };
+    /** POST /api/v2/communications/devices/link; auth MEETING_SESSION; retry IDEMPOTENT */
+    linkCommunicationsDevice: {
+      params: { body: DeviceLink; idempotencyKey?: string };
+      response: DeviceResult;
+    };
+    /** GET /api/v2/communications/activity; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsActivity: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: ActivityPage;
+      item: NonNullable<(ActivityPage)["data"]>[number];
+    };
     /** GET /api/v2/communications/blocks; auth MEETING_SESSION; retry SAFE */
     listCommunicationsBlocks: {
       params: { query?: { limit?: number; cursor?: string } };
       response: BlocksPage;
       item: NonNullable<(BlocksPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/calls/history; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsCallHistory: {
+      params: { query?: { limit?: number; cursor?: string; missed?: boolean } };
+      response: CallHistoryPage;
+      item: NonNullable<(CallHistoryPage)["data"]>[number];
     };
     /** GET /api/v2/communications/contacts/{contactId}/common-groups; auth MEETING_SESSION; retry SAFE */
     listCommunicationsCommonGroups: {
@@ -2475,11 +2977,48 @@ export namespace Communications {
       response: ContactsPage;
       item: NonNullable<(ContactsPage)["data"]>[number];
     };
+    /** GET /api/v2/communications/devices; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsDevices: {
+      params: {};
+      response: Devices;
+    };
+    /** GET /api/v2/communications/events; auth MEETING_SESSION; retry SAFE */
+    listCommunicationsEvents: {
+      params: { query?: { after?: number; limit?: number; domains?: string } };
+      response: Changes;
+    };
     /** GET /api/v2/communications/invites; auth MEETING_SESSION; retry SAFE */
     listCommunicationsInvitations: {
       params: { query?: { limit?: number; cursor?: string } };
       response: InvitesPage;
       item: NonNullable<(InvitesPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/contact-lists; auth MEETING_SESSION; retry SAFE */
+    listContactLists: {
+      params: {};
+      response: ContactLists;
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/media; auth MEETING_SESSION; retry SAFE */
+    listConversationMedia: {
+      params: { path: { conversationId: string }; query?: { limit?: number; cursor?: string } };
+      response: MediaPage;
+      item: NonNullable<(MediaPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/meetings; auth MEETING_SESSION; retry SAFE */
+    listConversationMeetings: {
+      params: { path: { conversationId: string }; query?: { limit?: number; cursor?: string } };
+      response: MeetingLinksPage;
+      item: NonNullable<(MeetingLinksPage)["data"]>[number];
+    };
+    /** GET /api/v2/communications/conversations/{conversationId}/shared-groups; auth MEETING_SESSION; retry SAFE */
+    listConversationSharedGroups: {
+      params: { path: { conversationId: string } };
+      response: SharedGroups;
+    };
+    /** GET /api/v2/communications/contacts/favorites; auth MEETING_SESSION; retry SAFE */
+    listFavoriteContacts: {
+      params: {};
+      response: FavoritesList;
     };
     /** GET /api/v2/communications/contact-requests/incoming; auth MEETING_SESSION; retry SAFE */
     listIncomingCommunicationsContactRequests: {
@@ -2493,10 +3032,36 @@ export namespace Communications {
       response: RequestsPage;
       item: NonNullable<(RequestsPage)["data"]>[number];
     };
+    /** GET /api/v2/communications/saved-messages; auth MEETING_SESSION; retry SAFE */
+    listSavedMessages: {
+      params: { query?: { limit?: number; cursor?: string } };
+      response: SavedMessagesPage;
+      item: NonNullable<(SavedMessagesPage)["data"]>[number];
+    };
+    /** PUT /api/v2/communications/devices/{deviceId}/push; auth MEETING_SESSION; retry IDEMPOTENT */
+    registerCommunicationsDevicePush: {
+      params: { path: { deviceId: string }; body: DevicePush; idempotencyKey?: string };
+      response: DeviceResult;
+    };
     /** DELETE /api/v2/communications/contacts/{contactId}; auth MEETING_SESSION; retry IDEMPOTENT */
     removeCommunicationsContact: {
       params: { path: { contactId: string }; idempotencyKey?: string };
       response: ContactRemoved;
+    };
+    /** DELETE /api/v2/communications/devices/{deviceId}/push; auth MEETING_SESSION; retry IDEMPOTENT */
+    removeCommunicationsDevicePush: {
+      params: { path: { deviceId: string }; idempotencyKey?: string };
+      response: DeviceResult;
+    };
+    /** DELETE /api/v2/communications/contact-lists/{listId}/members/{contactId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    removeContactListMember: {
+      params: { path: { listId: string; contactId: string }; idempotencyKey?: string };
+      response: ContactListMembership;
+    };
+    /** DELETE /api/v2/communications/contacts/{contactId}/favorite; auth MEETING_SESSION; retry IDEMPOTENT */
+    removeFavoriteContact: {
+      params: { path: { contactId: string }; idempotencyKey?: string };
+      response: FavoriteResult;
     };
     /** POST /api/v2/communications/profiles/{cfMeetId}/reports; auth MEETING_SESSION; retry IDEMPOTENT */
     reportCommunicationsProfile: {
@@ -2513,6 +3078,11 @@ export namespace Communications {
       params: { body: PublicIdResolve; idempotencyKey?: string };
       response: PublicProfile;
     };
+    /** POST /api/v2/communications/devices/{deviceId}/revoke; auth MEETING_SESSION; retry IDEMPOTENT */
+    revokeCommunicationsDevice: {
+      params: { path: { deviceId: string }; body: DeviceRevoke; idempotencyKey?: string };
+      response: DeviceResult;
+    };
     /** DELETE /api/v2/communications/invites/{inviteId}; auth MEETING_SESSION; retry IDEMPOTENT */
     revokeCommunicationsInvitation: {
       params: { path: { inviteId: string }; idempotencyKey?: string };
@@ -2522,6 +3092,31 @@ export namespace Communications {
     rotateCommunicationsPublicId: {
       params: { body: ExpectedVersion; idempotencyKey?: string };
       response: PublicId;
+    };
+    /** POST /api/v2/communications/saved-messages; auth MEETING_SESSION; retry IDEMPOTENT */
+    saveMessage: {
+      params: { body: SaveMessage; idempotencyKey?: string };
+      response: SavedMessage;
+    };
+    /** POST /api/v2/communications/conversations/{conversationId}/meetings/share; auth MEETING_SESSION; retry IDEMPOTENT */
+    shareConversationMeeting: {
+      params: { path: { conversationId: string }; body: MeetingShare; idempotencyKey?: string };
+      response: MeetingLink;
+    };
+    /** POST /api/v2/communications/contacts/{contactId}/calls; auth MEETING_SESSION; retry IDEMPOTENT */
+    startContactCall: {
+      params: { path: { contactId: string }; body: CallLaunch; idempotencyKey?: string };
+      response: CallLaunched;
+    };
+    /** POST /api/v2/communications/conversations/{conversationId}/calls; auth MEETING_SESSION; retry IDEMPOTENT */
+    startConversationCall: {
+      params: { path: { conversationId: string }; body: CallLaunch; idempotencyKey?: string };
+      response: CallLaunched;
+    };
+    /** GET /api/v2/communications/sync; auth MEETING_SESSION; retry SAFE */
+    syncCommunicationsChanges: {
+      params: { query?: { after?: number; limit?: number } };
+      response: Changes;
     };
     /** DELETE /api/v2/communications/profiles/{cfMeetId}/block; auth MEETING_SESSION; retry IDEMPOTENT */
     unblockCommunicationsProfile: {
@@ -2537,6 +3132,21 @@ export namespace Communications {
     updateCommunicationsPrivacy: {
       params: { body: PrivacyUpdate; idempotencyKey?: string };
       response: PrivacyView;
+    };
+    /** PATCH /api/v2/communications/contact-lists/{listId}; auth MEETING_SESSION; retry IDEMPOTENT */
+    updateContactList: {
+      params: { path: { listId: string }; body: ContactListUpdate; idempotencyKey?: string };
+      response: ContactList;
+    };
+    /** PUT /api/v2/communications/conversations/{conversationId}/preferences; auth MEETING_SESSION; retry IDEMPOTENT */
+    updateConversationPreferences: {
+      params: { path: { conversationId: string }; body: ConversationPreferencesUpdate; idempotencyKey?: string };
+      response: ConversationPreferences;
+    };
+    /** PUT /api/v2/communications/me/notification-preferences; auth MEETING_SESSION; retry IDEMPOTENT */
+    updateNotificationPreferences: {
+      params: { body: NotificationPreferencesUpdate; idempotencyKey?: string };
+      response: NotificationPreferences;
     };
   }
 }

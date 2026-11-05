@@ -3687,6 +3687,270 @@
       "method": "DELETE",
       "path": "/api/v2/communications/profiles/{cfMeetId}/block",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/bootstrap",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/inbox",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/activity",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/timeline",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/context",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/contacts/{contactId}/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/calls/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/calls/{callId}/context",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/sync",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/events",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/media",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/conversations/{conversationId}/preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/clear-for-me",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/saved-messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/saved-messages",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/saved-messages/{savedId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contacts/favorites",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/contacts/{contactId}/favorite",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contacts/{contactId}/favorite",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/contact-lists",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PATCH",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contact-lists/{listId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/notification-preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/me/notification-preferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/storage-summary",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/shared-groups",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/devices/link",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/devices/{deviceId}/push",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "DELETE",
+      "path": "/api/v2/communications/devices/{deviceId}/push",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/devices/{deviceId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "PUT",
+      "path": "/api/v2/communications/devices/{deviceId}/sync-state",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/notification-delivery-status",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings/instant",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings/share",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/conversations/{conversationId}/meetings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "GET",
+      "path": "/api/v2/communications/me/recovery-state",
+      "class": "PUBLIC_CUSTOMER"
     }
   ]
 }

@@ -148,9 +148,11 @@ def prepare_trust():
         if not (recovery/name).exists():p.write_private(recovery/name,(WORK/name).read_text())
     hubkey=public_key(keyfile,'communications-20261103')
     hub=dict(bundle_version=1,receiver='cfmeet.communications',runtime_environment='production',trusted_issuers=[])
+    # Sections 9-23: Hub-to-owner facades (call launch, meeting resolve/create). Owner
+    # event publishing and operator suspension stay ungranted until explicitly enabled.
     perms={'platform-access':['platform-identity.read','platform-principal.resolve'],
-        'meeting-service':['communications-account.read'],
-        'calling':['calling-communications.read','calling-communications.apply'],
+        'meeting-service':['communications-account.read','meeting-communications.read','meeting-communications.create'],
+        'calling':['calling-communications.read','calling-communications.apply','calling-communications.launch'],
         'messaging':['messaging-communications.read','messaging-communications.apply']}
     for service,name in OWNERS.items():
         c=p.inspect(name);e=p.env_of(c)
@@ -170,7 +172,7 @@ def prepare_trust():
     if not operator.exists():
         p.run('openssl','genpkey','-algorithm','ED25519','-out',str(operator))
         os.chmod(operator,0o400)
-    grant(hub,'cfmeet.operator-console',public_key(operator,'communications-operator-20261103'),['communications-backfill.run'])
+    grant(hub,'cfmeet.operator-console',public_key(operator,'communications-operator-20261103'),['communications-backfill.run','communications-observability.read'])
     save(WORK/'communications.trust.json',json.dumps(hub))
 
 def image(service,sha):

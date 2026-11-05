@@ -1,15 +1,23 @@
 pub mod api;
 pub mod auth;
+pub mod calls;
+pub mod chat;
+pub mod collections;
 pub mod config;
 pub mod crypto;
+pub mod devices;
 pub mod error;
 pub mod events;
+pub mod internal;
 pub mod invites;
+pub mod meetings;
 pub mod model;
+pub mod owners;
 pub mod policy;
 pub mod profiles;
 pub mod relationships;
 pub mod store;
+pub mod sync;
 
 use std::{
     sync::{
