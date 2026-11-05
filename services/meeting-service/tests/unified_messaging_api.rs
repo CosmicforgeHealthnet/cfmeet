@@ -564,7 +564,17 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
         "only the Idempotency-Key is forwarded"
     );
 
-    // Refused before any Messaging call: administration, unknown shapes, extra query keys,
+    // Group moderation is consumer-accessible; Messaging still enforces OWNER/ADMIN
+    // membership. The native relay supplies only the authenticated caller's principal.
+    let (status, value) = app
+        .post(
+            &relay(&format!("conversations/{conv}/bans")),
+            auth(),
+            json!({"principalId":Uuid::new_v4(),"reason":"ABUSE"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{value}");
+    // Refused before any Messaging call: application administration, unknown shapes, extra query keys,
     // non-JSON bodies, anonymous callers.
     let before = gw.calls().len();
     for (method, path) in [
@@ -572,7 +582,6 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
         (Method::POST, relay("messaging/legal-holds")),
         (Method::POST, relay("messaging/exports")),
         (Method::GET, relay("messaging/audit")),
-        (Method::POST, relay(&format!("conversations/{conv}/bans"))),
         (
             Method::GET,
             relay(&format!("conversations/{conv}/attachments/{conv}/content")),

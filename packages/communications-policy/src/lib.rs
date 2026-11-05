@@ -128,7 +128,10 @@ impl PolicyClient {
         let response = self.client.post_json(&req,
             "/internal/v1/communications/principals/resolve",
             &serde_json::json!({"actorPrincipalId":actor,"cfMeetId":cf_meet_id,"purpose":purpose}),
-        ).await.map_err(|_| PolicyError::Unavailable)?;
+        ).await.map_err(|error| match error {
+            cf_service_auth::client::InternalCallError::Status { status: 403 | 404, .. } => PolicyError::Denied,
+            _ => PolicyError::Unavailable,
+        })?;
         match response.status() {
             200 => {}
             403 | 404 => return Err(PolicyError::Denied),

@@ -428,6 +428,22 @@ async fn a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_c
     ));
     let second = operations::read_checkpoint(&path).unwrap().unwrap();
     assert!(second.tree_size > first.tree_size);
+    let pending_principal = h.principal(&c);
+    let pending = h.challenge(&c, pending_principal).await;
+    assert_eq!(pending.status, StatusCode::CREATED, "{}", pending.text);
+    let device = cf_messaging_crypto::device::Device::generate(
+        uuid::Uuid::parse_str(pending.json["deviceId"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let challenge_id =
+        uuid::Uuid::parse_str(pending.json["challengeId"].as_str().unwrap()).unwrap();
+    let nonce: [u8; 32] = hex::decode(pending.json["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let package = device
+        .registration_key_package(challenge_id, &nonce)
+        .unwrap();
 
     // A forked history: same size, different root.
     let forked = KtCheckpoint {
@@ -459,7 +475,16 @@ async fn a_rolled_back_or_forked_transparency_log_is_detected_and_appends_fail_c
             .unwrap()
     );
     assert_eq!(h.scalar("SELECT count(*) FROM messaging_incidents WHERE category = 'KT_ROLLBACK_DETECTED' AND severity = 'CRITICAL'").await, 1);
-    let (_, r) = h.register_device(&c, h.principal(&c)).await;
+    let challenge = h.challenge(&c, pending_principal).await;
+    assert_eq!(challenge.status, StatusCode::SERVICE_UNAVAILABLE);
+    let r = h
+        .post(
+            &c,
+            Some(pending_principal),
+            "/v1/messaging/devices",
+            json!({"challengeId":challenge_id,"keyPackage":b64(&package)}),
+        )
+        .await;
     assert_eq!(
         (r.status, r.reason()),
         (StatusCode::SERVICE_UNAVAILABLE, "KT_LOG_ROLLBACK_DETECTED"),

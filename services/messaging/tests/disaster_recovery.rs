@@ -292,6 +292,22 @@ async fn a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_
 
     // KT: the checkpoint taken at backup time is consistent; the newer one detects the
     // rollback, and appends fail closed until an operator resolves the incident.
+    let pending_principal = restored.principal(&e);
+    let pending = restored.challenge(&e, pending_principal).await;
+    assert_eq!(pending.status, StatusCode::CREATED, "{}", pending.text);
+    let device = cf_messaging_crypto::device::Device::generate(
+        uuid::Uuid::parse_str(pending.json["deviceId"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let challenge_id =
+        uuid::Uuid::parse_str(pending.json["challengeId"].as_str().unwrap()).unwrap();
+    let nonce: [u8; 32] = hex::decode(pending.json["nonce"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let package = device
+        .registration_key_package(challenge_id, &nonce)
+        .unwrap();
     let now = chrono::Utc::now();
     assert!(matches!(
         operations::kt_verify(restored.conn(), &at_backup, now)
@@ -304,7 +320,17 @@ async fn a_restored_backup_serves_history_drains_relays_once_and_detects_the_kt_
         KtVerdict::Behind { database_size, checkpoint_size }
             if database_size == at_backup.tree_size && checkpoint_size == after_backup.tree_size
     ));
-    let (_, refused) = restored.register_device(&e, restored.principal(&e)).await;
+    let denied_challenge = restored.challenge(&e, pending_principal).await;
+    assert_eq!(denied_challenge.status, StatusCode::SERVICE_UNAVAILABLE);
+    let refused = restored
+        .post(
+            &e,
+            Some(pending_principal),
+            "/v1/messaging/devices",
+            json!({"challengeId":challenge_id,"keyPackage":b64(&package)}),
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
         refused.reason(),
         "KT_LOG_ROLLBACK_DETECTED",
