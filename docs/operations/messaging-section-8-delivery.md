@@ -383,6 +383,17 @@ Acceptance thresholds are unchanged: the 20 s connect budget, real-media frame c
 authorization denials, transfer removal, reconnect and rollback criteria. No test was relaxed;
 the refreshed-token re-entry security test is unchanged.
 
+### Test results
+
+| Check | Run | Result |
+|---|---|---|
+| Real Calling gateway + LiveKit certification, two-key LiveKit, **before fix** (`be363bb`) | [42012267576](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012267576) (attempt 2) | **FAIL** at the first real media join through the gateway (`rtc_certification.rs:589`, connect `ok: false`), reproducing production |
+| Same, first fix (`9f61237`, join-only fallback) | [42012774740](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012774740) | FAIL: all enterprise media scenarios passed; refreshed-token round 1 held an unprivileged refresh (fixed by `4ca0cb5`) |
+| Same, **after fix** (`4ca0cb5`) | [42013987193](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42013987193) main, [42013981872](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42013981872) staging | **PASS**: extension, SIMULTANEOUS and ORDERED ring groups, queue, transfer and failed transfer with real media; all 3 refreshed-token re-entry rounds still refused 401 at the gateway and at LiveKit |
+| LiveKit refresh-key reproduction (production digest), topology replicas | [42012267771](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42012267771) | PASS (evidence above) |
+| Calling unit tests `media::` (21), `cargo fmt --check`, `cargo clippy --all-targets -D warnings` | local, `4ca0cb5` | PASS |
+| Production tooling unit tests (redaction, persistence, transfer, reconnect, gates) | local, `9bbcc3a` | PASS (65 tests) |
+
 ### Messaging configuration preservation verdict
 
 **PRESERVED (TESTED).** `messaging-configure` builds the configured container through the new
