@@ -74,18 +74,9 @@ jobs:
           workspaces: services/security-scan-gateway -> target
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - name: Wait for the engine
+      - name: Wait for the engine with current signatures (the gateway refuses > 72 h)
         working-directory: .
-        run: |
-          set -euo pipefail
-          command -v nc >/dev/null || sudo apt-get install -y -qq netcat-openbsd >/dev/null
-          for i in $(seq 1 150); do
-            if [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0')" = "PONG" ]; then
-              printf 'zVERSION\0' | nc -w 2 127.0.0.1 3310 | tr -d '\0'; echo; exit 0
-            fi
-            sleep 2
-          done
-          docker logs clamd | tail -50; exit 1
+        run: scripts/security-scan/wait-fresh-clamd.sh clamd 127.0.0.1:3310
       - name: Tests (scripted engine for failure modes, real engine for EICAR / clean / 5 MiB)
         run: cargo test --locked -- --nocapture
       - name: Real binary end to end (start-ci-gateway.sh, readiness against the real engine)

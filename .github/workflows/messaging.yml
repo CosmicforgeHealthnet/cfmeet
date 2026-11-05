@@ -348,7 +348,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd services/security-scan-gateway && cargo build --locked --bins)
-          for i in $(seq 1 150); do [ "$(printf 'zPING\0' | nc -w 2 127.0.0.1 3311 | tr -d '\0')" = "PONG" ] && break; sleep 2; done
+          scripts/security-scan/wait-fresh-clamd.sh gateway-clamd 127.0.0.1:3311
           scripts/security-scan/start-ci-gateway.sh "$PWD/services/security-scan-gateway/target/debug/security-scan-gateway" 127.0.0.1:3311 "$RUNNER_TEMP/scan-gateway"
 
       # Named gates first (a failure names the gate), then the whole workspace.

@@ -642,3 +642,43 @@ anyway. Push providers remain BLOCKED on credentials; production E2EE remains BL
 | Phone OTP, off-server DR | DEFERRED |
 | Section 8 | **PARTIALLY COMPLETE.** Calling media restored and the backend released; Messaging infrastructure activation waits on capacity |
 
+
+## Shared security scanning and Messaging infrastructure activation — 2026-11-05
+
+The owner replaced the "+2 GiB RAM / dedicated ClamAV" requirement with a shared,
+authenticated scanning gateway in front of an antivirus engine that already runs on the
+VPS. The earlier rejection of "sharing another product's clamd" was about crossing product
+isolation through a raw, unauthenticated port; the gateway keeps that isolation. Runbook:
+[shared-security-scanning.md](shared-security-scanning.md).
+
+### Scanner backend selection (read-only audit, runs 42077171046 and 42077986241)
+
+| Engine | Class | Limit / peak | Memory events | Reload | Threads / stream | Signatures | Decision |
+|---|---|---|---|---|---|---|---|
+| `admin-server-mail-clamav` (1.4.6) | production mail | 3072 / 1846 MiB | 0 OOM | `ConcurrentDatabaseReload no` | 8 / 25M, `AlertExceedsMax yes` | daily 28173, 60 h | **Selected** |
+| `admin-server-staging-mail-clamav` | staging | 3072 / 1846 MiB | 0 | no | 8 / 25M | 28173, 60 h | Excluded (staging) |
+| `karrygo-media-scanner` (1.5.4) | production KarryGo | 1536 / 1536 MiB | 52,772 `memory.max` hits, 277 MiB swap | default | default | 28174, 11 h | Excluded (no headroom) |
+
+Host during the audit: 5.33 GiB available of 11.68 GiB, swap 0.29 GiB, CPU pressure
+`some` ≈ 9 % (300 s), memory pressure 0. Mail engine: 0.02 % CPU median, 951 MiB, benign
+stdin scans 154–199 ms. LiveKit 54 MiB, Calling 13 MiB, Messaging 9 MiB.
+
+Finding for the mail owner: its signatures are one daily version behind KarryGo's (28173
+vs 28174) and its `freshclam.dat` is 156 h old, although `Checks 12`. If its database passes
+72 h the gateway refuses to scan (`SIGNATURES_STALE`) and MANAGED attachments stay
+`VERIFYING`. The threshold is not relaxed to keep scanning.
+
+### Implementation
+
+| Component | Status |
+|---|---|
+| `packages/scan-gateway-contract`: verdicts, reasons, `ScanResponse`, Ed25519 signed-verdict format and caller verification | IMPLEMENTED, TESTED (6 unit tests) |
+| `services/security-scan-gateway`: authenticated single-use service tokens, per-product registry and limits, replay guard, bounded streaming `INSTREAM`, freshness gate, signed verdicts, private metrics, probe and keygen binaries | IMPLEMENTED, TESTED (4 unit + 16 integration tests; real-engine test in CI) |
+| `cfmeet.security-scan` identity, `security-scan.submit` (Messaging only) | IMPLEMENTED, TESTED (service-auth suite, new least-privilege test) |
+| Messaging `GatewayScanner` behind the existing `AttachmentScanner` (no new state machine) | IMPLEMENTED, TESTED (5 adapter tests; full MANAGED lifecycle through the real gateway: clean → READY and byte-exact download, EICAR → QUARANTINED; 23/23 attachment tests) |
+| `scan-gateway-configure / verify / disable` operations | IMPLEMENTED, TESTED (7 unit tests) |
+| `messaging-configure` refactor: scanner mode `gateway` or `quarantine`; no antivirus engine; memory gate 3.5 GiB instead of 6.5 GiB; stage candidates never get the gateway | IMPLEMENTED, TESTED (persistence suite, 77 tooling tests total) |
+| PRIVATE_E2EE | Unchanged: ciphertext is never sent to a scanner; production E2EE stays disabled (issue 13) |
+
+No public Messaging API changed. The gateway API is internal only and absent from consumer
+Swagger. No frontend, mobile, Vercel or `frontend.yml` change.
