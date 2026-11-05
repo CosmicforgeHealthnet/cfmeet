@@ -698,6 +698,7 @@ Swagger. No frontend, mobile, Vercel or `frontend.yml` change.
 | `communications-verify` | [42105498094](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105498094) | PASS |
 | `resource-inventory` | [42105503611](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105503611) | PASS (stage candidates found running after the stage run; stopped by `resource-recover`) |
 | `messaging-verify` | [42105526737](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42105526737) | **FAILED**: Swagger, admin/metrics not public PASS; public `POST /v1/realtime/tickets` 502 (see "Open defect") |
+| `resource-recover` | [42114254870](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42114254870) | PASS: stage candidates restarted by the stage run stopped again (retained) |
 | Independent `scan-gateway-verify` | [42113919022](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42113919022) | **PASS 26/26**, regression PASS |
 
 Running images (`docker inspect` image IDs, from the verify receipts): messaging
