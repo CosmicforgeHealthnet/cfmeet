@@ -139,7 +139,8 @@ async fn internal_authentication_refuses_replays_forged_actors_and_unknown_keys(
     assert_eq!(
         h.count("SELECT count(*) FROM organization_service_nonces")
             .await,
-        2 + 1
+        2,
+        "create + first read; the replay recorded nothing"
     );
 
     // No token / an untrusted key.
