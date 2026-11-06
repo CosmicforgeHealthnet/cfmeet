@@ -349,7 +349,7 @@ impl State {
             .await?;
         let prefs = self.get_notification_preferences(p).await?;
         Ok(
-            json!({"schemaVersion":1,"providers":v["providers"],"devices":v["devices"],"pendingJobs":v["pendingJobs"],"deadJobs":v["deadJobs"],
+            json!({"schemaVersion":1,"providers":v["pushServices"],"devices":v["devices"],"pendingJobs":v["pendingJobs"],"deadJobs":v["deadJobs"],
             "callRinging":{"owner":"CALLING","transport":"Calling signaling WebSocket; mobile push transport NOT_CONFIGURED"},
             "preferences":prefs,"physicalDeviceAcceptance":"NOT_RUN"}),
         )

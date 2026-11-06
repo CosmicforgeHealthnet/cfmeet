@@ -746,6 +746,14 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             .device_push(&sa, &a.profile, device, None, Uuid::new_v4())
             .await,
     );
+    // N07: Messaging's push-status reports `pushServices`; the Hub must surface that
+    // truthful configuration, never a missing (null) provider state.
+    let status = h.state.delivery_status(&sa, &a.profile).await.unwrap();
+    assert_eq!(
+        status["providers"],
+        json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"})
+    );
+    assert_eq!(status["physicalDeviceAcceptance"], "NOT_RUN");
     h.close().await;
 }
 

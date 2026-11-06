@@ -193,7 +193,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
             )
         }
         "/internal/v1/communications/push-status" => ok(
-            json!({"schemaVersion":1,"providers":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
+            json!({"schemaVersion":1,"pushServices":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
         ),
         "/internal/v1/communications/endpoints/verify" => {
             let e = world.endpoints.get(&uuid_at(body, "endpointId"));
