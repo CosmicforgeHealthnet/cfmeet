@@ -342,6 +342,7 @@ def provision(sha, run_id):
 
 
 def secure_storage_ingress(run_id):
+    import storage_relay
     identity()
     store = inspect('cfmeet-calling-artifacts')
     assert not store['HostConfig']['PortBindings']
@@ -364,7 +365,7 @@ def secure_storage_ingress(run_id):
         '    proxy_set_header Host $http_host;\n'
         '    proxy_set_header X-Forwarded-Proto https;\n'
         '    add_header Cache-Control "private, no-store" always;\n'
-        '    proxy_pass http://'+ip+':9000;\n}\n')
+        '    proxy_pass http://'+storage_relay.store_upstream()+';\n}\n')
     old_snippet = snippet.read_text() if snippet.exists() else None
     include = 'include /etc/nginx/snippets/cfmeet-calling-artifacts.conf;'
     backup = ROOT/'production-evidence'/('storage-ingress-'+run_id)
@@ -830,6 +831,12 @@ if __name__ == '__main__':
             communications_release.run(operation, sha, run_id)
         elif operation == 'inspect':
             audit()
+        elif operation.startswith('private-tls-'):
+            import private_tls
+            private_tls.run(operation, sha, run_id)
+        elif operation.startswith('storage-routes'):
+            import storage_relay
+            storage_relay.run(operation, sha, run_id)
         elif operation.startswith('resource-'):
             import resource_recovery
             resource_recovery.run(operation, sha, run_id)

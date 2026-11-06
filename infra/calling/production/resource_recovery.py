@@ -187,7 +187,7 @@ def inventory():
 
 
 # Long-lived CF Meet infrastructure containers that releases never recreate.
-LONG_LIVED = ('lk-server', 'cfmeet-core-db', 'cfmeet-core-tls', 'cfmeet-calling-loopback', 'cfmeet-messaging-ingress', 'cfmeet-calling-redis',
+LONG_LIVED = ('lk-server', 'cfmeet-core-db', 'cfmeet-core-tls', 'cfmeet-calling-loopback', 'cfmeet-messaging-ingress', 'cfmeet-storage-ingress', 'cfmeet-calling-redis',
               'cfmeet-calling-artifacts', 'cfmeet-calling-egress')
 
 

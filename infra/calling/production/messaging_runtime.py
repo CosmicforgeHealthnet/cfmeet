@@ -238,9 +238,12 @@ def upstream_trust():
     return UPSTREAM_TRUST, 'system-directory'
 
 
-def nginx_config(store_ip, trust=SYSTEM_BUNDLE):
-    # The attachment route keeps its existing, separately verified storage address.
-    assert ipaddress.ip_address(store_ip).is_private
+def nginx_config(store, trust=SYSTEM_BUNDLE):
+    """`store` is the loopback storage relay (`storage_relay.ADDRESS`) or, before that
+    relay exists, a private store address."""
+    host, _, port = store.partition(':')
+    assert ipaddress.ip_address(host).is_private and port in ('', '9000', '19000')
+    store = store if port else store + ':9000'
     common = ('    access_log off;\n    proxy_http_version 1.1;\n'
         '    proxy_set_header Host $http_host;\n    proxy_set_header X-Forwarded-Proto https;\n'
         '    add_header Cache-Control "private, no-store" always;\n')
@@ -254,14 +257,15 @@ def nginx_config(store_ip, trust=SYSTEM_BUNDLE):
         'location = /v1/realtime/tickets {\n    limit_except POST OPTIONS { deny all; }\n' + tls + '}\n'
         'location ^~ /' + BUCKET + '/ {\n    limit_except GET HEAD PUT OPTIONS { deny all; }\n'
         '    client_max_body_size 64m;\n    proxy_buffering off;\n    proxy_request_buffering off;\n'
-        + common + '    proxy_pass http://' + store_ip + ':9000;\n}\n')
+        + common + '    proxy_pass http://' + store + ';\n}\n')
 
 
 def install_ingress(run_id):
     """Installs the relay and the host routes. Returns only when every accepting host
     nginx worker serves the new routes; restores everything itself on failure. The
     returned relay state lets later checks roll the installation back."""
-    store = p.inspect(storage.NAME)['NetworkSettings']['Networks'][p.NET]['IPAddress']
+    import storage_relay
+    store = storage_relay.store_upstream()
     assert SITE_LINK.resolve() == SITE
     before = SITE.read_text()
     include = 'include /etc/nginx/snippets/cfmeet-messaging.conf;'

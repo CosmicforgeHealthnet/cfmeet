@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -15,7 +15,7 @@ on:
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
+  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || (startsWith(inputs.operation, 'private-tls-') && inputs.operation != 'private-tls-inspect') || (startsWith(inputs.operation, 'storage-routes') && inputs.operation != 'storage-routes-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners' || inputs.operation == 'private-tls-inspect' || inputs.operation == 'storage-routes-inspect') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
@@ -37,6 +37,12 @@ jobs:
           command -v nginx >/dev/null || { sudo apt-get update -q; sudo apt-get install -y -q nginx-core; }
           sudo systemctl stop nginx 2>/dev/null || true
           python3 infra/calling/ingress-ci/realtime_ingress.py
+      - name: Prove private TLS renewal with the production proxy image before changing production
+        if: inputs.operation == 'private-tls-durable'
+        run: python3 infra/calling/ingress-ci/private_tls_renewal.py
+      - name: Prove the storage relay survives store recreation before changing production
+        if: inputs.operation == 'storage-routes'
+        run: python3 infra/calling/ingress-ci/storage_relay_ci.py
       - name: Configure existing production SSH access
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -114,7 +120,7 @@ jobs:
           IMAGE_SHA: ${{ inputs.image_sha || github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage || "$OPERATION" == media-diagnose || "$OPERATION" == resource-inventory || "$OPERATION" == resource-scanners ]]; then
+          if [[ "$OPERATION" == communications-inspect || "$OPERATION" == communications-stage || "$OPERATION" == media-diagnose || "$OPERATION" == resource-inventory || "$OPERATION" == resource-scanners || "$OPERATION" == private-tls-inspect || "$OPERATION" == storage-routes-inspect ]]; then
             [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/heads/staging ]]
           else
             [[ "$GITHUB_REF" == refs/heads/main ]]
