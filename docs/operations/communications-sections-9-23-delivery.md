@@ -195,12 +195,12 @@ Filled in with run IDs as they complete (see "Evidence" below).
 | T10 | PASS in CI only (Messaging suites) | production personal chats blocked as above |
 | T11 | PASS (Sections 4–7 production real media) | Hub-launched calls: pending launch credential |
 | T12, T25 | PASS (Sections 4–7 / Enterprise receipts) | |
-| T13 | pending CI | Hub PostgreSQL suite `unified.rs` |
-| T14 | pending CI | Hub + meeting-service suites |
-| T15 | pending CI | device link/revoke suites |
-| T17 | pending CI | favorites, lists, mute, clear-for-me, saved |
+| T13 | PASS (CI) | Hub `unified.rs` launch/timeline/dedupe/privacy, run 42134145133; production: pending release |
+| T14 | PASS (CI) | Hub meetings suite 42134145133; meeting-service MT-1/MT-2 suite in Meeting service 42133734288 |
+| T15 | PASS (CI) | Hub devices suite; Messaging 42133730321 and Calling 42133726194 owner-route suites |
+| T17 | PASS (CI) | Hub suites 42134145133 (favorites, lists, mute incl. per-conversation, clear-for-me, saved, operator hold) |
 | T18 | partial | Messaging retention/legal-hold suites; device deletion DEVICE_ONLY |
-| T19 | pending CI | contracts, SDK, migrations |
+| T19 | PASS (CI) | contracts 42133738418, TypeScript SDK 42133750706, Dart SDK 42133754917, gateway 42133742307; rollback-safe migration histories asserted in Hub and meeting-service suites |
 | T20 | PASS (Section 8 storage/scanner receipts) | |
 | T21 | BLOCKED_DEPENDENCY | physical devices and push credentials |
 | T22 | partial | fail-closed outage tests in Hub suites; no production fault injection |
@@ -239,4 +239,23 @@ antivirus, paid provider, carrier calling or AWS; frontend untouched.
 
 ## Evidence
 
-(Run IDs, image digests and production receipts are appended below as they complete.)
+### CI on `feature/sections-9-23`
+
+| Workflow | Run | Result |
+|---|---|---|
+| Communications Hub (fmt, clippy, 18 foundation + 7 unified PostgreSQL suites, policy, service-auth, consumers, real five-service journey) | [42134145133](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42134145133) | success |
+| Calling service (incl. new owner-route tests) | [42133726194](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133726194) | success |
+| Messaging (incl. new owner-route tests) | [42133730321](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133730321) | success |
+| Meeting service (incl. MT-1/MT-2 tests) | [42133734288](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133734288) | success |
+| Contracts and service auth | [42133738418](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133738418) | success |
+| API Gateway (routing incl. `/contacts/favorites`) | [42133742307](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133742307) | success |
+| Service boundaries, secrets, database roles | [42133746344](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133746344) | success |
+| SDK TypeScript / Dart | [42133750706](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133750706) / [42133754917](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133754917) | success |
+| Dependency and image security | [42133758824](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133758824) | success |
+| Communications end-to-end journeys | [42133770425](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133770425) | success |
+| Unified Messaging journeys | [42133766760](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42133766760) | backend jobs success; "Web Messaging client in Chromium" FAIL, pre-existing on `main` (42088185254, 42013987269), frontend scope, not counted |
+
+Two Hub runs before 42134145133 failed on test-setup mistakes (a card refreshed too
+recently, then a mock left in a ringing state); the code was unchanged and the tests were
+corrected, not weakened.
+
