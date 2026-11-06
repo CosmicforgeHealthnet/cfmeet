@@ -311,6 +311,26 @@ pub enum InternalPermission {
     /// (MANAGED attachments; never PRIVATE_E2EE ciphertext).
     #[serde(rename = "security-scan.submit")]
     SecurityScanSubmit,
+    /// Organizations (Blueprint Sections 3–5): read organizations, memberships and
+    /// capability decisions (service authorization, projections, colleague discovery).
+    #[serde(rename = "organization.read")]
+    OrganizationRead,
+    /// Organizations: mutate organizations, memberships and invitations on behalf of the
+    /// acting user the Meeting Service authenticated.
+    #[serde(rename = "organization.write")]
+    OrganizationWrite,
+    /// Organizations: assert the acting user (`X-CF-Acting-User`, verified email) of a
+    /// request. Only the account authority's relay (Meeting Service) holds it.
+    #[serde(rename = "organization.act-for-user")]
+    OrganizationActForUser,
+    /// Organizations: operator administration (listing, operator create, lifecycle
+    /// enforcement). Operator tooling and the Meeting Service platform-admin facade only.
+    #[serde(rename = "organization.administer")]
+    OrganizationAdminister,
+    /// Organizations: import the Meeting Service organization export and read the
+    /// migration reconciliation (Section 4 / 5 migration only).
+    #[serde(rename = "organization.migrate")]
+    OrganizationMigrate,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -839,6 +859,51 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Submit one file's bytes for malware inspection; receive a signed verdict bound to the request and digest",
     },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationRead,
+        name: "organization.read",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::CALLING,
+            services::MESSAGING,
+            services::COMMUNICATIONS,
+        ],
+        sensitive: false,
+        description: "Read organizations, memberships, membership resolution and capability decisions (ids, roles and statuses; no email or token)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationWrite,
+        name: "organization.write",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Create and change organizations, memberships and invitations for the signed acting user; Organizations enforces every role rule",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationActForUser,
+        name: "organization.act-for-user",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Assert the account-authenticated acting user (and verified email) of an Organizations request; account authority relay only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationAdminister,
+        name: "organization.administer",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Operator administration of organizations (listing, operator create, lifecycle enforcement); operator tooling and the Meeting Service platform-admin facade only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationMigrate,
+        name: "organization.migrate",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Import the Meeting Service organization export idempotently and read the migration reconciliation; Section 4 migration only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -923,6 +988,11 @@ impl InternalPermission {
         InternalPermission::WebhookMigrationImport,
         InternalPermission::DeveloperPlatformAdminister,
         InternalPermission::SecurityScanSubmit,
+        InternalPermission::OrganizationRead,
+        InternalPermission::OrganizationWrite,
+        InternalPermission::OrganizationActForUser,
+        InternalPermission::OrganizationAdminister,
+        InternalPermission::OrganizationMigrate,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1253,6 +1323,7 @@ mod tests {
         "sms-bridge.submit",
         "developer-event.publish",
         "security-scan.submit",
+        "organization.read",
     ];
 
     #[test]
@@ -1393,12 +1464,27 @@ mod tests {
                 "user-session.verify"
             ]
         );
-        for d in REGISTRY.iter().filter(|d| d.sensitive) {
-            assert!(
-                !d.grantable_to.contains(&services::MEETING_SERVICE),
-                "{}",
-                d.name
-            );
+        // The only sensitive grants the Meeting Service may hold are the Organizations
+        // relay permissions (ADR 0056 §3: it is the account authority that authenticates
+        // the acting human, relays platform-admin facades and exports the legacy rows).
+        let sensitive: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            sensitive,
+            [
+                "organization.act-for-user",
+                "organization.administer",
+                "organization.migrate"
+            ]
+        );
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
+        {
+            assert_eq!(d.receiver, services::ORGANIZATIONS, "{}", d.name);
         }
         // Identity administration and delegation stay out of reach.
         for p in [PlatformIdentityAdminister, PlatformIdentityDelegate] {
@@ -1407,6 +1493,54 @@ mod tests {
                 .grantable_to
                 .contains(&services::MEETING_SERVICE));
         }
+    }
+
+    #[test]
+    fn organizations_flows_are_least_privilege() {
+        let receiving: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::ORGANIZATIONS)
+            .map(|d| (d.name, d.grantable_to, d.sensitive))
+            .collect();
+        assert_eq!(
+            receiving,
+            [
+                (
+                    "organization.read",
+                    &[
+                        services::MEETING_SERVICE,
+                        services::CALLING,
+                        services::MESSAGING,
+                        services::COMMUNICATIONS
+                    ][..],
+                    false
+                ),
+                (
+                    "organization.write",
+                    &[services::MEETING_SERVICE][..],
+                    false
+                ),
+                (
+                    "organization.act-for-user",
+                    &[services::MEETING_SERVICE][..],
+                    true
+                ),
+                (
+                    "organization.administer",
+                    &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    true
+                ),
+                (
+                    "organization.migrate",
+                    &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    true
+                ),
+            ]
+        );
+        // Organizations calls nobody yet (its outbox has no delivery target in Section 5).
+        assert!(REGISTRY
+            .iter()
+            .all(|d| !d.grantable_to.contains(&services::ORGANIZATIONS)));
     }
 
     #[test]

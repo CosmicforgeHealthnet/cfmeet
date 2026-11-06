@@ -148,7 +148,12 @@
         "webhook-migration.export",
         "webhook-migration.import",
         "developer-platform.administer",
-        "security-scan.submit"
+        "security-scan.submit",
+        "organization.read",
+        "organization.write",
+        "organization.act-for-user",
+        "organization.administer",
+        "organization.migrate"
       ]
     }
   }
