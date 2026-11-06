@@ -228,7 +228,7 @@ catalogue 572.
 |---|---|---|
 | 1 | `policy/check` | ALREADY_IMPLEMENTED (now also applies operator holds and account-wide notification switches) |
 | 2 | `identities/resolve` | ALREADY_IMPLEMENTED as `principals/resolve` (name kept; purpose-bound) |
-| 3–5, 7 | `events/{calling,messaging,meetings,devices}` | IMPLEMENTED (`communications-events.publish`, family/type allowlists, payload-bound dedupe); producers not yet wired, not granted in production |
+| 3–5, 7 | `events/{calling,messaging,meetings,devices}` | IMPLEMENTED (`communications-events.publish`, family/type allowlists, payload-bound dedupe). Producers are deliberately not wired and the scope is not granted in production: each event family's correctness is provided by owner reads instead (Section 17 table below), proved by Hub tests |
 | 6 | `events/accounts` | ALREADY_IMPLEMENTED as `account-events` |
 | 8 | `readiness` | IMPLEMENTED (`communications-observability.read`) |
 | 9 | `reconciliation/range` | IMPLEMENTED (`communications-backfill.run`, ≤31 days) |
@@ -254,8 +254,21 @@ Consumer-visible change events are the per-user change feed domains:
 | notification.delivery_failed | Messaging push job state via `/me/notification-delivery-status` |
 | phone.changed | DEFERRED |
 
-\* Privacy/block feed entries for pre-existing operations are a follow-up; those
-resources are re-read on bootstrap.
+### Owner events versus owner reads (Section 17 audit, 2026-11-06)
+
+The Hub never holds canonical Calling, Messaging or Meetings state. Every event family
+either has a producer or an equivalent owner read that is proved by tests:
+
+| Event family | Mechanism in production | Proof |
+|---|---|---|
+| call.state_changed / call.ended / call.outcome_changed | Background sweep every 5 s (20 viewers, 50 cards each) re-reads due non-terminal call cards from Calling under each viewer's own delegation. A changed card writes one TIMELINE feed entry for that viewer. Timeline and activity reads refresh due cards too. An unreachable Calling changes nothing (timeline marks `stale`). An older owner version never overwrites a newer one. | `call_cards_converge_without_owner_events_across_viewers_devices_and_outages`, `activity_refreshes_due_call_cards_from_calling`, `calls_launch_through_policy_once_and_project_safe_timeline_cards` |
+| conversation.member_removed | Membership is read live from Messaging (MS-1) on every timeline, activity and launch | same suites (leaving removes timeline access) |
+| device.revoked / endpoint.revoked | `GET /devices` and `POST /devices/link` re-check each ACTIVE reference with its owner. An explicit owner answer revokes (`OWNER_SERVICE`, audited, DEVICE feed entry); an unavailable owner changes nothing | `owner_side_revocations_reconcile_and_outages_change_nothing` |
+| meeting.ended | Meeting cards record an immutable "meeting shared" fact. Meeting status is read live from Meetings at join (resolve). There is no Hub-side meeting status to invalidate | `meetings_are_linked_by_reference_and_only_shared_by_owners` |
+| privacy.changed / block.changed / contact.* / profile.updated | Written to the change feed in the same transaction as the change (PRIVACY, BLOCK, CONTACT, PROFILE). The blocked person's devices see only CONTACT | `privacy_block_and_identity_changes_invalidate_through_the_feed`, `change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps` |
+
+The private `events/*` routes stay available for future producers. They are not
+required for correctness.
 
 ## Section 18 — certification matrix
 
