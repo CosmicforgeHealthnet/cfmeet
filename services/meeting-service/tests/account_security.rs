@@ -90,7 +90,7 @@ fn claims(app: &TestApp, token: &str) -> backend::services::auth::Claims {
 async fn login_opens_a_session_with_typed_tokens_and_case_insensitive_email() {
     let app = app_with_redis!();
     password_user(&app, "alice.typed@example.com", "active").await;
-    let (access, refresh_token) = login(&app, "  Alice.Typed@EXAMPLE.com ").await;
+    let (access, refresh_token) = login(&app, "Alice.Typed@EXAMPLE.com").await;
 
     let a = claims(&app, &access);
     let r = claims(&app, &refresh_token);

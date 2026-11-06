@@ -302,6 +302,11 @@ fn every_v2_route_is_documented() {
         // Part I — quality
         ("post", "/api/v2/conferences/{id}/quality/samples"),
         ("get", "/api/v2/conferences/{id}/quality"),
+        // Blueprint Section 2 — account sessions and the security audit
+        ("get", "/api/v2/me/sessions"),
+        ("post", "/api/v2/me/sessions/revoke-all"),
+        ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
+        ("get", "/api/v2/admin/audit-events"),
     ];
     for (method, path) in expected {
         assert!(

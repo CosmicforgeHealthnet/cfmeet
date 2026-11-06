@@ -102,3 +102,5 @@ Import rules: refuse a different `schemaVersion`, a checksum mismatch or a count
 ## 6. Events
 
 Outbox events follow [`docs/events/organization-event-contracts.md`](../events/organization-event-contracts.md). Delivery targets and transport are added per consumer in Sections 7–14; until then the outbox records and the reconciliation read are the source.
+
+**Test vector (both sides must reproduce it).** One organization `00000000-0000-4000-8000-000000000001`, name `Acme Health`, slug `acme-health`, status `ACTIVE`, `createdBy` null, `createdAt` `2026-10-04T12:00:00Z` (unix µs `1791115200000000`); one membership `00000000-0000-4000-8000-0000000000b1` of user `00000000-0000-4000-8000-0000000000a1`, role `OWNER`, status `ACTIVE`, same `createdAt`. Checksum: `1a212f81add323e1e9bed715699c0ba8c97b2dc22e211c84a05bca42d0908e78` (meeting-service `organization_export::tests`).
