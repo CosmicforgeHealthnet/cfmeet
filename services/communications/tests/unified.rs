@@ -542,6 +542,12 @@ async fn calls_launch_through_policy_once_and_project_safe_timeline_cards() {
         .unwrap();
     assert_eq!(tb["stale"], true);
     h.world.write().unwrap().calling_down = false;
+    // Calling's latest state for the conversation call is the missed outcome again.
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("NO_ANSWER".into(), true, 3, "MISSED".into()));
     // History exposes public identities only, never principal ids.
     let history = h
         .state
