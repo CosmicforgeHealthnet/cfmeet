@@ -202,6 +202,16 @@ class RenewalHook(unittest.TestCase):
         self.assertIn("if problem is None and (mode == '--reload' or current != fp)", source)
         self.assertIn("'nginx', '-t'", source)
 
+    def test_reload_confirmation_ignores_workers_of_the_previous_generation(self):
+        namespace = {}
+        exec(compile(tls.monitor_source(), 'certificate-monitor.py', 'exec'), namespace)
+        before = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process\n   10 nginx: worker process\n')
+        during = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process is shutting down\n   10 nginx: worker process\n   17 nginx: worker process\n')
+        after = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process is shutting down\n   17 nginx: worker process\n   18 nginx: worker process\n')
+        self.assertEqual(before, {'9', '10'})
+        self.assertTrue(during & before, 'an old worker still accepting means the reload is not complete')
+        self.assertFalse(after & before)
+
     def test_monitor_reports_an_alert_for_a_broken_lineage(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)

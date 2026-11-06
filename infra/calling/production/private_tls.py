@@ -325,8 +325,33 @@ def presented():
     if code or 'Verify return code: 0 (ok)' not in out or not shown: return None
     return facts(shown[0])[0]
 
+def accepting_workers(ps_output):
+    """PIDs of workers still accepting connections: an old-generation worker retitles
+    itself 'nginx: worker process is shutting down' once it stops accepting."""
+    pids = set()
+    for line in ps_output.splitlines()[1:]:
+        pid, _, title = line.strip().partition(' ')
+        if pid.isdigit() and title.strip() == 'nginx: worker process':
+            pids.add(pid)
+    return pids
+
+def workers():
+    code, out = sh('docker', 'exec', CONTAINER, 'ps', '-o', 'pid,args')
+    return accepting_workers(out) if code == 0 else None
+
 def reload():
-    return sh('docker', 'exec', CONTAINER, 'nginx', '-t')[0] == 0 and sh('docker', 'exec', CONTAINER, 'nginx', '-s', 'reload')[0] == 0
+    """nginx -t, a graceful reload, then wait until every accepting worker belongs to
+    the new generation: until then a connection can still reach an old worker."""
+    before = workers()
+    if sh('docker', 'exec', CONTAINER, 'nginx', '-t')[0] or sh('docker', 'exec', CONTAINER, 'nginx', '-s', 'reload')[0]:
+        return False
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        now = workers()
+        if now and before is not None and not now & before:
+            return True
+        time.sleep(0.2)
+    return False
 
 def main(mode):
     fp, end, problem = managed()
