@@ -64,6 +64,23 @@ class RemovableImages(unittest.TestCase):
         self.assertNotIn('postrotate', config)
 
 
+class ConcurrentRemoval(unittest.TestCase):
+    def test_an_object_removed_after_listing_is_skipped_but_other_failures_are_not(self):
+        class R:
+            def __init__(self, code, out='', err=''):
+                self.returncode, self.stdout, self.stderr = code, out, err
+        def run(args, **kw):
+            ids = args[2:]
+            if len(ids) > 1:
+                return R(1, '[{"Id": "a"}]', 'Error: No such object: gone')
+            return R(0, '[{"Id": "%s"}]' % ids[0]) if ids[0] != 'gone' else R(1, '', 'Error: No such object: gone')
+        self.assertEqual(r.inspect_present(('docker', 'inspect'), ['a', 'gone'], run=run), [{'Id': 'a'}])
+        def broken(args, **kw):
+            return R(1, '', 'permission denied')
+        with self.assertRaises(RuntimeError):
+            r.inspect_present(('docker', 'inspect'), ['a', 'b'], run=broken)
+
+
 class StageSafety(unittest.TestCase):
     def test_active_stage_refuses_to_stop_anything(self):
         candidates = [container('cfmeet-comm-stage-calling', 'x', labels={r.CANDIDATE_LABEL: 'true'})]

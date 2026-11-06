@@ -32,14 +32,32 @@ def emit(kind, value):
     print(json.dumps({kind: value}, sort_keys=True), flush=True)
 
 
+def inspect_present(command, ids, run=subprocess.run):
+    """`docker inspect` of every object that still exists. A container or image removed
+    between listing and inspection (a concurrent `--rm` probe, another release) is
+    skipped; any other failure still fails the operation."""
+    if not ids:
+        return []
+    r = run([*command, *ids], capture_output=True, text=True, timeout=120)
+    if r.returncode == 0:
+        return json.loads(r.stdout)
+    found = []
+    for one in ids:
+        r = run([*command, one], capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            found += json.loads(r.stdout)
+        elif 'No such' not in r.stderr:
+            raise RuntimeError('command failed: ' + ' '.join(command[:2]))
+    return found
+
+
 def containers():
-    ids = sh('docker', 'ps', '-aq').split()
-    return json.loads(sh('docker', 'inspect', *ids)) if ids else []
+    return inspect_present(('docker', 'inspect'), sh('docker', 'ps', '-aq').split())
 
 
 def images():
-    ids = sorted(set(sh('docker', 'image', 'ls', '-aq', '--no-trunc').split()))
-    return json.loads(sh('docker', 'image', 'inspect', *ids)) if ids else []
+    return inspect_present(('docker', 'image', 'inspect'),
+                           sorted(set(sh('docker', 'image', 'ls', '-aq', '--no-trunc').split())))
 
 
 def name(c):
