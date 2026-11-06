@@ -1,23 +1,79 @@
 # Sections 9–23 — unified Communications delivery record
 
-## Current status (2026-11-06)
+## Current status (2026-11-06, after the authorized deployment attempt)
 
-**IMPLEMENTED and TESTED; NOT DEPLOYED.** `main` = `staging` = `c2a803586f64a5fd3c58487ee7f5149a25961291`.
-Immutable images for that commit are built ([42138825294](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42138825294),
-all seven services). Read-only production inspection [42144926527](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42144926527)
-passed: production still runs the Section 8 image set (Communications `sha256:b90ada26…`,
+**IMPLEMENTED; STAGE FAILED on a Hub defect; NOT DEPLOYED. Production unchanged.**
+`main` = `staging` = `71eedfe` (docs only over `c2a803586f64a5fd3c58487ee7f5149a25961291`).
+Production still runs the Section 8 image set (Communications `sha256:b90ada26…`,
 Calling `sha256:4ca17362…`, Messaging `sha256:60608afb…`, Account `sha256:0be1b722…`,
-Platform Access `sha256:d7189f63…`); host memory available 5.09 GiB, disk 26.9 GB.
+Platform Access `sha256:d7189f63…`).
 
-The automatic Account-only deploy triggered by the merge ([42138779634](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42138779634))
-was cancelled before its VPS step, as in Sections 4–7, so the coordinated release can
-replace Account together with the other services. Production was not changed.
+### What ran (owner-authorized, 2026-11-06)
 
-`communications-stage` was not started: dispatching production operations was refused
-by the agent's permission policy and needs the owner's explicit go-ahead. Next steps,
-in order: `communications-stage` → `communications-release` → `communications-verify`
-(all with `image_sha=c2a803586f64a5fd3c58487ee7f5149a25961291`), then `resource-recover`
-if stage candidates remain running.
+| Step | Run | Result |
+|---|---|---|
+| `communications-stage`, `image_sha=c2a8035` | [42164023747](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42164023747) | **FAIL**: 14 checks PASS, then `AttributeError` in the Sections 9–23 journey (see blocker) |
+| `communications-release` | not dispatched | release requires staging evidence with every check PASS |
+| `communications-verify` | not dispatched | nothing released |
+| `resource-recover` | [42164545942](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42164545942) | success: 5 stage candidates stopped (retained), 1 unused probe image tag removed, memory available 4.8 → 5.0 GiB, disk free 24.9 GiB |
+
+Stage exercised the exact `c2a8035` images (image ids: Platform Access `sha256:d95ac477…`,
+Meetings `sha256:39d55935…`, Calling `sha256:d41c33e8…`, Messaging `sha256:532068aa…`,
+Communications `sha256:1458b2c6…`), applied all five owner migration histories to
+fresh isolated databases without error, and passed: native accounts without phone,
+authenticated ingress and Swagger, capabilities, relationship gates, QR invites,
+idempotent requests, canonical direct conversation with a MANAGED test message, real
+voice and video media (both sessions CONNECTED, bidirectional frames), aliases and
+common groups, block/unblock, public-ID rotation, principal preservation, Meetings
+availability, and private favorites/contact lists.
+
+### Blocker (exact)
+
+`GET /api/v2/communications/me/notification-delivery-status` reports `"providers": null`.
+Messaging's private push-status contract (`messaging/communications-internal/v1`) and
+implementation return `pushServices`; the Hub (`services/communications/src/devices.rs`)
+read `providers`. The Hub test owner mock used the same wrong field name, so CI run
+42134145133 passed. The acceptance check `preferences_truthful_delivery_status_and_monotonic_sync`
+correctly refuses a null provider state. This is a defect **in the `c2a8035`
+Communications image**; it cannot be fixed by configuration, and the acceptance check
+was not weakened.
+
+Fix prepared on branch `claude/cosmicforge-shared-scan-gateway-pawadp` (not on `main`,
+no image built): the Hub reads `pushServices`; the mock returns the real contract
+shape; the Hub devices test asserts the truthful `NOT_CONFIGURED` state. Locally against PostgreSQL 16: the corrected test fails on the original code with
+`providers: Null` (reproducing stage) and passes with the fix; the full Hub suite
+(5 unit, 18 foundation, 7 unified) passes. Releasing it
+needs owner approval to merge, CI, and a new immutable image set — the c2a8035 images
+cannot pass stage.
+
+Not reached because the journey stopped at the blocker: Hub call launch, call
+history/timeline, devices, conversation timeline/Meetings checks, and the remaining
+cleanup assertions.
+
+### Launch credential (`CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID`)
+
+Resolved in the release tooling on the same branch (not yet exercised on the VPS):
+
+- release reuses an ACTIVE, PRODUCTION credential labelled `Communications Hub call
+  launch` of the governed personal scope's service account
+  (`CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID`, the account the Hub delegates — Platform
+  Access rejects any other), scoped to `calls.write` only, with ≥ 30 days left;
+  otherwise it issues one for 365 days
+- only the non-secret id is kept (`/opt/cfmeet-core/communications/launch-credential.json`)
+  and passed to Calling; the secret is discarded at issue and never stored or logged
+- stage passes its fixture credential's id, so candidates prove the launch first
+- with a credential configured, acceptance requires a successful launch (200), not
+  the fail-closed 503
+- acceptance additionally lists Hub devices and (stage) reads a real conversation's
+  timeline and Meetings view through the owner facades, read-only
+
+### Next steps (owner)
+
+1. Review and merge the branch (Hub fix + release tooling) to `main`/`staging`; CI
+   (Communications Hub suite) must pass.
+2. Build immutable images for the new commit.
+3. `communications-stage` → `communications-release` → `communications-verify` with
+   the new `image_sha`, then `resource-recover`.
 
 Status vocabulary: IMPLEMENTED (code), TESTED (named CI run passed), DEPLOYED (running in
 production, verified), BLOCKED_EXTERNAL, DEFERRED, NOT_RUN. A passed build is never
@@ -251,7 +307,8 @@ antivirus, paid provider, carrier calling or AWS; frontend untouched.
 |---|---|---|
 | Production E2EE assessment (issue 13) | personal chats, T07–T09 | independent assessor + owner approval |
 | Push provider credentials | background/locked notifications, T21 | owner (APNs key, FCM project, VAPID) + physical devices |
-| `CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID` | Hub call launch answers 503 until set | a Platform Access credential id (non-secret) of the personal scope's first-party service account with `calls:write` |
+| `CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID` | Hub call launch answers 503 until set | resolved in release tooling (dedicated `calls.write` credential, id only); takes effect at the next release |
+| Hub delivery-status field mismatch (`providers` vs `pushServices`) | stage acceptance fails; release blocked | fix on branch; owner merge + new images |
 | Phone verification provider | A03–A08, D01, T02–T04 | owner decision |
 | Isolated load environment | T23, Section 19 load levels | owner decision (no VPS load tests) |
 | Off-server backups | DR | owner decision (deferred) |
