@@ -535,7 +535,7 @@ async fn dispatch_inner(
             s.decide_request(scope, p, id(request)?, "cancel", body(&r), key(&r)?)
                 .await
         }
-        _ => Err(Error::NotFound),
+        _ => Err(Error::NoRoute),
     }
 }
 async fn report(s: &State, p: &Profile, cf_id: &str, body: Value, key: Uuid) -> Result<Value> {

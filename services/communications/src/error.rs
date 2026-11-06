@@ -12,6 +12,11 @@ pub enum Error {
     Forbidden,
     #[error("resource not found")]
     NotFound,
+    /// No public operation matches the method and path. Answered exactly like
+    /// NotFound; the private `x-cfmeet-route: unmatched` header lets contract tests
+    /// prove every published operation is routed.
+    #[error("resource not found")]
+    NoRoute,
     #[error("validation failed")]
     Validation,
     #[error("version conflict")]
@@ -47,7 +52,7 @@ impl Error {
         match self {
             Self::Authentication => "AUTHENTICATION_REQUIRED",
             Self::Forbidden => "PERMISSION_DENIED",
-            Self::NotFound => "NOT_FOUND",
+            Self::NotFound | Self::NoRoute => "NOT_FOUND",
             Self::Validation => "VALIDATION_ERROR",
             Self::Version => "VERSION_CONFLICT",
             Self::Idempotency => "IDEMPOTENCY_CONFLICT",
@@ -67,7 +72,7 @@ impl Error {
         match self {
             Self::Authentication => StatusCode::UNAUTHORIZED,
             Self::Forbidden | Self::RecentAuthentication => StatusCode::FORBIDDEN,
-            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::NoRoute => StatusCode::NOT_FOUND,
             Self::Validation => StatusCode::BAD_REQUEST,
             Self::Version | Self::Idempotency | Self::Pending | Self::Duplicate => {
                 StatusCode::CONFLICT
@@ -99,6 +104,11 @@ impl IntoResponse for Error {
         response
             .headers_mut()
             .insert("cache-control", HeaderValue::from_static("no-store"));
+        if matches!(self, Self::NoRoute) {
+            response
+                .headers_mut()
+                .insert("x-cfmeet-route", HeaderValue::from_static("unmatched"));
+        }
         if matches!(self, Self::RateLimited) {
             response
                 .headers_mut()

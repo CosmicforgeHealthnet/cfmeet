@@ -662,6 +662,34 @@ impl Harness {
         let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
     }
+    /// Like `http`, also returning the response headers.
+    pub async fn http_full(
+        &self,
+        signer: &ServiceTokenSigner,
+        path: &str,
+        body: Value,
+        scope: DelegatedPlatformContext,
+    ) -> (StatusCode, HeaderMap) {
+        let headers = signer
+            .sign(
+                &OutboundServiceRequest::new_operation(ServiceId::communications())
+                    .with_delegated_context(scope),
+            )
+            .unwrap()
+            .headers();
+        let mut r = axum::http::Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        r.headers_mut().extend(headers);
+        let response = communications::api::app(self.state.clone())
+            .oneshot(r)
+            .await
+            .unwrap();
+        (response.status(), response.headers().clone())
+    }
     pub async fn connected(&self, a: &Profile, b: &Profile) -> Uuid {
         let request = self
             .state

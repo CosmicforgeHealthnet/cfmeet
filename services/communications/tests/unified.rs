@@ -1,7 +1,7 @@
 //! Sections 10–16 PostgreSQL acceptance: favorites/lists, chat controls, call launch and
 //! timeline, devices, meetings links, the change feed and private operator routes.
 mod common;
-use cf_communications_policy::Action;
+use cf_communications_policy::{Action, Dispatch};
 use common::*;
 use communications::{
     error::Error,
@@ -1486,5 +1486,81 @@ async fn activity_refreshes_due_call_cards_from_calling() {
     let activity = h.state.activity(&sb, &b.profile, &q(&[])).await.unwrap();
     assert_eq!(activity["data"][0]["call"]["state"], "ENDED");
     assert_eq!(activity["data"][0]["call"]["terminal"], true);
+    h.close().await;
+}
+
+/// Section 15: every operation published in the public Communications contract reaches a
+/// Hub handler (whatever the handler then answers for these synthetic inputs), and an
+/// unpublished path does not. The fallback is marked privately so the two 404s differ.
+#[tokio::test]
+async fn every_published_communications_operation_is_routed() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let scope = h.delegated(&a.account);
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../packages/contracts/communications/http/v1.openapi.json"
+    );
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let route = |method: &str, path: String| Dispatch {
+        method: method.into(),
+        path,
+        query: Default::default(),
+        body: Some(json!({})),
+        idempotency_key: Some(Uuid::new_v4()),
+        account: a.account.clone(),
+    };
+    let unmatched = |headers: &axum::http::HeaderMap| {
+        headers
+            .get("x-cfmeet-route")
+            .is_some_and(|v| v == "unmatched")
+    };
+    let mut operations = 0;
+    for (template, item) in doc["paths"].as_object().unwrap() {
+        let relative = template
+            .strip_prefix("/api/v2/communications/")
+            .expect("public prefix");
+        let concrete: Vec<String> = relative
+            .split('/')
+            .map(|s| match s {
+                "{cfMeetId}" => "CFM-ROUTE-CHECK".into(),
+                s if s.starts_with('{') => Uuid::new_v4().to_string(),
+                s => s.into(),
+            })
+            .collect();
+        for method in ["get", "put", "post", "patch", "delete"] {
+            if item.get(method).is_none() {
+                continue;
+            }
+            operations += 1;
+            let body =
+                serde_json::to_value(route(&method.to_uppercase(), concrete.join("/"))).unwrap();
+            let (status, headers) = h
+                .http_full(
+                    &h.account_signer,
+                    "/internal/v1/communications/dispatch",
+                    body,
+                    scope.clone(),
+                )
+                .await;
+            assert!(
+                !unmatched(&headers),
+                "{} {template} is published but not routed ({status})",
+                method.to_uppercase()
+            );
+        }
+    }
+    assert_eq!(operations, 73, "published Communications operations");
+    let body = serde_json::to_value(route("GET", "phone/verification".into())).unwrap();
+    let (status, headers) = h
+        .http_full(
+            &h.account_signer,
+            "/internal/v1/communications/dispatch",
+            body,
+            scope,
+        )
+        .await;
+    assert_eq!(status, 404);
+    assert!(unmatched(&headers), "deferred phone routes are not served");
     h.close().await;
 }
