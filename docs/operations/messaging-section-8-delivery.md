@@ -773,10 +773,140 @@ Evidence, all from `messaging-ingress` diagnostics (42108774026 … 42113422356)
 - The live `nginx -T` shows the expected directives (depth 5, system bundle); workers
   reload; nothing unusual is inherited.
 
-Root cause: not yet identified. It fails closed (no access), and no client can use realtime
-while production E2EE devices are disabled. `messaging-verify` fails on this check.
-Status: **IMPLEMENTED_NEEDS_REPAIR**. Next step: compare the live master's environment
-(systemd) with the loopback instance, or move this hop off TLS deliberately and in review.
+Root cause was not identified in that session. It is identified and repaired below
+("Public realtime ingress repair").
+
+## Public realtime ingress repair — 2026-11-05 (closes the open defect)
+
+### Outcome
+
+`POST /v1/realtime/tickets` and `GET /v1/realtime` now reach Messaging over verified TLS.
+From the public internet, an unauthenticated ticket request gets Messaging's own **401**,
+not 502. Certificate, hostname and SNI verification are unchanged, and depth is now set
+explicitly. No public port was opened and no service image was redeployed.
+`messaging-verify`, `scan-gateway-verify` and `communications-verify` all pass.
+
+### Root cause (two defects, the second hid the fix for the first)
+
+1. **Insufficient verify depth.** The routes installed by `messaging-configure` 42104592956
+   (`cf4dd69`) had no `proxy_ssl_verify_depth`, so nginx used its default of 1. The private
+   proxy presents leaf → YE1 → Root YE (cross-signed by X2) → X2 (cross-signed by X1). The
+   trust anchor, ISRG Root X2 in the system bundle, sits two intermediates above the leaf.
+   Reproduced with the host's own nginx 1.24 / OpenSSL 3.0.13 on loopback, using the live
+   directives: default depth and depth 1 give **502** with `(20:unable to get local issuer
+   certificate)`, the exact live error. Depths 2, 3, 4 and 5 give **401**. `openssl
+   s_client -verify_depth` has the same boundary (1 fails, 2 passes).
+2. **Reload race in the deployment code.** `systemctl reload nginx` only signals the master.
+   Each repair attempt (`messaging-ingress` 42108003678 … 42113422356) probed the route right
+   after the reload, while the previous worker generation was still accepting requests with
+   the old configuration. The probe then failed and the route was rolled back, so the
+   corrected depth was never live afterwards. Evidence from the host error log: every run
+   logged exactly one 502 in the same second as its install reload, followed 2–5 s later by
+   the rollback reload. In run 42113422356 the failing worker (PID 1920696) had been started
+   at 22:28:26 by the *previous* run's rollback. This is why the loopback nginx, `curl` and
+   `s_client` all succeeded while "live nginx" kept failing. The earlier code comment
+   saying depth 3 fails was a product of this race and has been corrected.
+
+Ruled out: the systemd environment (no `Environment=` or drop-ins), alternate masters
+(port 443 is owned only by the systemd master; the other nginx masters are containers),
+trust-store content (the bundle alone verifies), SNI and routing (the error log shows the
+expected upstream).
+
+### Correction (commit `1f1e213`)
+
+| Change | Where |
+|---|---|
+| `reload_host_nginx()`: `nginx -t`, reload, then return only once none of the pre-reload workers still accepts connections (old workers retitle themselves "is shutting down"). Bounded at 60 s, fails closed. | `production.py` |
+| Realtime routes: `proxy_ssl_verify on`, `proxy_ssl_verify_depth 5` (measured minimum 2), `proxy_ssl_name api.cfmeet.com`, `proxy_ssl_server_name on`, system bundle; no `proxy_ssl_verify off` anywhere | `messaging_runtime.nginx_config` |
+| No Docker address in the realtime routes: host nginx connects to `https://127.0.0.1:18444`, a loopback-only **TCP relay** (`cfmeet-messaging-ingress`, nginx `stream`) that resolves `cfmeet-core-tls:8444` through Docker DNS on each connection. The relay never terminates TLS, so host nginx still verifies the private proxy's own chain and name. It reuses the private proxy's own nginx image (nothing pulled); read-only root, all capabilities dropped, no-new-privileges, UID 101, 32 MiB, 32 PIDs, 0.25 CPU, rotated logs, `unless-stopped`; networks `cfmeet-messaging-ingress-net` (bridge for the loopback port) and `cfmeet-core-private` | `messaging_runtime.ensure_relay` |
+| Pre-check through the relay with nginx's exact name, SNI, depth and trust file before any host change | `messaging_runtime.verifies` |
+| Probe checks Messaging's own refusals (error envelope, realm header, and the `private, no-store` header only this location adds) for tickets and WebSocket upgrades | `messaging_runtime.ingress_probe` |
+| Exact rollback of site, routes and relay when the install, the probe or the regression fails; `messaging-configure` uses the same path | `restore_ingress`, `restore_relay`, `_configure` |
+| Relay listed as long-lived infrastructure | `resource_recovery.LONG_LIVED` |
+
+The attachment route (`/cfmeet-messaging-attachments/` → MinIO) is unchanged. It still
+renders the storage container's address at install time; see "Remaining risks".
+
+### Tests and CI
+
+| Run | Result |
+|---|---|
+| Tooling unit tests (106, incl. 27 new in `test_messaging_ingress.py`) | PASS on every run below |
+| [42122365294](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42122365294) `Messaging realtime ingress` (branch), plus 42122587267 (`main`) and 42122586290 (`staging`) | **PASS** |
+| Compose config 42122587766 (`main`) | PASS |
+
+`infra/calling/ingress-ci/realtime_ingress.py` runs the deployment functions against
+Ubuntu 24.04's nginx 1.24.0 / OpenSSL 3.0.13 (the production build) as host nginx and the
+private proxy's image by digest (`nginx@sha256:0e52bd05…`) with its 8444 server block.
+The certificate chain has the Generation Y shape. A CI stand-in serves Messaging's realtime
+contract (status codes, envelope, single-use tickets, WebSocket upgrade).
+
+| CI check | Result |
+|---|---|
+| Chain needs depth 2 (`verifies` at depth 1 fails), like production | PASS |
+| Previously live directives (default depth) | **502** + "upstream SSL certificate verify error" (production failure reproduced) |
+| Rendered configuration: full `ingress_probe` | PASS |
+| Valid client token → ticket 201 → WebSocket **101**, subprotocol and accept key verified, one frame round-tripped | PASS |
+| Ticket replay | 401 `INVALID_TICKET` |
+| Flip bad ↔ good config 3× each way with `reload_host_nginx`, request immediately after each | always the new behaviour |
+| Wrong `proxy_ssl_name`; untrusted root | 502 / 502 |
+| Private proxy recreated with a **different Docker address** | route recovers by itself; host nginx master, relay and routes untouched |
+| Relay confinement, loopback-only port, no certificate or key in the relay, reuse without restart, rollback removal | PASS |
+
+The production workflow now runs this test before every `messaging-ingress` and
+`messaging-configure`.
+
+### Production deployment and verification
+
+| Step | Run | Result |
+|---|---|---|
+| Baseline | read-only | public ticket route 502; live routes without depth; no relay; port 18444 free; 5.2 GiB available |
+| `messaging-ingress` (`1f1e213`) | [42122645079](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42122645079) | **PASS**: real-nginx gate PASS; relay created; trust `system-bundle`; probes below; regression PASS. No rollback needed |
+| Independent `messaging-verify` | [42123078284](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42123078284) | **PASS 15/15**, incl. `public_realtime_routes_present_and_unauthenticated_access_denied`; activation verdict `BLOCKED_EXTERNAL_DEPENDENCY` (E2EE) |
+| Independent `scan-gateway-verify` | [42123256240](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42123256240) | **PASS** 24 checks, 0 failures; engine healthy, 949 MiB, 0 OOM; gateway publishes no ports |
+| Calling/Meetings `communications-verify` | [42123390637](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42123390637) | **PASS 14/14**, incl. native voice/video ringing with bidirectional media frames and `meetings_remain_independently_available`; regression PASS |
+
+Production probe (deploy run) and an independent repeat **from outside the VPS**:
+
+| Request | Answer |
+|---|---|
+| `POST /v1/realtime/tickets`, no credential (HTTP/1.1 and HTTP/2) | **401** `AUTHENTICATION_FAILED`, `WWW-Authenticate: Bearer realm="cf-meet-messaging"` |
+| Same with a forged `CF-Client-Token` | 401 `INVALID_CLIENT_TOKEN` |
+| Same with a refused `Origin` | 401 `ORIGIN_NOT_ALLOWED` |
+| Preflight from a refused origin | 403, no `Access-Control-Allow-Origin` |
+| Other methods (`DELETE`/`GET` tickets, `POST /v1/realtime`) | 403 (nginx `limit_except`) |
+| `wss` upgrade, subprotocol, no ticket | 401 `TICKET_REQUIRED` |
+| `wss` upgrade, well-formed unknown ticket | 401 `INVALID_TICKET` (Messaging's ticket store lookup) |
+| `wss` upgrade without subprotocol | 400 `SUBPROTOCOL_REQUIRED` |
+| TCP 18444 and 8444 on the public address | not reachable |
+
+Deployed state: relay running at 1.9 MiB; both realtime routes `proxy_pass
+https://127.0.0.1:18444` with verify on, depth 5, the api.cfmeet.com name and SNI; six
+current workers and no old generation; site file byte-identical (include already
+present); no upstream TLS errors after the install. Rollback material:
+`/opt/cfmeet-core/messaging/nginx-{site,snippet}-before-42122645079`. Running images are
+unchanged from the release (messaging `sha256:60608afbfc61…`, calling `4ca17362520f…`,
+communications `b90ada269a7b…`, meeting-service `0be1b722742c…`, platform-access
+`d7189f63d6aa…`, gateway `3cc6f387f958…`). Production E2EE is still disabled (0 devices,
+0 conversations).
+
+**Not run in production:** valid ticket issuance, a WebSocket 101 upgrade and session
+behaviour. A client token requires an enrolled device of the acting principal
+(`require_own_device`), and production device enrollment is refused by the E2EE guard
+(issue 13). These paths are proven through the exact ingress configuration in CI, and
+Messaging's own session suites cover ticket and session semantics.
+
+### Remaining risks
+
+- **Private proxy certificate is pinned to `archive/api.cfmeet.com/fullchain4.pem`**
+  (expires 2026-12-21), not certbot's `live/` link. After certbot renews (around
+  2026-11-21) the private proxy keeps presenting the old certificate. All private TLS
+  routes, including this one, fail closed when it expires unless the mount is moved to the
+  new version. This belongs to the TLS proxy release tooling and is outside this change.
+- The attachment route and the Calling artifacts route still render MinIO's Docker
+  address at install time. If MinIO restarts with a different address they fail closed
+  until the relevant configure operation is re-run.
+- The relay depends on the private proxy keeping the container name `cfmeet-core-tls`.
 
 ### Final status
 
@@ -788,7 +918,7 @@ Status: **IMPLEMENTED_NEEDS_REPAIR**. Next step: compare the live master's envir
 | Messaging `GatewayScanner` (signed CLEAN only) | IMPLEMENTED, TESTED, **DEPLOYED** (release 42098810080) |
 | Messaging attachment storage, Redis realtime broker/presence, private metrics, managed keyring, KT checkpoint | **DEPLOYED, VERIFIED** (messaging-configure 42104592956) |
 | Managed attachment lifecycle through the real gateway | TESTED (CI); production API journey not run (no isolated managed fixture) |
-| Public realtime route | **IMPLEMENTED_NEEDS_REPAIR** (502, fails closed) |
+| Public realtime route | **DEPLOYED, VERIFIED** (messaging-ingress 42122645079; messaging-verify 42123078284). Valid-ticket WebSocket upgrade proven in CI only (production enrollment blocked by issue 13) |
 | Calling / Meetings / LiveKit | regression PASS after every change; release acceptance PASS |
 | Production PRIVATE_E2EE | **BLOCKED_EXTERNAL** (issue 13); devices disabled |
 | Push providers | **BLOCKED_EXTERNAL** (no credentials) |

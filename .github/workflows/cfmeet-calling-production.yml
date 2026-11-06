@@ -30,6 +30,13 @@ jobs:
           fetch-depth: 0
       - name: Check activation gates and runtime preservation
         run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
+      - name: Prove the realtime ingress with real nginx before changing production
+        if: inputs.operation == 'messaging-ingress' || inputs.operation == 'messaging-configure'
+        run: |
+          set -euo pipefail
+          command -v nginx >/dev/null || { sudo apt-get update -q; sudo apt-get install -y -q nginx-core; }
+          sudo systemctl stop nginx 2>/dev/null || true
+          python3 infra/calling/ingress-ci/realtime_ingress.py
       - name: Configure existing production SSH access
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}

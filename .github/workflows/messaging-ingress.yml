@@ -1,0 +1,42 @@
+name: Messaging realtime ingress
+
+# Real-configuration test of the public Messaging realtime ingress. It runs the production
+# deployment code against Ubuntu 24.04's nginx 1.24 / OpenSSL 3.0.13 (the production host
+# build) and the private proxy's own nginx image, with a Generation Y shaped certificate
+# chain. It deploys nothing and needs no secrets.
+on:
+  push:
+    paths:
+      - "infra/calling/**"
+      - ".github/workflows/messaging-ingress.yml"
+      - ".github/workflows/cfmeet-calling-production.yml"
+  pull_request:
+    paths:
+      - "infra/calling/**"
+      - ".github/workflows/messaging-ingress.yml"
+      - ".github/workflows/cfmeet-calling-production.yml"
+  workflow_dispatch:
+
+permissions: { contents: read }
+concurrency:
+  group: messaging-ingress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ingress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Production tooling unit tests
+        run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
+      - name: Host nginx build
+        run: |
+          set -euo pipefail
+          command -v nginx >/dev/null || { sudo apt-get update -q; sudo apt-get install -y -q nginx-core; }
+          sudo systemctl stop nginx 2>/dev/null || true
+          nginx -V 2>&1 | head -2
+      - name: Realtime ingress against real nginx
+        run: python3 infra/calling/ingress-ci/realtime_ingress.py
