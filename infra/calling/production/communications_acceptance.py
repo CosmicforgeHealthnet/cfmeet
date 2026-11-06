@@ -218,7 +218,7 @@ class Journey:
         assert not any(x in json.dumps(history) for x in secret)
         self.hub(a,'/conversations/'+str(uuid.uuid4())+'/timeline',expected=(404,))
         launched=self.hub(a,'/contacts/'+cid+'/calls','POST',{'kind':'VOICE','clientRequestId':str(uuid.uuid4()),
-            'endpointId':a['endpointId']},expected=(200,503))
+            'endpointId':a['endpointId']},expected=(200,) if self.c['scope'].get('launchCredentialId') else (200,503))
         if 'callId' in launched:
             self.calls.append(launched['callId'])
             self.clean_call(launched['callId'])

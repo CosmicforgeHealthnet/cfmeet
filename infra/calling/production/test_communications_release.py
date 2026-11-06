@@ -7,6 +7,75 @@ from unittest.mock import patch
 import communications_release as release
 
 
+SA='11111111-1111-4111-8111-111111111111'
+NOW=release.datetime(2026,11,6,tzinfo=release.timezone.utc)
+
+
+def launch_view(**over):
+    v=dict(id='22222222-2222-4222-8222-222222222222',publicId='ab'*12,label=release.LAUNCH_LABEL,effectiveState='ACTIVE',
+        environmentKind='PRODUCTION',serviceAccountId=SA,scopes=['calls.write'],expiresAt='2027-11-06T00:00:00Z')
+    v.update(over);return v
+
+
+class CommunicationsLaunchCredential(unittest.TestCase):
+    def test_only_an_active_dedicated_calls_write_credential_of_the_scope_account_is_reused(self):
+        self.assertTrue(release.usable_launch_credential(launch_view(),SA,NOW))
+        self.assertTrue(release.usable_launch_credential(launch_view(expiresAt='2027-11-06T04:41:50.123456789Z'),SA,NOW))
+        for bad in (dict(label='Sections 4-7 native policy acceptance'),dict(effectiveState='REVOKED'),
+                dict(effectiveState='SUSPENDED'),dict(environmentKind='TEST'),
+                dict(serviceAccountId='33333333-3333-4333-8333-333333333333'),
+                dict(scopes=['calls.write','messages.send']),dict(scopes=['calls.read']),
+                dict(expiresAt='2026-11-20T00:00:00Z')):
+            self.assertFalse(release.usable_launch_credential(launch_view(**bad),SA,NOW),bad)
+
+    def admin_double(self,listed):
+        issued=[]
+        def admin(*args):
+            if args[:2]==('credential','list'):return listed
+            if args[:2]==('credential','create'):
+                issued.append(args)
+                return {'credential':launch_view(id='44444444-4444-4444-8444-444444444444'),'secret':'never-kept'}
+            return {}
+        return admin,issued
+
+    def run_launch(self,listed):
+        import api_acceptance
+        admin,issued=self.admin_double(listed)
+        with tempfile.TemporaryDirectory() as folder, patch.object(release,'WORK',Path(folder)), \
+             patch.object(api_acceptance,'sql',return_value=json.dumps({'tenant':'t','application':'personal','account':'hub'})), \
+             patch.object(api_acceptance,'admin',side_effect=admin), patch.object(release.os,'chown'):
+            value=release.launch_credential({'serviceAccountId':SA},NOW)
+            stored=(Path(folder)/'launch-credential.json').read_text()
+        self.assertNotIn('never-kept',stored)
+        return value,issued,json.loads(stored)
+
+    def test_existing_launch_credential_is_reused_without_issuing(self):
+        value,issued,stored=self.run_launch([launch_view(),launch_view(label='other')])
+        self.assertEqual(value,'22222222-2222-4222-8222-222222222222')
+        self.assertEqual(issued,[])
+        self.assertEqual(stored['scopes'],['calls.write'])
+
+    def test_missing_or_expiring_launch_credential_is_issued_with_calls_write_only(self):
+        value,issued,stored=self.run_launch([launch_view(expiresAt='2026-11-10T00:00:00Z')])
+        self.assertEqual(value,'44444444-4444-4444-8444-444444444444')
+        self.assertEqual(len(issued),1)
+        args=list(issued[0])
+        self.assertEqual([args[i+1] for i,a in enumerate(args) if a=='--scope'],['calls.write'])
+        self.assertIn('365',args)
+        self.assertEqual(stored['credentialId'],value)
+
+    def test_calling_receives_only_the_launch_credential_id(self):
+        scope={'tenantId':'t','applicationId':'a','environmentId':'e','launchCredentialId':'22222222-2222-4222-8222-222222222222'}
+        original={'Id':'a'*64,'Config':{'Env':['KEEP=1']},'HostConfig':{'AutoRemove':False},'NetworkSettings':{'Networks':{}}}
+        with patch.object(release.p,'inspect',return_value=original), patch.object(release,'image',return_value='sha256:new'):
+            _,cfg=release.configured('calling','a'*40,False,scope)
+            _,messaging=release.configured('messaging','a'*40,False,scope)
+            del scope['launchCredentialId']
+            _,unset=release.configured('calling','a'*40,False,scope)
+        self.assertIn('CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID=22222222-2222-4222-8222-222222222222',cfg['Env'])
+        self.assertFalse(any('LAUNCH_CREDENTIAL' in x for x in messaging['Env']+unset['Env']))
+
+
 class CommunicationsRuntimePreservation(unittest.TestCase):
     def test_staging_renews_expired_acceptance_credential_without_recreating_scope(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -16,10 +85,11 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
             def sql(db, query):
                 return json.dumps({'tenantId':'preserved'}) if 'json_build_object' in query else '1'
             with patch.object(release,'WORK',work), patch.object(release,'db_sql',side_effect=sql), \
-                 patch.object(release,'stage_admin',return_value={'secret':'fresh-fixture'}) as admin:
+                 patch.object(release,'stage_admin',return_value={'secret':'fresh-fixture','credential':{'id':'00000000-0000-4000-8000-000000000001'}}) as admin:
                 value=release.stage_scope('a'*40)
             self.assertEqual(value['tenantId'],'preserved')
             self.assertEqual(value['token'],'fresh-fixture')
+            self.assertEqual(value['launchCredentialId'],'00000000-0000-4000-8000-000000000001')
             creates=[call.args[1:3] for call in admin.call_args_list if call.args[2]=='create']
             self.assertEqual(creates,[('credential','create')])
             self.assertEqual(json.loads((work/'stage-context.private.json').read_text()),value)

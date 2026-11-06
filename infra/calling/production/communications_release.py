@@ -95,6 +95,8 @@ import re
 import secrets
 import subprocess
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlunsplit
 
 OWNERS = {'platform-access':'cfmeet-platform-access','meeting-service':'cfmeet-production-backend',
@@ -292,6 +294,10 @@ def configured(service,sha,stage,scope,db=None):
        'CF_SERVICE_TRUST_BUNDLE_FILE':'/run/communications/trust.json'}
     if service in ('calling','messaging'):
         e.update({'CF_COMMUNICATIONS_PERSONAL_'+k+'_ID':scope[k.lower()+'Id'] for k in ('TENANT','APPLICATION','ENVIRONMENT')})
+    if service=='calling' and scope.get('launchCredentialId'):
+        # Non-secret credential id; Calling re-verifies it live with Platform Access
+        # on every Hub launch and fails closed (503) if it is revoked or expired.
+        e['CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID']=str(uuid.UUID(scope['launchCredentialId']))
     if db:e['DATABASE_URL']=db
     if service=='communications':
         e.update({'CF_RUNTIME_ENVIRONMENT':'production','CF_SERVICE_AUTH_KEY_ID':'communications-20261103',
@@ -425,6 +431,9 @@ def stage_scope(sha):
     credential=stage_admin(sha,'credential','create',*args,'--service-account','acceptance','--expires-in-days','1',*[v for scope in scopes for v in ('--scope',scope)],'--label','Isolated Sections 4-7 acceptance')
     value=json.loads(db_sql(db,"SELECT json_build_object('tenantId',s.tenant_id,'applicationId',s.application_id,'environmentId',s.environment_id,'serviceAccountId',s.id,'kind','TEST') FROM platform_service_accounts s WHERE s.name='acceptance';"))
     value['token']=credential['secret']
+    # The stage fixture credential carries calls.write and belongs to the delegated
+    # acceptance service account, so it is a valid launch authority for candidates.
+    value['launchCredentialId']=str(uuid.UUID(credential['credential']['id']))
     p.write_private(file,json.dumps(value));return value
 
 def stage_release(sha,run_id):
@@ -512,6 +521,47 @@ def credential(scope):
         *[v for scope in scopes for v in ('--scope',scope)],'--label','Sections 4-7 native policy acceptance')
     return value['secret']
 
+LAUNCH_LABEL='Communications Hub call launch'
+LAUNCH_MIN_REMAINING_DAYS=30
+
+def usable_launch_credential(view,service_account,now):
+    # chrono emits up to nanoseconds; older Python parses at most microseconds.
+    text=re.sub(r'(\.\d{6})\d+',r'\1',view['expiresAt']).replace('Z','+00:00')
+    expires=datetime.fromisoformat(text)
+    return (view.get('label')==LAUNCH_LABEL and view.get('effectiveState')=='ACTIVE'
+        and view.get('environmentKind')=='PRODUCTION'
+        and str(uuid.UUID(view['serviceAccountId']))==service_account
+        and set(view.get('scopes') or [])=={'calls.write'}
+        and expires-now>=timedelta(days=LAUNCH_MIN_REMAINING_DAYS))
+
+def launch_credential(scope,now=None):
+    # The Hub's call launches are attributed to a dedicated credential of the
+    # governed personal scope's first-party service account (the same account the
+    # Hub delegates). Only its id is configured: the secret is discarded at issue,
+    # never stored or logged, so the credential cannot be presented as a bearer.
+    import api_acceptance
+    now=now or datetime.now(timezone.utc)
+    sa=str(uuid.UUID(scope['serviceAccountId']))
+    query="SELECT json_build_object('tenant',t.slug,'application',a.slug,'account',s.name) FROM platform_service_accounts s JOIN platform_tenants t ON t.id=s.tenant_id JOIN platform_applications a ON a.id=s.application_id WHERE s.id='"+sa+"'"
+    refs=json.loads(api_acceptance.sql(query))
+    path=['--tenant',refs['tenant'],'--application',refs['application'],'--environment','production']
+    existing=[v for v in api_acceptance.admin('credential','list',*path,'--service-account',refs['account'])
+              if usable_launch_credential(v,sa,now)]
+    if existing:
+        chosen=max(existing,key=lambda v:v['expiresAt'])
+        print('COMMUNICATIONS_LAUNCH_CREDENTIAL: existing credential reused',flush=True)
+    else:
+        api_acceptance.admin('scope','grant','--tenant',refs['tenant'],'--application',refs['application'],'--scope','calls.write','--environment-kind','production')
+        issued=api_acceptance.admin('credential','create',*path,'--service-account',refs['account'],'--expires-in-days','365',
+            '--scope','calls.write','--label',LAUNCH_LABEL)
+        chosen=issued['credential'];del issued
+        assert usable_launch_credential(chosen,sa,now),'Issued launch credential does not match the governed scope'
+        print('COMMUNICATIONS_LAUNCH_CREDENTIAL: issued (calls.write only, 365 days)',flush=True)
+    record=dict(credentialId=str(uuid.UUID(chosen['id'])),publicId=chosen['publicId'],serviceAccountId=sa,
+        scopes=chosen['scopes'],expiresAt=chosen['expiresAt'])
+    save(WORK/'launch-credential.json',json.dumps(record))
+    return record['credentialId']
+
 def release(sha,run_id):
     p.identity()
     evidence=json.loads((WORK/'staging-evidence.json').read_text())
@@ -519,6 +569,7 @@ def release(sha,run_id):
     for service in PORTS:
         assert evidence['images'][service]==image(service,sha),'Staged image digest mismatch'
     scope=prod_scope();prepare_trust();proxy_routes();secure_public_ingress()
+    scope['launchCredentialId']=launch_credential(scope)
     record=dict(sha=sha,runId=run_id,replacements=[],newHub=False)
     # Only the three additive owner feature migrations and the new isolated Hub
     # schema are applied. Existing base histories are deliberately untouched.
