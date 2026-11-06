@@ -186,7 +186,7 @@ class Journey:
         accepted=self.hub(b,path,'POST',body,key=key)
         assert accepted==self.hub(b,path,'POST',body,key=key)
 
-    def unified(self,a,b):
+    def unified(self,a,b,conversation=None):
         """Sections 9-23 facades on the fixture pair; every change is reverted."""
         secret=(a['principalId'],b['principalId'])
         boot=self.hub(a,'/bootstrap')
@@ -228,6 +228,16 @@ class Journey:
             self.report.setdefault('limitations',[]).append('Hub call launch answers 503 until CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID is configured.')
             self.done('hub_call_launch_fails_closed_without_launch_credential')
         self.done('call_history_and_timeline_expose_no_principal_ids')
+        devices=self.hub(a,'/devices')
+        assert isinstance(devices['data'],list) and not any(x in json.dumps(devices) for x in secret)
+        self.done('devices_listed_without_principal_ids')
+        if conversation:
+            # A real Messaging-owned conversation resolved through the owner facades.
+            timeline=self.hub(a,'/conversations/'+conversation+'/timeline?limit=20')
+            meetings=self.hub(a,'/conversations/'+conversation+'/meetings?limit=10')
+            assert isinstance(meetings['data'],list)
+            assert not any(x in json.dumps([timeline,meetings]) for x in secret)
+            self.done('conversation_timeline_and_meetings_resolve_through_owners')
 
     def media_call(self,a,b,kind):
         call=self.dial(a,b,kind)['call']['callId']
@@ -381,7 +391,7 @@ class Journey:
         self.done('public_id_operations_preserve_authoritative_principal')
         self.request('meeting-service','/api/v1/meetings',token=a['session'])
         self.done('meetings_remain_independently_available')
-        self.unified(a,b)
+        self.unified(a,b,conversation)
         # Close only fixture relationships; retained account/principal/history IDs
         # allow audit and subsequent regression runs without touching customers.
         for contact in self.hub(a,'/contacts')['data']:
