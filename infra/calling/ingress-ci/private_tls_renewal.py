@@ -81,8 +81,20 @@ def managed(lineage):
 
 
 def monitor(mode):
-    r = subprocess.run(['python3', str(tls.MONITOR), mode], capture_output=True, text=True)
+    r = subprocess.run(['python3', str(tls.MONITOR), mode, '--config', str(tls.MONITOR_CONFIG)], capture_output=True, text=True)
     return r.returncode, json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def independent(name, count=10):
+    """`count` fresh connections, each verified; all must present the same certificate."""
+    seen = {tls.presented(tls.address_of(p.inspect(name)))['fingerprint'] for _ in range(count)}
+    assert len(seen) == 1, 'unstable presentation: %d certificates' % len(seen)
+    return seen.pop()
+
+
+def managed_fp_any(lineage):
+    """Fingerprint of the lineage's leaf without the expiry floor of validate_material."""
+    return tls.validate_material(lineage / 'live' / tls.HOSTNAME, ca=tls.CA_BUNDLE, min_days=0)['fingerprint']
 
 
 def main():
@@ -98,6 +110,7 @@ def main():
         tls.WORK = root / 'tls-proxy'; tls.WORK.mkdir()
         tls.CONF, tls.STATE = tls.WORK / 'nginx.conf', tls.WORK / 'durable-rollback.json'
         tls.MONITOR, tls.STATUS = tls.WORK / 'certificate-monitor.py', tls.WORK / 'certificate-status.json'
+        tls.MONITOR_CONFIG = tls.WORK / 'certificate-monitor.json'
         tls.CA_BUNDLE = ca
         tls.route_codes = lambda address=None: {}
         # Bind mount sources must be readable by the Docker daemon; keys stay 0600.
@@ -106,7 +119,8 @@ def main():
             path.chmod(0o755)
         tls.CONF.write_text(CONF); tls.CONF.chmod(0o644)
         pinned_conf = root / 'pinned.conf'; pinned_conf.write_text(CONF); pinned_conf.chmod(0o644)
-        sh('docker', 'pull', '-q', PROXY_IMAGE)
+        if subprocess.run(['docker', 'image', 'inspect', PROXY_IMAGE], capture_output=True).returncode:
+            sh('docker', 'pull', '-q', PROXY_IMAGE)  # pinned by digest; pulled only when absent
         sh('docker', 'network', 'create', p.NET)
         try:
             pinned_container(tls.CONTAINER, tls.CONF, lineage, 1)
@@ -135,8 +149,23 @@ def main():
             print('PRIVATE_TLS_SWITCH: replacement verified before the switch; previous retained stopped')
 
             # Renewal: certbot writes fullchain2/privkey2 and repoints live/.
-            tls.install_renewal = lambda: None
-            tls.MONITOR.write_text(tls.monitor_source())
+            # The deployed monitor program and its configuration (private proxy target).
+            tls.install_monitor_files(False)
+            config = json.loads(tls.MONITOR_CONFIG.read_text())
+            assert config['thresholds'] == [45, 30, 14, 7] and config['stableHandshakes'] >= 5
+
+            # Restart: the lineage mounts survive and no reload is needed.
+            sh('docker', 'restart', '--time', '10', tls.CONTAINER)
+            assert tls.presented_eventually(tls.address_of(p.inspect(tls.CONTAINER)))['fingerprint'] == first
+            code, status = monitor('--check')
+            assert code == 0 and status['presentedMatchesManaged'] and status['targets'][0]['reloadAttempts'] == 0, status
+            print('PRIVATE_TLS_RESTART: lineage mounts survive a container restart; managed certificate presented')
+
+            # A stopped proxy is started again by the check (recovery), then verified.
+            sh('docker', 'stop', '--time', '10', tls.CONTAINER)
+            code, status = monitor('--check')
+            assert code == 0 and status['targets'][0]['recovered'] == 'started' and status['presentedMatchesManaged'], status
+            print('PRIVATE_TLS_RECOVERY: stopped proxy started again and verified')
             issue(root, 2)
             second = managed(lineage)
             assert second != first
@@ -149,7 +178,8 @@ def main():
             r = subprocess.run([str(hook)], env=dict(os.environ, RENEWED_DOMAINS='api.cfmeet.com'), capture_output=True, text=True)
             status = json.loads(r.stdout.strip().splitlines()[-1])
             assert r.returncode == 0 and status['reloaded'] and status['presentedMatchesManaged'], status
-            assert shown(tls.CONTAINER) == second
+            assert status['targets'][0]['handshakes'] >= 5 and status['targets'][0]['stable']
+            assert independent(tls.CONTAINER) == second
             print('PRIVATE_TLS_RENEWAL_HOOK: renewed certificate validated, tested and presented after a graceful reload')
 
             # A renewal whose hook did not run is repaired by the daily check.
@@ -157,16 +187,34 @@ def main():
             third = managed(lineage)
             assert shown(tls.CONTAINER) == second
             code, status = monitor('--check')
-            assert code == 0 and status['reloaded'] and shown(tls.CONTAINER) == third, status
+            assert code == 0 and status['targets'][0]['reloaded'] and independent(tls.CONTAINER) == third, status
             print('PRIVATE_TLS_MONITOR: missed reload detected and repaired; expiry recorded', status['expiresAt'])
+
+            # Renewal not happening in time: the active certificate is valid but has 10
+            # days left. It keeps serving; the check alerts in the 14-day band.
+            issue(root, 4, days=10)
+            fourth = managed_fp_any(lineage)
+            code, status = monitor('--check')
+            assert code == 1 and status['status'] == 'ALERT' and status['band'] == 14 and status['problem'] is None, status
+            assert independent(tls.CONTAINER) == fourth
+            print('PRIVATE_TLS_LATE_RENEWAL_ALERT: 14-day band alerts while the valid certificate keeps serving')
+
+            # A renewal for the wrong hostname is refused; the running certificate stays.
+            issue(root, 5, name='other.example')
+            code, status = monitor('--reload')
+            assert code == 1 and status['problem'] == 'chain does not verify for ' + tls.HOSTNAME and not status['reloaded'], status
+            assert independent(tls.CONTAINER) == fourth
+            print('PRIVATE_TLS_WRONG_HOSTNAME_REFUSED: renewal for another name not loaded')
 
             # Invalid renewed material is never loaded.
             live = tls.LIVE
             (live / 'privkey.pem').unlink()
             (live / 'privkey.pem').symlink_to('../../archive/%s/privkey1.pem' % tls.HOSTNAME)
+            (live / 'fullchain.pem').unlink()
+            (live / 'fullchain.pem').symlink_to('../../archive/%s/fullchain3.pem' % tls.HOSTNAME)
             code, status = monitor('--reload')
             assert code == 1 and status['problem'] == 'key does not match' and not status['reloaded'], status
-            assert shown(tls.CONTAINER) == third
+            assert independent(tls.CONTAINER) == fourth
             print('PRIVATE_TLS_INVALID_RENEWAL_REFUSED: mismatched key not loaded; running certificate kept')
 
             # Rollback restores the previous proxy and configuration exactly.

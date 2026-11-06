@@ -196,41 +196,18 @@ class RenewalHook(unittest.TestCase):
         self.assertEqual((other.returncode, other.stdout), (0, ''))
         self.assertIn('RAN', ours.stdout)
 
-    def test_monitor_is_valid_python_that_never_reloads_unvalidated_material(self):
-        source = tls.monitor_source()
-        compile(source, 'certificate-monitor.py', 'exec')
-        self.assertIn("if problem is None and (mode == '--reload' or current != fp)", source)
-        self.assertIn("'nginx', '-t'", source)
+    def test_hook_activates_through_the_installed_monitor_and_its_config(self):
+        hook = tls.hook_source()
+        self.assertIn('%s --reload --config %s' % (tls.MONITOR, tls.MONITOR_CONFIG), hook)
 
-    def test_reload_confirmation_ignores_workers_of_the_previous_generation(self):
-        namespace = {}
-        exec(compile(tls.monitor_source(), 'certificate-monitor.py', 'exec'), namespace)
-        before = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process\n   10 nginx: worker process\n')
-        during = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process is shutting down\n   10 nginx: worker process\n   17 nginx: worker process\n')
-        after = namespace['accepting_workers']('PID   COMMAND\n    8 nginx: master process nginx\n    9 nginx: worker process is shutting down\n   17 nginx: worker process\n   18 nginx: worker process\n')
-        self.assertEqual(before, {'9', '10'})
-        self.assertTrue(during & before, 'an old worker still accepting means the reload is not complete')
-        self.assertFalse(after & before)
-
-    def test_monitor_reports_an_alert_for_a_broken_lineage(self):
-        with tempfile.TemporaryDirectory() as folder:
-            folder = Path(folder)
-            live = folder / 'live'; live.mkdir()
-            (live / 'fullchain.pem').write_text('not a certificate')
-            (live / 'privkey.pem').write_text('')
-            saved = (tls.LIVE, tls.STATUS, tls.CONTAINER)
-            tls.LIVE, tls.STATUS, tls.CONTAINER = live, folder / 'status.json', 'cfmeet-ci-absent-proxy'
-            try:
-                script = folder / 'monitor.py'; script.write_text(tls.monitor_source())
-            finally:
-                tls.LIVE, tls.STATUS, tls.CONTAINER = saved
-            r = subprocess.run(['python3', str(script), '--check'], capture_output=True, text=True)
-            status = json.loads((folder / 'status.json').read_text())
-        self.assertEqual(r.returncode, 1)
-        self.assertEqual(status['status'], 'ALERT')
-        self.assertEqual(status['problem'], 'chain incomplete')
-        self.assertFalse(status['reloaded'])
-
+    def test_monitor_config_lists_host_nginx_only_when_it_serves_the_lineage(self):
+        private = tls.monitor_config(False)
+        both = tls.monitor_config(True)
+        self.assertEqual([t['name'] for t in private['targets']], ['private-proxy'])
+        self.assertEqual([t['name'] for t in both['targets']], ['private-proxy', 'host-nginx'])
+        self.assertEqual(both['thresholds'], [45, 30, 14, 7])
+        self.assertGreaterEqual(both['stableHandshakes'], 5)
+        self.assertEqual(both['ca'], '/etc/ssl/certs/ca-certificates.crt')
 
 if __name__ == '__main__':
     unittest.main()

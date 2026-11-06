@@ -67,7 +67,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         folder = Path(tmp)
         relay.WORK = folder / 'storage'
-        sh('docker', 'pull', '-q', PROXY_IMAGE)
+        if subprocess.run(['docker', 'image', 'inspect', PROXY_IMAGE], capture_output=True).returncode:
+            sh('docker', 'pull', '-q', PROXY_IMAGE)  # pinned by digest; pulled only when absent
         sh('docker', 'network', 'create', p.NET)
         try:
             sh('docker', 'run', '-d', '--name', 'cfmeet-core-tls', '--network', p.NET, PROXY_IMAGE)

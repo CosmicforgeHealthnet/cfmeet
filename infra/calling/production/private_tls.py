@@ -42,6 +42,7 @@ CONF = WORK / 'nginx.conf'
 STATE = WORK / 'durable-rollback.json'
 HOOK = LETSENCRYPT / 'renewal-hooks' / 'deploy' / 'cfmeet-core-tls'
 MONITOR = WORK / 'certificate-monitor.py'
+MONITOR_CONFIG = WORK / 'certificate-monitor.json'
 STATUS = WORK / 'certificate-status.json'
 UNIT = 'cfmeet-core-tls-certificate'
 SYSTEMD = Path('/etc/systemd/system')
@@ -55,7 +56,10 @@ NEW_DIRECTIVES = ('ssl_certificate %s/fullchain.pem;' % LIVE,
 # Refuse to switch to material this close to expiry; alert well before certbot's own
 # 30-day renewal window closes.
 MIN_REMAINING_DAYS = 7
-ALERT_REMAINING_DAYS = 21
+# Operator bands: 45 and 30 days warn (certbot renews at 30), 14 and 7 alert.
+ALERT_THRESHOLDS = (45, 30, 14, 7)
+STABLE_HANDSHAKES = 5
+RELOAD_ATTEMPTS = 3
 # Production private routes (port, path). Stage routes are not checked: their
 # candidates are stopped between stage runs by design.
 ROUTES = ((8443, '/ready'), (8444, '/ready'), (8445, '/health'), (8446, '/'),
@@ -267,137 +271,49 @@ def public_realtime_refusal():
 
 # ---- renewal hook and monitor --------------------------------------------------------
 
-MONITOR_SOURCE = r'''"""CF Meet private TLS proxy certificate check (installed by private-tls-durable).
-
---check : status OK only when the managed %(name)s certificate verifies, matches its key,
-          has at least %(alert)d days left and is the one the proxy presents; when the
-          proxy presents another certificate, reload once (after nginx -t) and re-check.
---reload: certbot deploy hook: the same validation, then nginx -t and a graceful reload.
-A failed validation never reloads, so the running certificate is kept.
-"""
-import datetime, json, subprocess, sys, tempfile, time
-from pathlib import Path
-LIVE = Path(%(live)r)
-STATUS = Path(%(status)r)
-NAME = %(name)r
-CONTAINER = %(container)r
-NET = %(net)r
-CA = %(ca)r
-ALERT_DAYS = %(alert)d
-BEGIN, END = '-----BEGIN CERTIFICATE-----', '-----END CERTIFICATE-----'
-
-def sh(*a, input=None):
-    r = subprocess.run(a, input=input, capture_output=True, text=True, timeout=60)
-    return r.returncode, r.stdout
-
-def blocks(text):
-    return [BEGIN + b.split(END)[0] + END + '\n' for b in text.split(BEGIN)[1:] if END in b]
-
-def facts(pem):
-    code, out = sh('openssl', 'x509', '-noout', '-fingerprint', '-sha256', '-enddate', input=pem)
-    fp = end = None
-    for line in out.splitlines() if code == 0 else []:
-        if line.lower().startswith('sha256 fingerprint='): fp = line.split('=', 1)[1].replace(':', '').lower()
-        if line.startswith('notAfter='):
-            end = datetime.datetime.strptime(line.split('=', 1)[1].replace('  ', ' '), '%%b %%d %%H:%%M:%%S %%Y %%Z').replace(tzinfo=datetime.timezone.utc)
-    return fp, end
-
-def managed():
-    chain = blocks((LIVE / 'fullchain.pem').read_text())
-    if len(chain) < 2: return None, None, 'chain incomplete'
-    with tempfile.TemporaryDirectory() as tmp:
-        leaf, rest = Path(tmp) / 'leaf.pem', Path(tmp) / 'rest.pem'
-        leaf.write_text(chain[0]); rest.write_text(''.join(chain[1:]))
-        if sh('openssl', 'verify', '-CAfile', CA, '-untrusted', str(rest), '-purpose', 'sslserver', '-verify_hostname', NAME, str(leaf))[0]:
-            return None, None, 'chain does not verify'
-    cert_pub = sh('openssl', 'x509', '-noout', '-pubkey', input=chain[0])[1].strip()
-    code, key_pub = sh('openssl', 'pkey', '-pubout', '-in', str(LIVE / 'privkey.pem'))
-    if code or not cert_pub or cert_pub != key_pub.strip(): return None, None, 'key does not match'
-    fp, end = facts(chain[0])
-    return fp, end, None
-
-def presented():
-    code, ip = sh('docker', 'inspect', '-f', '{{(index .NetworkSettings.Networks "' + NET + '").IPAddress}}', CONTAINER)
-    if code or not ip.strip(): return None
-    code, out = sh('openssl', 's_client', '-connect', ip.strip() + ':8443', '-servername', NAME, '-verify_hostname', NAME,
-                   '-verify_return_error', '-CAfile', CA, input='')
-    shown = blocks(out)
-    if code or 'Verify return code: 0 (ok)' not in out or not shown: return None
-    return facts(shown[0])[0]
-
-def accepting_workers(ps_output):
-    """PIDs of workers still accepting connections: an old-generation worker retitles
-    itself 'nginx: worker process is shutting down' once it stops accepting."""
-    pids = set()
-    for line in ps_output.splitlines()[1:]:
-        pid, _, title = line.strip().partition(' ')
-        if pid.isdigit() and title.strip() == 'nginx: worker process':
-            pids.add(pid)
-    return pids
-
-def workers():
-    code, out = sh('docker', 'exec', CONTAINER, 'ps', '-o', 'pid,args')
-    return accepting_workers(out) if code == 0 else None
-
-def reload():
-    """nginx -t, a graceful reload, then wait until every accepting worker belongs to
-    the new generation: until then a connection can still reach an old worker."""
-    before = workers()
-    if sh('docker', 'exec', CONTAINER, 'nginx', '-t')[0] or sh('docker', 'exec', CONTAINER, 'nginx', '-s', 'reload')[0]:
+def host_nginx_uses_lineage():
+    """True when host nginx serves this hostname from the managed live/ lineage (then it
+    is an activation target too). Paths only; no key material is read."""
+    code, out, _ = sh('nginx', '-T', timeout=30)
+    if code:
         return False
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        now = workers()
-        if now and before is not None and not now & before:
-            return True
-        time.sleep(0.2)
-    return False
-
-def main(mode):
-    fp, end, problem = managed()
-    current, reloaded = presented(), False
-    if problem is None and (mode == '--reload' or current != fp):
-        reloaded = reload()
-        for _ in range(15):
-            current = presented()
-            if current == fp: break
-            time.sleep(1)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    left = (end - now).days if end else -1
-    ok = problem is None and current == fp and left >= ALERT_DAYS
-    status = dict(checkedAt=now.isoformat(), mode=mode.strip('-'), problem=problem, managedFingerprint=fp,
-                  presentedMatchesManaged=fp is not None and current == fp, expiresAt=end.isoformat() if end else None,
-                  remainingDays=left, reloaded=reloaded, status='OK' if ok else 'ALERT')
-    STATUS.write_text(json.dumps(status)); STATUS.chmod(0o600)
-    subprocess.run(['logger', '-t', CONTAINER, '-p', 'user.' + ('info' if ok else 'err'), json.dumps(status)])
-    print(json.dumps(status))
-    return 0 if ok else 1
-
-if __name__ == '__main__':
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else '--check'))
-'''
+    return any(line.strip().startswith('ssl_certificate ') and str(LIVE) + '/' in line
+               for line in out.splitlines())
 
 
-def monitor_source():
-    return MONITOR_SOURCE % dict(live=str(LIVE), status=str(STATUS), name=HOSTNAME, container=CONTAINER,
-                                 net=p.NET, alert=ALERT_REMAINING_DAYS, ca=CA_BUNDLE)
+def monitor_config(include_host):
+    targets = [{'name': 'private-proxy', 'kind': 'container', 'container': CONTAINER, 'network': p.NET, 'port': 8443}]
+    if include_host:
+        targets.append({'name': 'host-nginx', 'kind': 'host-nginx', 'address': '127.0.0.1', 'port': 443,
+                        'pidfile': '/run/nginx.pid'})
+    return {'lineage': str(LIVE), 'hostname': HOSTNAME, 'ca': CA_BUNDLE, 'status': str(STATUS),
+            'thresholds': list(ALERT_THRESHOLDS), 'stableHandshakes': STABLE_HANDSHAKES,
+            'reloadAttempts': RELOAD_ATTEMPTS, 'targets': targets}
+
+
+def install_monitor_files(include_host):
+    """The monitor program (certificate_monitor.py, this release's copy) and its config."""
+    p.write_private(MONITOR, (Path(__file__).resolve().parent / 'certificate_monitor.py').read_text())
+    p.write_private(MONITOR_CONFIG, json.dumps(monitor_config(include_host), indent=2))
 
 
 def hook_source():
     return ('#!/bin/sh\n# CF Meet: reload the private TLS proxy after api.cfmeet.com renews (private-tls-durable).\n'
             '# Validates the renewed material and nginx -t first; a failure keeps the running certificate.\n'
             'case " ${RENEWED_DOMAINS:-} " in *" %s "*) ;; *) exit 0 ;; esac\n'
-            'exec /usr/bin/python3 %s --reload\n') % (HOSTNAME, MONITOR)
+            'exec /usr/bin/python3 %s --reload --config %s\n') % (HOSTNAME, MONITOR, MONITOR_CONFIG)
 
 
 def install_renewal():
-    p.write_private(MONITOR, monitor_source())
+    install_monitor_files(host_nginx_uses_lineage())
     HOOK.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     HOOK.write_text(hook_source()); HOOK.chmod(0o700)
     p.write_private(SYSTEMD / (UNIT + '.service'),
         '[Unit]\nDescription=CF Meet private TLS proxy certificate check\nAfter=docker.service\n[Service]\nType=oneshot\n'
-        'ExecStart=/usr/bin/python3 %s --check\nNoNewPrivileges=true\nProtectSystem=strict\nProtectHome=read-only\n'
-        'ReadWritePaths=%s\nPrivateTmp=true\nMemoryMax=64M\nCPUQuota=10%%\n' % (MONITOR, WORK))
+        # ProtectSystem=full keeps /usr, /boot and /etc read-only; host `nginx -t` must
+        # still open its logs under /var for the self-repair reload.
+        'ExecStart=/usr/bin/python3 %s --check --config %s\nNoNewPrivileges=true\nProtectSystem=full\nProtectHome=read-only\n'
+        'PrivateTmp=true\nMemoryMax=64M\nCPUQuota=10%%\n' % (MONITOR, MONITOR_CONFIG))
     p.write_private(SYSTEMD / (UNIT + '.timer'),
         '[Unit]\nDescription=Check the CF Meet private TLS certificate daily\n[Timer]\nOnBootSec=10min\n'
         'OnCalendar=daily\nRandomizedDelaySec=1h\nPersistent=true\n[Install]\nWantedBy=timers.target\n')
@@ -418,6 +334,32 @@ def certbot_dry_run():
 
 # ---- operations ----------------------------------------------------------------------
 
+def certificate_consumers():
+    """Every CF Meet consumer of letsencrypt material on this host: containers with a
+    letsencrypt bind mount, host nginx certificate paths for this hostname, and certbot's
+    renewal method for the lineage. Paths and setting names only."""
+    containers = []
+    for name in p.run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines():
+        c = p.inspect(name)
+        mounts = [m['Destination'] for m in c['Mounts'] if m['Source'].startswith(str(LETSENCRYPT))]
+        if mounts:
+            containers.append({'name': name, 'running': c['State']['Running'], 'mounts': mounts})
+    code, out, _ = sh('nginx', '-T', timeout=30)
+    host = sorted({line.strip().rstrip(';') for line in out.splitlines()
+                   if line.strip().startswith(('ssl_certificate ', 'ssl_certificate_key ')) and HOSTNAME in line}) if code == 0 else []
+    renewal = {}
+    conf = LETSENCRYPT / 'renewal' / (HOSTNAME + '.conf')
+    if conf.is_file():
+        for line in conf.read_text().splitlines():
+            key, _, value = line.partition('=')
+            if key.strip() in ('authenticator', 'installer', 'renew_hook', 'post_hook', 'pre_hook', 'deploy_hook'):
+                renewal[key.strip()] = value.strip()
+    timers = sh('systemctl', 'list-timers', '--all', '--no-legend')[1]
+    return {'containers': containers, 'hostNginx': host, 'hostNginxUsesManagedLineage': host_nginx_uses_lineage(),
+            'certbotRenewal': renewal, 'deployHooks': sorted(x.name for x in HOOK.parent.iterdir()) if HOOK.parent.is_dir() else [],
+            'certbotTimer': any('certbot' in line or 'snap.certbot' in line for line in timers.splitlines())}
+
+
 def inspect_state():
     c = p.inspect(CONTAINER)
     text = CONF.read_text()
@@ -428,6 +370,8 @@ def inspect_state():
         'mounts': [dict(source=m['Source'], target=m['Destination'], readonly=not m['RW']) for m in c['Mounts']],
         'managed': live, 'presented': shown, 'presentedIsManaged': shown['fingerprint'] == live['fingerprint'],
         'hookInstalled': HOOK.is_file(), 'monitorTimer': sh('systemctl', 'is-enabled', UNIT + '.timer')[1].strip() or 'absent',
+        'consumers': certificate_consumers(),
+        'monitorConfig': json.loads(MONITOR_CONFIG.read_text()) if MONITOR_CONFIG.is_file() else None,
         'lastCheck': json.loads(STATUS.read_text()) if STATUS.is_file() else None}}
     print(json.dumps(state), flush=True)
     return state
@@ -498,14 +442,21 @@ def finish(run_id, live, how):
     realtime = public_realtime_refusal()
     # Renewal path: the deploy hook validates, tests and reloads; the presented
     # certificate must still be the managed one afterwards.
-    code, out, _ = sh('/usr/bin/env', 'RENEWED_DOMAINS=' + HOSTNAME, 'RENEWED_LINEAGE=' + str(LIVE), str(HOOK), timeout=120)
+    code, out, _ = sh('/usr/bin/env', 'RENEWED_DOMAINS=' + HOSTNAME, 'RENEWED_LINEAGE=' + str(LIVE), str(HOOK), timeout=300)
     hook = json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else None
-    assert hook and hook['presentedMatchesManaged'] and hook['reloaded'], 'Renewal hook did not reload the managed certificate'
+    assert hook and hook['problem'] is None and hook['presentedMatchesManaged'] and hook['reloaded'], \
+        'Renewal hook did not activate the managed certificate on every target'
+    assert all(t['stable'] and t['handshakes'] >= STABLE_HANDSHAKES for t in hook['targets'])
+    # The daily check right after: no reload needed, every target stable on the lineage.
+    code, out, _ = sh('/usr/bin/python3', str(MONITOR), '--check', '--config', str(MONITOR_CONFIG), timeout=180)
+    daily = json.loads(out.strip().splitlines()[-1]) if out.strip() else None
+    assert daily and daily['presentedMatchesManaged'] and not any(t['reloadAttempts'] for t in daily['targets']), \
+        'Daily check does not confirm the active certificate'
     after_hook = wait_ready(None, route_codes())
     dry = certbot_dry_run()
     result = {'operation': 'private-tls-durable', 'runId': run_id, 'result': how,
               'presented': public(shown), 'relayPresented': relay['fingerprint'] == live['fingerprint'],
-              'publicRealtimeTickets': realtime, 'renewalHook': hook, 'routesAfterHook': after_hook,
+              'publicRealtimeTickets': realtime, 'renewalHook': hook, 'dailyCheck': daily, 'routesAfterHook': after_hook,
               'certbotDryRun': dry, 'monitorTimer': sh('systemctl', 'is-enabled', UNIT + '.timer')[1].strip(),
               'rollbackContainer': (json.loads(STATE.read_text()).get('previous') if STATE.is_file() else None)}
     print(json.dumps(result), flush=True)

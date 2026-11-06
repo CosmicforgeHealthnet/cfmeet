@@ -1,0 +1,79 @@
+name: CF Meet TLS certificate monitor
+
+# Daily: run the installed certificate monitor on the VPS (validate the api.cfmeet.com
+# lineage, measure what every proxy presents, activate a missed renewal), check the
+# public certificate from outside, and notify operators on the tracking issue.
+# Warn at 45/30 days, alert at 14/7 days, expiry, an invalid lineage or a proxy not
+# presenting the managed certificate. A delivery test posts unconditionally and the
+# comment is read back before delivery is reported.
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      delivery_test:
+        description: 'Post a notification even if nothing changed, and verify delivery'
+        type: boolean
+        default: false
+
+permissions: { contents: read, issues: write }
+concurrency:
+  # Activation can reload the private proxy and host nginx: never beside a deployment.
+  group: deploy-backend-production
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Notification and monitor unit tests
+        run: |
+          cd infra/calling/production
+          python3 -m unittest test_certificate_notify test_certificate_monitor -v
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Run the installed monitor on the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -uo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            'python3 /opt/cfmeet-core/tls-proxy/certificate-monitor.py --check --config /opt/cfmeet-core/tls-proxy/certificate-monitor.json' \
+            > monitor.out; echo "monitor exit $?"
+          tail -n 1 monitor.out > status.json
+          python3 -c 'import json; json.load(open("status.json"))' || echo '{}' > status.json
+          cat status.json
+      - name: Check the public certificate from outside
+        run: |
+          set -uo pipefail
+          out=$(openssl s_client -connect api.cfmeet.com:443 -servername api.cfmeet.com -verify_hostname api.cfmeet.com \
+                -verify_return_error </dev/null 2>/dev/null || true)
+          if grep -q 'Verify return code: 0 (ok)' <<<"$out"; then
+            fp=$(openssl x509 -noout -fingerprint -sha256 <<<"$out" | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+            end=$(openssl x509 -noout -enddate <<<"$out" | cut -d= -f2)
+            printf '{"fingerprint":"%s","notAfter":"%s"}\n' "$fp" "$end" > external.json
+          else
+            echo '{"fingerprint":null,"error":"public TLS verification failed"}' > external.json
+          fi
+          cat external.json
+      - name: Notify operators and verify delivery
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DELIVERY_TEST: ${{ inputs.delivery_test && 'true' || 'false' }}
+          OPERATOR_LOGIN: ${{ github.repository_owner }}
+        run: python3 infra/calling/production/certificate_notify.py status.json external.json
