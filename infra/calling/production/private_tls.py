@@ -343,7 +343,7 @@ def install_renewal():
     HOOK.write_text(hook_source()); HOOK.chmod(0o700)
     p.write_private(SYSTEMD / (UNIT + '.service'),
         '[Unit]\nDescription=CF Meet private TLS proxy certificate check\nAfter=docker.service\n[Service]\nType=oneshot\n'
-        'ExecStart=/usr/bin/python3 %s --check\nNoNewPrivileges=true\nProtectSystem=strict\nProtectHome=true\n'
+        'ExecStart=/usr/bin/python3 %s --check\nNoNewPrivileges=true\nProtectSystem=strict\nProtectHome=read-only\n'
         'ReadWritePaths=%s\nPrivateTmp=true\nMemoryMax=64M\nCPUQuota=10%%\n' % (MONITOR, WORK))
     p.write_private(SYSTEMD / (UNIT + '.timer'),
         '[Unit]\nDescription=Check the CF Meet private TLS certificate daily\n[Timer]\nOnBootSec=10min\n'
