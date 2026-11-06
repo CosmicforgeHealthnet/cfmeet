@@ -244,8 +244,19 @@ class Journey:
             assert not any(x in json.dumps([timeline,meetings]) for x in secret)
             self.done('conversation_timeline_and_meetings_resolve_through_owners')
 
-    def media_call(self,a,b,kind):
-        call=self.dial(a,b,kind)['call']['callId']
+    def hub_launch(self,a,path,kind):
+        """A Hub launch (contact or conversation facade) under the configured launch
+        credential; the identical retry must return the same call, never a second one."""
+        body={'kind':kind,'clientRequestId':str(uuid.uuid4()),'endpointId':a['endpointId']}
+        def launch():
+            first=self.hub(a,path,'POST',body)
+            assert self.hub(a,path,'POST',body)['callId']==first['callId'],'Hub launch retry created a second call'
+            self.calls.append(first['callId'])
+            return first['callId']
+        return launch
+
+    def media_call(self,a,b,kind,launch=None):
+        call=launch() if launch else self.dial(a,b,kind)['call']['callId']
         token=self.c['scope']['token'];path='/v1/calls/'+call
         for _ in range(40):
             offers=self.request('calling','/v1/calling/invitations',token=b['signaling'])['data']
@@ -286,6 +297,34 @@ class Journey:
                 try:client.close()
                 except Exception:pass
             self.clean_call(call)
+        return call
+
+    def hub_media_calls(self,a,b,conversation):
+        """Calls launched through the Hub facades take the same real path as direct
+        dials: ringing, acceptance, media credentials, CONNECTED and frames both ways."""
+        cid=next(x for x in self.hub(a,'/contacts')['data'] if x['cfMeetId']==b['cfMeetId'])['contactId']
+        launched=[self.media_call(a,b,kind,self.hub_launch(a,'/contacts/'+cid+'/calls',kind)) for kind in ('VOICE','VIDEO')]
+        mine=self.hub(a,'/calls/history?limit=50')['data'];theirs=self.hub(b,'/calls/history?limit=50')['data']
+        for call,kind in zip(launched,('VOICE','VIDEO')):
+            out=next(x for x in mine if x['callId']==call);into=next(x for x in theirs if x['callId']==call)
+            assert (out['kind'],out['origin'],out['direction'],out['missed'])==(kind,'CONTACT','OUTGOING',False),out
+            assert (into['direction'],into['missed'])==('INCOMING',False),into
+        assert not any(x in json.dumps([mine,theirs]) for x in (a['principalId'],b['principalId']))
+        self.done('hub_contact_launched_voice_and_video_connect_with_bidirectional_media_and_history')
+        if conversation:
+            call=self.media_call(a,b,'VOICE',self.hub_launch(a,'/conversations/'+conversation+'/calls','VOICE'))
+            for person in (a,b):
+                cards=[x for x in self.hub(person,'/conversations/'+conversation+'/timeline?limit=50')['data']
+                       if x['kind']=='CALL' and x['sourceId']==call]
+                assert len(cards)==1,'Expected exactly one call card per viewer'
+            assert next(x for x in self.hub(a,'/calls/history?limit=50')['data'] if x['callId']==call)['origin']=='CONVERSATION'
+            self.done('hub_conversation_launched_call_connects_and_writes_one_card_per_viewer')
+
+    def hub_launch_denied(self,a,cid):
+        """Blocked or no-longer-accepted contacts cannot be called through the Hub."""
+        denied=self.hub(a,'/contacts/'+cid+'/calls','POST',{'kind':'VOICE','clientRequestId':str(uuid.uuid4()),
+            'endpointId':a['endpointId']},expected=(403,404,409))
+        assert 'callId' not in denied
 
     def clean_call(self,call):
         token=self.c['scope']['token'];path='/v1/calls/'+call
@@ -358,13 +397,17 @@ class Journey:
         for kind in ('VOICE','VIDEO'):
             self.media_call(a,b,kind)
         self.done('native_voice_video_ringing_accept_media_credentials_and_bidirectional_frames')
+        if self.c['scope'].get('launchCredentialId'):
+            self.hub_media_calls(a,b,conversation)
         contact=self.hub(a,'/contacts')['data'][0]
         self.hub(a,'/contacts/'+contact['contactId'],'PATCH',{'expectedVersion':contact['version'],'alias':'My saved contact','favorite':True})
         assert self.hub(b,'/contacts')['data'][0]['alias'] is None
         self.hub(a,'/contacts/'+contact['contactId']+'/common-groups')
         self.done('separate_aliases_and_messaging_owned_common_groups')
+        cid=next(x for x in self.hub(a,'/contacts')['data'] if x['cfMeetId']==b['cfMeetId'])['contactId']
         self.hub(b,'/profiles/'+a['cfMeetId']+'/block','PUT')
         assert self.dial(a,b,expected=(403,404,409)).get('error',{}).get('code')=='TARGET_UNAVAILABLE'
+        self.hub_launch_denied(a,cid)
         if self.c['stage']:
             assert self.direct(a,b,expected=(403,404,409)).get('error',{}).get('code')=='DELIVERY_REFUSED'
             denied=self.request('messaging','/v1/conversations/'+conversation+'/messages','POST',
@@ -372,6 +415,7 @@ class Journey:
             assert denied.get('error',{}).get('code')=='DELIVERY_REFUSED'
         self.hub(b,'/profiles/'+a['cfMeetId']+'/block','DELETE')
         assert self.dial(a,b,expected=(403,404,409)).get('error',{}).get('code')=='TARGET_UNAVAILABLE'
+        self.hub_launch_denied(a,cid)
         self.done('immediate_block_and_unblock_without_implicit_reconnection')
         self.connect(a,b)
         unused=self.hub(a,'/invites','POST',{'purpose':'CONNECT','expiresInSeconds':600,'maxUses':1})

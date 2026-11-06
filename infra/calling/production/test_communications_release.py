@@ -76,6 +76,26 @@ class CommunicationsLaunchCredential(unittest.TestCase):
         self.assertFalse(any('LAUNCH_CREDENTIAL' in x for x in messaging['Env']+unset['Env']))
 
 
+class LaunchCredentialMonitoring(unittest.TestCase):
+    RECORD={'credentialId':'22222222-2222-4222-8222-222222222222','scopes':['calls.write'],'expiresAt':'2027-11-06T04:41:50.123456789Z'}
+
+    def test_status_reports_days_left_and_asks_for_renewal_in_time(self):
+        ok=release.launch_credential_status(NOW,self.RECORD)
+        self.assertEqual((ok['remainingDays'],ok['status']),(365,'OK'))
+        soon=release.launch_credential_status(release.datetime(2027,10,1,tzinfo=release.timezone.utc),self.RECORD)
+        self.assertEqual(soon['status'],'RENEW')
+
+    def test_daily_monitor_is_valid_and_alerts_below_the_threshold(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(release,'WORK',Path(folder)):
+            for expires,code in (('2099-01-01T00:00:00Z',0),('2026-01-01T00:00:00.5Z',1)):
+                (Path(folder)/'launch-credential.json').write_text(json.dumps(dict(self.RECORD,expiresAt=expires)))
+                script=Path(folder)/'monitor.py';script.write_text(release.launch_monitor_source())
+                import subprocess
+                r=subprocess.run(['python3',str(script)],capture_output=True,text=True)
+                self.assertEqual(r.returncode,code,r.stderr)
+                self.assertNotIn('secret',r.stdout.lower())
+
+
 class CommunicationsRuntimePreservation(unittest.TestCase):
     def test_staging_renews_expired_acceptance_credential_without_recreating_scope(self):
         with tempfile.TemporaryDirectory() as folder:

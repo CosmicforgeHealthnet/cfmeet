@@ -562,6 +562,44 @@ def launch_credential(scope,now=None):
     save(WORK/'launch-credential.json',json.dumps(record))
     return record['credentialId']
 
+LAUNCH_ALERT_DAYS=45
+LAUNCH_MONITOR='cfmeet-communications-launch-credential'
+
+def launch_credential_status(now=None,record=None):
+    """Days left on the configured launch credential (non-secret record) and whether
+    Calling runs with exactly that id. The credential itself is re-verified live by
+    Calling on every launch; this only warns before it expires."""
+    now=now or datetime.now(timezone.utc)
+    record=record or json.loads((WORK/'launch-credential.json').read_text())
+    text=re.sub(r'(\.\d{6})\d+',r'\1',record['expiresAt']).replace('Z','+00:00')
+    left=(datetime.fromisoformat(text)-now).days
+    return {'credentialId':record['credentialId'],'scopes':record['scopes'],'expiresAt':record['expiresAt'],
+            'remainingDays':left,'status':'OK' if left>=LAUNCH_ALERT_DAYS else 'RENEW'}
+
+def launch_monitor_source():
+    return ('import datetime, json, re, subprocess, sys\n'
+        'r = json.load(open(%r))\n'
+        "t = re.sub(r'(\\.\\d{6})\\d+', r'\\1', r['expiresAt']).replace('Z', '+00:00')\n"
+        'left = (datetime.datetime.fromisoformat(t) - datetime.datetime.now(datetime.timezone.utc)).days\n'
+        "status = dict(credentialId=r['credentialId'], expiresAt=r['expiresAt'], remainingDays=left, status='OK' if left >= %d else 'RENEW')\n"
+        "subprocess.run(['logger', '-t', %r, '-p', 'user.' + ('info' if left >= %d else 'err'), json.dumps(status)])\n"
+        'print(json.dumps(status))\n'
+        'sys.exit(0 if left >= %d else 1)\n') % (str(WORK/'launch-credential.json'),LAUNCH_ALERT_DAYS,LAUNCH_MONITOR,LAUNCH_ALERT_DAYS,LAUNCH_ALERT_DAYS)
+
+def install_launch_monitor():
+    """Daily journal check; renewal is the next communications-release, which reuses
+    the credential only with >= 30 days left and otherwise issues a fresh one."""
+    script=WORK/'launch-credential-monitor.py'
+    p.write_private(script,launch_monitor_source())
+    p.write_private(Path('/etc/systemd/system/%s.service'%LAUNCH_MONITOR),
+        '[Unit]\nDescription=CF Meet Hub call-launch credential expiry check\n[Service]\nType=oneshot\n'
+        'ExecStart=/usr/bin/python3 %s\nNoNewPrivileges=true\nProtectSystem=strict\nProtectHome=true\nPrivateTmp=true\n'
+        'MemoryMax=32M\nCPUQuota=5%%\n'%script)
+    p.write_private(Path('/etc/systemd/system/%s.timer'%LAUNCH_MONITOR),
+        '[Unit]\nDescription=Check the CF Meet call-launch credential daily\n[Timer]\nOnBootSec=15min\n'
+        'OnCalendar=daily\nRandomizedDelaySec=1h\nPersistent=true\n[Install]\nWantedBy=timers.target\n')
+    p.run('systemctl','daemon-reload');p.run('systemctl','enable','--now',LAUNCH_MONITOR+'.timer')
+
 def release(sha,run_id):
     p.identity()
     evidence=json.loads((WORK/'staging-evidence.json').read_text())
@@ -570,6 +608,8 @@ def release(sha,run_id):
         assert evidence['images'][service]==image(service,sha),'Staged image digest mismatch'
     scope=prod_scope();prepare_trust();proxy_routes();secure_public_ingress()
     scope['launchCredentialId']=launch_credential(scope)
+    install_launch_monitor()
+    print(json.dumps({'launchCredential':launch_credential_status()}),flush=True)
     record=dict(sha=sha,runId=run_id,replacements=[],newHub=False)
     # Only the three additive owner feature migrations and the new isolated Hub
     # schema are applied. Existing base histories are deliberately untouched.
@@ -621,6 +661,11 @@ def verify(sha,run_id):
     scope=json.loads((WORK/'production-context.private.json').read_text())
     scope['token']=credential(scope)
     report=communications_acceptance.execute(sha,run_id,scope,stage=False,verification=True)
+    launch=launch_credential_status()
+    configured_id=p.env_of(p.inspect('cfmeet-calling')).get('CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID')
+    assert configured_id==launch['credentialId'],'Calling runs with a different launch credential than recorded'
+    assert launch['remainingDays']>=LAUNCH_MIN_REMAINING_DAYS,'Launch credential must be renewed (communications-release)'
+    report['launchCredential']=launch
     p.regression();print(json.dumps(report),flush=True)
 
 def run(operation, sha, run_id):

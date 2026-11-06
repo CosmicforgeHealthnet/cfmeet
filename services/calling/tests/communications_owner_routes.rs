@@ -442,6 +442,34 @@ async fn launch_fails_closed_without_a_launch_authority() {
 }
 
 #[tokio::test]
+async fn launch_fails_closed_once_the_launch_credential_is_revoked() {
+    let Some((w, hub)) = world(true).await else {
+        return;
+    };
+    let (me, them) = (&w.w.initiator, &w.w.recipient);
+    let mine = w.device(me, "me-main").await;
+    w.device(them, "them-main").await;
+    let (me_id, them_id) = (me.id().as_uuid(), them.id().as_uuid());
+    // Revocation in Platform Access applies to the very next launch: the credential is
+    // re-verified live, never cached as a standing grant.
+    w.h()
+        .platform
+        .revoke_credential(w.w.token.credential.id)
+        .await
+        .unwrap();
+    let r = hub_as(
+        &w,
+        me_id,
+        LAUNCH,
+        launch_body("hub-revoked", me_id, &mine, &[them_id]),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.text);
+    assert_eq!(hub.checks(), 0);
+    assert_eq!(w.w.count("SELECT count(*) FROM calls").await, 0);
+}
+
+#[tokio::test]
 async fn participation_and_history_return_only_the_delegated_users_calls() {
     let Some((w, _hub)) = world(true).await else {
         return;
