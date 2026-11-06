@@ -1,0 +1,14 @@
+# PROPOSAL / TEMPLATE — not installed by any workflow (see cfmeet-db-backup.service).
+# Daily at 02:30 UTC (low traffic for the current user base), randomized by up to 20 minutes;
+# a run missed while the host was down starts at the next boot.
+[Unit]
+Description=Daily CF Meet encrypted database backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+RandomizedDelaySec=20m
+Persistent=true
+Unit=cfmeet-db-backup.service
+
+[Install]
+WantedBy=timers.target
