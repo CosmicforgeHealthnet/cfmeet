@@ -198,6 +198,9 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
             || json!({"schemaVersion":1,"pushServices":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
         )),
         "/internal/v1/communications/endpoints/verify" => {
+            if world.calling_down {
+                return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+            }
             let e = world.endpoints.get(&uuid_at(body, "endpointId"));
             ok(
                 json!({"schemaVersion":1,"owned":e.is_some_and(|e| e.0==principal),"status":e.filter(|e| e.0==principal).map(|e| e.1.clone()),"endpointKind":"MOBILE"}),

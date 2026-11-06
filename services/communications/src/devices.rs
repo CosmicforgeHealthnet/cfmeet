@@ -33,6 +33,84 @@ impl State {
     ) -> Result<Value> {
         one(db,&format!("SELECT to_jsonb(d) doc FROM communication_devices d WHERE id=$1 AND profile_id=$2{}",if lock {" FOR UPDATE"} else {""}),vec![id.into(),p.id.into()]).await?.ok_or(Error::NotFound)
     }
+    /// Devices revoked inside Messaging or Calling (an owner-side revocation, or the
+    /// user's own revocation on another surface) become REVOKED here before they are
+    /// listed or counted. Only an explicit owner answer revokes: an unavailable or
+    /// refusing owner leaves the reference unchanged, never silently ACTIVE->REVOKED.
+    pub async fn reconcile_devices(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+    ) -> Result<usize> {
+        let active:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(d) doc FROM communication_devices d WHERE profile_id=$1 AND state='ACTIVE' ORDER BY created_at,id LIMIT 100",vec![p.id.into()]).await?;
+        let mut revoked = 0;
+        for d in &active {
+            let id = uuid_field(d, "id")?;
+            let mut gone = false;
+            if let Some(chat) = d["chat_device_ref"].as_str() {
+                gone |= self.owner_revoked(scope, true, p, "deviceId", chat).await;
+            }
+            if let Some(endpoint) = d["call_endpoint_ref"].as_str() {
+                gone |= self
+                    .owner_revoked(scope, false, p, "endpointId", endpoint)
+                    .await;
+            }
+            if !gone {
+                continue;
+            }
+            let txn = self.store.begin().await?;
+            let row:Option<Value>=one(&txn,"UPDATE communication_devices d SET state='REVOKED',revoked_at=now(),revocation_reason='OWNER_SERVICE',push_platform=NULL,push_registered_at=NULL,version=d.version+1,updated_at=now() WHERE id=$1 AND profile_id=$2 AND state='ACTIVE' RETURNING to_jsonb(d) doc",
+                vec![id.into(),p.id.into()]).await?;
+            if let Some(row) = row {
+                self.store
+                    .audit(
+                        &txn,
+                        p,
+                        "DEVICE_REVOKED",
+                        Some(id),
+                        json!({"reason":"OWNER_SERVICE"}),
+                    )
+                    .await?;
+                self.store
+                    .change(&txn, p.id, "DEVICE", Some(id), row["version"].as_i64())
+                    .await?;
+                revoked += 1;
+            }
+            txn.commit().await?;
+        }
+        Ok(revoked)
+    }
+
+    /// True only when the owner answered that the reference is no longer an ACTIVE
+    /// device or endpoint of this principal.
+    async fn owner_revoked(
+        &self,
+        scope: &DelegatedPlatformContext,
+        messaging: bool,
+        p: &Profile,
+        field: &str,
+        reference: &str,
+    ) -> bool {
+        let (client, path) = if messaging {
+            (
+                self.messaging(scope),
+                "/internal/v1/communications/devices/verify",
+            )
+        } else {
+            (
+                self.calling(scope),
+                "/internal/v1/communications/endpoints/verify",
+            )
+        };
+        let Ok(client) = client else { return false };
+        let mut body = json!({"principalId":p.principal_id});
+        body[field] = json!(reference);
+        match client.call(path, &body).await {
+            Ok(v) => v["owned"] != true || v["status"] != "ACTIVE",
+            Err(_) => false,
+        }
+    }
+
     pub async fn list_devices(&self, p: &Profile) -> Result<Value> {
         let devices:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(d) doc FROM communication_devices d WHERE profile_id=$1 ORDER BY created_at,id LIMIT 100",vec![p.id.into()]).await?;
         Ok(
@@ -101,6 +179,8 @@ impl State {
                 return Err(Error::NotFound);
             }
         }
+        // References revoked at their owner no longer hold one of the device slots.
+        self.reconcile_devices(scope, p).await?;
         let txn = self.store.begin().await?;
         let op = "device.link";
         if let Some(v) = self.store.idempotency(&txn, p, op, key, &body).await? {

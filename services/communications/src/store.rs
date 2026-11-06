@@ -280,6 +280,20 @@ impl Store {
         execute(db,"INSERT INTO communication_changes(profile_id,domain,resource_id,resource_version) VALUES($1,$2,$3,$4)",vec![profile.into(),domain.into(),resource.into(),version.into()]).await?;
         Ok(())
     }
+    /// A CONTACT feed entry for every participant of a relationship change.
+    pub async fn relationship_changed<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        profiles: &[Uuid],
+        connection: Uuid,
+        version: i64,
+    ) -> Result<()> {
+        for profile in profiles {
+            self.change(db, *profile, "CONTACT", Some(connection), Some(version))
+                .await?;
+        }
+        Ok(())
+    }
     pub fn public_profile(public_id: String, p: &Profile, relationship: String) -> Json {
         json!({"schemaVersion":1,"cfMeetId":public_id,"displayName":p.display_name,"avatarReference":p.avatar_reference,"relationship":relationship})
     }

@@ -481,7 +481,10 @@ async fn dispatch_inner(
         ("GET", ["me", "storage-summary"]) => s.storage_summary(scope, p).await,
         ("GET", ["me", "notification-delivery-status"]) => s.delivery_status(scope, p).await,
         ("GET", ["me", "recovery-state"]) => s.recovery_state(scope, p).await,
-        ("GET", ["devices"]) => s.list_devices(p).await,
+        ("GET", ["devices"]) => {
+            s.reconcile_devices(scope, p).await?;
+            s.list_devices(p).await
+        }
         ("POST", ["devices", "link"]) => s.link_device(scope, p, body(&r), key(&r)?).await,
         ("PUT", ["devices", device, "push"]) => {
             #[derive(serde::Deserialize)]

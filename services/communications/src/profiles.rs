@@ -197,6 +197,9 @@ impl State {
                 json!({"previousIdentifiersInvalidated":true,"invitationsRevoked":true}),
             )
             .await?;
+        self.store
+            .change(&txn, p.id, "PROFILE", Some(p.id), Some(current.version + 1))
+            .await?;
         let result = json!({"schemaVersion":1,"cfMeetId":id,"version":current.version+1});
         self.store
             .finish_idempotency(&txn, p, "public-id.rotate", key, result.clone())
@@ -273,6 +276,9 @@ impl State {
                 current.version + 1,
                 json!({"principalId":p.principal_id,"privacyVersion":current.version+1}),
             )
+            .await?;
+        self.store
+            .change(&txn, p.id, "PRIVACY", Some(p.id), Some(current.version + 1))
             .await?;
         let result =
             json!({"schemaVersion":1,"version":current.version+1,"privacy":update.privacy});

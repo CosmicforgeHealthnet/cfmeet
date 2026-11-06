@@ -909,6 +909,17 @@ async fn change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps() {
     let (a, b) = (user(&h).await, user(&h).await);
     h.connected(&a.profile, &b.profile).await;
     let ab = contact_id(&h, &a.profile, &b.profile).await;
+    // The request and its acceptance invalidate the relationship on both sides.
+    for u in [&a, &b] {
+        let contact = h
+            .state
+            .changes(&u.profile, &q(&[("domains", "CONTACT")]), true)
+            .await
+            .unwrap();
+        assert_eq!(contact["data"].as_array().unwrap().len(), 2);
+    }
+    let base = h.state.sync_head(&a.profile).await.unwrap().0.to_string();
+    let base_b = h.state.sync_head(&b.profile).await.unwrap().0.to_string();
     for _ in 0..3 {
         h.state
             .create_list(
@@ -923,7 +934,11 @@ async fn change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps() {
         .set_favorite(&a.profile, ab, true, json!({}), Uuid::new_v4())
         .await
         .unwrap();
-    let all = h.state.changes(&a.profile, &q(&[]), false).await.unwrap();
+    let all = h
+        .state
+        .changes(&a.profile, &q(&[("after", &base)]), false)
+        .await
+        .unwrap();
     let positions: Vec<i64> = all["data"]
         .as_array()
         .unwrap()
@@ -933,7 +948,10 @@ async fn change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps() {
     assert_eq!(positions.len(), 4);
     assert!(positions.windows(2).all(|w| w[0] < w[1]));
     assert_eq!(
-        h.state.changes(&b.profile, &q(&[]), false).await.unwrap()["data"]
+        h.state
+            .changes(&b.profile, &q(&[("after", &base_b)]), false)
+            .await
+            .unwrap()["data"]
             .as_array()
             .unwrap()
             .len(),
@@ -941,7 +959,11 @@ async fn change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps() {
     );
     let filtered = h
         .state
-        .changes(&a.profile, &q(&[("domains", "CONTACT")]), true)
+        .changes(
+            &a.profile,
+            &q(&[("after", &base), ("domains", "CONTACT")]),
+            true,
+        )
         .await
         .unwrap();
     assert_eq!(filtered["data"].as_array().unwrap().len(), 1);
@@ -959,7 +981,7 @@ async fn change_feed_is_monotonic_bounded_and_reports_resync_instead_of_gaps() {
     ));
     let page = h
         .state
-        .changes(&a.profile, &q(&[("limit", "2")]), false)
+        .changes(&a.profile, &q(&[("after", &base), ("limit", "2")]), false)
         .await
         .unwrap();
     assert_eq!(page["hasMore"], true);
@@ -1182,6 +1204,132 @@ async fn private_owner_and_operator_routes_are_scoped_deduplicated_and_audited()
             .await
             .unwrap()
             .allowed
+    );
+    h.close().await;
+}
+
+/// A device or endpoint revoked at its owner (not through the Hub) is no longer listed
+/// or counted as ACTIVE; an unavailable owner never changes a reference.
+#[tokio::test]
+async fn owner_side_revocations_reconcile_and_outages_change_nothing() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let sa = h.delegated(&a.account);
+    let chat = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat, (a.profile.principal_id, "ACTIVE".into()));
+    let ep = endpoint(&h, &a);
+    let mut ids = Vec::new();
+    for body in [
+        json!({"platform":"IOS","chatDeviceId":chat}),
+        json!({"platform":"WEB","callEndpointId":ep}),
+    ] {
+        let linked = h
+            .state
+            .link_device(&sa, &a.profile, body, Uuid::new_v4())
+            .await
+            .unwrap();
+        ids.push(linked["device"]["deviceId"].as_str().unwrap().to_owned());
+    }
+    let state = |v: &Value, id: &str| {
+        v["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["deviceId"] == id)
+            .map(|d| (d["state"].clone(), d["revocationReason"].clone()))
+            .unwrap()
+    };
+    // Calling is down and the endpoint was revoked there: nothing is assumed.
+    {
+        let mut w = h.world.write().unwrap();
+        w.calling_down = true;
+        w.endpoints.get_mut(&ep).unwrap().1 = "REVOKED".into();
+    }
+    assert_eq!(h.state.reconcile_devices(&sa, &a.profile).await.unwrap(), 0);
+    let listed = h.state.list_devices(&a.profile).await.unwrap();
+    assert_eq!(state(&listed, &ids[1]).0, "ACTIVE");
+    // Messaging revoked the chat device itself; Calling recovers.
+    {
+        let mut w = h.world.write().unwrap();
+        w.calling_down = false;
+        w.devices.get_mut(&chat).unwrap().1 = "REVOKED".into();
+    }
+    let head = h.state.sync_head(&a.profile).await.unwrap().0;
+    assert_eq!(h.state.reconcile_devices(&sa, &a.profile).await.unwrap(), 2);
+    let listed = h.state.list_devices(&a.profile).await.unwrap();
+    for id in &ids {
+        assert_eq!(
+            state(&listed, id),
+            (json!("REVOKED"), json!("OWNER_SERVICE"))
+        );
+    }
+    // Each revocation reaches other devices through the change feed, exactly once.
+    let after = h.state.sync_head(&a.profile).await.unwrap().0;
+    assert!(after > head);
+    let changed: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_changes WHERE profile_id=$1 AND domain='DEVICE' AND seq>$2", vec![a.profile.id.into(), head.into()]).await.unwrap().unwrap();
+    assert_eq!(changed["n"], 2);
+    assert_eq!(h.state.reconcile_devices(&sa, &a.profile).await.unwrap(), 0);
+    h.close().await;
+}
+
+/// Privacy, block/unblock and public-ID rotation reach the per-user change feed, so other
+/// devices invalidate without waiting for a bootstrap; the blocked person only sees a
+/// relationship change, never a block entry.
+#[tokio::test]
+async fn privacy_block_and_identity_changes_invalidate_through_the_feed() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let heads = (
+        h.state.sync_head(&a.profile).await.unwrap().0,
+        h.state.sync_head(&b.profile).await.unwrap().0,
+    );
+    let domains = |profile: Uuid, after: i64| {
+        let db = h.state.store.db.clone();
+        async move {
+            let v: Value = one(&db, "SELECT jsonb_build_object('d',COALESCE(jsonb_agg(domain ORDER BY seq),'[]'::jsonb)) doc FROM communication_changes WHERE profile_id=$1 AND seq>$2",
+                vec![profile.into(), after.into()]).await.unwrap().unwrap();
+            v["d"].clone()
+        }
+    };
+    let privacy = h.state.get_privacy(&a.profile).await.unwrap();
+    h.state
+        .set_privacy(
+            &a.profile,
+            json!({"expectedVersion":privacy["version"],"privacy":privacy["privacy"]}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    h.state
+        .set_block(&a.profile, &b.profile, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    h.state
+        .set_block(&a.profile, &b.profile, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    let current = h.profile(&a.account).await;
+    h.state
+        .rotate_public_id(
+            &current,
+            &a.account,
+            json!({"expectedVersion":current.version}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        domains(a.profile.id, heads.0).await,
+        json!(["PRIVACY", "BLOCK", "BLOCK", "PROFILE"])
+    );
+    assert_eq!(
+        domains(b.profile.id, heads.1).await,
+        json!(["CONTACT", "CONTACT"])
     );
     h.close().await;
 }

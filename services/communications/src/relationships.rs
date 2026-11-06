@@ -97,6 +97,9 @@ impl State {
             .audit(&txn, p, "CONNECTION_REQUESTED", Some(id), json!({}))
             .await?;
         self.store.event(&txn,p,"communications.connection.requested",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"state":"REQUEST_PENDING"})).await?;
+        self.store
+            .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
+            .await?;
         let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":request.cf_meet_id,"state":"PENDING","version":1});
         self.store
             .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
@@ -206,6 +209,9 @@ impl State {
             )
             .await?;
         self.store.event(&txn,p,&format!("communications.connection.{}",relationship.to_lowercase()),pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":other.principal_id,"state":relationship})).await?;
+        self.store
+            .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
+            .await?;
         let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":self.store.current_public_id(&txn,other.id).await?,"state":next,"version":r.version+1,"relationship":relationship});
         self.store
             .finish_idempotency(&txn, p, &operation, key, result.clone())
@@ -350,6 +356,15 @@ impl State {
                 json!({"relationshipVersion":pair.version}),
             )
             .await?;
+        self.store
+            .change(
+                &txn,
+                p.id,
+                "CONTACT",
+                Some(id),
+                Some(update.expected_version + 1),
+            )
+            .await?;
         let response = json!({"schemaVersion":1,"contactId":id,"alias":alias,"favorite":favorite,"notifications":notifications,"version":update.expected_version+1});
         self.store
             .finish_idempotency(&txn, p, "contact.patch", key, response.clone())
@@ -378,6 +393,9 @@ impl State {
                 .audit(&txn, p, "CONNECTION_REMOVED", Some(pair.id), json!({}))
                 .await?;
             self.store.event(&txn,p,"communications.connection.revoked",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":other.principal_id,"state":"REVOKED"})).await?;
+            self.store
+                .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
+                .await?;
         }
         let result = json!({"schemaVersion":1,"contactId":id,"relationship":"REVOKED"});
         self.store
@@ -427,6 +445,20 @@ impl State {
             )
             .await?;
         self.store.event(&txn,p,"communications.block.changed",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"blocked":active})).await?;
+        // The blocker's devices refresh their block list; the other person's devices
+        // refresh the relationship (no block state is disclosed to them).
+        self.store
+            .change(&txn, p.id, "BLOCK", Some(pair.id), Some(pair.version + 1))
+            .await?;
+        self.store
+            .change(
+                &txn,
+                target.id,
+                "CONTACT",
+                Some(pair.id),
+                Some(pair.version + 1),
+            )
+            .await?;
         let result = json!({"schemaVersion":1,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"blocked":active,"relationship":state});
         self.store
             .finish_idempotency(&txn, p, "block.update", key, result.clone())
