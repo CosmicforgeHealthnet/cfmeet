@@ -130,15 +130,43 @@ def validate_material(folder=LIVE, now=None, min_days=MIN_REMAINING_DAYS, ca=CA_
     return facts
 
 
+def handshake_failure(out, err):
+    """A bounded, secret-free class of an openssl s_client failure for diagnostics."""
+    text = out + err
+    for marker in ('Connection refused', 'connect:errno', 'No route to host', 'timed out'):
+        if marker in text:
+            return 'connect: ' + marker
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith('verify error:') or line.startswith('Verify return code:'):
+            return line[:120]
+    return 'handshake failed'
+
+
 def presented(address, port=8443, ca=None):
     """Facts of the certificate the proxy at `address` presents for HOSTNAME, verified
     against the public roots with SNI and the hostname checked."""
-    code, out, _ = sh('openssl', 's_client', '-connect', '%s:%d' % (address, port), '-servername', HOSTNAME,
-                      '-verify_hostname', HOSTNAME, '-verify_return_error', '-CAfile', ca or CA_BUNDLE, input='', timeout=20)
-    assert code == 0 and 'Verify return code: 0 (ok)' in out, 'Presented certificate does not verify'
+    code, out, err = sh('openssl', 's_client', '-connect', '%s:%d' % (address, port), '-servername', HOSTNAME,
+                        '-verify_hostname', HOSTNAME, '-verify_return_error', '-CAfile', ca or CA_BUNDLE, input='', timeout=20)
+    assert code == 0 and 'Verify return code: 0 (ok)' in out, \
+        'Presented certificate does not verify (%s)' % handshake_failure(out, err)
     blocks = split_pem(out)
     assert blocks, 'No certificate presented'
     return certificate_facts(blocks[0])
+
+
+def presented_eventually(address, port=8443, timeout=30, probe=None, sleep=time.sleep, clock=time.monotonic):
+    """`presented`, allowing a freshly started or reloaded proxy up to `timeout`
+    seconds to accept TLS; the last failure is raised unchanged."""
+    probe = probe or presented
+    deadline = clock() + timeout
+    while True:
+        try:
+            return probe(address, port)
+        except AssertionError:
+            if clock() >= deadline:
+                raise
+            sleep(1)
 
 
 def public(facts):
@@ -409,7 +437,7 @@ def make_durable(run_id):
         state['stage'] = 'started'; p.write_private(STATE, json.dumps(state))
         p.run('docker', 'exec', nxt, 'nginx', '-t')
         candidate = p.inspect(nxt)
-        shown = presented(address_of(candidate))
+        shown = presented_eventually(address_of(candidate))
         assert shown['fingerprint'] == live['fingerprint'], 'Replacement does not present the managed certificate'
         wait_ready(address_of(candidate), before)
         # Switch: the previous proxy stops gracefully (nginx finishes open requests) and
@@ -438,9 +466,9 @@ def make_durable(run_id):
 
 def finish(run_id, live, how):
     deployed = p.inspect(CONTAINER)
-    shown = presented(address_of(deployed))
+    shown = presented_eventually(address_of(deployed))
     assert shown['fingerprint'] == live['fingerprint']
-    relay = presented('127.0.0.1', 18444)
+    relay = presented_eventually('127.0.0.1', 18444)
     assert relay['fingerprint'] == live['fingerprint'], 'Messaging ingress relay does not reach the proxy'
     realtime = public_realtime_refusal()
     # Renewal path: the deploy hook validates, tests and reloads; the presented

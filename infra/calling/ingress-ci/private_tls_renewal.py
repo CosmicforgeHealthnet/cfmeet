@@ -124,7 +124,9 @@ def main():
             p.docker_api('POST', '/containers/create?name=' + state['next'], payload)
             p.docker_api('POST', '/containers/%s/start' % state['next'])
             sh('docker', 'exec', state['next'], 'nginx', '-t')
-            assert shown(state['next']) == first, 'replacement must present the managed certificate before the switch'
+            # The production wait for a freshly started proxy, not a test-only retry.
+            assert tls.presented_eventually(tls.address_of(p.inspect(state['next'])))['fingerprint'] == first, \
+                'replacement must present the managed certificate before the switch'
             sh('docker', 'rename', tls.CONTAINER, state['previous'])
             sh('docker', 'update', '--restart', 'no', state['previous'])
             sh('docker', 'stop', '--time', '10', state['previous'])

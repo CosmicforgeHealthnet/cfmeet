@@ -153,6 +153,35 @@ class DurableShape(unittest.TestCase):
         self.assertFalse(tls.is_durable(writable, tls.durable_conf(CONF)))
 
 
+class StartupWait(unittest.TestCase):
+    def test_a_proxy_that_is_still_starting_is_waited_for_within_the_bound(self):
+        calls, now = [], [0.0]
+        def probe(address, port):
+            calls.append(address)
+            if len(calls) < 3:
+                raise AssertionError('Presented certificate does not verify (connect: Connection refused)')
+            return {'fingerprint': 'f'}
+        def sleep(seconds):
+            now[0] += seconds
+        self.assertEqual(tls.presented_eventually('172.23.0.9', probe=probe, sleep=sleep, clock=lambda: now[0]), {'fingerprint': 'f'})
+        self.assertEqual(len(calls), 3)
+
+    def test_a_proxy_that_never_verifies_still_fails_with_its_reason(self):
+        now = [0.0]
+        def probe(address, port):
+            raise AssertionError('Presented certificate does not verify (verify error:num=20)')
+        def sleep(seconds):
+            now[0] += seconds
+        with self.assertRaisesRegex(AssertionError, 'num=20'):
+            tls.presented_eventually('172.23.0.9', timeout=5, probe=probe, sleep=sleep, clock=lambda: now[0])
+        self.assertGreaterEqual(now[0], 5)
+
+    def test_failure_classes_carry_no_certificate_or_key_material(self):
+        self.assertEqual(tls.handshake_failure('', 'connect:errno=111'), 'connect: connect:errno')
+        self.assertEqual(tls.handshake_failure('verify error:num=20:unable to get local issuer certificate\n-----BEGIN CERTIFICATE-----\nAAA', ''),
+                         'verify error:num=20:unable to get local issuer certificate')
+
+
 class RenewalHook(unittest.TestCase):
     def test_hook_runs_only_for_this_lineage_and_validates_before_reloading(self):
         hook = tls.hook_source()
