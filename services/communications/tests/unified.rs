@@ -754,7 +754,65 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
         json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"})
     );
     assert_eq!(status["physicalDeviceAcceptance"], "NOT_RUN");
+    // A malformed owner answer (here the pre-fix field name) is a dependency failure.
+    h.world.write().unwrap().push_status = Some(
+        json!({"schemaVersion":1,"providers":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
+    );
+    assert!(matches!(
+        h.state.delivery_status(&sa, &a.profile).await,
+        Err(Error::Unavailable)
+    ));
+    h.world.write().unwrap().push_status = None;
     h.close().await;
+}
+
+/// The Hub's PushStatus parser and its test owner follow Messaging's published
+/// contract, so a renamed or re-shaped field cannot pass the Hub suite again.
+#[test]
+fn push_status_follows_the_messaging_owner_contract() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../packages/contracts/messaging/communications-internal/v1.openapi.json"
+    );
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let schema = &doc["components"]["schemas"]["PushStatus"];
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        required,
+        [
+            "schemaVersion",
+            "pushServices",
+            "devices",
+            "pendingJobs",
+            "deadJobs"
+        ]
+    );
+    let services = &schema["properties"]["pushServices"];
+    let mut names: Vec<&str> = services["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    names.sort_unstable();
+    let mut expected = communications::devices::PUSH_SERVICES.to_vec();
+    expected.sort_unstable();
+    assert_eq!(names, expected);
+    assert_eq!(services["additionalProperties"], false);
+    for name in communications::devices::PUSH_SERVICES {
+        assert_eq!(
+            services["properties"][name]["enum"],
+            json!(["CONFIGURED", "NOT_CONFIGURED"])
+        );
+    }
+    // The default test owner answer is itself a valid contract instance.
+    let sample = json!({"schemaVersion":1,"pushServices":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0});
+    assert!(communications::devices::PushStatus::parse(&sample).is_some());
 }
 
 #[tokio::test]

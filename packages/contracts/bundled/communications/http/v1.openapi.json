@@ -13610,7 +13610,36 @@
           },
           "providers": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": false,
+            "description": "Whether this deployment holds delivery credentials for each push service, as reported by Messaging. NOT_CONFIGURED means notifications cannot be delivered through that service.",
+            "properties": {
+              "APNS": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              },
+              "FCM": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              },
+              "WEB_PUSH": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              }
+            },
+            "required": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH"
+            ]
           },
           "devices": {
             "type": "array",

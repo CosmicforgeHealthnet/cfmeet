@@ -444,6 +444,17 @@ impl PersonalStack {
             let _ = p.child.kill().await;
         }
     }
+    /// Start a stopped service again with exactly the configuration it first ran with.
+    pub async fn restart(&mut self, name: &str) -> anyhow::Result<()> {
+        self.stop(name).await;
+        self.procs.retain(|p| p.name != name);
+        let env = self
+            .envs
+            .get(name)
+            .context("service was never launched")?
+            .clone();
+        self.launch(name, name, env, "/ready").await
+    }
     pub async fn close(mut self) {
         for p in &mut self.procs {
             let _ = p.child.kill().await;

@@ -1054,6 +1054,33 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         "server-controlled reactivation with fresh credentials",
     )?;
     assert_eq!(resumed["cfMeetId"], rotated["cfMeetId"]);
+    // N07 against the real Messaging process: its PushStatus `pushServices` is repeated
+    // exactly as `providers`; without push credentials every service is NOT_CONFIGURED.
+    let delivery = status(
+        hub(s, &a, Method::GET, "/me/notification-delivery-status", None).await?,
+        200,
+        "truthful notification delivery status",
+    )?;
+    assert_eq!(
+        delivery["providers"],
+        json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"})
+    );
+    assert!(delivery["devices"].is_array() && delivery["pendingJobs"].is_u64());
+    assert_eq!(delivery["physicalDeviceAcceptance"], "NOT_RUN");
+    // With Messaging unavailable the Hub reports a dependency failure, never a null or
+    // optimistic provider state.
+    s.stop("messaging").await;
+    let down = hub(s, &a, Method::GET, "/me/notification-delivery-status", None).await?;
+    assert_eq!(
+        (down.status, down.code()),
+        (503, Some("COMMUNICATIONS_UNAVAILABLE"))
+    );
+    s.restart("messaging").await?;
+    status(
+        hub(s, &a, Method::GET, "/me/notification-delivery-status", None).await?,
+        200,
+        "delivery status after Messaging recovers",
+    )?;
     s.stop("communications").await;
     assert_eq!(
         create_call(s, &a, &b, endpoints[0], "VOICE").await?.status,
@@ -1109,6 +1136,6 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     db.close().await?;
     // Keep the fixture login values private even on assertion failure.
     assert!(!a.email.is_empty() && !a.password.is_empty());
-    println!("PERSONAL_COMMUNICATIONS_REAL_E2E: identity_without_phone, principal_stability, public_swagger, private_internal_api, truthful_security_readiness, invitations, accepted_connections, direct_conversation_reuse, message_send_policy, voice_call_policy, video_call_policy, separate_aliases, common_groups, blocking, revocation, rotation, invitation_invalidation, tenant_isolation, fail_closed_outage, independent_meetings, durable_logout: PASS");
+    println!("PERSONAL_COMMUNICATIONS_REAL_E2E: identity_without_phone, principal_stability, public_swagger, private_internal_api, truthful_security_readiness, invitations, accepted_connections, direct_conversation_reuse, message_send_policy, voice_call_policy, video_call_policy, separate_aliases, common_groups, blocking, revocation, rotation, invitation_invalidation, tenant_isolation, truthful_delivery_status, delivery_status_owner_outage, fail_closed_outage, independent_meetings, durable_logout: PASS");
     Ok(())
 }

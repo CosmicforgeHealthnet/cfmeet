@@ -207,7 +207,12 @@ class Journey:
         same={k:prefs[k] for k in ('directMessages','groupMessages','incomingCalls','missedCalls','contactRequests','groupInvitations','meetingInvitations')}
         assert self.hub(a,'/me/notification-preferences','PUT',dict(same,expectedVersion=prefs['version']))['version']==prefs['version']+1
         delivery=self.hub(a,'/me/notification-delivery-status')
-        assert set(delivery['providers'].values())<={'CONFIGURED','NOT_CONFIGURED'} and delivery['physicalDeviceAcceptance']=='NOT_RUN'
+        providers=delivery['providers']
+        # Every push service is named with a truthful state; an empty, partial or null
+        # provider map is a defect, not an unconfigured deployment.
+        assert isinstance(providers,dict) and set(providers)=={'APNS','FCM','WEB_PUSH'},providers
+        assert set(providers.values())<={'CONFIGURED','NOT_CONFIGURED'} and delivery['physicalDeviceAcceptance']=='NOT_RUN'
+        self.report['pushProviders']=providers
         self.hub(a,'/me/storage-summary')
         assert self.hub(a,'/me/recovery-state')['phoneRecovery']['status']=='DEFERRED'
         feed=self.hub(a,'/sync?after=0&limit=500')

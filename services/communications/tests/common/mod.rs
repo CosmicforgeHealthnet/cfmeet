@@ -53,6 +53,8 @@ pub struct World {
     pub meetings: BTreeMap<String, (Uuid, Uuid)>,
     pub instant: BTreeMap<String, (Uuid, String)>,
     pub calling_down: bool,
+    /// Replaces Messaging's push-status answer (malformed-owner tests).
+    pub push_status: Option<Value>,
     pub revoked_devices: Vec<Uuid>,
     pub revoked_endpoints: Vec<Uuid>,
 }
@@ -192,9 +194,9 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 json!({"schemaVersion":1,"deviceId":body["deviceId"],"pushRegistered":register,"platform":if register {json!("FCM")} else {Value::Null}}),
             )
         }
-        "/internal/v1/communications/push-status" => ok(
-            json!({"schemaVersion":1,"pushServices":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
-        ),
+        "/internal/v1/communications/push-status" => ok(world.push_status.clone().unwrap_or_else(
+            || json!({"schemaVersion":1,"pushServices":{"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"},"devices":[],"pendingJobs":0,"deadJobs":0}),
+        )),
         "/internal/v1/communications/endpoints/verify" => {
             let e = world.endpoints.get(&uuid_at(body, "endpointId"));
             ok(

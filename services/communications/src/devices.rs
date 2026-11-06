@@ -347,15 +347,109 @@ impl State {
                 &json!({"principalId":p.principal_id}),
             )
             .await?;
+        // A missing or malformed owner answer is a dependency failure, never a
+        // null or optimistic provider state.
+        let push = PushStatus::parse(&v).ok_or(Error::Unavailable)?;
         let prefs = self.get_notification_preferences(p).await?;
         Ok(
-            json!({"schemaVersion":1,"providers":v["pushServices"],"devices":v["devices"],"pendingJobs":v["pendingJobs"],"deadJobs":v["deadJobs"],
+            json!({"schemaVersion":1,"providers":push.services,"devices":push.devices,"pendingJobs":push.pending_jobs,"deadJobs":push.dead_jobs,
             "callRinging":{"owner":"CALLING","transport":"Calling signaling WebSocket; mobile push transport NOT_CONFIGURED"},
             "preferences":prefs,"physicalDeviceAcceptance":"NOT_RUN"}),
         )
     }
 }
+/// Push services Messaging reports (`messaging/communications-internal/v1` PushStatus).
+pub const PUSH_SERVICES: [&str; 3] = ["APNS", "FCM", "WEB_PUSH"];
+
+/// Messaging's PushStatus, validated against its contract before the Hub repeats it.
+#[derive(Debug, PartialEq)]
+pub struct PushStatus {
+    pub services: Value,
+    pub devices: Value,
+    pub pending_jobs: u64,
+    pub dead_jobs: u64,
+}
+impl PushStatus {
+    /// `None` unless `pushServices` names exactly APNS, FCM and WEB_PUSH, each
+    /// CONFIGURED or NOT_CONFIGURED, `devices` is an array and both job counts are
+    /// non-negative integers.
+    pub fn parse(v: &Value) -> Option<Self> {
+        let services = v.get("pushServices")?.as_object()?;
+        if services.len() != PUSH_SERVICES.len()
+            || !PUSH_SERVICES.iter().all(|k| {
+                matches!(
+                    services.get(*k).and_then(Value::as_str),
+                    Some("CONFIGURED" | "NOT_CONFIGURED")
+                )
+            })
+        {
+            return None;
+        }
+        let devices = v.get("devices")?;
+        if !devices.as_array()?.iter().all(Value::is_object) {
+            return None;
+        }
+        Some(Self {
+            services: Value::Object(services.clone()),
+            devices: devices.clone(),
+            pending_jobs: v.get("pendingJobs")?.as_u64()?,
+            dead_jobs: v.get("deadJobs")?.as_u64()?,
+        })
+    }
+}
+
 fn sync_state_view(id: Uuid, position: i64, head: (i64, i64)) -> Value {
     json!({"schemaVersion":1,"deviceId":id,"acknowledgedPosition":position,"latestPosition":head.0,"oldestRetainedPosition":head.1,
         "resyncRequired":position>0 && position+1<head.1})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn messaging(services: Value) -> Value {
+        json!({"schemaVersion":1,"pushServices":services,"devices":[],"pendingJobs":0,"deadJobs":0})
+    }
+
+    #[test]
+    fn the_real_messaging_push_status_is_repeated_exactly() {
+        let all = json!({"APNS":"NOT_CONFIGURED","FCM":"CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"});
+        let parsed = PushStatus::parse(&messaging(all.clone())).unwrap();
+        assert_eq!(parsed.services, all);
+        assert_eq!((parsed.pending_jobs, parsed.dead_jobs), (0, 0));
+    }
+
+    #[test]
+    fn missing_or_malformed_push_status_is_never_reported() {
+        let ok =
+            json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"});
+        // The defect stage found: the pre-fix field name, so pushServices is absent.
+        let legacy = json!({"schemaVersion":1,"providers":ok.clone(),"devices":[],"pendingJobs":0,"deadJobs":0});
+        assert_eq!(PushStatus::parse(&legacy), None);
+        for bad in [
+            Value::Null,
+            json!([]),
+            json!({}),
+            json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED"}),
+            json!({"APNS":"READY","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"}),
+            json!({"APNS":true,"FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED"}),
+            json!({"APNS":"NOT_CONFIGURED","FCM":"NOT_CONFIGURED","WEB_PUSH":"NOT_CONFIGURED","LOCAL_TEST":"CONFIGURED"}),
+        ] {
+            assert_eq!(PushStatus::parse(&messaging(bad.clone())), None, "{bad}");
+        }
+        for (field, value) in [
+            ("devices", Value::Null),
+            ("devices", json!(["x"])),
+            ("pendingJobs", json!(-1)),
+            ("pendingJobs", Value::Null),
+            ("deadJobs", json!("0")),
+        ] {
+            let mut v = messaging(ok.clone());
+            v[field] = value;
+            assert_eq!(PushStatus::parse(&v), None, "{field}");
+        }
+        let mut v = messaging(ok);
+        v.as_object_mut().unwrap().remove("deadJobs");
+        assert_eq!(PushStatus::parse(&v), None);
+    }
 }

@@ -2431,7 +2431,12 @@ export namespace Communications {
   };
   export type DeliveryStatus = {
     schemaVersion: 1;
-    providers: { [key: string]: unknown };
+    /** Whether this deployment holds delivery credentials for each push service, as reported by Messaging. NOT_CONFIGURED means notifications cannot be delivered through that service. */
+    providers: {
+      APNS: "CONFIGURED" | "NOT_CONFIGURED";
+      FCM: "CONFIGURED" | "NOT_CONFIGURED";
+      WEB_PUSH: "CONFIGURED" | "NOT_CONFIGURED";
+    };
     devices?: Array<{ [key: string]: unknown }>;
     pendingJobs?: number;
     deadJobs?: number;
