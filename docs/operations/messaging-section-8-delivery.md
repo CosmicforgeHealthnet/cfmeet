@@ -923,3 +923,21 @@ Messaging's own session suites cover ticket and session semantics.
 | Production PRIVATE_E2EE | **BLOCKED_EXTERNAL** (issue 13); devices disabled |
 | Push providers | **BLOCKED_EXTERNAL** (no credentials) |
 | Phone OTP, phone matching, carrier calling, off-server DR | **DEFERRED** |
+
+## Remaining risks closed — 2026-11-06
+
+The three remaining risks above are resolved in production. Full evidence is in [cfmeet-sections-8-23-final-closure.md](cfmeet-sections-8-23-final-closure.md) section 8.
+
+| Former risk | Resolution | Status |
+|---|---|---|
+| Private proxy pinned to `archive/…/fullchain4.pem` | Read-only `live/` and `archive/` directory mounts ([42185815717](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42185815717)). A certbot deploy hook activates renewals, a daily monitor runs (warn at 45/30 days, alert at 14/7), and operators are notified on issue #38 ([42188709330](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42188709330), [42189603354](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42189603354)). Runbook: [tls-certificate-automation.md](tls-certificate-automation.md) | PRODUCTION_VERIFIED |
+| Storage routes rendered MinIO's Docker address | Loopback relay `cfmeet-storage-ingress` on `127.0.0.1:19000`, which resolves the store by name ([42186633760](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42186633760)) | PRODUCTION_VERIFIED |
+| Relay depends on the `cfmeet-core-tls` name | The durable switch keeps the name through an alias swap; the CI proof covers container restart and recovery of a stopped proxy | ENGINEERING_CLOSED |
+
+Latest `messaging-verify`: [42193577972](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42193577972), 15 of 15 PASS. Activation verdict `BLOCKED_EXTERNAL_DEPENDENCY`. Latest `scan-gateway-verify`: [42192822658](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42192822658), PASS.
+
+Current status:
+
+- Production PRIVATE_E2EE: still BLOCKED_EXTERNAL (#13).
+- Push providers: still BLOCKED_EXTERNAL.
+- Phone and off-server DR: still DEFERRED_BY_OWNER.

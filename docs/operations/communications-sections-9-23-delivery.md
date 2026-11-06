@@ -1,6 +1,25 @@
 # Sections 9–23 — unified Communications delivery record
 
-## Current status (2026-11-06, after the authorized deployment attempt)
+## Current status (2026-11-06, final)
+
+**RELEASED and PRODUCTION_VERIFIED.** The full record is in
+[cfmeet-sections-8-23-final-closure.md](cfmeet-sections-8-23-final-closure.md).
+
+- The Hub `pushServices` defect described below is fixed: strict parsing of Messaging's real contract, with tests tied to the contract.
+- Service image source: `08729298656daf69e32870390888554675d44dde`. The `c2a8035` images were never deployed.
+- Stage [42180933332](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42180933332): 22 of 22 PASS.
+- Release [42189631003](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42189631003): 22 of 22 PASS.
+- Independent `communications-verify` [42191576906](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42191576906): 20 of 20 PASS on the released images.
+- Launch credential `b8d54e20-42ca-4c93-a154-6beacffe00e5`: `calls.write` only, expires 2027-11-06, monitored.
+- Still open:
+  - PRIVATE_E2EE: BLOCKED_EXTERNAL (#13)
+  - push providers and physical devices: BLOCKED_EXTERNAL
+  - phone, off-server DR and an isolated load environment: DEFERRED_BY_OWNER
+  - the Chromium web journey: frontend-owned (#37)
+
+The section below is kept as the record of the first, failed attempt.
+
+## Earlier status (2026-11-06, first deployment attempt — superseded)
 
 **IMPLEMENTED; STAGE FAILED on a Hub defect; NOT DEPLOYED. Production unchanged.**
 `main` = `staging` = `71eedfe` (docs only over `c2a803586f64a5fd3c58487ee7f5149a25961291`).

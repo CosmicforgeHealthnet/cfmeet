@@ -4,14 +4,31 @@ Status words: `ENGINEERING_CLOSED` means implemented, tested in CI, with no open
 
 ## 0. Verdict
 
-<!-- VERDICT -->
-_Pending the coordinated release and independent verification (sections 6–7)._
+**All implementable Section 8–23 backend work is ENGINEERING_CLOSED and PRODUCTION_VERIFIED.** The fixed Communications release (Hub `pushServices` defect corrected) is running in production. Evidence:
+
+- immutable images from `0872929` (section 3)
+- isolated stage, 22 of 22 (section 5)
+- production release, 22 of 22 (section 6)
+- independent verification: Communications 20/20, Messaging 15/15, scanner and resources all pass (section 7)
+- private TLS renewal and storage-route defects fixed in production; certificate activation, daily monitoring and operator notification are automated (section 8)
+
+**BLOCKED_EXTERNAL:**
+
+- production PRIVATE_E2EE: independent cryptographic assessment on #13; the gate was not bypassed
+- push providers: no APNs, FCM or Web Push credentials
+- physical-device acceptance
+
+**DEFERRED_BY_OWNER:** phone verification and phone features, off-server disaster recovery, and an isolated load-test environment.
+
+**Frontend-owned:** the Chromium web journey failure (#37). It is not counted as a backend pass.
+
+No result here is FAILED.
 
 ## 1. Branches
 
 | Item | Value |
 |---|---|
-| `main` = `staging` | `<!-- HEAD -->` (fast-forward promotions only; no force push) |
+| `main` = `staging` | `584b4197059ad0de61ce4509600565ac8d79a547` plus the documentation commit that adds this report (fast-forward promotions only; no force push) |
 | Previous `main` at the start of this closure | `71eedfebcdac788c80a2f3743527cc953b07e257` |
 
 ## 2. Final service image source
@@ -91,8 +108,14 @@ The running images are exactly the staged set in section 3. The production flags
 
 ## 7. Independent production verification
 
-<!-- VERIFY -->
-_Pending._
+| Check | Run | Result |
+|---|---|---|
+| `communications-verify` | [42191576906](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42191576906) | **20 of 20 PASS** on the running images, which it asserts are identical to the release record: Hub-launched voice and video with media, history and timeline without principal ids, devices, block/unblock, QR, ID rotation, favorites and lists, truthful delivery status, public ingress refusing private Account routes, served Swagger with 73 operations and no internal paths. Calling runs exactly the recorded launch credential (364 days left) |
+| `scan-gateway-verify` | [42192822658](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42192822658) | PASS. A clean file gets a signed, bound verdict; EICAR is detected infected and signed; a digest mismatch is rejected (422); both scan engines are unreachable from the caller network; ClamAV 1.4.6, signature age about 27 h; no new daemon |
+| `messaging-verify` | [42193577972](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42193577972) | **15 of 15 PASS**: public realtime routes present with unauthenticated access refused, anonymous native messaging refused, private admin and metrics not publicly routed, no plaintext fallback, production E2EE device guard active, MANAGED never substituted for personal E2EE, served consumer Swagger. Activation verdict `BLOCKED_EXTERNAL_DEPENDENCY` (independent E2EE assessment). Configured: scanner, attachment storage, Redis, managed encryption, transparency signing and checkpoint. Not configured: APNs, FCM, Web Push, transparency witnesses |
+| TLS and certificates | [42188709330](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42188709330), [42189603354](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42189603354) | see section 8 |
+| `resource-inventory` | [42192839669](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42192839669) | Memory available 4.74 of 11.68 GiB (CF Meet 0.91 GiB, other products 4.61 GiB), disk free 23.14 GiB, 103 rollback/evidence SHAs protected. The first attempt, [42191596869](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42191596869), failed when a probe container vanished mid-listing; fixed in `584b419` with a test |
+| `resource-recover` | [42194210244](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42194210244) | success. The 5 stage candidates were stopped and retained, 1 unused probe image tag was removed, and log rotation is confirmed for the 6 long-lived CF Meet containers. Memory available went from 4.87 to 5.05 GiB, disk free from 23.14 to 23.68 GiB, swap 0.3 GiB. Preserved: running production, rollback, failed and retired containers, evidence, volumes, other products and secrets. No removable CF Meet image remains (104 SHAs protected). Most reclaimable image space belongs to other products; it was not touched |
 
 ## 8. Section 8 infrastructure delivered in production
 
