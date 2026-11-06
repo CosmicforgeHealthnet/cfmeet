@@ -186,6 +186,49 @@ class Journey:
         accepted=self.hub(b,path,'POST',body,key=key)
         assert accepted==self.hub(b,path,'POST',body,key=key)
 
+    def unified(self,a,b):
+        """Sections 9-23 facades on the fixture pair; every change is reverted."""
+        secret=(a['principalId'],b['principalId'])
+        boot=self.hub(a,'/bootstrap')
+        assert boot['counts']['contacts']>=1 and not any(x in json.dumps(boot) for x in secret)
+        contact=next(c for c in self.hub(a,'/contacts')['data'] if c['cfMeetId']==b['cfMeetId'])
+        cid=contact['contactId']
+        assert self.hub(a,'/contacts/'+cid+'/favorite','PUT',{'rank':1})['favorite'] is True
+        assert any(x['contactId']==cid for x in self.hub(a,'/contacts/favorites')['data'])
+        self.hub(a,'/contacts/'+cid+'/favorite','DELETE')
+        listed=self.hub(a,'/contact-lists','POST',{'name':'acceptance-'+uuid.uuid4().hex[:8]})
+        self.hub(a,'/contact-lists/'+listed['listId']+'/members/'+cid,'PUT')
+        got=self.hub(a,'/contact-lists/'+listed['listId'])
+        assert got['memberCount']==1 and not any(x in json.dumps(got) for x in secret)
+        self.hub(a,'/contact-lists/'+listed['listId'],'DELETE',{'expectedVersion':got['version']})
+        assert self.hub(a,'/contacts/'+cid)['relationship']=='CONNECTED'
+        self.done('private_favorites_and_lists_never_change_relationships')
+        prefs=self.hub(a,'/me/notification-preferences')
+        same={k:prefs[k] for k in ('directMessages','groupMessages','incomingCalls','missedCalls','contactRequests','groupInvitations','meetingInvitations')}
+        assert self.hub(a,'/me/notification-preferences','PUT',dict(same,expectedVersion=prefs['version']))['version']==prefs['version']+1
+        delivery=self.hub(a,'/me/notification-delivery-status')
+        assert set(delivery['providers'].values())<={'CONFIGURED','NOT_CONFIGURED'} and delivery['physicalDeviceAcceptance']=='NOT_RUN'
+        self.hub(a,'/me/storage-summary')
+        assert self.hub(a,'/me/recovery-state')['phoneRecovery']['status']=='DEFERRED'
+        feed=self.hub(a,'/sync?after=0&limit=500')
+        positions=[e['position'] for e in feed['data']]
+        assert positions==sorted(positions) and len(set(positions))==len(positions)
+        self.done('preferences_truthful_delivery_status_and_monotonic_sync')
+        history=self.hub(a,'/calls/history?limit=10')
+        assert not any(x in json.dumps(history) for x in secret)
+        self.hub(a,'/conversations/'+str(uuid.uuid4())+'/timeline',expected=(404,))
+        launched=self.hub(a,'/contacts/'+cid+'/calls','POST',{'kind':'VOICE','clientRequestId':str(uuid.uuid4()),
+            'endpointId':a['endpointId']},expected=(200,503))
+        if 'callId' in launched:
+            self.calls.append(launched['callId'])
+            self.clean_call(launched['callId'])
+            self.done('hub_call_launch_reuses_canonical_calling')
+        else:
+            assert launched.get('error',{}).get('code')=='COMMUNICATIONS_UNAVAILABLE'
+            self.report.setdefault('limitations',[]).append('Hub call launch answers 503 until CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID is configured.')
+            self.done('hub_call_launch_fails_closed_without_launch_credential')
+        self.done('call_history_and_timeline_expose_no_principal_ids')
+
     def media_call(self,a,b,kind):
         call=self.dial(a,b,kind)['call']['callId']
         token=self.c['scope']['token'];path='/v1/calls/'+call
@@ -338,12 +381,13 @@ class Journey:
         self.done('public_id_operations_preserve_authoritative_principal')
         self.request('meeting-service','/api/v1/meetings',token=a['session'])
         self.done('meetings_remain_independently_available')
+        self.unified(a,b)
         # Close only fixture relationships; retained account/principal/history IDs
         # allow audit and subsequent regression runs without touching customers.
         for contact in self.hub(a,'/contacts')['data']:
             if contact['cfMeetId']==b['cfMeetId']:self.hub(a,'/contacts/'+contact['contactId'],'DELETE')
         self.done('fixture_relationship_cleanup')
-        self.report['limitations']=['Real media uses controlled synthetic audio tones and video frames, not browser microphone or camera permissions.',
+        self.report['limitations']=self.report.get('limitations',[])+['Real media uses controlled synthetic audio tones and video frames, not browser microphone or camera permissions.',
             'MANAGED messages are exercised only in the isolated TEST application; production MLS activation remains the next milestone.']
 
 
