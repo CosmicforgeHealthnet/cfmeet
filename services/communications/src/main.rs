@@ -38,6 +38,8 @@ async fn main() -> anyhow::Result<()> {
                 _=tick.tick()=>{
                     if worker_state.deliver_due().await.is_err() {tracing::warn!("communications outbox iteration deferred");}
                     count+=1;if count%120==0 && worker_state.maintain().await.is_err() {tracing::warn!("communications retention iteration deferred");}
+                    // Every 5 s: call cards converge on Calling's canonical outcome.
+                    if count%10==0 && worker_state.reconcile_call_cards(20).await.is_err() {tracing::warn!("communications call-card reconciliation deferred");}
                 }
             }
         }

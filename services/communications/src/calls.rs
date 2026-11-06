@@ -382,13 +382,70 @@ impl State {
             let patch = json!({"state":call["state"],"terminal":call["terminal"],"outcome":call["outcome"],"missed":call["missed"],
                 "direction":call["direction"],"durationMs":call["durationMs"],"answeredAt":call["answeredAt"],"endedAt":call["endedAt"]});
             // Out-of-order safe: a lower owner version never overwrites a newer outcome.
-            execute(&self.store.db,"UPDATE communication_timeline_entries SET data=data||$3,source_version=$4,refreshed_at=now() WHERE viewer_profile_id=$1 AND source='CALLING' AND source_id=$2 AND source_version<=$4",
+            // A card whose content changed tells the viewer's other devices (TIMELINE).
+            let txn = self.store.begin().await?;
+            let changed:Vec<Value>=rows(&txn,"WITH old AS (SELECT conversation_id,entry_key,data FROM communication_timeline_entries WHERE viewer_profile_id=$1 AND source='CALLING' AND source_id=$2 AND source_version<=$4 FOR UPDATE) \
+                UPDATE communication_timeline_entries e SET data=e.data||$3,source_version=$4,refreshed_at=now() FROM old WHERE e.viewer_profile_id=$1 AND e.conversation_id=old.conversation_id AND e.entry_key=old.entry_key \
+                RETURNING jsonb_build_object('conversation',e.conversation_id,'changed',old.data IS DISTINCT FROM old.data||$3) doc",
                 vec![p.id.into(),id.into(),patch.into(),version.into()]).await?;
+            for c in changed.iter().filter(|c| c["changed"] == true) {
+                self.store
+                    .change(
+                        &txn,
+                        p.id,
+                        "TIMELINE",
+                        Some(uuid_field(c, "conversation")?),
+                        Some(version),
+                    )
+                    .await?;
+            }
+            txn.commit().await?;
         }
         // Calls no longer visible to this viewer are not refreshed again on every read.
         execute(&self.store.db,"UPDATE communication_timeline_entries SET refreshed_at=now() WHERE viewer_profile_id=$1 AND source='CALLING' AND source_id IN (SELECT jsonb_array_elements_text($2::jsonb)::uuid)",
             vec![p.id.into(),json!(due).into()]).await?;
         Ok(true)
+    }
+
+    /// Section 17 `call.outcome_changed` without a Calling producer: every non-terminal
+    /// call card older than CALL_REFRESH_SECONDS (and younger than a day) is re-read
+    /// from Calling under its viewer's own delegated context, oldest first and bounded.
+    /// A changed card writes a TIMELINE feed entry, so all of the viewer's devices
+    /// converge even when none is reading that conversation. Calling stays canonical:
+    /// an unreachable Calling leaves cards unchanged and they are retried next sweep.
+    pub async fn reconcile_call_cards(&self, viewers: i64) -> Result<usize> {
+        const DUE: &str =
+            "kind='CALL' AND source='CALLING' AND COALESCE(data->>'terminal','false')<>'true' \
+            AND refreshed_at<now()-make_interval(secs=>$1) AND occurred_at>now()-interval '1 day'";
+        let due:Vec<Value>=rows(&self.store.db,&format!("SELECT jsonb_build_object('profile',viewer_profile_id) doc FROM communication_timeline_entries WHERE {DUE} GROUP BY viewer_profile_id ORDER BY min(refreshed_at) LIMIT $2"),
+            vec![(CALL_REFRESH_SECONDS as f64).into(),viewers.into()]).await?;
+        let mut refreshed = 0;
+        for d in due {
+            let Some(p): Option<Profile> = one(&self.store.db,"SELECT to_jsonb(p) doc FROM communication_profiles p WHERE id=$1 AND activation_state='ACTIVE'",
+                vec![uuid_field(&d, "profile")?.into()]).await? else { continue };
+            let Some(a): Option<Value> = one(&self.store.db,"SELECT jsonb_build_object('serviceAccountId',service_account_id,'environmentKind',environment_kind) doc FROM communication_scope_authorities WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3",
+                vec![p.tenant_id.into(),p.application_id.into(),p.environment_id.into()]).await? else { continue };
+            let kind: cf_service_auth::ApplicationEnvironmentKind =
+                serde_json::from_value(a["environmentKind"].clone())
+                    .map_err(|_| Error::Unavailable)?;
+            let scope = DelegatedPlatformContext::new(
+                p.tenant_id,
+                p.application_id,
+                p.environment_id,
+                kind,
+                uuid_field(&a, "serviceAccountId")?,
+            )
+            .with_initiating_principal(
+                p.principal_id,
+                cf_service_auth::DelegatedPrincipalKind::NativeCfUser,
+            );
+            let entries:Vec<Value>=rows(&self.store.db,&format!("SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$2 AND {DUE} ORDER BY refreshed_at LIMIT 50"),
+                vec![(CALL_REFRESH_SECONDS as f64).into(),p.id.into()]).await?;
+            if self.refresh_call_cards(&scope, &p, &entries).await? {
+                refreshed += entries.len();
+            }
+        }
+        Ok(refreshed)
     }
 
     /// U04: per-viewer call/meeting cards of one conversation, anchored to message
@@ -408,20 +465,7 @@ impl State {
             vec![p.id.into(),conversation.into(),after_at.into(),after_key.into(),mark.into(),cleared_at.into(),(limit+1).into()]).await?;
         let more = entries.len() > limit as usize;
         entries.truncate(limit as usize);
-        let stale_due: Vec<Value> = entries
-            .iter()
-            .filter(|e| {
-                e["data"]["terminal"] != true
-                    && e["refreshed_at"]
-                        .as_str()
-                        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                        .is_none_or(|t| {
-                            chrono::Utc::now().signed_duration_since(t).num_seconds()
-                                >= CALL_REFRESH_SECONDS
-                        })
-            })
-            .cloned()
-            .collect();
+        let stale_due: Vec<Value> = entries.iter().filter(|e| refresh_due(e)).cloned().collect();
         let fresh = self.refresh_call_cards(scope, p, &stale_due).await?;
         if !stale_due.is_empty() && fresh {
             let keys: Vec<String> = entries
@@ -458,8 +502,21 @@ impl State {
     ) -> Result<Value> {
         let (limit, cursor) = timeline_page(query)?;
         let (before_at, before_key) = cursor.unwrap_or_else(|| ("infinity".into(), "~".into()));
-        let entries:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$1 AND (occurred_at,entry_key)<($2::timestamptz,$3) ORDER BY occurred_at DESC,entry_key DESC LIMIT $4",
-            vec![p.id.into(),before_at.into(),before_key.into(),(limit+1).into()]).await?;
+        const PAGE: &str = "SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$1 AND (occurred_at,entry_key)<($2::timestamptz,$3) ORDER BY occurred_at DESC,entry_key DESC LIMIT $4";
+        let page = || {
+            vec![
+                p.id.into(),
+                before_at.clone().into(),
+                before_key.clone().into(),
+                (limit + 1).into(),
+            ]
+        };
+        let mut entries: Vec<Value> = rows(&self.store.db, PAGE, page()).await?;
+        // Activity shows the same canonical outcomes as the conversation timeline.
+        let due: Vec<Value> = entries.iter().filter(|e| refresh_due(e)).cloned().collect();
+        if !due.is_empty() && self.refresh_call_cards(scope, p, &due).await? {
+            entries = rows(&self.store.db, PAGE, page()).await?;
+        }
         let more = entries.len() > limit as usize;
         let mut membership: BTreeMap<Uuid, (bool, i64, String)> = BTreeMap::new();
         let mut data = Vec::new();
@@ -489,6 +546,17 @@ impl State {
             json!({"schemaVersion":1,"projectionVersion":1,"data":data,"nextCursor":if more {last} else {None}}),
         )
     }
+}
+
+/// A non-terminal card last refreshed CALL_REFRESH_SECONDS or more ago.
+fn refresh_due(e: &Value) -> bool {
+    e["data"]["terminal"] != true
+        && e["refreshed_at"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .is_none_or(|t| {
+                chrono::Utc::now().signed_duration_since(t).num_seconds() >= CALL_REFRESH_SECONDS
+            })
 }
 
 /// A card is cleared when anchored before the watermark, or at it but not after the clear.

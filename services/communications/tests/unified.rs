@@ -1333,3 +1333,158 @@ async fn privacy_block_and_identity_changes_invalidate_through_the_feed() {
     );
     h.close().await;
 }
+
+/// Section 17 `call.outcome_changed` without a Calling producer. The background sweep
+/// re-reads due cards from Calling under each viewer's own delegation, so every viewer
+/// and every device converges on the canonical per-participant outcome with no event,
+/// no reader and no duplicate feed entries. An older owner version never wins, and a
+/// Calling outage changes nothing until Calling recovers.
+#[tokio::test]
+async fn call_cards_converge_without_owner_events_across_viewers_devices_and_outages() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let sa = h.delegated(&a.account);
+    let sb = h.delegated(&b.account);
+    let conv = conversation(&h, "DIRECT", &[&a, &b], 7);
+    let ea = endpoint(&h, &a);
+    let call = h
+        .state
+        .call_conversation(
+            &sa,
+            &a.profile,
+            conv,
+            json!({"kind":"VOICE","clientRequestId":Uuid::new_v4(),"endpointId":ea}),
+        )
+        .await
+        .unwrap();
+    let call_id = Uuid::parse_str(call["callId"].as_str().unwrap()).unwrap();
+    let timeline_changes = |profile: Uuid| {
+        let db = h.state.store.db.clone();
+        async move {
+            let v: Value = one(&db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_changes WHERE profile_id=$1 AND domain='TIMELINE'",
+                vec![profile.into()]).await.unwrap().unwrap();
+            v["n"].as_i64().unwrap()
+        }
+    };
+    let card = |profile: Uuid| {
+        let db = h.state.store.db.clone();
+        async move {
+            let v: Value = one(&db, "SELECT data doc FROM communication_timeline_entries WHERE viewer_profile_id=$1 AND source_id=$2",
+                vec![profile.into(), call_id.into()]).await.unwrap().unwrap();
+            v
+        }
+    };
+    let age = |seconds: i64| {
+        let db = h.state.store.db.clone();
+        async move {
+            execute(&db, "UPDATE communication_timeline_entries SET refreshed_at=now()-make_interval(secs=>$1) WHERE source_id=$2",
+                vec![(seconds as f64).into(), call_id.into()]).await.unwrap();
+        }
+    };
+    // New cards are due at once: the first sweep fills them from Calling (RINGING).
+    assert_eq!(h.state.reconcile_call_cards(20).await.unwrap(), 2);
+    assert_eq!(card(b.profile.id).await["state"], "RINGING");
+    let before = (
+        timeline_changes(a.profile.id).await,
+        timeline_changes(b.profile.id).await,
+    );
+    // B never answered; Calling now holds the terminal outcome. Nobody reads anything.
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("NO_ANSWER".into(), true, 3, "MISSED".into()));
+    // Just-refreshed cards are not re-read (bounded load) inside the 5 s window.
+    assert_eq!(h.state.reconcile_call_cards(20).await.unwrap(), 0);
+    assert_eq!(card(b.profile.id).await["terminal"], false);
+    // Calling outage: due cards stay as they were, nothing is fabricated or erased.
+    age(6).await;
+    h.world.write().unwrap().calling_down = true;
+    assert_eq!(h.state.reconcile_call_cards(20).await.unwrap(), 0);
+    assert_eq!(card(b.profile.id).await["state"], "RINGING");
+    assert_eq!(timeline_changes(b.profile.id).await, before.1);
+    // Calling recovers: both viewers converge, each told once through its own feed.
+    h.world.write().unwrap().calling_down = false;
+    assert_eq!(h.state.reconcile_call_cards(20).await.unwrap(), 2);
+    let (cb, ca) = (card(b.profile.id).await, card(a.profile.id).await);
+    assert_eq!(
+        (&cb["terminal"], &cb["outcome"], &cb["missed"]),
+        (&json!(true), &json!("MISSED"), &json!(true))
+    );
+    assert_eq!(
+        (&ca["terminal"], &ca["missed"]),
+        (&json!(true), &json!(false))
+    );
+    assert_eq!(timeline_changes(a.profile.id).await, before.0 + 1);
+    assert_eq!(timeline_changes(b.profile.id).await, before.1 + 1);
+    // Terminal cards are never re-read; repeated sweeps add no feed entries.
+    age(60).await;
+    assert_eq!(h.state.reconcile_call_cards(20).await.unwrap(), 0);
+    assert_eq!(timeline_changes(b.profile.id).await, before.1 + 1);
+    // An older owner version arriving later (out of order) never regresses the card
+    // and is not announced.
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("RINGING".into(), false, 2, "RINGING".into()));
+    execute(&h.state.store.db, "UPDATE communication_timeline_entries SET data=data||'{\"terminal\":false}' WHERE source_id=$1",
+        vec![call_id.into()]).await.unwrap();
+    age(6).await;
+    h.state.reconcile_call_cards(20).await.unwrap();
+    assert_eq!(card(b.profile.id).await["outcome"], "MISSED");
+    assert_eq!(timeline_changes(b.profile.id).await, before.1 + 1);
+    // Every device of B reads the same canonical state from timeline and activity.
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("NO_ANSWER".into(), true, 3, "MISSED".into()));
+    for _device in 0..2 {
+        let timeline = h
+            .state
+            .timeline(&sb, &b.profile, conv, &q(&[]))
+            .await
+            .unwrap();
+        let activity = h.state.activity(&sb, &b.profile, &q(&[])).await.unwrap();
+        for view in [&timeline["data"][0], &activity["data"][0]] {
+            assert_eq!(view["call"]["outcome"], "MISSED");
+            assert_eq!(view["call"]["missed"], true);
+        }
+    }
+    h.close().await;
+}
+
+/// Activity (U03) refreshes due cards like the timeline, so it never shows a call as
+/// ringing after Calling has ended it.
+#[tokio::test]
+async fn activity_refreshes_due_call_cards_from_calling() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let sb = h.delegated(&b.account);
+    let conv = conversation(&h, "DIRECT", &[&a, &b], 2);
+    let call = h
+        .state
+        .call_conversation(
+            &h.delegated(&a.account),
+            &a.profile,
+            conv,
+            json!({"kind":"VIDEO","clientRequestId":Uuid::new_v4(),"endpointId":endpoint(&h, &a)}),
+        )
+        .await
+        .unwrap();
+    let call_id = Uuid::parse_str(call["callId"].as_str().unwrap()).unwrap();
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("ENDED".into(), true, 5, "ANSWERED".into()));
+    execute(&h.state.store.db, "UPDATE communication_timeline_entries SET refreshed_at=now()-interval '10 seconds' WHERE source_id=$1",
+        vec![call_id.into()]).await.unwrap();
+    let activity = h.state.activity(&sb, &b.profile, &q(&[])).await.unwrap();
+    assert_eq!(activity["data"][0]["call"]["state"], "ENDED");
+    assert_eq!(activity["data"][0]["call"]["terminal"], true);
+    h.close().await;
+}
