@@ -26,6 +26,7 @@ use utoipa::OpenApi;
         // OAuth endpoints
         crate::handlers::auth::oauth_google_init,
         crate::handlers::auth::oauth_google_callback,
+        crate::handlers::auth::oauth_google_exchange,
         // API Key endpoints
         crate::handlers::api_keys::create_api_key,
         crate::handlers::api_keys::list_api_keys,
@@ -197,6 +198,10 @@ use utoipa::OpenApi;
         crate::handlers::v2::organizations::list_organization_members,
         crate::handlers::v2::organizations::upsert_organization_member,
         crate::handlers::v2::organizations::my_organizations,
+        crate::handlers::v2::account_sessions::list_my_sessions,
+        crate::handlers::v2::account_sessions::revoke_my_session,
+        crate::handlers::v2::account_sessions::revoke_all_my_sessions,
+        crate::handlers::v2::account_sessions::list_account_audit_events,
         // Parts G–I
         crate::handlers::v2::artifacts::start_recording,
         crate::handlers::v2::artifacts::list_recordings,
@@ -468,6 +473,12 @@ use utoipa::OpenApi;
             crate::dto::v2::OrganizationResponse,
             crate::dto::v2::OrganizationMemberResponse,
             crate::dto::v2::MyOrganizationResponse,
+            crate::dto::auth::GoogleExchangeRequest,
+            crate::services::account_security::SessionRecord,
+            crate::services::account_security::SecurityEventRecord,
+            crate::handlers::v2::account_sessions::AccountSessionListResponse,
+            crate::handlers::v2::account_sessions::AccountSessionRevokeResponse,
+            crate::handlers::v2::account_sessions::SecurityEventPage,
             crate::domain::OrganizationStatus,
             crate::domain::OrganizationRole,
             crate::domain::OrganizationMemberStatus,
@@ -569,6 +580,7 @@ use utoipa::OpenApi;
     tags(
         (name = "General", description = "Application information and health endpoints"),
         (name = "Authentication", description = "User authentication endpoints"),
+        (name = "Account sessions (v2)", description = "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."),
         (name = "API Keys", description = "API key management for third-party integrations.\n\n## Usage\n- Create API keys via authenticated endpoints\n- Use `Api-Key: <key>` header for authentication\n- API keys have usage limits and expiration dates\n- Keys can be revoked at any time\n\n## Notes\n- Full API key is only shown on creation\n- Third-party devs cannot access internal media servers directly\n- Short-lived join tokens required for connecting to RTC infrastructure"),
         (name = "Meetings", description = "Meeting lifecycle management with LiveKit integration"),
         (name = "Participants", description = "Participant management (kick, list)"),

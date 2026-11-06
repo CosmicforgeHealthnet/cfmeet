@@ -206,3 +206,11 @@ fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), Validati
 
     Ok(())
 }
+
+/// One-time Google sign-in exchange (ACC-005): the callback redirect carries only a
+/// short-lived, single-use `exchange_code`, never tokens.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct GoogleExchangeRequest {
+    #[validate(length(min = 20, max = 128, message = "Invalid exchange code"))]
+    pub exchange_code: String,
+}

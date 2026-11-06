@@ -127,6 +127,16 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
+    // Blueprint Section 2: account sessions, the revocation epoch and the security audit
+    // live in their own additive history (`account-security-migration up`). Refuse to run
+    // without them rather than silently skipping revocation.
+    if !migration::account_security_ready(&state.db)
+        .await
+        .expect("Account security migration readiness")
+    {
+        panic!("Account security migration is required (account-security-migration up)");
+    }
+
     state.communications = backend::services::communications::Bridge::from_env()
         .unwrap_or_else(|e| panic!("Communications configuration error: {e}"));
     if state.communications.is_some() {

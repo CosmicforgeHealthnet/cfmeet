@@ -41,6 +41,7 @@ pub const BINARIES: &[&str] = &[
     "developer-platform-migration",
     "backend",
     "migration",
+    "account-security-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -320,6 +321,10 @@ impl Stack {
         let url = db::create(&self.config.admin_url, &name).await?;
         self.dbs.push(name.clone());
         db::migrate(&self.bin(migration), &url)?;
+        if service == MEETING_SERVICE {
+            // Blueprint Section 2: the account-security history is required at startup.
+            db::migrate(&self.bin("account-security-migration"), &url)?;
+        }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under
         // its no-DDL runtime role (the Meeting Service keeps its own deployment model).

@@ -1,3 +1,4 @@
+pub mod account_security;
 pub mod auth;
 pub mod email;
 pub mod livekit;

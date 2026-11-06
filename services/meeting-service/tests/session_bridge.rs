@@ -183,3 +183,46 @@ async fn an_unreachable_revocation_store_fails_closed() {
         StatusCode::SERVICE_UNAVAILABLE
     );
 }
+
+/// Blueprint Section 2 (ACC-001/ACC-002): the bridge refuses refresh tokens and every
+/// token issued before the account's revocation epoch (here: a password change).
+#[tokio::test]
+async fn the_bridge_enforces_token_type_and_the_revocation_epoch() {
+    if !require_test_redis() {
+        return;
+    }
+    let Some(app) = TestApp::new().await else {
+        return;
+    };
+    let (dp, dp_pub) = signer(ServiceId::developer_platform(), "developer-platform-test-2");
+    let (_, calling_pub) = signer(ServiceId::calling(), "calling-test-2");
+    let router = session_bridge::router(app.state.clone(), verifier(&dp_pub, &calling_pub));
+
+    let dave = app.user("dave").await;
+    let refresh = app
+        .state
+        .jwt_service
+        .generate_refresh_token(dave.id, "user")
+        .unwrap();
+    assert_eq!(
+        verify(&router, Some(&dp), &refresh).await.1["outcome"],
+        "REJECTED"
+    );
+    assert_eq!(
+        verify(&router, Some(&dp), &dave.token).await.1["outcome"],
+        "VERIFIED"
+    );
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "UPDATE users SET password_hash = 'replaced' WHERE id = $1",
+            [dave.id.into()],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        verify(&router, Some(&dp), &dave.token).await.1["outcome"],
+        "REJECTED"
+    );
+}

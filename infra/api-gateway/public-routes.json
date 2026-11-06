@@ -1324,6 +1324,13 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v1/auth/oauth/google/exchange",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v1/auth/refresh",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
@@ -2171,6 +2178,27 @@
       "method": "GET",
       "path": "/api/v2/me/organizations",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/sessions",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/sessions/revoke-all",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/sessions/{sessionId}/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
     },
     {
       "domain": "meetings",

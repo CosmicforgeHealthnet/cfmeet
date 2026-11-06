@@ -24,7 +24,7 @@ COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-communications-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin account-communications-migration
 # Build the backend binary from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend
 
@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy binaries from builder
 COPY --from=builder /app/services/meeting-service/target/release/migration ./migration
+COPY --from=builder /app/services/meeting-service/target/release/account-security-migration ./account-security-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 

@@ -23,6 +23,9 @@ pub struct AppState {
     pub otp_service: Arc<OtpService>,
     pub token_blacklist: Arc<TokenBlacklistService>,
     pub rate_limiter: Arc<RateLimiterService>,
+    /// Blueprint Section 2 account-security runtime policy (OAuth token delivery,
+    /// browser binding, trusted client-address header).
+    pub auth_policy: Arc<crate::services::account_security::AuthPolicy>,
     /// Frontend/Hosted UI URL for generating join links
     pub app_url: String,
     /// Google OAuth Client ID
@@ -89,6 +92,7 @@ impl AppState {
             otp_service,
             token_blacklist,
             rate_limiter,
+            auth_policy: Arc::new(crate::services::account_security::AuthPolicy::from_env()),
             app_url: app_config.app_url.clone(),
             google_client_id: app_config.google_client_id.clone(),
             google_client_secret: app_config.google_client_secret.clone(),

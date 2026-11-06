@@ -146,6 +146,10 @@ async fn template(admin: &str) -> String {
             migration::Migrator::up(&tmpl, None)
                 .await
                 .expect("migrations apply");
+            // Blueprint Section 2: every running image requires the account-security history.
+            migration::AccountSecurityMigrator::up(&tmpl, None)
+                .await
+                .expect("account security migrations apply");
             tmpl.close().await.ok();
             name
         })

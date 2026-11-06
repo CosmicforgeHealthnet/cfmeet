@@ -505,6 +505,23 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             put(organizations::upsert_organization_member),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        // Blueprint Section 2: account sessions and the security audit
+        .route(
+            "/me/sessions",
+            get(crate::handlers::v2::account_sessions::list_my_sessions),
+        )
+        .route(
+            "/me/sessions/revoke-all",
+            post(crate::handlers::v2::account_sessions::revoke_all_my_sessions),
+        )
+        .route(
+            "/me/sessions/:session_id/revoke",
+            post(crate::handlers::v2::account_sessions::revoke_my_session),
+        )
+        .route(
+            "/admin/audit-events",
+            get(crate::handlers::v2::account_sessions::list_account_audit_events),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::platform_auth::platform_credential,

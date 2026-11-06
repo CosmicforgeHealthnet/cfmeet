@@ -197,6 +197,8 @@ impl PersonalStack {
             self.names.push(db_name.clone());
             db::migrate(&self.bin.join(base), &owner)?;
             if name == "meeting-service" {
+                // Blueprint Section 2: the account-security history is required at startup.
+                db::migrate(&self.bin.join("account-security-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {

@@ -204,10 +204,12 @@ def database(name):
     p.write_private(config,json.dumps(value));return value
 
 def migrate(service,sha,url,feature_only=False,network=None):
-    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-communications-migration'],
+    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','account-communications-migration'],
               'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration'],
               'communications':['communications-migration']}[service]
-    if feature_only:binaries=binaries[-1:]
+    # Feature-only releases apply every additive history after the base one (meeting-service:
+    # account security, then Account Communications); other services have exactly one.
+    if feature_only:binaries=binaries[1:]
     path=env_file(WORK/(service+'.migration.private.env'),{'DATABASE_URL':url})
     for binary in binaries:
         p.run('docker','run','--rm','--network',network or p.NET,'--env-file',str(path),'--entrypoint','/app/'+binary,image(service,sha),'up')

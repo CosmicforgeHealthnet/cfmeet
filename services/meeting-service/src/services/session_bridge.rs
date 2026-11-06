@@ -161,7 +161,7 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
     let Ok(claims) = s.app.jwt_service.verify_token(token) else {
         return invalid();
     };
-    if claims.role == "guest" {
+    if claims.role == "guest" || !claims.is_kind(crate::services::auth::TokenKind::Access) {
         return invalid();
     }
     // Revocation must be CHECKED: an unreachable store fails closed here.
@@ -193,6 +193,25 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
     };
     if user.status != UserStatus::Active || user.role == UserRole::Guest {
         return invalid();
+    }
+    // ACC-002: logout, password reset/change and deactivation end bridge sessions too.
+    match crate::services::account_security::authorize_user_token(
+        &s.app,
+        &claims,
+        user.id,
+        crate::services::auth::TokenKind::Access,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(crate::error::ApiError::Unauthorized(_)) => return invalid(),
+        Err(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                Some(&rid),
+            )
+        }
     }
     let email_verified = user.auth_type == AuthType::Google
         || (user.status == UserStatus::Active && s.app.require_email_verification);

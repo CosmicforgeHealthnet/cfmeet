@@ -15,6 +15,8 @@ use crate::middleware::request_id::current_request_id;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     MeetingNotFound,
+    /// Blueprint Section 2: an account session that does not exist or is not the caller's.
+    SessionNotFound,
     MeetingAccessDenied,
     MeetingPasscodeRequired,
     MeetingPasscodeInvalid,
@@ -120,6 +122,7 @@ impl ErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             ErrorCode::MeetingNotFound => "MEETING_NOT_FOUND",
+            ErrorCode::SessionNotFound => "SESSION_NOT_FOUND",
             ErrorCode::MeetingAccessDenied => "MEETING_ACCESS_DENIED",
             ErrorCode::MeetingPasscodeRequired => "MEETING_PASSCODE_REQUIRED",
             ErrorCode::MeetingPasscodeInvalid => "MEETING_PASSCODE_INVALID",
@@ -211,6 +214,7 @@ impl ErrorCode {
     pub fn status(&self) -> StatusCode {
         match self {
             ErrorCode::MeetingNotFound
+            | ErrorCode::SessionNotFound
             | ErrorCode::ConferenceNotFound
             | ErrorCode::ParticipantNotFound
             | ErrorCode::FeatureDisabled => StatusCode::NOT_FOUND,
@@ -561,6 +565,7 @@ mod tests {
     fn every_error_code_has_a_stable_string_and_client_or_server_status() {
         let all = [
             ErrorCode::MeetingNotFound,
+            ErrorCode::SessionNotFound,
             ErrorCode::PermissionDenied,
             ErrorCode::ValidationError,
             ErrorCode::RateLimited,

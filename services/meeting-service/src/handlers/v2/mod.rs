@@ -4,6 +4,7 @@
 //! call one service method, and serialize. No role checks, transactions, policy
 //! orchestration or provider calls live here.
 
+pub mod account_sessions;
 pub mod artifacts;
 pub mod breakouts;
 pub mod collaboration;

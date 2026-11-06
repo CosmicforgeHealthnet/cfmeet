@@ -45,6 +45,12 @@ pub async fn auth_middleware(
         .jwt_service
         .verify_token(token)
         .map_err(|_| ApiError::Unauthorized("Invalid or expired token".to_string()))?;
+    // ACC-001: a refresh token never authenticates a request.
+    if !claims.is_kind(crate::services::auth::TokenKind::Access) {
+        return Err(ApiError::Unauthorized(
+            "Invalid or expired token".to_string(),
+        ));
+    }
 
     // Check for Guest Role
     if claims.role == "guest" {
@@ -91,6 +97,16 @@ pub async fn auth_middleware(
             "Account has been deactivated".to_string(),
         ));
     }
+
+    // ACC-002: the account revocation epoch and session state apply on v1 routes too
+    // (password reset/change, logout, deactivation end these tokens).
+    crate::services::account_security::authorize_user_token(
+        &state,
+        &claims,
+        user.id,
+        crate::services::auth::TokenKind::Access,
+    )
+    .await?;
 
     // Create auth context
     let auth_context = AuthContext {

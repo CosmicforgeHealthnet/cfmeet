@@ -611,7 +611,7 @@
           "Authentication"
         ],
         "summary": "Change password for authenticated user",
-        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in.",
+        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in. A change signs the account\nout of every session, including the current one; sign in again with the new password.",
         "operationId": "change_password",
         "requestBody": {
           "content": {
@@ -654,7 +654,7 @@
           "Authentication"
         ],
         "summary": "Request password reset",
-        "description": "Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an\nemail-and-password account. Public endpoint. Returns 404 if no account uses the email, 400 for\nGoogle sign-in accounts, and 429 after 5 requests per email within 15 minutes. Finish with\n`POST /api/v1/auth/reset-password`.",
+        "description": "Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an\nemail-and-password account. Public endpoint. The answer is the same whether or not such an\naccount exists (no email is sent for unknown or Google sign-in accounts); at most 5 codes per\nemail are sent within 15 minutes. Finish with `POST /api/v1/auth/reset-password`.",
         "operationId": "forgot_password",
         "requestBody": {
           "content": {
@@ -668,7 +668,7 @@
         },
         "responses": {
           "200": {
-            "description": "Password reset code sent",
+            "description": "Request accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -679,9 +679,6 @@
           },
           "400": {
             "description": "Validation error"
-          },
-          "404": {
-            "description": "User not found"
           },
           "429": {
             "description": "Too many requests"
@@ -695,7 +692,7 @@
           "Authentication"
         ],
         "summary": "Login user",
-        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days) and basic user info. Public endpoint. Accounts still pending email\nverification can log in, so check `user.status` and route to verification if needed; deactivated\naccounts get 403. More than 5 attempts per email within 15 minutes returns 429; a successful\nlogin resets the count.",
+        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account\nsession that lasts at most 30 days and can be listed and revoked from\n`/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so\ncheck `user.status` and route to verification if needed; deactivated accounts get 403. More than\n5 attempts per email within 15 minutes returns 429; a successful login resets the count.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -736,7 +733,7 @@
           "Authentication"
         ],
         "summary": "Logout user",
-        "description": "Revokes the bearer access token sent in the `Authorization` header so it is rejected for the\nrest of its lifetime. When the Messaging integration is enabled, it also ends the account's\nMessaging sessions; a Messaging outage does not block logout. Clients should also discard their\nstored refresh token.",
+        "description": "Ends the current session: the bearer access token is revoked and the session's refresh\ntoken stops working. Tokens issued before account sessions existed cannot be told apart, so\nfor those this signs the account out everywhere. Other sessions stay signed in; use\n`POST /api/v2/me/sessions/revoke-all` to sign out everywhere. When the Messaging integration is\nenabled, it also ends the account's Messaging sessions; a Messaging outage does not block\nlogout.",
         "operationId": "logout",
         "responses": {
           "200": {
@@ -766,10 +763,10 @@
           "Authentication"
         ],
         "summary": "Initiate Google OAuth flow",
-        "description": "Generates a secure state token, stores it in Redis, and redirects\nthe user to Google's OAuth consent page.",
+        "description": "Generates single-use `state` and `nonce` values, binds them to this browser with an HttpOnly\ncookie, and redirects the user to Google's consent page. Public endpoint.",
         "operationId": "oauth_google_init",
         "responses": {
-          "302": {
+          "303": {
             "description": "Redirect to Google OAuth consent page"
           },
           "500": {
@@ -784,7 +781,7 @@
           "Authentication"
         ],
         "summary": "Google OAuth callback handler",
-        "description": "Validates the state token, exchanges the authorization code for tokens,\nverifies the ID token, and creates/authenticates the user.",
+        "description": "Consumes the single-use state, checks the browser binding, exchanges the authorization code,\nvalidates the ID token (issuer, audience, expiry, nonce, verified email) and signs the user in.\nIt then redirects to `{APP_URL}/google/callback`. With `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`\nthe redirect carries only a 60-second single-use `exchange_code` for\n`POST /api/v1/auth/oauth/google/exchange`; the legacy mode (tokens in the query string) is kept\nonly until the live web client adopts the exchange. Errors redirect with a short `error` code.",
         "operationId": "oauth_google_callback",
         "parameters": [
           {
@@ -807,8 +804,33 @@
           }
         ],
         "responses": {
+          "303": {
+            "description": "Redirect to the web application's Google callback page"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/google/exchange": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Exchange a one-time Google sign-in code for tokens",
+        "description": "Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.\nThe code from the callback redirect is valid once, for 60 seconds. Returns the same body as\n`POST /api/v1/auth/login`. Public endpoint.",
+        "operationId": "oauth_google_exchange",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
           "200": {
-            "description": "Login successful",
+            "description": "Signed in",
             "content": {
               "application/json": {
                 "schema": {
@@ -818,13 +840,7 @@
             }
           },
           "400": {
-            "description": "Invalid state or code"
-          },
-          "401": {
-            "description": "Authentication failed"
-          },
-          "403": {
-            "description": "Email verification required or account deactivated"
+            "description": "Invalid or expired exchange code"
           }
         }
       }
@@ -835,7 +851,7 @@
           "Authentication"
         ],
         "summary": "Refresh access token",
-        "description": "Exchanges a valid, unexpired refresh token for a new access token (valid 15 minutes) and a new\nrefresh token (valid 7 days). Public endpoint: send the refresh token in the request body, not\nin the `Authorization` header. Returns 401 if the token is invalid or expired.",
+        "description": "Exchanges a valid, unexpired refresh token for a new access token (valid 15 minutes) and a new\nrefresh token (valid 7 days). Public endpoint: send the refresh token in the request body, not\nin the `Authorization` header. Refresh tokens are single-use: presenting a superseded refresh\ntoken ends the whole session. A session lasts at most 30 days from sign-in. Returns 401 if the\ntoken is invalid, expired, revoked or not a refresh token.",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {
@@ -870,7 +886,7 @@
           "Authentication"
         ],
         "summary": "Register a new user",
-        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nReturns 409 if the email or username is already in use.",
+        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. Returns 409 if the email or\nusername is already in use.",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -898,6 +914,9 @@
           },
           "409": {
             "description": "User already exists"
+          },
+          "429": {
+            "description": "Too many requests"
           }
         }
       }
@@ -908,7 +927,7 @@
           "Authentication"
         ],
         "summary": "Resend verification email",
-        "description": "Generates a new 6-digit verification code for an account that is still pending verification and\nemails it, replacing the previous code. Public endpoint. Limited to 5 sends per email within 15\nminutes (429 after that). Returns 400 if the account is already verified.",
+        "description": "Sends a new 6-digit verification code to an account that is still pending verification,\nreplacing the previous code. Public endpoint. The answer is the same whether or not such an\naccount exists; at most 5 codes per email are sent within 15 minutes.",
         "operationId": "resend_verification_email",
         "requestBody": {
           "content": {
@@ -922,7 +941,7 @@
         },
         "responses": {
           "200": {
-            "description": "Verification email sent",
+            "description": "Request accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -933,9 +952,6 @@
           },
           "400": {
             "description": "Validation error"
-          },
-          "404": {
-            "description": "User not found"
           },
           "429": {
             "description": "Too many requests"
@@ -949,7 +965,7 @@
           "Authentication"
         ],
         "summary": "Reset password with token",
-        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429).",
+        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the\naccount out of every session.",
         "operationId": "reset_password",
         "requestBody": {
           "content": {
@@ -987,7 +1003,7 @@
           "Authentication"
         ],
         "summary": "Verify email with token",
-        "description": "Activates a newly registered account using the 6-digit code emailed at registration. Public\nendpoint. The code is single-use; repeated wrong codes for the same email are rate-limited\n(429). Returns 400 if the code is wrong or expired, or if the account is already verified.",
+        "description": "Activates a newly registered account using the 6-digit code emailed at registration. Public\nendpoint. The code is single-use; repeated wrong codes for the same email are rate-limited\n(429). Returns 400 if the code is wrong or expired; the answer does not reveal whether an\naccount exists or is already verified.",
         "operationId": "verify_email",
         "requestBody": {
           "content": {
@@ -1011,10 +1027,10 @@
             }
           },
           "400": {
-            "description": "Invalid or expired token"
+            "description": "Invalid or expired code"
           },
-          "404": {
-            "description": "User not found"
+          "429": {
+            "description": "Too many attempts"
           }
         }
       }
@@ -1025,7 +1041,7 @@
           "Authentication"
         ],
         "summary": "Verify password reset token",
-        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted\ncode must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does\nthat). Returns 400 if no reset is pending and 404 if the email is unknown.",
+        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted\ncode must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does\nthat). Returns 400 if no reset is pending, including when the email is unknown.",
         "operationId": "verify_reset_token",
         "requestBody": {
           "content": {
@@ -1049,10 +1065,7 @@
             }
           },
           "400": {
-            "description": "Invalid or expired token"
-          },
-          "404": {
-            "description": "User not found"
+            "description": "No pending reset"
           }
         }
       }
@@ -2443,6 +2456,98 @@
           },
           "404": {
             "description": "Webhook not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/audit-events": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Read the account security audit (platform administrators)",
+        "description": "Append-only account security events — sign-ins, sign-outs, password changes and resets,\nGoogle linking, refresh-token reuse — newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
+        "operationId": "v2_admin_list_account_audit_events",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "description": "Exact event type, for example LOGIN, LOGOUT_ALL or REFRESH_TOKEN_REUSE.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "`nextCursor` from the previous page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1-200, default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityEventPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -10191,6 +10296,150 @@
         ]
       }
     },
+    "/api/v2/me/sessions": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "List my sessions",
+        "description": "Lists the signed-in user's account sessions (one per sign-in), newest first, marking the\nsession this request was made with as `current`. Sessions last at most 30 days.",
+        "operationId": "v2_list_my_sessions",
+        "parameters": [
+          {
+            "name": "includeEnded",
+            "in": "query",
+            "description": "Also return revoked and expired sessions (most recent 100 in total).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/revoke-all": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out everywhere",
+        "description": "Ends every session of the signed-in user, including the current one, and every token issued\nbefore sessions existed. Connected CF Meet services are told through the account's durable\nrevocation events. Sign in again afterwards.",
+        "operationId": "v2_revoke_all_my_sessions",
+        "responses": {
+          "200": {
+            "description": "Every session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/{sessionId}/revoke": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out one session",
+        "description": "Ends one of the signed-in user's sessions (for example a lost device): its access and refresh\ntokens stop working immediately on every CF Meet service that checks account sessions.\nUnknown or foreign session ids get the same 404.",
+        "operationId": "v2_revoke_my_session",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked (or already ended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/meeting-spaces": {
       "get": {
         "tags": [
@@ -12998,6 +13247,34 @@
         },
         "additionalProperties": false
       },
+      "AccountSessionListResponse": {
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionRecord"
+            }
+          }
+        }
+      },
+      "AccountSessionRevokeResponse": {
+        "type": "object",
+        "required": [
+          "revokedCount"
+        ],
+        "properties": {
+          "revokedCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of sessions this request ended (0 when the session had already ended).",
+            "minimum": 0
+          }
+        }
+      },
       "AddMemberRequest": {
         "type": "object",
         "required": [
@@ -15690,6 +15967,7 @@
         "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
+          "SESSION_NOT_FOUND",
           "MEETING_ACCESS_DENIED",
           "MEETING_PASSCODE_REQUIRED",
           "MEETING_PASSCODE_INVALID",
@@ -15897,6 +16175,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "GoogleExchangeRequest": {
+        "type": "object",
+        "description": "One-time Google sign-in exchange (ACC-005): the callback redirect carries only a\nshort-lived, single-use `exchange_code`, never tokens.",
+        "required": [
+          "exchange_code"
+        ],
+        "properties": {
+          "exchange_code": {
+            "type": "string"
+          }
+        }
       },
       "HandRaiseResponse": {
         "type": "object",
@@ -19984,6 +20274,86 @@
           }
         }
       },
+      "SecurityEventPage": {
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecurityEventRecord"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
+      "SecurityEventRecord": {
+        "type": "object",
+        "description": "One account security audit event (administrator view; never secrets or contact data).",
+        "required": [
+          "seq",
+          "eventId",
+          "eventType",
+          "outcome",
+          "actorKind",
+          "detail",
+          "occurredAt"
+        ],
+        "properties": {
+          "actorKind": {
+            "type": "string",
+            "description": "USER, ADMIN, SYSTEM or ANONYMOUS."
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "detail": {
+            "type": "object"
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "SUCCESS, FAILURE or DENIED."
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cursor value: pass it as `before` to page further back."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
       "SecurityProfile": {
         "type": "string",
         "enum": [
@@ -20095,6 +20465,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "SessionRecord": {
+        "type": "object",
+        "description": "One account session as shown to its owner.",
+        "required": [
+          "sessionId",
+          "authMethod",
+          "authenticatedAt",
+          "createdAt",
+          "expiresAt",
+          "status",
+          "current"
+        ],
+        "properties": {
+          "authMethod": {
+            "type": "string",
+            "description": "PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward)."
+          },
+          "authenticatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clientLabel": {
+            "type": "string",
+            "description": "Shortened User-Agent of the client that signed in.",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True for the session the request was made with."
+          },
+          "endReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The session ends here at the latest, whatever the refresh activity."
+          },
+          "lastRefreshedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, REVOKED or EXPIRED."
+          }
+        }
       },
       "SessionState": {
         "type": "string",
@@ -21236,6 +21669,10 @@
     {
       "name": "Authentication",
       "description": "User authentication endpoints"
+    },
+    {
+      "name": "Account sessions (v2)",
+      "description": "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."
     },
     {
       "name": "API Keys",

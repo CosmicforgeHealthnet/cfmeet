@@ -28,6 +28,7 @@ mod m20261020_000001_unified_messaging_scoped_chat;
 mod m20261101_000001_platform_environment_meetings;
 mod m20261103_000001_communications_account_authority;
 mod m20261105_000001_communications_meeting_facade;
+mod m20261106_000001_account_security;
 
 pub mod phase2_backfill;
 
@@ -153,6 +154,54 @@ pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
         ))
         .await?;
     let known: std::collections::BTreeSet<_> = CommunicationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
+/// Blueprint v1.0 Section 2 account security (revocation epoch independent of the
+/// Communications integration, sessions, security audit). A SEPARATE additive history so
+/// the previously deployed image still starts after it is applied (rollback safety).
+pub struct AccountSecurityMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountSecurityMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261106_000001_account_security::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("account_security_migrations").into_iden()
+    }
+}
+
+/// Exactly the known account-security history has been applied.
+pub async fn account_security_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.account_security_migrations') IS NOT NULL AS present"
+                .to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM account_security_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = AccountSecurityMigrator::migrations()
         .iter()
         .map(|m| m.name().to_owned())
         .collect();

@@ -12254,6 +12254,7 @@
         "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
+          "SESSION_NOT_FOUND",
           "MEETING_ACCESS_DENIED",
           "MEETING_PASSCODE_REQUIRED",
           "MEETING_PASSCODE_INVALID",

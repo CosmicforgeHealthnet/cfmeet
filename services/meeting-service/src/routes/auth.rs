@@ -22,6 +22,7 @@ pub fn auth_routes() -> Router<AppState> {
         // OAuth routes
         .route("/oauth/google", get(auth::oauth_google_init))
         .route("/oauth/google/callback", get(auth::oauth_google_callback))
+        .route("/oauth/google/exchange", post(auth::oauth_google_exchange))
 }
 
 /// Authenticated auth routes (require JWT token)

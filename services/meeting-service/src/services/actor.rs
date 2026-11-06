@@ -269,11 +269,18 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                 "Invalid or expired token",
             )
         })?;
+        // ACC-001: refresh tokens never authenticate requests.
+        if !claims.is_kind(crate::services::auth::TokenKind::Access) {
+            return Err(ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "Invalid or expired token",
+            ));
+        }
         // Per-token revocation (logout) lives ONLY in Redis (`TokenBlacklistService`).
         // Account deactivation is authoritative in PostgreSQL and checked below on every
         // request. If Redis is unreachable the token is honoured but marked
         // `revocation_checked = false`; strict security profiles fail closed on that.
-        let revocation_checked = match state.token_blacklist.is_blacklisted(&token).await {
+        let mut revocation_checked = match state.token_blacklist.is_blacklisted(&token).await {
             Ok(true) => {
                 return Err(ApiError::domain(
                     ErrorCode::AuthenticationRequired,
@@ -316,15 +323,17 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             }
             let email_verified = user.auth_type == AuthType::Google
                 || (user.status == UserStatus::Active && state.require_email_verification);
-            // Account-owned credential revocation remains independent of Hub reachability.
-            // A fresh login, rather than a refresh or another old access token, is needed
-            // after the account's Communications revocation epoch advances.
-            crate::services::communications::require_fresh_credentials(
+            // Account revocation epoch (always enforced) plus the Communications epoch when
+            // configured, and the account session. A session token is revocation-checked in
+            // PostgreSQL, so a Redis outage no longer leaves it unchecked (SEC-007).
+            let authorization = crate::services::account_security::authorize_user_token(
                 state,
+                &claims,
                 user.id,
-                claims.auth_time,
+                crate::services::auth::TokenKind::Access,
             )
             .await?;
+            revocation_checked = revocation_checked || authorization.session_verified;
             let verified_organizations = state
                 .organization_directory
                 .organizations_for_user(user.id)
