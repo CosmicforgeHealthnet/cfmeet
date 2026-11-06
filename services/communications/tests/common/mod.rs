@@ -240,7 +240,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                     return Some(reject(StatusCode::CONFLICT, "IDEMPOTENCY_CONFLICT"));
                 }
                 return ok(
-                    json!({"schemaVersion":1,"callId":l.0,"state":"RINGING","kind":kind,"version":1,"createdAt":"2026-11-06T10:00:00Z","replayed":true}),
+                    json!({"schemaVersion":1,"callId":l.0,"state":"RINGING","kind":kind,"version":1,"createdAt":chrono::Utc::now().to_rfc3339(),"replayed":true}),
                 );
             }
             let id = Uuid::new_v4();
@@ -251,7 +251,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                 .calls
                 .insert(id, ("RINGING".into(), false, 1, "RINGING".into()));
             ok(
-                json!({"schemaVersion":1,"callId":id,"state":"RINGING","kind":kind,"version":1,"createdAt":"2026-11-06T10:00:00Z","replayed":false}),
+                json!({"schemaVersion":1,"callId":id,"state":"RINGING","kind":kind,"version":1,"createdAt":chrono::Utc::now().to_rfc3339(),"replayed":false}),
             )
         }
         "/internal/v1/communications/calls/participation" => {
