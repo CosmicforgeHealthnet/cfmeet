@@ -1185,7 +1185,15 @@ async fn enterprise_queue(cert: &Cert) {
     assert_eq!(r.json["enterprise"]["phase"], "QUEUED");
     let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
     // The first agent is offered and lets it ring out; server time moves the offer on.
-    assert!(cert.a.invitation_for(call, d1.endpoint).await.is_some());
+    // The post-create dispatch is best-effort: real LiveKit's room_started callback can
+    // briefly hold the Call row (a foreign-key lock), so the dispatch skips it and the
+    // queue worker offers it on its next pass, as in production. The fake clock does not
+    // move while polling, so no offer or wait expires here.
+    eventually(10, "first queue agent offered", || async {
+        h.state.app.expire_due(100).await.unwrap();
+        cert.a.invitation_for(call, d1.endpoint).await.is_some()
+    })
+    .await;
     h.clock.advance(chrono::Duration::seconds(11));
     h.state.app.expire_due(100).await.unwrap();
     let invitation = cert.a.invitation_for(call, d2.endpoint).await.unwrap();
