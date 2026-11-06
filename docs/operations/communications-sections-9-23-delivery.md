@@ -1,5 +1,24 @@
 # Sections 9–23 — unified Communications delivery record
 
+## Current status (2026-11-06)
+
+**IMPLEMENTED and TESTED; NOT DEPLOYED.** `main` = `staging` = `c2a803586f64a5fd3c58487ee7f5149a25961291`.
+Immutable images for that commit are built ([42138825294](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42138825294),
+all seven services). Read-only production inspection [42144926527](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42144926527)
+passed: production still runs the Section 8 image set (Communications `sha256:b90ada26…`,
+Calling `sha256:4ca17362…`, Messaging `sha256:60608afb…`, Account `sha256:0be1b722…`,
+Platform Access `sha256:d7189f63…`); host memory available 5.09 GiB, disk 26.9 GB.
+
+The automatic Account-only deploy triggered by the merge ([42138779634](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42138779634))
+was cancelled before its VPS step, as in Sections 4–7, so the coordinated release can
+replace Account together with the other services. Production was not changed.
+
+`communications-stage` was not started: dispatching production operations was refused
+by the agent's permission policy and needs the owner's explicit go-ahead. Next steps,
+in order: `communications-stage` → `communications-release` → `communications-verify`
+(all with `image_sha=c2a803586f64a5fd3c58487ee7f5149a25961291`), then `resource-recover`
+if stage candidates remain running.
+
 Status vocabulary: IMPLEMENTED (code), TESTED (named CI run passed), DEPLOYED (running in
 production, verified), BLOCKED_EXTERNAL, DEFERRED, NOT_RUN. A passed build is never
 reported as a deployment.
