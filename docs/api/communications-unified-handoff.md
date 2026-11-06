@@ -80,10 +80,17 @@ APIs with the returned `meetingCode`. Meeting chat is separate from the conversa
 
 **Settings and devices.** `GET /bootstrap` once at start. Notifications:
 `GET|PUT /me/notification-preferences`; diagnostics
-`GET /me/notification-delivery-status` (reports `NOT_CONFIGURED` truthfully). Storage:
+`GET /me/notification-delivery-status`. `providers` always names exactly `APNS`, `FCM`
+and `WEB_PUSH`, each `CONFIGURED` or `NOT_CONFIGURED` (Messaging's own configuration);
+if Messaging is unavailable or answers outside its contract the Hub returns 503
+`COMMUNICATIONS_UNAVAILABLE`. It never returns a null or partial provider map. Storage:
 `GET /me/storage-summary`. Devices: link existing Messaging device and/or Calling
 endpoint with `POST /devices/link`; push target `PUT|DELETE /devices/{id}/push`
 (the token passes through to Messaging); revoke `POST /devices/{id}/revoke`.
+`GET /devices` (and `POST /devices/link`) first re-check every ACTIVE device with its
+owner. A device or endpoint revoked in Messaging or Calling directly shows as `REVOKED`
+with `revocationReason: OWNER_SERVICE` and writes a `DEVICE` change-feed entry. An
+unavailable owner never changes a device's state.
 Recovery after reinstall: `GET /me/recovery-state`. Privacy: `GET|PUT /me/privacy`.
 
 ## 4. Multi-device synchronization
@@ -91,6 +98,14 @@ Recovery after reinstall: `GET /me/recovery-state`. Privacy: `GET|PUT /me/privac
 1. `GET /bootstrap` → remember `sync.latestPosition` as `P`.
 2. Poll or, on a realtime nudge, `GET /sync?after=P`. Each entry names a domain and
    resource; refetch that resource from its endpoint. Apply in position order.
+   Domains and what to refetch:
+   `CONTACT` (contact requests, accept/decline, removal, alias/favorite/notification
+   changes, and the other side of a block or unblock: `GET /contacts`, `GET /contact-requests`),
+   `BLOCK` (your own block list: `GET /blocks`), `PRIVACY` (`GET /me/privacy`),
+   `PROFILE` (your CF Meet ID after rotation or an operator change: `GET /me`),
+   `CONTACT_LIST`, `CONVERSATION_PREFERENCE`, `CLEAR_FOR_ME`, `SAVED_MESSAGE`,
+   `NOTIFICATION_PREFERENCE`, `DEVICE`, `TIMELINE`, `MEETING_LINK`. A blocked person's
+   devices receive only a `CONTACT` entry; no block state is disclosed to them.
 3. `PUT /devices/{deviceId}/sync-state {acknowledgedPosition}` after applying (monotonic).
 4. If `resyncRequired` is true, reload `GET /bootstrap` and continue from
    `latestPosition`. Never treat a gap as acknowledged.
@@ -171,6 +186,7 @@ decision applies the recipient's contact mute, account-wide switches and operato
 Calling owns ring offers over signaling. Payloads carry routing metadata only, never
 message text, keys, OTPs, phone numbers or recording URLs. Production push providers
 are **not configured**: delivery status reports `NOT_CONFIGURED`, never delivered.
+Physical-device delivery has not been tested (no provider credentials, no devices).
 
 ## 10. Deployment, rollback and monitoring
 
