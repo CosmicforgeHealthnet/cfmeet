@@ -49,6 +49,13 @@ jobs:
           python3 -m unittest scripts/contracts/test_check_gateway_upstreams.py -v
           python3 scripts/contracts/check_gateway_upstreams.py
 
+      # DATA-014: new migrations are well named, append to their migrator's vector and
+      # sort last; historical anomalies are frozen in the guard's baseline.
+      - name: migration naming and ordering (mutation tests + guard)
+        run: |
+          python3 -m unittest scripts/migrations/test_check_migration_order.py -v
+          python3 scripts/migrations/check_migration_order.py
+
       - name: no phase-03 path
         run: |
           set -euo pipefail
