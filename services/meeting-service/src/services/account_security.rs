@@ -144,6 +144,33 @@ impl Default for AuthPolicy {
 // Email identity (DATA-002 / ACC-023)
 // ---------------------------------------------------------------------------
 
+/// The opaque reference other services store for one account session (ADR 0049 A1,
+/// ADR 0057 amendment A1): a domain-separated SHA-256 of the FIRST_PARTY environment and
+/// the session id, lowercase hex. Receivers can match it, never reverse it.
+pub fn session_reference(environment_id: Uuid, session_id: Uuid) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"cfmeet-account-session:v1|");
+    h.update(environment_id.as_bytes());
+    h.update(b"|");
+    h.update(session_id.as_bytes());
+    hex::encode(h.finalize())
+}
+
+/// The user's still-open session whose reference (in `environment_id`) is `reference`.
+pub async fn open_session_by_reference(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    environment_id: Uuid,
+    reference: &str,
+) -> ApiResult<Option<Uuid>> {
+    Ok(list_sessions(db, user_id, false, None)
+        .await?
+        .into_iter()
+        .map(|s| s.session_id)
+        .find(|id| session_reference(environment_id, *id) == reference))
+}
+
 pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }

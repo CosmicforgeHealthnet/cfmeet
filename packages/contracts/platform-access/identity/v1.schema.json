@@ -60,6 +60,12 @@
     },
     {
       "$ref": "#/$defs/EnsurePrincipalResult"
+    },
+    {
+      "$ref": "#/$defs/AccountStatusRequest"
+    },
+    {
+      "$ref": "#/$defs/AccountStatusResult"
     }
   ],
   "$defs": {
@@ -1585,6 +1591,46 @@
               ]
             }
           }
+        }
+      }
+    },
+    "AccountStatusRequest": {
+      "description": "POST /internal/v1/principals/account-status (Blueprint Section 14, ACC-010): the first-party account authority mirrors an account's current status onto its NATIVE_CF_USER principal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalReference",
+        "status"
+      ],
+      "properties": {
+        "externalReference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED",
+            "DEACTIVATED"
+          ]
+        }
+      }
+    },
+    "AccountStatusResult": {
+      "description": "The principal after mirroring and whether this call changed its status.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principal",
+        "changed"
+      ],
+      "properties": {
+        "principal": {
+          "$ref": "#/$defs/PrincipalSnapshot"
+        },
+        "changed": {
+          "type": "boolean"
         }
       }
     }

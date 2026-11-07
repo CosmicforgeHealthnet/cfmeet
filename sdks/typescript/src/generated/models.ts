@@ -2266,7 +2266,7 @@ export namespace Communications {
     schemaVersion: 1;
     activationState: ActivationState;
     personalCalling: BackendCapability;
-    messaging: BackendCapability;
+    messaging: MessagingCapability;
     contacts: {
       available: boolean;
     };
@@ -2460,9 +2460,14 @@ export namespace Communications {
     push?: { [key: string]: unknown };
     acknowledgedSyncPosition?: number;
     revokedAt?: string | null;
+    /** USER_REQUESTED, COMPROMISED, OPERATOR, OWNER_SERVICE or ACCOUNT_SESSION_ENDED (1.2.0: the sign-in that linked the device ended). */
     revocationReason?: string | null;
     version?: number;
     createdAt?: string;
+    /** 1.2.0: whether the device is bound to the CF Meet sign-in (account session) that linked it. Signing that session out (POST /api/v2/me/sessions/{sessionId}/revoke, logout) revokes the device; revoking the device signs that session out. The session reference itself is never shown. */
+    accountSession?: {
+      bound: boolean;
+    };
   };
   export type DeviceLink = {
     platform: "IOS" | "ANDROID" | "WEB" | "DESKTOP";
@@ -2481,6 +2486,7 @@ export namespace Communications {
     device: Device;
     linked?: boolean;
     alreadyRevoked?: boolean;
+    /** Revocation effects: messagingDevice, callingEndpoint and accountSession (ENDED: the bound sign-in was signed out; NOT_BOUND; UNCHANGED: no Account relay ended it). */
     effects?: { [key: string]: unknown };
   };
   export type DeviceRevoke = {
@@ -2601,6 +2607,21 @@ export namespace Communications {
   export type MeetingShare = {
     clientRequestId: string;
     meetingCode: string;
+  };
+  /** Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never … */
+  export type MessagingCapability = {
+    available: boolean;
+    reason: "AVAILABLE" | "DISABLED" | "MANAGED_NOT_ALLOWED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+    securityReady: boolean;
+    managed: {
+      available: boolean;
+      reason: "AVAILABLE" | "DISABLED" | "MANAGED_NOT_ALLOWED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+      realtime: "SESSION_DEVICE" | "POLLING" | "NONE";
+    };
+    privateE2ee: {
+      available: boolean;
+      reason: "AVAILABLE" | "DISABLED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+    };
   };
   export type NotificationPreferences = {
     schemaVersion: 1;

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Communications API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded."
   },
   "servers": [
@@ -365,7 +365,7 @@
       "get": {
         "operationId": "getCommunicationsCapabilities",
         "summary": "Read actual backend and device-security readiness",
-        "description": "Reflects live Calling flags and Messaging security readiness. Accepted connections establish eligibility; they do not replace MLS device setup. Meetings keep their independent existing authorization. Phone verification is deferred and never required.",
+        "description": "Messaging availability follows MANAGED messaging and reports session-device realtime separately from E2EE readiness (1.2.0). Reflects live Calling flags and Messaging security readiness. Accepted connections establish eligibility; they do not replace MLS device setup. Meetings keep their independent existing authorization. Phone verification is deferred and never required.",
         "tags": [
           "Identity"
         ],
@@ -5044,7 +5044,7 @@
       "get": {
         "operationId": "getCommunicationsInboxOverlay",
         "summary": "Per-user overlay for the conversation list",
-        "description": "Mute, clear-for-me and latest call/meeting activity per conversation. Messaging owns the conversation list, ordering and unread counts; merge by conversationId. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Only conversations the viewer is a current member of (checked with Messaging, 1.2.0); a page may hold fewer rows than limit, follow nextCursor. Mute, clear-for-me and latest call/meeting activity per conversation. Messaging owns the conversation list, ordering and unread counts; merge by conversationId. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "Unified"
         ],
@@ -5382,7 +5382,7 @@
       "get": {
         "operationId": "getConversationTimeline",
         "summary": "Call and meeting cards for a conversation",
-        "description": "Versioned per-viewer projection. Each card carries anchorSequence so clients merge it deterministically with the Messaging history they page. Call outcomes come from Calling; stale=true when Calling could not be reached. No message content is copied. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Versioned per-viewer projection. Each card carries anchorSequence so clients merge it deterministically with the Messaging history they page. Call outcomes come from Calling; stale=true when Calling could not be reached. No message content is copied. Tenant, application, environment and acting account come from the existing authenticated CF Meet session. Since 1.2.0 a member who had no Communications profile when a meeting was shared receives its invitation card on first read, unless the share predates the history Messaging lets that member see.",
         "tags": [
           "Unified"
         ],
@@ -10429,7 +10429,7 @@
       "post": {
         "operationId": "linkCommunicationsDevice",
         "summary": "Link an existing device",
-        "description": "Ownership is verified with Messaging and Calling for the caller; another user identifiers return 404. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Ownership is verified with Messaging and Calling for the caller; another user identifiers return 404. The device is bound to the sign-in (account session) making this request (1.2.0). Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "Devices"
         ],
@@ -10944,7 +10944,7 @@
       "post": {
         "operationId": "revokeCommunicationsDevice",
         "summary": "Revoke a device",
-        "description": "Revokes the Messaging device and Calling endpoint at their owners first; the reference becomes terminally REVOKED. Retry completes a partial failure. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Revokes the Messaging device and Calling endpoint at their owners first; the reference becomes terminally REVOKED. When the device is bound to a sign-in (accountSession.bound), that account session is signed out too (its tokens, session devices and other devices it linked end); revoking the device you are using signs you out. Retry completes a partial failure, including the sign-out. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "Devices"
         ],
@@ -12534,7 +12534,7 @@
             "$ref": "#/components/schemas/BackendCapability"
           },
           "messaging": {
-            "$ref": "#/components/schemas/BackendCapability"
+            "$ref": "#/components/schemas/MessagingCapability"
           },
           "contacts": {
             "type": "object",
@@ -14632,7 +14632,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "USER_REQUESTED, COMPROMISED, OPERATOR, OWNER_SERVICE or ACCOUNT_SESSION_ENDED (1.2.0: the sign-in that linked the device ended)."
           },
           "version": {
             "type": "integer"
@@ -14640,6 +14641,19 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "accountSession": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.2.0: whether the device is bound to the CF Meet sign-in (account session) that linked it. Signing that session out (POST /api/v2/me/sessions/{sessionId}/revoke, logout) revokes the device; revoking the device signs that session out. The session reference itself is never shown.",
+            "properties": {
+              "bound": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bound"
+            ]
           }
         },
         "required": [
@@ -14726,7 +14740,8 @@
           },
           "effects": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Revocation effects: messagingDevice, callingEndpoint and accountSession (ENDED: the bound sign-in was signed out; NOT_BOUND; UNCHANGED: no Account relay ended it)."
           }
         },
         "required": [
@@ -15330,6 +15345,92 @@
           "schemaVersion",
           "activationState",
           "phoneRecovery"
+        ]
+      },
+      "MessagingCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never implies. With a Messaging version that does not report MANAGED, `available` keeps the 1.1.0 meaning (E2EE readiness) and `managed.available` is false.",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "AVAILABLE",
+              "DISABLED",
+              "MANAGED_NOT_ALLOWED",
+              "DEVICE_SECURITY_SETUP_REQUIRED",
+              "BACKEND_UNAVAILABLE",
+              "ACCOUNT_INACTIVE"
+            ]
+          },
+          "securityReady": {
+            "type": "boolean"
+          },
+          "managed": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "MANAGED_NOT_ALLOWED",
+                  "BACKEND_UNAVAILABLE",
+                  "ACCOUNT_INACTIVE"
+                ]
+              },
+              "realtime": {
+                "type": "string",
+                "enum": [
+                  "SESSION_DEVICE",
+                  "POLLING",
+                  "NONE"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason",
+              "realtime"
+            ]
+          },
+          "privateE2ee": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "DEVICE_SECURITY_SETUP_REQUIRED",
+                  "BACKEND_UNAVAILABLE",
+                  "ACCOUNT_INACTIVE"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "securityReady",
+          "managed",
+          "privateE2ee"
         ]
       }
     }

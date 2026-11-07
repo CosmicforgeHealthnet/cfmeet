@@ -9,6 +9,36 @@ use cf_communications_policy::{Action, Decision, DecisionReason, PolicyCheck};
 use cf_service_auth::{DelegatedPlatformContext, OutboundServiceRequest, ServiceId};
 use serde_json::{json, Value};
 
+/// Section 14: Messaging availability for the consumer. CF Meet personal chats are
+/// MANAGED (PRIVATE_E2EE stays blocked in production), so `available` follows MANAGED
+/// messaging and `managed.realtime` says whether live delivery comes from a session
+/// device (ADR 0049 A1, `MESSAGING_SESSION_DEVICES_ENABLED`) or the client polls.
+/// `securityReady` / `privateE2ee` keep reporting E2EE device readiness, never implied by
+/// MANAGED. An older Messaging image without `managed` keeps the previous meaning
+/// (available only with E2EE readiness).
+pub fn messaging_capability(v: &Value, e2ee_available: bool, e2ee_reason: &str) -> Value {
+    let security = v["securityReady"] == true;
+    let private = json!({"available":e2ee_available && security,
+        "reason":if security {e2ee_reason} else {"DEVICE_SECURITY_SETUP_REQUIRED"}});
+    let managed = &v["managed"];
+    let Some(managed_available) = managed["available"].as_bool() else {
+        return json!({"available":e2ee_available && security,"reason":private["reason"],"securityReady":security,
+            "managed":{"available":false,"reason":"BACKEND_UNAVAILABLE","realtime":"NONE"},"privateE2ee":private});
+    };
+    let reason = managed["reason"]
+        .as_str()
+        .filter(|r| ["AVAILABLE", "DISABLED", "MANAGED_NOT_ALLOWED"].contains(r))
+        .unwrap_or("BACKEND_UNAVAILABLE");
+    let available = managed_available && reason == "AVAILABLE";
+    let realtime = match managed["realtime"].as_str() {
+        Some("SESSION_DEVICE") if available => "SESSION_DEVICE",
+        _ if available => "POLLING",
+        _ => "NONE",
+    };
+    json!({"available":available,"reason":reason,"securityReady":security,
+        "managed":{"available":available,"reason":reason,"realtime":realtime},"privateE2ee":private})
+}
+
 impl State {
     pub async fn domain_blocks(
         &self,
@@ -199,8 +229,9 @@ impl State {
     }
     pub async fn capabilities(&self, scope: &DelegatedPlatformContext, p: &Profile) -> Value {
         let mut calling = json!({"available":false,"reason":"BACKEND_UNAVAILABLE"});
-        let mut messaging =
-            json!({"available":false,"reason":"BACKEND_UNAVAILABLE","securityReady":false});
+        let mut messaging = json!({"available":false,"reason":"BACKEND_UNAVAILABLE","securityReady":false,
+            "managed":{"available":false,"reason":"BACKEND_UNAVAILABLE","realtime":"NONE"},
+            "privateE2ee":{"available":false,"reason":"BACKEND_UNAVAILABLE"}});
         for (service, value) in [
             (ServiceId::calling(), &mut calling),
             (ServiceId::messaging(), &mut messaging),
@@ -235,11 +266,7 @@ impl State {
                             v["available"].as_bool().unwrap_or(false) && reason == "AVAILABLE";
                         *value = json!({"available":available,"reason":reason});
                         if service == ServiceId::messaging() {
-                            let security = v["securityReady"] == true;
-                            value["securityReady"] = json!(security);
-                            if !security {
-                                value["available"] = json!(false);
-                            }
+                            *value = messaging_capability(&v, available, reason);
                         }
                     }
                 }
@@ -247,8 +274,9 @@ impl State {
         }
         if p.activation_state != Activation::Active || self.held(p).await.unwrap_or(true) {
             calling = json!({"available":false,"reason":"ACCOUNT_INACTIVE"});
-            messaging =
-                json!({"available":false,"reason":"ACCOUNT_INACTIVE","securityReady":false});
+            messaging = json!({"available":false,"reason":"ACCOUNT_INACTIVE","securityReady":false,
+                "managed":{"available":false,"reason":"ACCOUNT_INACTIVE","realtime":"NONE"},
+                "privateE2ee":{"available":false,"reason":"ACCOUNT_INACTIVE"}});
         }
         json!({"schemaVersion":1,"activationState":p.activation_state,"personalCalling":calling,"messaging":messaging,
             "contacts":{"available":p.activation_state==Activation::Active},"phoneVerification":{"status":"DEFERRED","required":false},
@@ -372,5 +400,53 @@ mod tests {
         for value in ["MUTED", "MENTIONS", "unknown"] {
             assert!(!notification_preference_allows(Some(value)));
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::messaging_capability;
+    use serde_json::json;
+
+    #[test]
+    fn managed_availability_follows_session_devices_not_e2ee_readiness() {
+        let v = json!({"available":false,"securityReady":false,"reason":"DEVICE_SECURITY_SETUP_REQUIRED",
+            "managed":{"available":true,"reason":"AVAILABLE","realtime":"SESSION_DEVICE"}});
+        let c = messaging_capability(&v, false, "DEVICE_SECURITY_SETUP_REQUIRED");
+        assert_eq!(c["available"], true);
+        assert_eq!(c["managed"]["realtime"], "SESSION_DEVICE");
+        assert_eq!(c["securityReady"], false);
+        assert_eq!(c["privateE2ee"]["available"], false);
+        let polling = json!({"securityReady":false,"managed":{"available":true,"reason":"AVAILABLE","realtime":"POLLING"}});
+        assert_eq!(
+            messaging_capability(&polling, false, "DISABLED")["managed"]["realtime"],
+            "POLLING"
+        );
+        let off = json!({"securityReady":true,"managed":{"available":false,"reason":"MANAGED_NOT_ALLOWED","realtime":"SESSION_DEVICE"}});
+        let c = messaging_capability(&off, true, "AVAILABLE");
+        assert_eq!(
+            (c["available"].clone(), c["managed"]["realtime"].clone()),
+            (json!(false), json!("NONE"))
+        );
+        assert_eq!(c["privateE2ee"]["available"], true);
+        // Unknown owner vocabulary never reads as available.
+        let odd = json!({"securityReady":false,"managed":{"available":true,"reason":"MAYBE"}});
+        assert_eq!(
+            messaging_capability(&odd, false, "DISABLED")["available"],
+            false
+        );
+    }
+
+    #[test]
+    fn older_messaging_keeps_the_e2ee_meaning() {
+        let v = json!({"available":true,"securityReady":false,"reason":"AVAILABLE"});
+        let c = messaging_capability(&v, true, "AVAILABLE");
+        assert_eq!(c["available"], false);
+        assert_eq!(c["managed"]["available"], false);
+        let ready = json!({"available":true,"securityReady":true,"reason":"AVAILABLE"});
+        assert_eq!(
+            messaging_capability(&ready, true, "AVAILABLE")["available"],
+            true
+        );
     }
 }

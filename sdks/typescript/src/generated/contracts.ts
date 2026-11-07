@@ -23,5 +23,5 @@ export const CONTRACTS: readonly ContractRef[] = [
   { id: "cfmeet.numbering.public-api", version: "1.13.0", kind: "openapi", path: "bundled/public/numbering/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.sms-gateway.public-api", version: "1.3.0", kind: "openapi", path: "bundled/public/sms/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.developer-platform.public-api", version: "1.6.0", kind: "openapi", path: "bundled/public/developer-platform/v1.openapi.json", lifecycle: "beta" },
-  { id: "cfmeet.communications.public-api", version: "1.1.0", kind: "openapi", path: "bundled/public/communications/v1.openapi.json", lifecycle: "beta" },
+  { id: "cfmeet.communications.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/communications/v1.openapi.json", lifecycle: "beta" },
 ] as const;

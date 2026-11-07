@@ -1030,3 +1030,67 @@ async fn the_directory_lists_and_resolves_only_organization_colleagues() {
         assert_eq!(s, StatusCode::UNAUTHORIZED, "{path}: {v}");
     }
 }
+
+/// Section 14 (ACC-010): an account-wide credential end other than logout (here the
+/// user deactivating the account) also revokes the Messaging sessions of the bridge
+/// principal, through the same durable queue, acting as that principal.
+#[tokio::test]
+async fn deactivation_revokes_the_bridge_principal_messaging_sessions() {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("deactivating").await;
+    // The account uses Messaging through the bridge: Account maps it to a principal.
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/client-sessions/revoke-all"),
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
+    let before = gw.calls().len();
+    let (s, v) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let revoke = gw.calls()[before..]
+        .iter()
+        .rfind(|c| c.peer == Peer::Messaging)
+        .cloned()
+        .expect("Messaging revocation");
+    assert_eq!(
+        revoke.path,
+        "/internal/v1/delegated/v1/messaging/client-sessions/revoke-all"
+    );
+    assert_eq!(
+        revoke.acting,
+        Some(Acting {
+            principal_id: principal,
+            kind: PrincipalKind::NativeCfUser
+        })
+    );
+    let row = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT reason, status FROM communication_session_revocations WHERE principal_id = $1 ORDER BY created_at DESC LIMIT 1",
+            [principal.into()],
+        ))
+        .await
+        .unwrap()
+        .expect("durable revocation job");
+    assert_eq!(
+        row.try_get::<String>("", "reason").unwrap(),
+        "ACCOUNT_DISABLED"
+    );
+    assert_eq!(row.try_get::<String>("", "status").unwrap(), "DONE");
+}

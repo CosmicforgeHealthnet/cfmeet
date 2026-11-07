@@ -12,6 +12,7 @@
 //! | `POST /internal/v1/principals/resolve` | `platform-principal.resolve` | signed delegated context |
 //! | `POST /internal/v1/principals/telephone-endpoints` | `platform-principal.register` | signed delegated context |
 //! | `POST /internal/v1/principals/ensure` | `platform-principal.ensure` | signed delegated context of a FIRST_PARTY tenant (NATIVE_CF_USER / TEMPORARY_EXTERNAL_PARTICIPANT / BOT_OR_SERVICE only) |
+//! | `POST /internal/v1/principals/account-status` | `platform-principal.ensure` | signed delegated context of a FIRST_PARTY tenant (NATIVE_CF_USER only; Blueprint Section 14 ACC-010) |
 //! | `POST /internal/v1/principals/{id}/tombstone` | `platform-principal.register` | — (a named operator's retention decision, audited) |
 //!
 //! A tenant / application / environment identifier in a request BODY is never
@@ -73,6 +74,7 @@ pub fn routes() -> Router<AppState> {
             post(ensure_telephone_endpoint),
         )
         .route("/principals/ensure", post(ensure_principal))
+        .route("/principals/account-status", post(mirror_account_status))
         .route(
             "/principals/:principal_id/tombstone",
             post(tombstone_principal),
@@ -820,6 +822,79 @@ async fn ensure_principal(
     Ok(Json(json!({
         "principal": principal_snapshot(&state, principal.id.as_uuid()).await?,
         "created": created,
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountStatusRequest {
+    external_reference: String,
+    status: String,
+}
+
+/// Blueprint v1.0 Section 14 (ACC-010): the first-party account authority (the Meeting
+/// Service, the same caller and scope rule as `ensure`) mirrors the CURRENT status of an
+/// account onto its NATIVE_CF_USER principal: an inactive account is DEACTIVATED, a
+/// suspended one SUSPENDED, any other ACTIVE. Idempotent (setting the current status
+/// changes nothing). It never creates a principal (an unknown reference is NOT_FOUND:
+/// nothing to mirror) and never revives a tombstoned one (INVALID_STATE).
+async fn mirror_account_status(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<AccountStatusRequest>,
+) -> AccessResult<impl IntoResponse> {
+    use crate::domain::{PrincipalStatus, TenantClassification};
+    caller.require_permission(InternalPermission::PlatformPrincipalEnsure)?;
+    let scope = trusted_scope(&state, &caller).await?;
+    if scope.tenant.classification != TenantClassification::FirstParty {
+        return Err(AccessError::Refused(ErrorCode::PolicyViolation));
+    }
+    if scope.authority_mode().1.is_some() {
+        return Err(AccessError::Refused(ErrorCode::InvalidState));
+    }
+    let status = match body.status.as_str() {
+        "ACTIVE" => PrincipalStatus::Active,
+        "SUSPENDED" => PrincipalStatus::Suspended,
+        "DEACTIVATED" => PrincipalStatus::Deactivated,
+        _ => return Err(AccessError::Refused(ErrorCode::ValidationError)),
+    };
+    let reference = crate::identity::principals::validate_external_reference(
+        PrincipalKind::NativeCfUser,
+        &body.external_reference,
+    )
+    .map_err(|_| AccessError::Refused(ErrorCode::ValidationError))?;
+    let row = state
+        .platform
+        .db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id, status, tombstoned_at IS NOT NULL AS tombstoned FROM platform_principals \
+             WHERE environment_id = $1 AND kind = 'NATIVE_CF_USER' AND external_reference = $2",
+            vec![scope.environment.id.into(), reference.into()],
+        ))
+        .await
+        .map_err(internal)?
+        .ok_or(AccessError::Refused(ErrorCode::NotFound))?;
+    let id: Uuid = row.try_get("", "id").map_err(internal)?;
+    let current: String = row.try_get("", "status").map_err(internal)?;
+    if row.try_get::<bool>("", "tombstoned").map_err(internal)? {
+        return Err(AccessError::Refused(ErrorCode::InvalidState));
+    }
+    let changed = current != status.as_str();
+    if changed {
+        state
+            .platform
+            .set_principal_status(PrincipalId::from_uuid(id), status)
+            .await
+            .map_err(AccessError::service)?;
+    }
+    crate::metrics::inc(
+        "platform_access_principal_account_status_total",
+        &[("changed", if changed { "true" } else { "false" })],
+    );
+    Ok(Json(json!({
+        "principal": principal_snapshot(&state, id).await?,
+        "changed": changed,
     })))
 }
 

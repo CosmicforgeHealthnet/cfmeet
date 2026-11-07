@@ -251,6 +251,17 @@ async fn relay(
         .ok_or_else(|| ApiError::Unauthorized("Sign in to continue".into()))?;
     let claims = state.jwt_service.verify_token(token)?;
     let principal = bridge.principal(&state, user.user_id).await?;
+    // Section 14 (ACC-008, ADR 0057 A1): device links are bound to this sign-in, and a
+    // device revocation hands back the sign-in it was bound to. Only those two operations
+    // carry the session reference.
+    let device_op = DeviceOperation::of(&method, &path);
+    let account_session_ref = match (device_op, claims.session_id()) {
+        (Some(_), Some(session)) => Some(crate::services::account_security::session_reference(
+            bridge.scope.application_environment_id(),
+            session,
+        )),
+        _ => None,
+    };
     let body =
         if bytes.is_empty() {
             None
@@ -282,6 +293,7 @@ async fn relay(
             display_name: user.display_name.clone(),
             avatar_reference: None,
             authenticated_at: claims.auth_time,
+            account_session_ref,
         },
     };
     let scope = bridge.scope.clone().with_initiating_principal(
@@ -301,9 +313,22 @@ async fn relay(
         .await
         .map_err(|_| unavailable())?;
     let status = StatusCode::from_u16(r.status()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let value: Value = r.json().map_err(|_| unavailable())?;
+    let mut value: Value = r.json().map_err(|_| unavailable())?;
     if value["schemaVersion"] != 1 {
         return Err(unavailable());
+    }
+    // The bound sign-in of a revoked device ends here, at its owner. The reference is
+    // consumed, never relayed. A failure answers 503 so the client retries the
+    // (idempotent) revocation, which hands the reference back again.
+    if let Some(bound) = value
+        .as_object_mut()
+        .and_then(|o| o.remove("boundAccountSessionRef"))
+    {
+        if device_op == Some(DeviceOperation::Revoke) && status == StatusCode::OK {
+            if let Some(reference) = bound.as_str() {
+                end_bound_session(&state, bridge, user.user_id, reference).await?;
+            }
+        }
     }
     let retry_after = r.header("retry-after").and_then(|v| v.parse::<u32>().ok());
     let mut response = (status, Json(value)).into_response();
@@ -317,6 +342,173 @@ async fn relay(
         .headers_mut()
         .insert("cache-control", HeaderValue::from_static("no-store"));
     Ok(response)
+}
+
+/// The two Hub device operations that carry the Account session (Section 14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceOperation {
+    Link,
+    Revoke,
+}
+impl DeviceOperation {
+    fn of(method: &Method, path: &str) -> Option<Self> {
+        if method != Method::POST {
+            return None;
+        }
+        match path
+            .trim_matches('/')
+            .split('/')
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            ["devices", "link"] => Some(Self::Link),
+            ["devices", id, "revoke"] if Uuid::parse_str(id).is_ok() => Some(Self::Revoke),
+            _ => None,
+        }
+    }
+}
+
+/// End the user's open sign-in bound to a revoked device, with everything bound to it:
+/// its session devices (Messaging) and, through the durable account outbox, the other Hub
+/// devices it linked. Already-ended sessions are not an error.
+async fn end_bound_session(
+    state: &AppState,
+    bridge: &Bridge,
+    user_id: Uuid,
+    reference: &str,
+) -> ApiResult<()> {
+    use crate::services::account_security::{
+        self as security, Outcome, RevokeReason, SecurityEvent,
+    };
+    if !cf_communications_policy::valid_account_session_ref(reference) {
+        return Err(unavailable());
+    }
+    let Some(session) = security::open_session_by_reference(
+        &state.db,
+        user_id,
+        bridge.scope.application_environment_id(),
+        reference,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    if security::revoke_session(&state.db, user_id, session, RevokeReason::UserRevoked).await? {
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("SESSION_REVOKED", Outcome::Success)
+                .by_user(user_id)
+                .session(session)
+                .detail(json!({"trigger":"DEVICE_REVOKED"})),
+        )
+        .await;
+    }
+    session_ended(state, user_id, session).await
+}
+
+/// Section 14 (ACC-010): an account-wide credential end (password change or reset,
+/// deactivation, suspension, a discarded password). The database triggers already
+/// advanced both epochs, closed every session and queued the Hub event (which reaches
+/// Calling and Messaging even without a Hub profile, and Platform Access); this adds the
+/// durable Messaging revocation of the web bridge principal and delivers right away.
+/// Never fails the caller: every queue is durable and retried by its worker.
+pub async fn credentials_ended(state: &AppState, user_id: Uuid, reason: &'static str) {
+    if let Some(um) = state.meeting.core.unified.as_ref() {
+        um.revoke_sessions_for_user(user_id, reason).await;
+    }
+    let _ = deliver_due(state).await;
+}
+
+/// One account session ended (single sign-out, session revoke, bound device revoked):
+/// its MANAGED-realtime session devices end at once (best effort, bounded by their token
+/// lifetime) and the Hub devices it linked end through the durable account outbox.
+pub async fn session_ended(state: &AppState, user_id: Uuid, session_id: Uuid) -> ApiResult<()> {
+    if let Some(um) = state.meeting.core.unified.as_ref() {
+        um.revoke_session_devices_for(user_id, session_id).await;
+    }
+    record_session_ended(state, user_id, session_id).await?;
+    let _ = deliver_due(state).await;
+    Ok(())
+}
+
+/// Queue ACCOUNT_SESSION_ENDED for the Hub (Section 14, ACC-008). The account epoch and
+/// version are unchanged: one sign-in ending is not an account-wide revocation.
+pub async fn record_session_ended(
+    state: &AppState,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> ApiResult<()> {
+    let Some(bridge) = state.communications.as_ref() else {
+        return Ok(());
+    };
+    let txn = state.db.begin().await?;
+    txn.execute(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO account_communication_state(user_id,version) VALUES($1,1) ON CONFLICT DO NOTHING",[user_id.into()])).await?;
+    let row = txn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT version FROM account_communication_state WHERE user_id=$1",
+            [user_id.into()],
+        ))
+        .await?
+        .ok_or_else(unavailable)?;
+    let version: i64 = row.try_get("", "version")?;
+    let event = Uuid::new_v4();
+    let payload = json!({"eventId":event,"accountReference":format!("cfmeet-user:{user_id}"),"sourceVersion":version,
+        "kind":"ACCOUNT_SESSION_ENDED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now(),
+        "accountSessionRef":crate::services::account_security::session_reference(bridge.scope.application_environment_id(), session_id)});
+    txn.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "INSERT INTO account_communication_outbox(event_id,payload) VALUES($1,$2)",
+        [event.into(), payload.into()],
+    ))
+    .await?;
+    txn.commit().await?;
+    Ok(())
+}
+
+/// ACC-010: mirror the account's CURRENT status onto its Platform Access principal (an
+/// inactive account DEACTIVATED, a suspended one SUSPENDED, otherwise ACTIVE), so owners
+/// that check Platform Access agree with Account. Reading the current status makes any
+/// delivery order converge. `true` when done or nothing to do.
+async fn mirror_principal_status(state: &AppState, bridge: &Bridge, user_id: Uuid) -> bool {
+    let user = match users::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    let link = state.db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,
+        "SELECT principal_id FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1 AND environment_id=$2",
+        [user_id.into(),bridge.scope.application_environment_id().into()])).await;
+    match link {
+        Ok(Some(_)) => {}
+        Ok(None) => return true,
+        Err(_) => return false,
+    }
+    let status = principal_status_for(user.as_ref().map(|u| &u.status));
+    let req = OutboundServiceRequest::new_operation(ServiceId::platform_access())
+        .with_delegated_context(bridge.scope.clone());
+    match bridge
+        .client
+        .post_json(
+            &req,
+            "/internal/v1/principals/account-status",
+            &json!({"externalReference":format!("cfmeet-user:{user_id}"),"status":status}),
+        )
+        .await
+    {
+        // 404: no principal to mirror (or a Platform Access image without the route);
+        // 409 INVALID_STATE: a tombstoned principal stays DEACTIVATED for ever.
+        Ok(r) => matches!(r.status(), 200 | 404 | 409),
+        Err(_) => false,
+    }
+}
+
+/// Platform Access principal status for an account status (a missing account is gone).
+fn principal_status_for(status: Option<&users::UserStatus>) -> &'static str {
+    match status {
+        None | Some(users::UserStatus::Inactive) => "DEACTIVATED",
+        Some(users::UserStatus::Suspended) => "SUSPENDED",
+        Some(_) => "ACTIVE",
+    }
 }
 
 pub fn internal_routes() -> Router<AppState> {
@@ -685,11 +877,23 @@ pub async fn deliver_due(state: &AppState) -> ApiResult<u64> {
         let attempts: i32 = row.try_get("", "attempts")?;
         let req = OutboundServiceRequest::new_operation(ServiceId::communications())
             .with_delegated_context(bridge.scope.clone());
-        let ok = bridge
+        let mut ok = bridge
             .client
             .post_json(&req, "/internal/v1/communications/account-events", &payload)
             .await
             .is_ok_and(|r| r.status() == 200);
+        // ACC-010: the same durable event mirrors the account status onto Platform
+        // Access. A failure retries the whole event; the Hub answers a retry as a
+        // duplicate.
+        if ok && payload["kind"] != "ACCOUNT_SESSION_ENDED" {
+            if let Some(user_id) = payload["accountReference"]
+                .as_str()
+                .and_then(|r| r.strip_prefix("cfmeet-user:"))
+                .and_then(|r| Uuid::parse_str(r).ok())
+            {
+                ok = mirror_principal_status(state, bridge, user_id).await;
+            }
+        }
         if ok {
             state.db.execute(Statement::from_sql_and_values(DbBackend::Postgres,"UPDATE account_communication_outbox SET delivered_at=now(),lease_id=NULL,lease_until=NULL WHERE event_id=$1 AND lease_id=$2",[id.into(),lease.into()])).await?;
             count += 1;
@@ -748,6 +952,62 @@ mod tests {
             assert_eq!(public_role(Some(r)), "PARTICIPANT");
         }
         assert_eq!(public_role(None), "NONE");
+    }
+
+    #[test]
+    fn only_device_link_and_revoke_carry_the_account_session() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            DeviceOperation::of(&Method::POST, "devices/link"),
+            Some(DeviceOperation::Link)
+        );
+        assert_eq!(
+            DeviceOperation::of(&Method::POST, &format!("/devices/{id}/revoke")),
+            Some(DeviceOperation::Revoke)
+        );
+        for (method, path) in [
+            (Method::GET, "devices".to_owned()),
+            (Method::GET, "devices/link".to_owned()),
+            (Method::POST, "devices/not-a-uuid/revoke".to_owned()),
+            (Method::PUT, format!("devices/{id}/push")),
+            (Method::POST, "me/public-id/rotate".to_owned()),
+        ] {
+            assert_eq!(DeviceOperation::of(&method, &path), None, "{method} {path}");
+        }
+    }
+
+    #[test]
+    fn principal_status_mirrors_the_account_status() {
+        use users::UserStatus;
+        assert_eq!(principal_status_for(None), "DEACTIVATED");
+        assert_eq!(
+            principal_status_for(Some(&UserStatus::Inactive)),
+            "DEACTIVATED"
+        );
+        assert_eq!(
+            principal_status_for(Some(&UserStatus::Suspended)),
+            "SUSPENDED"
+        );
+        assert_eq!(principal_status_for(Some(&UserStatus::Active)), "ACTIVE");
+        assert_eq!(
+            principal_status_for(Some(&UserStatus::PendingVerification)),
+            "ACTIVE"
+        );
+    }
+
+    #[test]
+    fn session_references_are_domain_separated_per_environment() {
+        let (env, other, session) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let r = crate::services::account_security::session_reference(env, session);
+        assert!(cf_communications_policy::valid_account_session_ref(&r));
+        assert_ne!(
+            r,
+            crate::services::account_security::session_reference(other, session)
+        );
+        assert_eq!(
+            r,
+            crate::services::account_security::session_reference(env, session)
+        );
     }
 
     #[test]
