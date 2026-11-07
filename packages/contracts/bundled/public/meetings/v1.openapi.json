@@ -8244,6 +8244,169 @@
         ]
       }
     },
+    "/api/v2/me/workspaces": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List the caller's workspaces (Personal and organizations).",
+        "description": "Returns the caller's workspace contexts: `personal` first, then every organization in which\nthe caller holds an ACTIVE membership, ordered by id, each with the caller's role, the\norganization's status (a SUSPENDED organization is listed and grants nothing), its\nprovisioning state and a small capability summary. Workspace context is per request: the\nserver stores no active organization, so organization-scoped calls keep naming their\norganization. Once the Organizations Service is authoritative the list comes from it (all\nroles, including GUEST; capabilities under the organization policy); before that it comes\nfrom the meeting-service organization directory with the rule of `GET\n/api/v2/me/organizations` and `provisioningState` is null. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`.",
+        "operationId": "v2_my_workspaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable; never a partial list)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspaces",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
+    "/api/v2/me/workspaces/{workspaceId}/capabilities": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Capabilities of one workspace, derived by the server.",
+        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` — `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
+        "operationId": "v2_my_workspace_capabilities",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "description": "`personal`, or an organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspace_capabilities",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/meeting-spaces": {
       "get": {
         "tags": [
@@ -17432,6 +17595,273 @@
           },
           "withdrawalMode": {
             "$ref": "#/components/schemas/WithdrawalMode"
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "description": "One workspace context of the caller.",
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/WorkspaceCapabilitySummary"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "`Personal`, or the organization name."
+          },
+          "id": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "ORGANIZATION only."
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;\nnull for PERSONAL and when the legacy directory answers (no provisioning there)."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows\nOWNER, ADMIN and MEMBER). ORGANIZATION only."
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ORGANIZATION only."
+          }
+        }
+      },
+      "WorkspaceAuthority": {
+        "type": "string",
+        "description": "Which store answered: the meeting-service organization directory\n(`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service\n(authoritative).",
+        "enum": [
+          "LEGACY_DIRECTORY",
+          "ORGANIZATIONS_SERVICE"
+        ]
+      },
+      "WorkspaceCapabilities": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces/{workspaceId}/capabilities`.",
+        "required": [
+          "workspaceId",
+          "kind",
+          "authority",
+          "features",
+          "capabilities",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceCapability"
+            },
+            "description": "Every capability of the vocabulary with its decision."
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the answer was computed (it is never cached server-side)."
+          },
+          "features": {
+            "$ref": "#/components/schemas/WorkspaceFeatures"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personalCommunicationsCapabilities": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PERSONAL only: the Communications Hub read that owns personal communications\ncapabilities (`/api/v2/communications/me/capabilities`)."
+          },
+          "policyRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Organization policy revision the answer was computed with (Organizations Service)."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          }
+        }
+      },
+      "WorkspaceCapability": {
+        "type": "object",
+        "description": "One capability decision.",
+        "required": [
+          "capability",
+          "granted",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability name, e.g. `meetings.organization.create`."
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WorkspaceCapabilityReason"
+          }
+        }
+      },
+      "WorkspaceCapabilityReason": {
+        "type": "string",
+        "description": "Why a capability is (not) granted in a workspace.",
+        "enum": [
+          "ALLOWED",
+          "CAPABILITY_NOT_GRANTED",
+          "POLICY_RESTRICTED",
+          "ORGANIZATION_SUSPENDED",
+          "FEATURE_DISABLED"
+        ]
+      },
+      "WorkspaceCapabilitySummary": {
+        "type": "object",
+        "description": "A small summary of what the caller can do in a workspace.",
+        "required": [
+          "granted",
+          "canCreateMeetings",
+          "canInviteMembers",
+          "canAdminister"
+        ],
+        "properties": {
+          "canAdminister": {
+            "type": "boolean",
+            "description": "Organization administration: profile, member management or policies."
+          },
+          "canCreateMeetings": {
+            "type": "boolean",
+            "description": "Meetings can be created in this context."
+          },
+          "canInviteMembers": {
+            "type": "boolean",
+            "description": "Members can be invited (`organization.members.invite`)."
+          },
+          "granted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every capability granted now (default deny)."
+          }
+        }
+      },
+      "WorkspaceFeatures": {
+        "type": "object",
+        "description": "Features the workspace context does not disable. Owner services still apply their\nown policy (stricter wins) and re-verify every request.",
+        "required": [
+          "meetings",
+          "messaging",
+          "calling"
+        ],
+        "properties": {
+          "calling": {
+            "type": "boolean"
+          },
+          "meetings": {
+            "type": "boolean"
+          },
+          "messaging": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkspaceKind": {
+        "type": "string",
+        "description": "Kind of workspace context.",
+        "enum": [
+          "PERSONAL",
+          "ORGANIZATION"
+        ]
+      },
+      "WorkspacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces`.",
+        "required": [
+          "items",
+          "authority"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workspace"
+            },
+            "description": "PERSONAL first, then organizations ordered by id."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `cursor` for the next page; null on the last page."
           }
         }
       }

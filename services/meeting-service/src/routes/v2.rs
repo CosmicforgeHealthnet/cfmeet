@@ -571,6 +571,15 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        // Blueprint Section 8: workspace context (per request; no switch endpoint)
+        .route(
+            "/me/workspaces",
+            get(crate::handlers::v2::workspaces::my_workspaces),
+        )
+        .route(
+            "/me/workspaces/:workspace_id/capabilities",
+            get(crate::handlers::v2::workspaces::my_workspace_capabilities),
+        )
         // Blueprint Section 2: account sessions and the security audit
         .route(
             "/me/sessions",

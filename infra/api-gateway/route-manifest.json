@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 38,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 574,
+    "PUBLIC_CUSTOMER": 576,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -2617,6 +2617,36 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/me/organizations",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": [
+        "x-client-kind"
+      ]
+    },
+    {
+      "id": "meetings.v2_my_workspaces",
+      "domain": "meetings",
+      "method": "GET",
+      "pattern": "/api/v2/me/workspaces",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/me/workspaces",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": [
+        "x-client-kind"
+      ]
+    },
+    {
+      "id": "meetings.v2_my_workspace_capabilities",
+      "domain": "meetings",
+      "method": "GET",
+      "pattern": "/api/v2/me/workspaces/{workspaceId}/capabilities",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/me/workspaces/{workspaceId}/capabilities",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -12162,6 +12192,22 @@
       "path": "/api/v2/me/sessions/{sessionId}/revoke",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_my_workspaces",
+      "method": "GET",
+      "path": "/api/v2/me/workspaces",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_my_workspace_capabilities",
+      "method": "GET",
+      "path": "/api/v2/me/workspaces/{workspaceId}/capabilities",
+      "class": "PUBLIC_CUSTOMER"
     },
     {
       "domain": "meetings",
