@@ -152,6 +152,10 @@ async fn template(admin: &str) -> String {
             migration::MeetingsCalendarMigrator::up(&tmpl, None)
                 .await
                 .expect("meetings calendar migrations apply");
+            // Blueprint Sections 9/11: profile columns and notification jobs.
+            migration::ProfileNotificationsMigrator::up(&tmpl, None)
+                .await
+                .expect("profile/notifications migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -595,6 +599,31 @@ impl TestApp {
         Self::on_with_lk(db, opts, None)
     }
 
+    /// Blueprint Section 11: replace the notification transport / preference source (the
+    /// in-process `RecordingMail`; never a real SMTP server) and rebuild the router.
+    pub fn with_notifier(
+        mut self,
+        notifier: Arc<backend::services::notifications::Notifier>,
+    ) -> Self {
+        self.state.notifier = notifier;
+        self.router = routes::create_routes(self.state.clone())
+            .route_layer(axum::middleware::from_fn(route_coverage::record));
+        self
+    }
+
+    /// Meeting v2 test tunables with Section 11 notification email switched on.
+    pub fn notifications_config() -> MeetingV2Config {
+        MeetingV2Config {
+            passcode_hash_cost: 4,
+            passcode_max_attempts: 5,
+            notifications: backend::config::notifications::NotificationConfig {
+                email_enabled: true,
+                ..Default::default()
+            },
+            ..MeetingV2Config::default()
+        }
+    }
+
     /// Like [`TestApp::on`], starting the mock LiveKit server when `opts.rtc` asks for it.
     pub async fn on_with_provider(db: TestDb, opts: TestOptions) -> Self {
         let lk = match opts.rtc {
@@ -868,6 +897,7 @@ impl TestApp {
             created_at: Set(now),
             updated_at: Set(now),
             last_login: Set(None),
+            ..Default::default()
         }
         .insert(&self.db.conn)
         .await

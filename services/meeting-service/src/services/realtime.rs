@@ -645,7 +645,7 @@ impl RealtimeService {
 
     /// Load the registered actor behind a user ticket (fresh from PostgreSQL).
     pub async fn user_actor(&self, user_id: Uuid) -> ApiResult<ActorContext> {
-        use crate::models::users::{self, AuthType, UserRole, UserStatus};
+        use crate::models::users::{self, UserRole, UserStatus};
         let user = users::Entity::find_by_id(user_id)
             .one(&self.core.db)
             .await?
@@ -662,12 +662,11 @@ impl RealtimeService {
             .organizations_for_user(user.id)
             .await;
         // Same verification rule as `resolve_actor`.
-        let email_verified = user.auth_type == AuthType::Google
-            || (user.status == UserStatus::Active && self.require_email_verification);
+        let email_verified = user.email_verified(self.require_email_verification);
         Ok(ActorContext {
             kind: ActorKind::RegisteredUser(crate::services::actor::RegisteredActor {
                 user_id: user.id,
-                display_name: user.username.clone(),
+                display_name: user.presentation_name(),
                 verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
                 platform_admin: user.role == UserRole::Admin,
                 // The ticket was issued to an authenticated, revocation-checked request.

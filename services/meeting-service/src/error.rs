@@ -136,6 +136,8 @@ pub enum ErrorCode {
     ProvisioningPending,
     /// New members join an organization only by accepting an invitation.
     InvitationRequired,
+    /// Blueprint Section 9: the requested username belongs to another account.
+    UsernameTaken,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -241,6 +243,7 @@ impl ErrorCode {
             ErrorCode::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
             ErrorCode::ProvisioningPending => "PROVISIONING_PENDING",
             ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
+            ErrorCode::UsernameTaken => "USERNAME_TAKEN",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -342,7 +345,8 @@ impl ErrorCode {
             | ErrorCode::SlugTaken
             | ErrorCode::IdempotencyConflict
             | ErrorCode::ProvisioningPending
-            | ErrorCode::InvitationRequired => StatusCode::CONFLICT,
+            | ErrorCode::InvitationRequired
+            | ErrorCode::UsernameTaken => StatusCode::CONFLICT,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR

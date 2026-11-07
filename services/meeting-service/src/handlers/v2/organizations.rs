@@ -179,6 +179,11 @@ struct Relay<'a> {
 /// from the request). An organization document in the answer refreshes the local
 /// read-only projection.
 async fn relay(state: &AppState, actor: &ActorContext, r: Relay<'_>) -> ApiResult<Response> {
+    relay_reply(state, actor, r).await.map(relayed_success)
+}
+
+/// [`relay`] returning the authoritative answer for post-processing.
+async fn relay_reply(state: &AppState, actor: &ActorContext, r: Relay<'_>) -> ApiResult<Reply> {
     let authority = require_authoritative(state)?;
     let user = relay_actor(actor)?;
     let query = query_pairs(r.raw_query, r.allowed_query)?;
@@ -202,7 +207,7 @@ async fn relay(state: &AppState, actor: &ActorContext, r: Relay<'_>) -> ApiResul
         return Err(relayed_error(&reply));
     }
     authority.project_document(&state.db, &reply.body).await;
-    Ok(relayed_success(reply))
+    Ok(reply)
 }
 
 fn legacy_member(m: &AuthorityMember) -> ApiResult<OrganizationMemberResponse> {
@@ -795,7 +800,10 @@ pub async fn transfer_organization_ownership(
 /// (shown only in this response; only the token's hash is stored). Only an account whose verified
 /// email equals the invited address can accept it. Requires the `organization.members.invite`
 /// capability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.
-/// Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+/// With `sendEmail: true` the invitation link is also emailed to the invitee when notification
+/// email is enabled on the deployment (`emailDelivery` reports the outcome; an idempotent replay
+/// re-issues the token and emails the new link). Returns FEATURE_DISABLED until the Organizations
+/// Service is authoritative.
 #[utoipa::path(
     post, path = "/api/v2/organizations/{id}/invitations", tag = "Organizations (v2)", operation_id = "v2_create_organization_invitation",
     params(("id" = Uuid, Path, description = "Organization id")),
@@ -806,6 +814,7 @@ pub async fn transfer_organization_ownership(
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 409, description = "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (invitation emails per hour)", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
@@ -817,19 +826,95 @@ pub async fn create_organization_invitation(
     V2Path(id): V2Path<Uuid>,
     body: Bytes,
 ) -> ApiResult<Response> {
-    relay(
+    use crate::services::notifications::{self as notify, EmailDelivery};
+    // Blueprint Section 11: `sendEmail` belongs to this relay, never to the Organizations
+    // contract (which refuses unknown fields); it is removed before the signed call.
+    let mut document = json_object(&body)?;
+    let send_email = match document
+        .as_mut()
+        .and_then(|d| d.as_object_mut())
+        .and_then(|o| o.remove("sendEmail"))
+    {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => b,
+        Some(_) => return Err(validation("sendEmail must be a boolean")),
+    };
+    let invitee = document
+        .as_ref()
+        .and_then(|d| d["email"].as_str())
+        .map(str::to_owned);
+    let forwarded = match &document {
+        Some(d) => Bytes::from(serde_json::to_vec(d).map_err(|_| unavailable())?),
+        None => body.clone(),
+    };
+    let ctx = notify::NotificationContext::from_state(&state);
+    let mut budget_ok = true;
+    if send_email && ctx.config.email_enabled {
+        require_authoritative(&state)?;
+        let user = relay_actor(&actor)?;
+        match notify::invitation_email_budget(&state, user.user_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(ApiError::domain(
+                    ErrorCode::RateLimited,
+                    "Too many invitation emails; try again later or share the link",
+                ))
+            }
+            Err(()) => budget_ok = false,
+        }
+    }
+    let mut reply = relay_reply(
         &state,
         &actor,
         Relay {
             method: Method::POST,
             path: format!("/internal/v1/organizations/{id}/invitations"),
             headers: &headers,
-            body: Some(&body),
+            body: Some(&forwarded),
             raw_query: None,
             allowed_query: &[],
         },
     )
-    .await
+    .await?;
+    if send_email {
+        let token = reply.body["token"].as_str().map(str::to_owned);
+        let delivery = match (ctx.config.email_enabled, budget_ok, token, invitee) {
+            (false, _, _, _) => EmailDelivery::Disabled,
+            (true, true, Some(token), Some(to)) => {
+                let organization = <organizations::Entity as sea_orm::EntityTrait>::find_by_id(id)
+                    .one(&state.db)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|o| o.name);
+                let expires_at = reply.body["expiresAt"]
+                    .as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|t| t.with_timezone(&chrono::Utc));
+                let inviter = actor
+                    .registered()
+                    .map(|r| r.display_name.clone())
+                    .unwrap_or_default();
+                notify::send_organization_invitation(
+                    &ctx,
+                    &inviter,
+                    &to,
+                    organization.as_deref(),
+                    reply.body["role"].as_str().unwrap_or("MEMBER"),
+                    &token,
+                    expires_at,
+                )
+                .await
+            }
+            // No token in the answer (for example a replay of an invitation that is no
+            // longer pending): nothing valid to send.
+            _ => EmailDelivery::Failed,
+        };
+        if let Some(o) = reply.body.as_object_mut() {
+            o.insert("emailDelivery".into(), json!(delivery));
+        }
+    }
+    Ok(relayed_success(reply))
 }
 
 /// List an organization's invitations.

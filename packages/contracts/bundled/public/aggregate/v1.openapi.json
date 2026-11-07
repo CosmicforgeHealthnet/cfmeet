@@ -21742,7 +21742,7 @@
           "meetings"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -21777,8 +21777,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -68902,6 +68922,13 @@
               }
             ]
           },
+          "sendEmail": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Blueprint Section 11: also email the invitation link to `inviteeEmail` (required\nwith this flag). The result is reported in `emailDelivery`. Default false."
+          },
           "useLimit": {
             "type": [
               "integer",
@@ -68919,6 +68946,20 @@
           "token"
         ],
         "properties": {
+          "emailDelivery": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/meetings.EmailDelivery"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "invitation": {
             "$ref": "#/components/schemas/meetings.InvitationResponse"
           },
@@ -69272,6 +69313,15 @@
         },
         "additionalProperties": false
       },
+      "meetings.EmailDelivery": {
+        "type": "string",
+        "description": "What happened to a requested invitation email.",
+        "enum": [
+          "DISABLED",
+          "ACCEPTED",
+          "FAILED"
+        ]
+      },
       "meetings.ErrorBody": {
         "type": "object",
         "required": [
@@ -69404,6 +69454,7 @@
           "IDEMPOTENCY_CONFLICT",
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
+          "USERNAME_TAKEN",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]

@@ -2260,3 +2260,100 @@ async fn s8_authoritative_workspaces_fail_closed() {
     assert_eq!(granted_capabilities(&caps), matrix_of("OWNER"));
     assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
 }
+
+/// Blueprint Section 11: an organization invitation email is delivered by the account
+/// relay from the Organizations Service's authoritative answer. `sendEmail` never reaches
+/// the Organizations contract, the link carries the token in the URL fragment, and the
+/// email is off unless notification email is enabled.
+#[tokio::test]
+async fn s11_organization_invitation_email_from_the_authoritative_answer() {
+    use backend::services::notifications::{Notifier, RecordingMail, StaticPreferences};
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(
+        TestApp::with(TestOptions {
+            organizations_authority: Some(live.clone()),
+            config: Some(TestApp::notifications_config()),
+            ..TestOptions::default()
+        })
+        .await
+    );
+    let mail = Arc::new(RecordingMail::default());
+    let app = app.with_notifier(Arc::new(Notifier::new(
+        mail.clone(),
+        Arc::new(StaticPreferences::default()),
+    )));
+    let admin = app.admin("org-mailer").await;
+    let org = fake.add_org("mail-acme", &[(admin.id, "OWNER")]);
+    let uri = format!("/api/v2/organizations/{org}/invitations");
+    let internal = format!("/internal/v1/organizations/{org}/invitations");
+
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&admin.token),
+            json!({ "email": "invitee@example.com", "role": "MEMBER", "sendEmail": true }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["emailDelivery"], "ACCEPTED");
+    assert_eq!(
+        fake.last("POST", &internal).body,
+        json!({ "email": "invitee@example.com", "role": "MEMBER" }),
+        "sendEmail is consumed by the relay"
+    );
+    let sent = mail.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].to, "invitee@example.com");
+    assert!(sent[0]
+        .text
+        .contains("/organizations/invitations#orginv_fake_token"));
+
+    // Not requested: unchanged relay, no email, no emailDelivery.
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&admin.token),
+            json!({ "email": "second@example.com", "role": "MEMBER" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert!(v.get("emailDelivery").is_none());
+    assert_eq!(mail.sent().len(), 1);
+
+    // Malformed flag: refused before any call.
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&admin.token),
+            json!({ "email": "third@example.com", "role": "MEMBER", "sendEmail": "yes" }),
+        )
+        .await;
+    assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
+
+    // Disabled deployment: the invitation is created, the email is not.
+    let off = some!(
+        TestApp::with(TestOptions {
+            organizations_authority: Some(live),
+            ..TestOptions::default()
+        })
+        .await
+    );
+    let off_mail = Arc::new(RecordingMail::default());
+    let off = off.with_notifier(Arc::new(Notifier::new(
+        off_mail.clone(),
+        Arc::new(StaticPreferences::default()),
+    )));
+    let owner = off.admin("org-off").await;
+    let org2 = fake.add_org("mail-off", &[(owner.id, "OWNER")]);
+    let (s, v) = off
+        .post(
+            format!("/api/v2/organizations/{org2}/invitations"),
+            Auth::Bearer(&owner.token),
+            json!({ "email": "x@example.com", "role": "MEMBER", "sendEmail": true }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["emailDelivery"], "DISABLED");
+    assert!(off_mail.sent().is_empty());
+}

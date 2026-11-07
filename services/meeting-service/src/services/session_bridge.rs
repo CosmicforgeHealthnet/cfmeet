@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use crate::{
     config::env_bool,
-    models::users::{self, AuthType, UserRole, UserStatus},
+    models::users::{self, UserRole, UserStatus},
     state::AppState,
 };
 
@@ -213,13 +213,12 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
             )
         }
     }
-    let email_verified = user.auth_type == AuthType::Google
-        || (user.status == UserStatus::Active && s.app.require_email_verification);
+    let email_verified = user.email_verified(s.app.require_email_verification);
     tracing::info!(caller = %ctx.authenticated_service(), "session bridge: session verified");
     let mut r = Json(json!({
         "outcome": "VERIFIED",
         "userId": user.id,
-        "displayName": user.username,
+        "displayName": user.presentation_name(),
         "verifiedEmail": email_verified.then(|| user.email.to_ascii_lowercase()),
     }))
     .into_response();

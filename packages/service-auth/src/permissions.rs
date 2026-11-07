@@ -65,6 +65,10 @@ pub enum InternalPermission {
     /// Meeting Service: create one instant meeting owned by the delegated user.
     #[serde(rename = "meeting-communications.create")]
     MeetingCommunicationsCreate,
+    /// Communications: read which accounts turned a notification category off (Blueprint
+    /// Section 11; account references in, opted-out references out, nothing else).
+    #[serde(rename = "communications-preferences.read")]
+    CommunicationsPreferencesRead,
 
     /// Privacy Relay: authorize a communication.
     #[serde(rename = "communication.authorize")]
@@ -369,6 +373,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::CommunicationsProfileSuspend, name: "communications-profile.suspend", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: true, description: "Suspend or restore one personal Communications profile with an audited reason" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsRead, name: "meeting-communications.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Resolve a meeting the delegated user may share; returns public meeting references only" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsCreate, name: "meeting-communications.create", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Create one instant meeting owned by the delegated user under existing Meetings rules" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsPreferencesRead, name: "communications-preferences.read", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Read which of the given accounts turned a notification category off before the Account sends them a notification; no preference values beyond the opt-out, no profile data" },
 
     PermissionDefinition {
         permission: InternalPermission::CommunicationAuthorize,
@@ -942,6 +947,7 @@ impl InternalPermission {
         InternalPermission::CommunicationsProfileSuspend,
         InternalPermission::MeetingCommunicationsRead,
         InternalPermission::MeetingCommunicationsCreate,
+        InternalPermission::CommunicationsPreferencesRead,
         InternalPermission::CommunicationAuthorize,
         InternalPermission::CommunicationContextRead,
         InternalPermission::ProtectedContactResolveForExecution,

@@ -270,6 +270,12 @@ async fn relay(
                 })
         })
         .transpose()?;
+    // Blueprint Section 9: the Account profile is authoritative; the Hub profile's display
+    // name and avatar reference are refreshed from it on every relayed request.
+    let avatar_reference = users::Entity::find_by_id(user.user_id)
+        .one(&state.db)
+        .await?
+        .and_then(|u| u.avatar_url);
     let request = Dispatch {
         method: method.as_str().to_owned(),
         path,
@@ -280,7 +286,7 @@ async fn relay(
             account_reference: format!("cfmeet-user:{}", user.user_id),
             principal_id: principal,
             display_name: user.display_name.clone(),
-            avatar_reference: None,
+            avatar_reference,
             authenticated_at: claims.auth_time,
         },
     };
@@ -418,8 +424,7 @@ async fn delegated_actor(
         })
         .ok_or_else(denied)?;
     // Same identity rule as `resolve_actor` for a verified session of this account.
-    let email_verified = user.auth_type == users::AuthType::Google
-        || (user.status == users::UserStatus::Active && state.require_email_verification);
+    let email_verified = user.email_verified(state.require_email_verification);
     let verified_organizations = state
         .organization_directory
         .organizations_for_user(user.id)
@@ -427,7 +432,7 @@ async fn delegated_actor(
     Ok(ActorContext {
         kind: ActorKind::RegisteredUser(RegisteredActor {
             user_id: user.id,
-            display_name: user.username.clone(),
+            display_name: user.presentation_name(),
             verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
             platform_admin: user.role == users::UserRole::Admin,
             // The Hub reaches this route only for a session the Account relay verified
@@ -632,7 +637,7 @@ async fn backfill(
             "limit must be 1-100",
         ));
     }
-    let records=state.db.query_all(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT id,username FROM users WHERE id>$1 AND status::text NOT IN ('inactive','suspended') AND role::text<>'guest' ORDER BY id LIMIT $2",[body.cursor.unwrap_or(Uuid::nil()).into(),(body.limit as i64+1).into()])).await?;
+    let records=state.db.query_all(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT id,COALESCE(display_name,username) AS username FROM users WHERE id>$1 AND status::text NOT IN ('inactive','suspended') AND role::text<>'guest' ORDER BY id LIMIT $2",[body.cursor.unwrap_or(Uuid::nil()).into(),(body.limit as i64+1).into()])).await?;
     let more = records.len() > body.limit as usize;
     let mut accounts = Vec::new();
     let mut last = None;

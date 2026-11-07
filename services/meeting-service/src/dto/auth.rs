@@ -63,6 +63,8 @@ pub struct RegisterResponse {
     pub user_id: Uuid,
     pub email: String,
     pub role: String,
+    /// `pending_verification` (spelled `pendingverification` until
+    /// `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
     pub status: String,
 }
 
@@ -87,6 +89,8 @@ pub struct UserInfo {
     pub id: Uuid,
     pub username: String,
     pub role: String,
+    /// `pending_verification` (spelled `pendingverification` until
+    /// `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
     pub status: String,
 }
 

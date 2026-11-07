@@ -771,6 +771,14 @@ impl ConferenceService {
             json!({}),
         )
         .await?;
+        // Blueprint Section 11 (MTG-006): durable cancellation notice, same transaction.
+        crate::services::notifications::record_cancelled(
+            &txn,
+            &self.core.config.notifications,
+            &updated,
+            ctx.user_id(),
+        )
+        .await?;
         if had_room {
             emit(&txn, Self::terminate_command(&updated)).await?;
         }
@@ -854,6 +862,15 @@ impl ConferenceService {
             action::CONFERENCE_RESCHEDULE,
             &[event::CONFERENCE_RESCHEDULED],
             json!({ "from": conference.scheduled_start_at, "to": req.scheduled_start_at }),
+        )
+        .await?;
+        // Blueprint Section 11 (MTG-006): durable reschedule notice, same transaction.
+        crate::services::notifications::record_rescheduled(
+            &txn,
+            &self.core.config.notifications,
+            &conference,
+            &updated,
+            ctx.user_id(),
         )
         .await?;
         txn.commit().await?;
