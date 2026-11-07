@@ -1331,20 +1331,25 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
         200,
         "canonical call created by the Hub facade",
     )?;
-    status(
-        request(
-            s,
-            "calling",
-            Some(&s.customer.secret),
-            None,
-            Method::POST,
-            &format!("/v1/calls/{call_id}/cancel"),
-            Some(json!({"expectedVersion":current["version"]})),
-        )
-        .await?,
-        200,
-        "call cleanup",
-    )?;
+    assert_eq!(current["callId"], call_id.as_str());
+    // Best-effort cleanup: the call may already have moved on (ringing timeout,
+    // auto-end), which Calling answers with CALL_STATE_CONFLICT.
+    let cleanup = request(
+        s,
+        "calling",
+        Some(&s.customer.secret),
+        None,
+        Method::POST,
+        &format!("/v1/calls/{call_id}/cancel"),
+        Some(json!({"expectedVersion":current["version"]})),
+    )
+    .await?;
+    assert!(
+        cleanup.status == 200 || cleanup.code() == Some("CALL_STATE_CONFLICT"),
+        "call cleanup: {} {:?}",
+        cleanup.status,
+        cleanup.code()
+    );
     let instant = status(
         hub(
             s,
