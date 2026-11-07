@@ -268,9 +268,10 @@ fn managed_capability(
 ) -> Value {
     use crate::{conversations::ContextClass, domain::SecurityProfile};
     let allowed = [ContextClass::Direct, ContextClass::Group].iter().any(|c| {
-        policy.contexts.get(c).is_some_and(|p| {
-            p.enabled && p.allowed_profiles.contains(&SecurityProfile::Managed)
-        })
+        policy
+            .contexts
+            .get(c)
+            .is_some_and(|p| p.enabled && p.allowed_profiles.contains(&SecurityProfile::Managed))
     });
     let available = policy.sending_enabled && allowed;
     let realtime =

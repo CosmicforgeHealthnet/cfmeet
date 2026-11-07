@@ -505,3 +505,52 @@ async fn push_status_reports_not_configured_and_never_echoes_the_handle() {
         json!({"schemaVersion": 1, "owned": true, "status": "ACTIVE", "pushRegistered": false, "pushPlatform": null})
     );
 }
+
+/// Section 14: the Hub capability answer reports MANAGED messaging on its own. MANAGED
+/// follows the personal-context policy; its live delivery is the session device of ADR
+/// 0049 A1 (needs `MESSAGING_SESSION_DEVICES_ENABLED` and client-token keys), otherwise
+/// clients poll. PRIVATE_E2EE readiness (`securityReady`) is never implied by it.
+#[tokio::test]
+async fn capabilities_report_managed_messaging_apart_from_e2ee_readiness() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    let alice = h.member(&c, 0).await;
+    h.set_policy(
+        &c,
+        json!({"contexts":{"DIRECT":{"allowedProfiles":["PRIVATE_E2EE"],"defaultProfile":"PRIVATE_E2EE"},
+                           "GROUP":{"allowedProfiles":["PRIVATE_E2EE"],"defaultProfile":"PRIVATE_E2EE"}}}),
+    )
+    .await;
+    govern(&mut h, &c);
+    let body = json!({"principalId": alice.principal});
+    let e2ee_only = hub(&h, &c, alice.principal, "capabilities", body.clone()).await;
+    assert_eq!(e2ee_only.status, StatusCode::OK, "{}", e2ee_only.text);
+    assert_eq!(e2ee_only.json["securityReady"], false);
+    assert_eq!(
+        e2ee_only.json["managed"],
+        json!({"available": false, "reason": "MANAGED_NOT_ALLOWED", "realtime": "POLLING"})
+    );
+    h.state.communications = None;
+    h.set_policy(
+        &c,
+        json!({"contexts":{"DIRECT":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED"},
+                           "GROUP":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED"}}}),
+    )
+    .await;
+    govern(&mut h, &c);
+    let managed = hub(&h, &c, alice.principal, "capabilities", body).await;
+    assert_eq!(managed.status, StatusCode::OK, "{}", managed.text);
+    assert_eq!(managed.json["managed"]["available"], true);
+    assert_eq!(managed.json["managed"]["reason"], "AVAILABLE");
+    // Without client-token signing keys live delivery is not claimed.
+    if h.state.realtime.keys.is_none() || !h.state.realtime.settings.session_devices_enabled {
+        assert_eq!(managed.json["managed"]["realtime"], "POLLING");
+    } else {
+        assert_eq!(managed.json["managed"]["realtime"], "SESSION_DEVICE");
+    }
+    // The PRIVATE_E2EE fields keep their previous meaning for older Hub images.
+    assert_eq!(managed.json["securityReady"], false);
+    assert_eq!(managed.json["available"], false);
+}
