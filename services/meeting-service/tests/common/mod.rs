@@ -149,6 +149,9 @@ async fn template(admin: &str) -> String {
             migration::AccountSecurityMigrator::up(&tmpl, None)
                 .await
                 .expect("account security migrations apply");
+            migration::MeetingsCalendarMigrator::up(&tmpl, None)
+                .await
+                .expect("meetings calendar migrations apply");
             tmpl.close().await.ok();
             name
         })

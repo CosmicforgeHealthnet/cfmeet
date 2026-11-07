@@ -56,7 +56,7 @@ for s in $provisioned meeting-service; do
 done
 cfb_load_service meeting-service
 [ "${CFB_REQUIRED[*]}" = "seaql_migrations" ] && pass "meeting-service requires seaql_migrations" || fail "meeting-service required history"
-[ "${CFB_OPTIONAL[*]}" = "account_communications_migrations account_communications_facade_migrations account_security_migrations" ] &&
+[ "${CFB_OPTIONAL[*]}" = "account_communications_migrations account_communications_facade_migrations account_security_migrations meetings_calendar_migrations" ] &&
   pass "meeting-service records both additive histories" || fail "meeting-service optional histories"
 [ "${CFB_IDENTITY[*]}" = "users meetings" ] && pass "meeting-service identity tables" || fail "meeting-service identity tables"
 cfb_load_service organizations && [ "$CFB_STATUS" = reserved ] && pass "organizations slot is reserved" || fail "organizations slot"

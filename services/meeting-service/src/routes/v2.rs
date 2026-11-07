@@ -14,7 +14,7 @@ use axum::{
 use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
-        artifacts, breakouts, collaboration as collab, compat, conferences, engagement,
+        artifacts, breakouts, calendar, collaboration as collab, compat, conferences, engagement,
         invitations, members, organizations, participants, quality, realtime, spaces, specialized,
     },
     state::AppState,
@@ -96,6 +96,16 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(conferences::list_conferences).post(conferences::create_conference),
         )
         .route("/conferences/:id", get(conferences::get_conference))
+        // Blueprint Section 10: first-party calendar (agenda, RFC 5545 exports)
+        .route("/me/conferences", get(calendar::my_conferences))
+        .route(
+            "/conferences/:id/calendar.ics",
+            get(calendar::conference_calendar),
+        )
+        .route(
+            "/meeting-spaces/:id/calendar.ics",
+            get(calendar::meeting_space_calendar),
+        )
         .route(
             "/conferences/:id/prepare",
             post(conferences::prepare_conference),

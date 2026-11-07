@@ -4302,6 +4302,53 @@ export namespace Meetings {
     all?: boolean;
     participantIds?: Array<string>;
   };
+  /** One occurrence on the caller's agenda. */
+  export type AgendaItem = {
+    /** The conference id; null for a recurring occurrence beyond the materialization horizon (it becomes a conference later, under the same `occurrenceKey`). */
+    conferenceId?: string | null;
+    /** FULL view only. */
+    endedAt?: string | null;
+    isException: boolean;
+    kind: ConferenceKind;
+    /** False for an occurrence computed from the recurrence rule (not yet materialized). */
+    materialized: boolean;
+    meetingSpace: AgendaSpace;
+    meetingSpaceId: string;
+    /** Stable occurrence identity within the meeting space (unchanged by materialization). */
+    occurrenceKey: string;
+    /** FULL view only. */
+    originalStartAt?: string | null;
+    relations: Array<AgendaRelation>;
+    scheduledEndAt?: string | null;
+    scheduledStartAt: string;
+    /** FULL view only. */
+    startedAt?: string | null;
+    status: ConferenceStatus;
+    view: ResourceView;
+    viewerRole?: Role | null;
+  };
+  /** Why an occurrence is on the caller's agenda. */
+  export type AgendaRelation = "OWNER" | "MEMBER" | "INVITEE" | "REGISTRANT" | "PARTICIPANT" | "ORGANIZATION";
+  export type AgendaResponse = {
+    /** Ordered by scheduled start, then meeting space, then occurrence key. */
+    items: Array<AgendaItem>;
+    /** Pass back as `cursor` for the next page; null on the last page. */
+    nextCursor?: string | null;
+  };
+  /** Meeting-space fields an agenda entry may show. */
+  export type AgendaSpace = {
+    accessPolicy: AccessPolicy;
+    meetingCode: string;
+    meetingType: MeetingType;
+    /** FULL view only. */
+    organizationId?: string | null;
+    requiresPasscode: boolean;
+    status: SpaceStatus;
+    /** IANA timezone of the meeting: show times in this zone and in the viewer's zone. */
+    timezone: string;
+    /** Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space. */
+    title?: string | null;
+  };
   export type AnnouncementResponse = {
     rooms: number;
   };
@@ -4891,6 +4938,8 @@ export namespace Meetings {
   export type MeetingProfile = "STANDARD" | "WEBINAR" | "TOWN_HALL" | "HEALTHCARE" | "HIGH_SECURITY";
   export type MeetingSpaceListResponse = {
     items: Array<MeetingSpaceResponse>;
+    /** Present only on paginated requests (`limit` or `cursor` sent) when another page exists: pass it back as `cursor`. */
+    nextCursor?: string | null;
   };
   export type MeetingSpaceResponse = {
     accessConfig?: AccessConfig | null;
@@ -5453,8 +5502,12 @@ export namespace Meetings {
     reason?: string | null;
   };
   export type RescheduleConferenceRequest = {
+    /** New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays start-only). At most 24 hours after the start. */
     scheduledEndAt?: string | null;
+    /** New start; more than 5 minutes in the past is rejected. */
     scheduledStartAt: string;
+    /** Optional optimistic-concurrency guard: the conference `version` last read. */
+    version?: number | null;
   };
   export type ResolveInvitationResponse = {
     conferenceId?: string | null;
@@ -5797,6 +5850,11 @@ export namespace Meetings {
       params: { path: { id: string } };
       response: AttendanceReport;
     };
+    /** GET /api/v2/conferences/{id}/calendar.ics; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    v2ConferenceCalendar: {
+      params: { path: { id: string } };
+      response: ArrayBuffer;
+    };
     /** GET /api/v2/conferences/{id}/quality; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
     v2ConferenceQuality: {
       params: { path: { id: string } };
@@ -5812,9 +5870,9 @@ export namespace Meetings {
       params: { path: { id: string }; body: CreateBreakoutsRequest };
       response: BreakoutListCreatedResponse;
     };
-    /** POST /api/v2/meeting-spaces/{id}/conferences — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces/{id}/conferences — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     v2CreateConference: {
-      params: { path: { id: string }; body: CreateConferenceRequest };
+      params: { path: { id: string }; body: CreateConferenceRequest; idempotencyKey?: string };
       response: ConferenceResponse;
     };
     /** POST /api/v2/instant-meetings — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
@@ -5827,9 +5885,9 @@ export namespace Meetings {
       params: { path: { id: string }; body: CreateInvitationRequest };
       response: CreateInvitationResponse;
     };
-    /** POST /api/v2/meeting-spaces — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
+    /** POST /api/v2/meeting-spaces — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     v2CreateMeetingSpace: {
-      params: { body: CreateMeetingSpaceRequest };
+      params: { body: CreateMeetingSpaceRequest; idempotencyKey?: string };
       response: MeetingSpaceResponse;
     };
     /** POST /api/v2/conferences/{id}/polls; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
@@ -5984,8 +6042,9 @@ export namespace Meetings {
     };
     /** GET /api/v2/meeting-spaces — scope meetings.read; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry SAFE */
     v2ListMeetingSpaces: {
-      params: {};
+      params: { query?: { cursor?: string | null; limit?: number | null } };
       response: MeetingSpaceListResponse;
+      item: NonNullable<(MeetingSpaceListResponse)["items"]>[number];
     };
     /** GET /api/v2/meeting-spaces/{id}/members; auth MEETING_SESSION; retry SAFE */
     v2ListMembers: {
@@ -6052,6 +6111,11 @@ export namespace Meetings {
       params: { path: { id: string }; body: MediaCredentialRequest };
       response: MediaCredentialResponse;
     };
+    /** GET /api/v2/meeting-spaces/{id}/calendar.ics; auth MEETING_SESSION; retry SAFE */
+    v2MeetingSpaceCalendar: {
+      params: { path: { id: string } };
+      response: ArrayBuffer;
+    };
     /** POST /api/v2/conferences/{id}/breakouts/move; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2MoveParticipant: {
       params: { path: { id: string }; body: MoveParticipantRequest };
@@ -6061,6 +6125,12 @@ export namespace Meetings {
     v2MuteParticipant: {
       params: { path: { id: string; participantId: string }; body: MuteRequest };
       response: MuteResponse;
+    };
+    /** GET /api/v2/me/conferences; auth MEETING_SESSION; retry SAFE */
+    v2MyConferences: {
+      params: { query?: { from?: string | null; to?: string | null; status?: string | null; role?: string | null; organizationId?: string | null; cursor?: string | null; limit?: number | null } };
+      response: AgendaResponse;
+      item: NonNullable<(AgendaResponse)["items"]>[number];
     };
     /** GET /api/v2/me/organizations; auth MEETING_SESSION; retry SAFE */
     v2MyOrganizations: {

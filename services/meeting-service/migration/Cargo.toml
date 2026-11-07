@@ -30,3 +30,7 @@ path = "src/communications-main.rs"
 [[bin]]
 name = "account-security-migration"
 path = "src/account-security-main.rs"
+
+[[bin]]
+name = "meetings-calendar-migration"
+path = "src/meetings-calendar-main.rs"

@@ -4,13 +4,13 @@
 use crate::{
     domain::{RecordOrigin, SecurityProfile},
     dto::v2::{
-        BulkAdmissionResponse, ConferenceResponse, ConferenceSummary, InvitationResponse,
-        MeetingSpaceResponse, MemberResponse, ParticipantResponse, RecurrenceResponse,
-        ResourceView, SkippedParticipant,
+        AgendaItem, AgendaSpace, BulkAdmissionResponse, ConferenceResponse, ConferenceSummary,
+        InvitationResponse, MeetingSpaceResponse, MemberResponse, ParticipantResponse,
+        RecurrenceResponse, ResourceView, SkippedParticipant,
     },
     models::{
         conference_participants, conference_sessions, meeting_invitations, meeting_members,
-        meeting_recurrence_rules,
+        meeting_recurrence_rules, meeting_spaces,
     },
     services::{
         meeting_permissions::RolePolicy,
@@ -65,19 +65,82 @@ pub fn space(view: &SpaceView) -> MeetingSpaceResponse {
         updated_at: full.then_some(s.updated_at),
         archived_at: full.then_some(s.archived_at).flatten(),
         version: full.then_some(s.version),
-        latest_conference: view.latest_conference.as_ref().map(conference_summary),
+        latest_conference: view.latest_conference.as_ref().map(|c| {
+            conference_summary(
+                c,
+                full || !crate::services::calendar::schedule_restricted(s),
+            )
+        }),
     }
 }
 
-/// Project a conference session to a minimal summary for space responses.
-fn conference_summary(c: &conference_sessions::Model) -> ConferenceSummary {
+/// Project a conference session to a minimal summary for space responses. MTG-011: the
+/// timing is withheld from callers without the FULL view of a healthcare / high-security
+/// space, exactly like the conference SUMMARY view.
+fn conference_summary(c: &conference_sessions::Model, with_schedule: bool) -> ConferenceSummary {
     ConferenceSummary {
         id: c.id,
         status: c.status,
-        scheduled_start_at: c.scheduled_start_at,
-        scheduled_end_at: c.scheduled_end_at,
-        started_at: c.started_at,
-        ended_at: c.ended_at,
+        scheduled_start_at: c.scheduled_start_at.filter(|_| with_schedule),
+        scheduled_end_at: c.scheduled_end_at.filter(|_| with_schedule),
+        started_at: c.started_at.filter(|_| with_schedule),
+        ended_at: c.ended_at.filter(|_| with_schedule),
+    }
+}
+
+/// A conference as seen by a caller of `space` (MTG-011): the SUMMARY view carries the
+/// scheduled start/end (guest countdown) unless the space is healthcare / high-security.
+pub fn conference_in(
+    c: &conference_sessions::Model,
+    space: &meeting_spaces::Model,
+    full: bool,
+) -> ConferenceResponse {
+    let mut view = conference(c, full);
+    if !full && !crate::services::calendar::schedule_restricted(space) {
+        view.scheduled_start_at = c.scheduled_start_at;
+        view.scheduled_end_at = c.scheduled_end_at;
+    }
+    view
+}
+
+/// One agenda entry: every caller with a relation sees the schedule (it is their own
+/// calendar); management detail only in the FULL view; titles of healthcare /
+/// high-security spaces only in the FULL view.
+pub fn agenda_item(e: &crate::services::calendar::AgendaEntry) -> AgendaItem {
+    let s = &e.space;
+    let o = &e.occurrence;
+    let full = e.full;
+    AgendaItem {
+        conference_id: o.conference_id,
+        occurrence_key: o.occurrence_key.clone(),
+        meeting_space_id: s.id,
+        materialized: o.conference_id.is_some(),
+        view: if full {
+            ResourceView::Full
+        } else {
+            ResourceView::Summary
+        },
+        status: o.status,
+        kind: o.kind,
+        scheduled_start_at: o.start,
+        scheduled_end_at: o.end,
+        is_exception: o.is_exception,
+        original_start_at: o.original_start_at.filter(|_| full),
+        started_at: o.started_at.filter(|_| full),
+        ended_at: o.ended_at.filter(|_| full),
+        viewer_role: e.viewer_role,
+        relations: e.relations.clone(),
+        meeting_space: AgendaSpace {
+            title: (full || !crate::services::calendar::title_restricted(s))
+                .then(|| s.title.clone()),
+            meeting_code: s.meeting_code.clone(),
+            meeting_type: s.meeting_type,
+            status: s.status,
+            timezone: s.timezone.clone(),
+            access_policy: s.access_policy,
+            requires_passcode: s.access_policy == crate::domain::AccessPolicy::PublicPasscode,
+            organization_id: s.organization_id.filter(|_| full),
+        },
     }
 }
 

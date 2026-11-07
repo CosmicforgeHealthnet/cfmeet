@@ -1576,6 +1576,12 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/conferences/{id}/calendar.ics",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/conferences/{id}/artifacts",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -2183,6 +2189,12 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/me/conferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/me/sessions",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
@@ -2241,6 +2253,12 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/meeting-spaces/{id}/conferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/calendar.ics",
       "class": "PUBLIC_CUSTOMER"
     },
     {

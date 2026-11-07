@@ -2,17 +2,23 @@
 
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use uuid::Uuid;
 
-use super::{views, V2Json, V2OptionalJson, V2Path};
+use super::{
+    idempotency_key, views, V2Json, V2JsonDigest, V2OptionalJson, V2Path, IDEMPOTENT_REPLAYED,
+};
 use crate::{
     domain::TerminationReason,
     dto::v2::*,
     error::{ApiError, ApiResult, ErrorCode},
-    services::{actor::ActorContext, admission::RtcOutcome, conference::ConferenceOutcome},
+    services::{
+        actor::ActorContext, admission::RtcOutcome, conference::ConferenceOutcome,
+        idempotency::IdempotencyRequest,
+    },
     state::AppState,
 };
 
@@ -28,27 +34,51 @@ fn action_response(o: ConferenceOutcome) -> Json<ConferenceActionResponse> {
 ///
 /// Adds a single (non-recurring) conference to an active meeting space in state CREATED, with
 /// optional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and
-/// at most 24 hours later). Requires a bearer user token whose space role may start conferences
-/// (`conference.start`).
+/// at most 24 hours later; a start more than 5 minutes in the past is rejected). Requires a bearer
+/// user token whose space role may schedule conferences. Send an `Idempotency-Key` header (1-128
+/// visible ASCII characters, kept 24 hours per caller and space) to make retries safe: the same
+/// key and body return the same conference (header `Idempotent-Replayed: true`); the same key
+/// with a different body is IDEMPOTENCY_CONFLICT.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/conferences", tag = "Conferences (v2)", operation_id = "v2_create_conference",
-    params(("id" = Uuid, Path, description = "Meeting space id")),
+    params(
+        ("id" = Uuid, Path, description = "Meeting space id"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Optional retry key (1-128 visible ASCII characters)"),
+    ),
     request_body = CreateConferenceRequest,
-    responses((status = 201, description = "Created", body = ConferenceResponse), (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope)),
+    responses(
+        (status = 201, description = "Created (or replayed for the same Idempotency-Key)", body = ConferenceResponse),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 409, description = "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT", body = ErrorEnvelope),
+    ),
     security(("bearer_auth" = []))
 )]
 pub async fn create_conference(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
-    V2OptionalJson(req): V2OptionalJson<CreateConferenceRequest>,
-) -> ApiResult<(StatusCode, Json<ConferenceResponse>)> {
-    let c = state
+    headers: HeaderMap,
+    V2JsonDigest(req, digest): V2JsonDigest<CreateConferenceRequest, true>,
+) -> ApiResult<Response> {
+    let idempotency = match idempotency_key(&headers)? {
+        Some(key) => {
+            IdempotencyRequest::new(&actor, format!("v2_create_conference:{id}"), &key, digest)?
+        }
+        None => None,
+    };
+    let (c, replayed) = state
         .meeting
         .conferences
-        .create_occurrence(&actor, id, req)
+        .create_occurrence_idempotent(&actor, id, req, idempotency)
         .await?;
-    Ok((StatusCode::CREATED, Json(views::conference(&c, true))))
+    let mut response = (StatusCode::CREATED, Json(views::conference(&c, true))).into_response();
+    if replayed {
+        response
+            .headers_mut()
+            .insert(IDEMPOTENT_REPLAYED, HeaderValue::from_static("true"));
+    }
+    Ok(response)
 }
 
 /// List occurrences of a meeting space (members only).
@@ -84,7 +114,8 @@ pub async fn list_conferences(
 ///
 /// Works with or without authentication. The space owner, members and admitted participants get the
 /// FULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY
-/// view with only the id, meeting space id and status.
+/// view with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /
+/// healthcare-appointment meetings — the scheduled start and end (pre-join countdown).
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}", tag = "Conferences (v2)", operation_id = "v2_get_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -96,8 +127,8 @@ pub async fn get_conference(
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Json<ConferenceResponse>> {
-    let (c, _space, full) = state.meeting.conferences.get(&actor, id).await?;
-    Ok(Json(views::conference(&c, full)))
+    let (c, space, full) = state.meeting.conferences.get(&actor, id).await?;
+    Ok(Json(views::conference_in(&c, &space, full)))
 }
 
 /// CREATED → PREPARING → (provider room confirmed) → WAITING.
@@ -262,15 +293,21 @@ pub async fn cancel_conference(
 
 /// Reschedule one unstarted occurrence (series untouched).
 ///
-/// Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the
-/// start) for a conference still in state CREATED; any other state returns
-/// CONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For
-/// an occurrence of a recurring series only that occurrence moves.
+/// Sets a new `scheduledStartAt` (required; more than 5 minutes in the past is rejected) for a
+/// conference still in state CREATED; any other state returns CONFERENCE_STATE_CONFLICT. An omitted
+/// `scheduledEndAt` keeps the occurrence's duration (the end is never cleared); an explicit one must
+/// be after the start and at most 24 hours later. An optional `version` guards against concurrent
+/// changes (MEETING_VERSION_CONFLICT). Requires a bearer user token whose role holds
+/// `conference.start`. For an occurrence of a recurring series only that occurrence moves.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/reschedule", tag = "Conferences (v2)", operation_id = "v2_reschedule_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
     request_body = RescheduleConferenceRequest,
-    responses((status = 200, description = "Rescheduled", body = ConferenceActionResponse), (status = 409, description = "CONFERENCE_STATE_CONFLICT", body = ErrorEnvelope)),
+    responses(
+        (status = 200, description = "Rescheduled", body = ConferenceActionResponse),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_STATE_CONFLICT / MEETING_VERSION_CONFLICT", body = ErrorEnvelope),
+    ),
     security(("bearer_auth" = []))
 )]
 pub async fn reschedule_conference(
