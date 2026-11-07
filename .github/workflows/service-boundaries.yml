@@ -41,6 +41,14 @@ jobs:
       - name: operations registry
         run: python3 scripts/service-boundaries/check_operations_registry.py
 
+      # INV-001: every API Gateway route forwards to a handler that exists in the
+      # upstream service's axum router (or a declared relay dispatch table). Lives here,
+      # not in contracts.yml, because a router refactor in services/** must trigger it.
+      - name: gateway upstream handlers exist (mutation tests + gate)
+        run: |
+          python3 -m unittest scripts/contracts/test_check_gateway_upstreams.py -v
+          python3 scripts/contracts/check_gateway_upstreams.py
+
       - name: no phase-03 path
         run: |
           set -euo pipefail
