@@ -890,8 +890,9 @@ class Conversation {
   const Conversation.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Conversation.create({required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, required String updatedAt, required int version}) =>
+  factory Conversation.create({String? avatarRef, required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, ConversationInbox? inbox, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, String? title, required String updatedAt, required int version}) =>
       Conversation.fromJson(<String, Object?>{
+        if (avatarRef != null) 'avatarRef': avatarRef,
         'context': context?.toJson(),
         'contextClass': contextClass,
         'conversationId': conversationId,
@@ -900,6 +901,7 @@ class Conversation {
         'encryption': encryption,
         'expiresAt': expiresAt,
         'expiryGraceSeconds': expiryGraceSeconds,
+        if (inbox != null) 'inbox': inbox.toJson(),
         'lifecycleReason': lifecycleReason,
         'lifecycleState': lifecycleState,
         'memberCount': memberCount,
@@ -913,12 +915,16 @@ class Conversation {
         'securityProfile': securityProfile,
         'stateChangedAt': stateChangedAt,
         'successorConversationId': successorConversationId,
+        if (title != null) 'title': title,
         'updatedAt': updatedAt,
         'version': version,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches.
+  String? get avatarRef => json['avatarRef'] as String?;
 
   ContextRef? get context => json['context'] == null ? null : ContextRef.fromJson(json['context']! as Map<String, Object?>);
 
@@ -935,6 +941,8 @@ class Conversation {
   String? get expiresAt => json['expiresAt'] as String?;
 
   int? get expiryGraceSeconds => (json['expiryGraceSeconds'] as num?)?.toInt();
+
+  ConversationInbox? get inbox => json['inbox'] == null ? null : ConversationInbox.fromJson(json['inbox']! as Map<String, Object?>);
 
   String? get lifecycleReason => json['lifecycleReason'] as String?;
 
@@ -963,6 +971,9 @@ class Conversation {
   String get stateChangedAt => json['stateChangedAt']! as String;
 
   Uuid? get successorConversationId => json['successorConversationId'] as String?;
+
+  /// Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group).
+  String? get title => json['title'] as String?;
 
   String get updatedAt => json['updatedAt']! as String;
 
@@ -1018,6 +1029,78 @@ class ConversationEvent {
   Map<String, Object?> toJson() => json;
 }
 
+/// Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content.
+class ConversationInbox {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationInbox.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationInbox.create({required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, required int unreadCount}) =>
+      ConversationInbox.fromJson(<String, Object?>{
+        'lastActivityAt': lastActivityAt,
+        'lastMessage': lastMessage?.toJson(),
+        'mentionCount': mentionCount,
+        'unreadCount': unreadCount,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The latest application message (or the creation time); the key of orderBy=lastActivity.
+  String get lastActivityAt => json['lastActivityAt']! as String;
+
+  ConversationLastMessage? get lastMessage => json['lastMessage'] == null ? null : ConversationLastMessage.fromJson(json['lastMessage']! as Map<String, Object?>);
+
+  /// Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext).
+  int get mentionCount => (json['mentionCount']! as num).toInt();
+
+  /// Active application messages from others after the member's read cursor, inside its history window, not hidden for it.
+  int get unreadCount => (json['unreadCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured).
+class ConversationLastMessage {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationLastMessage.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationLastMessage.create({required int attachmentCount, required String createdAt, required MessageLifecycle lifecycle, required Uuid messageId, required String? previewText, required SecurityProfile securityProfile, required Uuid senderPrincipalId, required int sequence}) =>
+      ConversationLastMessage.fromJson(<String, Object?>{
+        'attachmentCount': attachmentCount,
+        'createdAt': createdAt,
+        'lifecycle': lifecycle,
+        'messageId': messageId,
+        'previewText': previewText,
+        'securityProfile': securityProfile,
+        'senderPrincipalId': senderPrincipalId,
+        'sequence': sequence,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  int get attachmentCount => (json['attachmentCount']! as num).toInt();
+
+  String get createdAt => json['createdAt']! as String;
+
+  MessageLifecycle get lifecycle => json['lifecycle']! as String;
+
+  Uuid get messageId => json['messageId']! as String;
+
+  /// MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones.
+  String? get previewText => json['previewText'] as String?;
+
+  SecurityProfile get securityProfile => json['securityProfile']! as String;
+
+  Uuid get senderPrincipalId => json['senderPrincipalId']! as String;
+
+  int get sequence => (json['sequence']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 class ConversationPage {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ConversationPage.fromJson(this.json);
@@ -1045,8 +1128,9 @@ class CreateConversationRequest {
   const CreateConversationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateConversationRequest.create({ContextRef? context, required ContextClass contextClass, String? counterpartCfMeetId, Uuid? counterpartPrincipalId, int? expectedPolicyVersion, String? expiresAt, int? expiryGraceSeconds, bool? managedDisclosureAcknowledged, Uuid? predecessorConversationId, bool? profileChangeDisclosureAcknowledged, bool? readReceipts, int? retentionSeconds, SecurityProfile? securityProfile}) =>
+  factory CreateConversationRequest.create({String? avatarRef, ContextRef? context, required ContextClass contextClass, String? counterpartCfMeetId, Uuid? counterpartPrincipalId, int? expectedPolicyVersion, String? expiresAt, int? expiryGraceSeconds, bool? managedDisclosureAcknowledged, Uuid? predecessorConversationId, bool? profileChangeDisclosureAcknowledged, bool? readReceipts, int? retentionSeconds, SecurityProfile? securityProfile, String? title}) =>
       CreateConversationRequest.fromJson(<String, Object?>{
+        if (avatarRef != null) 'avatarRef': avatarRef,
         if (context != null) 'context': context.toJson(),
         'contextClass': contextClass,
         if (counterpartCfMeetId != null) 'counterpartCfMeetId': counterpartCfMeetId,
@@ -1060,10 +1144,14 @@ class CreateConversationRequest {
         if (readReceipts != null) 'readReceipts': readReceipts,
         if (retentionSeconds != null) 'retentionSeconds': retentionSeconds,
         if (securityProfile != null) 'securityProfile': securityProfile,
+        if (title != null) 'title': title,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Section 13: opaque avatar reference (MANAGED only).
+  String? get avatarRef => json['avatarRef'] as String?;
 
   ContextRef? get context => json['context'] == null ? null : ContextRef.fromJson(json['context']! as Map<String, Object?>);
 
@@ -1097,6 +1185,9 @@ class CreateConversationRequest {
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
 
   SecurityProfile? get securityProfile => json['securityProfile'] as String?;
+
+  /// Section 13: display title (MANAGED only; PRIVATE_E2EE refuses it with CONTENT_REJECTED / DISPLAY_METADATA_MANAGED_ONLY).
+  String? get title => json['title'] as String?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -3122,7 +3213,7 @@ class SendMessageRequest {
   const SendMessageRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? kind, String? managedPresentation, bool? notify, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
+  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? kind, String? managedPresentation, List<Uuid>? mentionedPrincipalIds, bool? notify, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
       SendMessageRequest.fromJson(<String, Object?>{
         if (attachmentIds != null) 'attachmentIds': attachmentIds,
         if (ciphertext != null) 'ciphertext': ciphertext,
@@ -3131,6 +3222,7 @@ class SendMessageRequest {
         if (epoch != null) 'epoch': epoch,
         if (kind != null) 'kind': kind,
         if (managedPresentation != null) 'managedPresentation': managedPresentation,
+        if (mentionedPrincipalIds != null) 'mentionedPrincipalIds': mentionedPrincipalIds,
         if (notify != null) 'notify': notify,
         if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
         if (targetMessageId != null) 'targetMessageId': targetMessageId,
@@ -3155,6 +3247,9 @@ class SendMessageRequest {
 
   /// MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext).
   String? get managedPresentation => json['managedPresentation'] as String?;
+
+  /// Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate …
+  List<Uuid>? get mentionedPrincipalIds => json['mentionedPrincipalIds'] == null ? null : (json['mentionedPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
 
   /// false: no push notification jobs (mirrored / migrated writes). Default true.
   bool? get notify => json['notify'] as bool?;
@@ -3544,17 +3639,22 @@ class UpdateConversationRequest {
   const UpdateConversationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory UpdateConversationRequest.create({required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds}) =>
+  factory UpdateConversationRequest.create({String? avatarRef, required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds, String? title}) =>
       UpdateConversationRequest.fromJson(<String, Object?>{
+        if (avatarRef != null) 'avatarRef': avatarRef,
         'expectedVersion': expectedVersion,
         if (expiresAt != null) 'expiresAt': expiresAt,
         if (lifecycleState != null) 'lifecycleState': lifecycleState,
         if (reason != null) 'reason': reason,
         if (retentionSeconds != null) 'retentionSeconds': retentionSeconds,
+        if (title != null) 'title': title,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Section 13: a new avatar reference; null clears it (MANAGED only, owner).
+  String? get avatarRef => json['avatarRef'] as String?;
 
   int get expectedVersion => (json['expectedVersion']! as num).toInt();
 
@@ -3566,6 +3666,9 @@ class UpdateConversationRequest {
 
   /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS).
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
+
+  /// Section 13: a new display title; null clears it (MANAGED only, owner).
+  String? get title => json['title'] as String?;
 
   Map<String, Object?> toJson() => json;
 }
