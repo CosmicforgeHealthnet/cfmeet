@@ -235,26 +235,30 @@ Shared/exported contract strategy is described in [`packages/contracts`](../../p
 
 ## Part III communications (`services/calling`)
 
-The Calling service publishes the **public Part III developer documentation** directly from
-the authoritative contract files in `packages/contracts`. The Swagger page intentionally
-contains only customer/client-facing Calling and Privacy Relay APIs. Service-to-service
-Privacy Relay operations, Telephony execution APIs, provider callbacks and operator
-interfaces remain internal and are not listed in public Swagger.
+The Calling service can serve Part III developer documentation, but since Blueprint v1.0
+Section 16 (PLT-006) it is **off by default** and authenticated when on. It serves exactly
+the generated public bundles (`packages/contracts/bundled/public/{calling,privacy-relay}`,
+written by `scripts/contracts/public_api.py`), the same documents the API Gateway publishes;
+Contact Vault private-contact operations, service-to-service Privacy Relay operations,
+Telephony execution APIs, provider callbacks and operator interfaces are never listed.
 
 | Endpoint | Content |
 |---|---|
-| `GET /swagger-ui/` | Part III Swagger UI with a Calling / Privacy Relay selector |
-| `GET /api-docs/calling/openapi.json` | Public-only Calling OpenAPI (83 paths, 127 operations including `/health`) |
-| `GET /api-docs/privacy-relay/openapi.json` | Public Privacy Relay OpenAPI (19 paths, 22 operations) |
+| `GET /swagger-ui/` | Swagger UI with a Calling / Privacy Relay selector (pinned swagger-ui with SRI, hash-only CSP, no try-it-out, no persisted authorization) |
+| `GET /api-docs/calling/openapi.json` | the public Calling bundle (125 operations) |
+| `GET /api-docs/privacy-relay/openapi.json` | the public Privacy Relay bundle (17 operations) |
 
-That is **149 documented public Part III operations** including the Calling health check
-(**148 product/customer operations** when health is excluded).
+Configuration: `CALLING_DOCS_ENABLED` (default `false`: every docs path is 404);
+`CALLING_DOCS_ACCESS_TOKEN` or `CALLING_DOCS_ACCESS_TOKEN_FILE` (at least 32 characters;
+HTTP Basic with the token as the password). Without a token the page is served only when
+`CF_RUNTIME_ENVIRONMENT` is `local` or `test`. The canonical public reference for
+integrators is the API Gateway's `/docs` and `/openapi/{domain}.json`.
 
 The source contracts remain:
 
 - `packages/contracts/calling/http/v1.openapi.json` — the full Calling contract,
-  including internal routes used for conformance testing. The runtime public document
-  removes every `/internal/*` path and internal-only security schemes before serving it.
+  including internal routes used for conformance testing. The served document is its
+  generated public bundle, not a runtime filter of this file.
 - `packages/contracts/privacy-relay/http/v1.openapi.json` — the public Privacy Relay
   contract.
 - `packages/contracts/privacy-relay/internal/v1.openapi.json` and

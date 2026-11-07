@@ -151,6 +151,36 @@ impl CompatService {
         crate::services::calendar::canonical_conference(&self.core.db, space_id, Utc::now()).await
     }
 
+    /// Blueprint v1.0 Section 16 (MTG-017 / DATA-008): mirror one legacy meeting into v2
+    /// right after a legacy create / update / end, through the same idempotent backfill
+    /// the migration and the lazy resolver use (single-meeting mode). Best effort: the
+    /// legacy write has already committed, and a failed mirror is repaired by the lazy
+    /// resolver or the next admin backfill, so it is logged and counted, never returned.
+    /// No-op unless `FEATURE_LEGACY_MEETING_CREATE_MODE=mirror` (the default).
+    pub async fn mirror_legacy_write(&self, legacy_meeting_id: Uuid) {
+        use crate::services::ops_metrics::{inc, OPS_METRICS as OM};
+        if self.core.flags.legacy_meeting_create_mode
+            != crate::config::LegacyMeetingCreateMode::Mirror
+        {
+            return;
+        }
+        match self.backfill(Some(legacy_meeting_id)).await {
+            Ok(report) if report.mapping_failures == 0 => inc(&OM.legacy_creates_mirrored),
+            Ok(report) => {
+                inc(&OM.legacy_mirror_failures);
+                tracing::warn!(
+                    %legacy_meeting_id,
+                    mapping_failures = report.mapping_failures,
+                    "legacy meeting mirror left the meeting unmapped (lazy resolve retries)"
+                );
+            }
+            Err(e) => {
+                inc(&OM.legacy_mirror_failures);
+                tracing::warn!(%legacy_meeting_id, "legacy meeting mirror failed: {e}");
+            }
+        }
+    }
+
     /// Run the idempotent backfill (all legacy meetings, or one).
     pub async fn backfill(&self, legacy_meeting_id: Option<Uuid>) -> ApiResult<BackfillReport> {
         let txn = self.core.db.begin().await?;

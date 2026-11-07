@@ -5,6 +5,9 @@
 //! answers `410 LEGACY_WRITE_DISABLED` before authentication or any database access, so
 //! a retired legacy handler can never overwrite v2 state. Legacy reads keep working for
 //! the deprecation period and `/api/v2` is unaffected. Off by default.
+//!
+//! [`legacy_create_guard`] is the narrower Section 16 switch (MTG-017 / DATA-008,
+//! `FEATURE_LEGACY_MEETING_CREATE_MODE`): it refuses only new legacy creates.
 
 use axum::{
     extract::{Request, State},
@@ -40,6 +43,35 @@ pub async fn legacy_write_guard(
             "Legacy meeting writes are retired; use the /api/v2 meeting API",
         )
         .into_response();
+    }
+    next.run(request).await
+}
+
+/// Refusal text for `FEATURE_LEGACY_MEETING_CREATE_MODE=refuse` (MTG-017 / DATA-008).
+pub const LEGACY_CREATE_REFUSED: &str = "Legacy meeting creation is retired. Create meetings \
+     with POST /api/v2/meeting-spaces then POST /api/v2/meeting-spaces/{id}/conferences, or \
+     POST /api/v2/instant-meetings; existing legacy meetings keep working";
+
+/// Mounted on the three legacy create routes (`POST /api/v1/meetings`,
+/// `/api/v1/meetings/instant`, `/api/v1/api/meetings`). In `refuse` mode a create answers
+/// `410 LEGACY_WRITE_DISABLED` before the handler runs; in `mirror` mode (default) the
+/// handler runs and mirrors the new meeting into v2.
+pub async fn legacy_create_guard(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.meeting.core.flags.legacy_meeting_create_mode
+        == crate::config::LegacyMeetingCreateMode::Refuse
+        && request.method() == Method::POST
+    {
+        inc(&OM.legacy_creates_refused);
+        tracing::info!(
+            path = %request.uri().path(),
+            "legacy meeting create refused (FEATURE_LEGACY_MEETING_CREATE_MODE=refuse)"
+        );
+        return ApiError::domain(ErrorCode::LegacyWriteDisabled, LEGACY_CREATE_REFUSED)
+            .into_response();
     }
     next.run(request).await
 }

@@ -13,8 +13,10 @@
 //! * The media connection gateway (`GET /v1/calling/media/rtc…`) is authenticated by the
 //!   edge-sealed media credential and admits every connection against the database
 //!   before the media server is contacted.
-//! * Public Part III developer documentation is served at `GET /swagger-ui/` with
-//!   public-only Calling and Privacy Relay OpenAPI documents under `/api-docs/*`.
+//! * Calling's documentation page (`GET /swagger-ui/`, the generated public Calling and
+//!   Privacy Relay bundles under `/api-docs/*`) is off by default and authenticated when
+//!   enabled (`CALLING_DOCS_ENABLED`, `CALLING_DOCS_ACCESS_TOKEN[_FILE]`; see
+//!   `public_docs`).
 //! * Internal routes are passed as `internal`, are nested under `/internal/v1` and run
 //!   behind internal service authentication BY CONSTRUCTION — including unknown internal
 //!   paths, so internal routes cannot be enumerated without a valid service token.

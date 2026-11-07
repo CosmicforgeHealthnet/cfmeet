@@ -19,6 +19,8 @@ COPY packages/service-auth/ /app/packages/service-auth/
 COPY packages/communications-policy /app/packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts/ /app/packages/usage-facts/
+# Blueprint Section 16 (SEC-019): shared S3 signer for artefact storage.
+COPY packages/object-storage/ /app/packages/object-storage/
 # Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
 COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 

@@ -20,6 +20,7 @@ on:
       - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
       - "packages/usage-facts/**"
+      - "packages/object-storage/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
   pull_request:

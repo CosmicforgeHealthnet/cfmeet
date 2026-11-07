@@ -111,9 +111,9 @@ pub async fn create_api_key(
         api_key: raw_api_key,
         usage_limit: api_key.usage_limit,
         used_count: api_key.used_count,
-        expires_at: api_key.expires_at,
+        expires_at: api_key.expires_at.and_utc(),
         status: format_status(&api_key.status),
-        created_at: api_key.created_at,
+        created_at: api_key.created_at.and_utc(),
     };
 
     Ok((
@@ -162,10 +162,10 @@ pub async fn list_api_keys(
             api_key_masked: mask_api_key(&key.api_key),
             usage_limit: key.usage_limit,
             used_count: key.used_count,
-            expires_at: key.expires_at,
+            expires_at: key.expires_at.and_utc(),
             status: format_status(&key.status),
-            created_at: key.created_at,
-            updated_at: key.updated_at,
+            created_at: key.created_at.and_utc(),
+            updated_at: key.updated_at.and_utc(),
         })
         .collect();
 
@@ -215,10 +215,10 @@ pub async fn get_api_key(
         api_key_masked: mask_api_key(&api_key.api_key),
         usage_limit: api_key.usage_limit,
         used_count: api_key.used_count,
-        expires_at: api_key.expires_at,
+        expires_at: api_key.expires_at.and_utc(),
         status: format_status(&api_key.status),
-        created_at: api_key.created_at,
-        updated_at: api_key.updated_at,
+        created_at: api_key.created_at.and_utc(),
+        updated_at: api_key.updated_at.and_utc(),
     };
 
     Ok(Json(ApiKeyApiResponse {

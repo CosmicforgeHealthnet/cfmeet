@@ -1,3 +1,11 @@
+//! Legacy meeting-service webhook DTOs.
+//!
+//! DEPRECATED (Blueprint v1.0 Section 16, PLT-003 / DATA-007): registrations are stored
+//! but no event is ever delivered. Every response says so (`delivery`, `notice`) and
+//! carries `Deprecation` / `Sunset` headers. Replacement: Developer Platform webhooks
+//! (`/v1/environments/{environmentId}/webhooks`), see
+//! `docs/api/legacy-meeting-webhooks-deprecation.md`.
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -29,6 +37,10 @@ pub struct WebhookResponse {
     pub event_type: String,
     pub endpoint_url: String,
     pub status: String,
+    /// Always `NOT_DELIVERED`: legacy meeting webhooks are never delivered (deprecated;
+    /// use Developer Platform webhooks).
+    #[schema(example = "NOT_DELIVERED")]
+    pub delivery: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -39,9 +51,14 @@ pub struct CreateWebhookResponse {
     pub user_id: Uuid,
     pub event_type: String,
     pub endpoint_url: String,
-    /// Secret key for verifying webhook signatures. Only returned on creation.
+    /// Generated secret, returned only on creation. No event is ever signed with it,
+    /// because legacy meeting webhooks are never delivered.
     pub secret: String,
     pub status: String,
+    /// Always `NOT_DELIVERED`: legacy meeting webhooks are never delivered (deprecated;
+    /// use Developer Platform webhooks).
+    #[schema(example = "NOT_DELIVERED")]
+    pub delivery: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,17 +66,26 @@ pub struct CreateWebhookResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct WebhookListResponse {
     pub success: bool,
+    /// Deprecation notice: nothing registered here is delivered; use Developer Platform
+    /// webhooks.
+    pub notice: String,
     pub data: Vec<WebhookResponse>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct WebhookApiResponse {
     pub success: bool,
+    /// Deprecation notice: nothing registered here is delivered; use Developer Platform
+    /// webhooks.
+    pub notice: String,
     pub data: WebhookResponse,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CreateWebhookApiResponse {
     pub success: bool,
+    /// Deprecation notice: nothing registered here is delivered; use Developer Platform
+    /// webhooks.
+    pub notice: String,
     pub data: CreateWebhookResponse,
 }

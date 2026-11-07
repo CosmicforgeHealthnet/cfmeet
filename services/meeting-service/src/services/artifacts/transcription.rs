@@ -536,10 +536,10 @@ impl TranscriptionService {
                     .core
                     .artifacts
                     .storage
-                    .signed_read_url(
+                    // Server-to-provider source (never a client): up to one hour.
+                    .provider_read_url(
                         rec.storage_key.as_deref().unwrap_or_default(),
-                        std::time::Duration::from_secs(3600),
-                        None,
+                        super::storage::MAX_PROVIDER_READ,
                     )
                     .map_err(|_| super::storage_unavailable())?;
                 provider

@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "paths": {
     "/": {
@@ -501,7 +501,7 @@
           "API Keys"
         ],
         "summary": "Create a new meeting via API key",
-        "description": "Third-party integrations can use this endpoint with Api-Key authentication\nto create meetings on behalf of the key owner.",
+        "description": "Third-party integrations can use this endpoint with Api-Key authentication\nto create meetings on behalf of the key owner.\n\nDEPRECATED (Sections 15–16, PLT-004 / MTG-017): use a Platform Access credential with\n`meetings.write` through the API Gateway and the v2 meeting-space operations\n(`docs/api/legacy-api-keys-deprecation.md`). Same create policy and headers as\n`POST /api/v1/meetings`.",
         "operationId": "api_create_meeting",
         "requestBody": {
           "content": {
@@ -534,6 +534,7 @@
             "description": "Forbidden - API key usage limit exceeded"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "api_key_auth": []
@@ -1140,7 +1141,7 @@
           "Meetings"
         ],
         "summary": "Create a new meeting",
-        "description": "The authenticated user becomes the host. Meeting starts as \"scheduled\".\nNo RTC resources are allocated at this point.",
+        "description": "The authenticated user becomes the host. Meeting starts as \"scheduled\".\nNo RTC resources are allocated at this point.\n\nDEPRECATED (Blueprint v1.0 Section 16, MTG-017): use `POST /api/v2/meeting-spaces` then\n`POST /api/v2/meeting-spaces/{id}/conferences`. Responses carry `Deprecation` / `Sunset`.\nBy default the new meeting is mirrored into v2 at once (it stays legacy-managed and is\njoined through the legacy join routes); with `FEATURE_LEGACY_MEETING_CREATE_MODE=refuse`\nthis answers `410 LEGACY_WRITE_DISABLED`.",
         "operationId": "create_meeting",
         "requestBody": {
           "content": {
@@ -1170,6 +1171,7 @@
             "description": "Unauthorized"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -1183,7 +1185,7 @@
           "Meetings"
         ],
         "summary": "Create an instant public meeting",
-        "description": "Creates a meeting that starts immediately and lasts 1 hour.\nThe authenticated user becomes the host and is automatically joined.\nReturns join token for immediate connection.",
+        "description": "Creates a meeting that starts immediately and lasts 1 hour.\nThe authenticated user becomes the host and is automatically joined.\nReturns join token for immediate connection.\n\nDEPRECATED (Blueprint v1.0 Section 16, MTG-017): use `POST /api/v2/instant-meetings`.\nResponses carry `Deprecation` / `Sunset`. By default the new meeting is mirrored into v2\nat once (it stays legacy-managed and is joined through the legacy join routes); with\n`FEATURE_LEGACY_MEETING_CREATE_MODE=refuse` this answers `410 LEGACY_WRITE_DISABLED`.",
         "operationId": "create_instant_meeting",
         "requestBody": {
           "content": {
@@ -1213,6 +1215,7 @@
             "description": "Unauthorized"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -2298,12 +2301,12 @@
         "tags": [
           "Webhooks"
         ],
-        "summary": "List all webhooks for the authenticated user",
-        "description": "Returns all webhooks owned by the authenticated user, active and inactive, newest first. Secrets\nare not included. Not paginated.",
+        "summary": "List legacy meeting webhooks (deprecated: never delivered)",
+        "description": "DEPRECATED (PLT-003). Returns the authenticated user's stored registrations, active and\ninactive, newest first, each marked `delivery: NOT_DELIVERED`. Secrets are not included. Not\npaginated. Nothing registered here is ever delivered; use Developer Platform webhooks.",
         "operationId": "list_webhooks",
         "responses": {
           "200": {
-            "description": "List of webhooks",
+            "description": "Stored registrations (none is delivered)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2316,6 +2319,7 @@
             "description": "Unauthorized"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -2326,8 +2330,8 @@
         "tags": [
           "Webhooks"
         ],
-        "summary": "Create a new webhook",
-        "description": "Registers a webhook for one event type (`meeting_start`, `meeting_end`, `participant_join` or\n`participant_leave`), owned by the authenticated user and active from creation. Create one\nwebhook per event type you need. The response includes a generated secret, which is returned\nonly here and never by the list or update endpoints.",
+        "summary": "Register a legacy meeting webhook (deprecated: never delivered)",
+        "description": "DEPRECATED (Blueprint v1.0 Section 16, PLT-003). Stores a registration for one event type\n(`meeting_start`, `meeting_end`, `participant_join` or `participant_leave`), owned by the\nauthenticated user. **No event is ever delivered to the endpoint**: the response says so\n(`delivery: NOT_DELIVERED`, `notice`) and carries `Deprecation`, `Sunset` and\n`Link rel=\"deprecation\"` headers. Use Developer Platform webhooks\n(`/v1/environments/{environmentId}/webhooks`) for signed meeting event delivery. The\ngenerated secret is returned only here.",
         "operationId": "create_webhook",
         "requestBody": {
           "content": {
@@ -2341,7 +2345,7 @@
         },
         "responses": {
           "201": {
-            "description": "Webhook created successfully",
+            "description": "Registration stored; nothing will be delivered (deprecated)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2357,6 +2361,7 @@
             "description": "Unauthorized"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -2369,8 +2374,8 @@
         "tags": [
           "Webhooks"
         ],
-        "summary": "Delete a webhook",
-        "description": "Permanently deletes a webhook owned by the authenticated user. Returns 404 if the webhook does\nnot exist or belongs to another user. To disable a webhook without deleting it, set its status\nto `inactive` with `PATCH /api/v1/webhooks/{id}`.",
+        "summary": "Delete a legacy meeting webhook (deprecated)",
+        "description": "DEPRECATED (PLT-003). Permanently deletes a stored registration owned by the authenticated\nuser (nothing was ever delivered to it). Returns 404 if the webhook does not exist or belongs\nto another user.",
         "operationId": "delete_webhook",
         "parameters": [
           {
@@ -2402,6 +2407,7 @@
             "description": "Webhook not found"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -2412,8 +2418,8 @@
         "tags": [
           "Webhooks"
         ],
-        "summary": "Update a webhook",
-        "description": "Changes the endpoint URL and/or status (`active` or `inactive`) of a webhook owned by the\nauthenticated user; omitted fields are left unchanged. The event type cannot be changed, so\ncreate a new webhook instead. Returns 404 if the webhook does not exist or belongs to another\nuser.",
+        "summary": "Update a legacy meeting webhook (deprecated: never delivered)",
+        "description": "DEPRECATED (PLT-003). Changes the endpoint URL and/or status (`active` or `inactive`) of a\nstored registration owned by the authenticated user; omitted fields are left unchanged. Even\n`active` registrations are never delivered (`delivery: NOT_DELIVERED`). Returns 404 if the\nwebhook does not exist or belongs to another user.",
         "operationId": "update_webhook",
         "parameters": [
           {
@@ -2458,6 +2464,7 @@
             "description": "Webhook not found"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "bearer_auth": []
@@ -5556,7 +5563,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -5659,7 +5666,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -6438,7 +6445,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -6826,7 +6833,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -10394,7 +10401,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -11381,7 +11388,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -11673,7 +11680,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -11788,7 +11795,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -19078,11 +19085,16 @@
         "type": "object",
         "required": [
           "success",
+          "notice",
           "data"
         ],
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CreateWebhookResponse"
+          },
+          "notice": {
+            "type": "string",
+            "description": "Deprecation notice: nothing registered here is delivered; use Developer Platform\nwebhooks."
           },
           "success": {
             "type": "boolean"
@@ -19114,12 +19126,18 @@
           "endpoint_url",
           "secret",
           "status",
+          "delivery",
           "created_at",
           "updated_at"
         ],
         "properties": {
           "created_at": {
             "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "description": "Always `NOT_DELIVERED`: legacy meeting webhooks are never delivered (deprecated;\nuse Developer Platform webhooks).",
+            "example": "NOT_DELIVERED"
           },
           "endpoint_url": {
             "type": "string"
@@ -19133,7 +19151,7 @@
           },
           "secret": {
             "type": "string",
-            "description": "Secret key for verifying webhook signatures. Only returned on creation."
+            "description": "Generated secret, returned only on creation. No event is ever signed with it,\nbecause legacy meeting webhooks are never delivered."
           },
           "status": {
             "type": "string"
@@ -25313,11 +25331,16 @@
         "type": "object",
         "required": [
           "success",
+          "notice",
           "data"
         ],
         "properties": {
           "data": {
             "$ref": "#/components/schemas/WebhookResponse"
+          },
+          "notice": {
+            "type": "string",
+            "description": "Deprecation notice: nothing registered here is delivered; use Developer Platform\nwebhooks."
           },
           "success": {
             "type": "boolean"
@@ -25328,6 +25351,7 @@
         "type": "object",
         "required": [
           "success",
+          "notice",
           "data"
         ],
         "properties": {
@@ -25336,6 +25360,10 @@
             "items": {
               "$ref": "#/components/schemas/WebhookResponse"
             }
+          },
+          "notice": {
+            "type": "string",
+            "description": "Deprecation notice: nothing registered here is delivered; use Developer Platform\nwebhooks."
           },
           "success": {
             "type": "boolean"
@@ -25350,12 +25378,18 @@
           "event_type",
           "endpoint_url",
           "status",
+          "delivery",
           "created_at",
           "updated_at"
         ],
         "properties": {
           "created_at": {
             "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "description": "Always `NOT_DELIVERED`: legacy meeting webhooks are never delivered (deprecated;\nuse Developer Platform webhooks).",
+            "example": "NOT_DELIVERED"
           },
           "endpoint_url": {
             "type": "string"
@@ -25739,7 +25773,7 @@
     },
     {
       "name": "Webhooks",
-      "description": "Webhook management for event notifications.\n\n## Events\n- `meeting_start`: Triggered when a meeting begins\n- `meeting_end`: Triggered when a meeting ends\n- `participant_join`: Triggered when a participant joins\n- `participant_leave`: Triggered when a participant leaves\n\n## Security\n- Each webhook has a unique secret for payload signing\n- Secret is only shown once on creation\n- Payloads are signed using HMAC-SHA256\n\n## Notes\n- Webhooks are user-scoped\n- Delivery is async and failure-tolerant"
+      "description": "**Deprecated** (Blueprint v1.0 Section 16, PLT-003). Legacy per-user meeting webhook registrations.\n\n## Nothing is delivered\nRegistrations are stored, but no event is ever delivered to a registered endpoint: the Meeting Service has no webhook dispatcher. The event types (`meeting_start`, `meeting_end`, `participant_join`, `participant_leave`) are accepted for compatibility only.\n\n## Deprecation\nEvery response carries `Deprecation` and `Sunset` headers. Removal still requires a measured zero-consumer window (register decision D-9).\n\n## Replacement\nUse Developer Platform webhooks (`/v1/environments/{environmentId}/webhooks`): signed delivery, delivery history, replay and secret rotation. Migration guide: `docs/api/legacy-meeting-webhooks-deprecation.md`."
     },
     {
       "name": "Meeting Spaces (v2)",
