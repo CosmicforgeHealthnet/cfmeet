@@ -147,10 +147,12 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      # Provisions throwaway Calling / Privacy Relay / Telephony databases with
+      # Provisions throwaway databases for every service in verify-service-isolation.sh
+      # (Calling, Platform Access, ..., Organizations and Meeting-service, SEC-018) with
       # infra/deployment/postgres/provision-service-database.sh and proves least privilege:
       # runtime roles have no DDL, and no role can connect to another service's database.
-      # (Each service workflow also applies its REAL migrations through these roles.)
+      # (Each service workflow also applies its REAL migrations through these roles;
+      # Meeting-service's are applied in backend.yml.)
       - name: verify service database isolation
         run: |
           infra/deployment/postgres/verify-service-isolation.sh \
