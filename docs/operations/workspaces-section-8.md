@@ -107,11 +107,11 @@ needs no Organizations call and keeps answering.
 
 ## Left for later
 
-* Owner-service enforcement of organization policy: the authoritative organization directory used
-  by meeting admission / space creation still counts any ACTIVE non-GUEST membership of an ACTIVE
-  organization as membership; it does not yet apply `meetings.hostCreation` or
-  `features.meetings`. The capability read reports the authority's (policy-aware) answer. Wiring
-  policy into meeting creation is a Meeting-side change for a later section (Section 10/12
-  follow-up), as are Calling (Section 12) and Messaging (Section 13).
+* ~~Owner-service enforcement of organization policy~~ — **closed by the Section 12 follow-up**
+  ([org-policy-calling-scope-section-12.md](org-policy-calling-scope-section-12.md)): Meeting
+  create / duplicate / admit and membership-based admission now enforce the same decision this
+  read reports (one evaluator, `workspaces::authoritative_organization_answer`), and per-organization
+  Enterprise Calling administration is gated by `calling.enterprise.manage`. Messaging (Section 13)
+  remains its own owner.
 * Team context (`teams[]` from `memberships/resolve`) is not part of the workspace answer.
 * Production: nothing here is deployed; `ORGANIZATIONS_AUTHORITY_MODE` stays `legacy` by default.
