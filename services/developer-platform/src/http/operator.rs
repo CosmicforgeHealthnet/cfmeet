@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use cf_service_auth::InternalPermission;
-use serde_json::Value;
+use sea_orm::TransactionTrait;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
@@ -21,6 +22,7 @@ use crate::{
         commercial, operator,
         operator::{RegisterFirstParty, SetState},
         organizations,
+        pagination::{Page, PageQuery},
     },
     domain::{current_context, rbac::OrganizationState, RequestContext},
     state::AppState,
@@ -28,7 +30,11 @@ use crate::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/operator/organizations", post(register_first_party))
+        .route(
+            "/operator/organizations",
+            post(register_first_party).get(list_organizations),
+        )
+        .route("/operator/activity", get(operator_activity))
         .route("/operator/organizations/:organization_id", get(overview))
         .route(
             "/operator/organizations/:organization_id/state",
@@ -243,13 +249,24 @@ async fn rebuild_rollups(
     headers: HeaderMap,
     Json(b): Json<RebuildBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let (op, _) = operator_of(&caller, &headers)?;
+    let (op, ctx) = operator_of(&caller, &headers)?;
     let from = crate::control::usage::parse_day(&b.from)?;
     let to = crate::control::usage::parse_day(&b.to)?;
-    tracing::info!(operator = %op, "usage rollups rebuilt from facts");
-    Ok(Json(
-        crate::ledger::rebuild_rollups(&s.db, from, to, b.environment_id).await?,
-    ))
+    let txn = s.db.begin().await?;
+    let out = crate::ledger::rebuild_rollups(&txn, from, to, b.environment_id).await?;
+    operator::audit_command(
+        &txn,
+        &op,
+        &ctx,
+        "usage.rollups_rebuilt",
+        "USAGE_ROLLUPS",
+        &b.environment_id
+            .map_or_else(|| "ALL".to_string(), |e| e.to_string()),
+        json!({ "from": b.from, "to": b.to, "environmentId": b.environment_id }),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(out))
 }
 
 #[derive(serde::Deserialize)]
@@ -264,15 +281,25 @@ async fn backfill_api_operations(
     headers: HeaderMap,
     Json(b): Json<DayBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let (op, _) = operator_of(&caller, &headers)?;
+    let (op, ctx) = operator_of(&caller, &headers)?;
     let before = crate::control::usage::parse_day(&b.day)?;
     if before > chrono::Utc::now().date_naive() {
         return Err(ApiError(ErrorCode::ValidationError));
     }
-    tracing::info!(operator = %op, "historical API_OPERATION usage backfilled");
-    Ok(Json(
-        crate::ledger::backfill_api_operations(&s, before).await?,
-    ))
+    // The backfill commits per environment and is idempotent; it is audited once it
+    // returns (a failure of the audit write fails the request, and a re-run is safe).
+    let out = crate::ledger::backfill_api_operations(&s, before).await?;
+    operator::audit_command(
+        &s.db,
+        &op,
+        &ctx,
+        "usage.api_operations_backfilled",
+        "USAGE_LEDGER",
+        &b.day,
+        json!({ "before": b.day }),
+    )
+    .await?;
+    Ok(Json(out))
 }
 
 async fn reconcile_api_operations(
@@ -294,11 +321,21 @@ async fn reset_stream(
     headers: HeaderMap,
     Path((producer, stream)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let (op, _) = operator_of(&caller, &headers)?;
-    tracing::info!(operator = %op, %producer, %stream, "usage stream watermark reset (backfill)");
-    Ok(Json(
-        crate::ledger::reset_stream(&s.db, &producer, &stream).await?,
-    ))
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    let txn = s.db.begin().await?;
+    let out = crate::ledger::reset_stream(&txn, &producer, &stream).await?;
+    operator::audit_command(
+        &txn,
+        &op,
+        &ctx,
+        "usage.stream_reset",
+        "USAGE_STREAM",
+        &format!("{producer}/{stream}"),
+        json!({ "producer": producer, "stream": stream }),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(out))
 }
 
 #[derive(serde::Deserialize)]
@@ -361,6 +398,84 @@ fn operator_of(
         .ok_or(ApiError(ErrorCode::OperatorRequired))?;
     let ctx = current_context().ok_or(ApiError(ErrorCode::InternalError))?;
     Ok((name.to_string(), ctx))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OrganizationsQuery {
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// Section 15 (PLT-009): operator list / search of organizations (read-only; permission
+/// AND a named operator, like every operator read of audit-grade data).
+async fn list_organizations(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<OrganizationsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    let page = Page::from_query(&PageQuery {
+        limit: q.limit,
+        cursor: q.cursor,
+    })?;
+    let state = q
+        .state
+        .as_deref()
+        .map(|v| OrganizationState::parse(v).ok_or(ApiError(ErrorCode::ValidationError)))
+        .transpose()?;
+    let search = operator::OrganizationSearch {
+        query: q.query,
+        state,
+    };
+    Ok(Json(
+        operator::list_organizations(&s.db, &search, &page).await?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ActivityQuery {
+    #[serde(default)]
+    organization_id: Option<Uuid>,
+    #[serde(default)]
+    operator: Option<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// Section 15 (PLT-009): the operator audit trail (organization-scoped OPERATOR events
+/// and platform-level operator commands), newest first.
+async fn operator_activity(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<ActivityQuery>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    let page = Page::from_query(&PageQuery {
+        limit: q.limit,
+        cursor: q.cursor,
+    })?;
+    let filter = operator::OperatorActivityFilter {
+        organization_id: q.organization_id,
+        operator: q.operator,
+        action: q.action,
+    };
+    Ok(Json(
+        operator::operator_activity(&s.db, &filter, &page).await?,
+    ))
 }
 
 async fn register_first_party(
@@ -435,12 +550,21 @@ async fn publish_plan(
     headers: HeaderMap,
     Json(body): Json<commercial::PublishPlan>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let (op, _) = operator_of(&caller, &headers)?;
-    tracing::info!(operator = %op, "commercial plan version published");
-    Ok((
-        StatusCode::CREATED,
-        Json(commercial::operator_publish_plan(&s.db, body).await?),
-    ))
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    let txn = s.db.begin().await?;
+    let plan = commercial::operator_publish_plan(&txn, body).await?;
+    operator::audit_command(
+        &txn,
+        &op,
+        &ctx,
+        "commercial_plan.published",
+        "COMMERCIAL_PLAN",
+        plan["id"].as_str().unwrap_or_default(),
+        json!({ "code": plan["code"], "version": plan["version"] }),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok((StatusCode::CREATED, Json(plan)))
 }
 
 async fn retire_plan(
@@ -449,7 +573,19 @@ async fn retire_plan(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let (op, _) = operator_of(&caller, &headers)?;
-    tracing::info!(operator = %op, "commercial plan version retired");
-    Ok(Json(commercial::operator_retire_plan(&s.db, id).await?))
+    let (op, ctx) = operator_of(&caller, &headers)?;
+    let txn = s.db.begin().await?;
+    let plan = commercial::operator_retire_plan(&txn, id).await?;
+    operator::audit_command(
+        &txn,
+        &op,
+        &ctx,
+        "commercial_plan.retired",
+        "COMMERCIAL_PLAN",
+        &id.to_string(),
+        json!({}),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(Json(plan))
 }
