@@ -4,7 +4,7 @@
 mod common;
 
 use axum::http::{Method, StatusCode};
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, SubsecRound, TimeZone, Utc};
 use common::{contract::*, *};
 use futures_util::future::join_all;
 use sea_orm::ConnectionTrait;
@@ -207,7 +207,7 @@ async fn cal01_agenda_across_spaces_and_relations() {
     let alice = app.user("alice").await;
     let bob = app.user("bob").await;
     let carol = app.user("carol").await;
-    let soon = Utc::now() + Duration::days(2);
+    let soon = Utc::now().trunc_subsecs(6) + Duration::days(2);
 
     // Bob owns S1.
     let s1 = uuid(
@@ -259,7 +259,14 @@ async fn cal01_agenda_across_spaces_and_relations() {
         )
         .await["id"],
     );
-    let c5 = schedule(&app, &alice, s5, Utc::now() + Duration::minutes(5), None).await;
+    let c5 = schedule(
+        &app,
+        &alice,
+        s5,
+        Utc::now().trunc_subsecs(6) + Duration::minutes(5),
+        None,
+    )
+    .await;
     let c5 = uuid(&c5["id"]);
     let (s, v) = app
         .post(
@@ -278,7 +285,7 @@ async fn cal01_agenda_across_spaces_and_relations() {
     );
     let c6 = schedule(&app, &carol, s6, soon, None).await;
 
-    let from = rfc(Utc::now() - Duration::hours(1));
+    let from = rfc(Utc::now().trunc_subsecs(6) - Duration::hours(1));
     let v = agenda_ok(&app, &bob, &format!("?from={from}")).await;
     let list = items(&v);
     let by_conf = |c: &Value| list.iter().find(|i| i["conferenceId"] == c["id"]).cloned();
@@ -338,7 +345,7 @@ async fn cal02_agenda_rejects_bad_queries() {
         (s, code(&v)),
         (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
     );
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     for q in [
         "?limit=0".to_string(),
         "?limit=201".to_string(),
@@ -390,7 +397,7 @@ async fn cal03_organization_filter_member_vs_outsider() {
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    let soon = Utc::now() + Duration::days(1);
+    let soon = Utc::now().trunc_subsecs(6) + Duration::days(1);
     let all_hands = uuid(&app.create_space(&owner, json!({ "title": "All hands", "accessPolicy": "ORGANIZATION_ONLY", "organizationId": acme })).await["id"]);
     let c_all = schedule(&app, &owner, all_hands, soon, None).await;
     let secret = uuid(
@@ -451,7 +458,7 @@ async fn cal04_agenda_pagination_is_stable() {
     let owner = app.user("owner").await;
     let a = uuid(&app.create_space(&owner, json!({ "title": "A" })).await["id"]);
     let b = uuid(&app.create_space(&owner, json!({ "title": "B" })).await["id"]);
-    let base = (Utc::now() + Duration::days(3))
+    let base = (Utc::now().trunc_subsecs(6) + Duration::days(3))
         .date_naive()
         .and_hms_opt(9, 0, 0)
         .unwrap()
@@ -481,7 +488,14 @@ async fn cal04_agenda_pagination_is_stable() {
         pages += 1;
         if pages == 1 {
             // Rows created before the cursor position never shift later pages.
-            schedule(&app, &owner, a, Utc::now() + Duration::hours(1), None).await;
+            schedule(
+                &app,
+                &owner,
+                a,
+                Utc::now().trunc_subsecs(6) + Duration::hours(1),
+                None,
+            )
+            .await;
         }
         match page["nextCursor"].as_str() {
             Some(c) => cursor = Some(c.to_string()),
@@ -507,12 +521,12 @@ async fn cal05_recurrence_beyond_the_horizon_has_stable_identity() {
         )
         .await["id"],
     );
-    let first = (Utc::now() + Duration::days(1))
+    let first = (Utc::now().trunc_subsecs(6) + Duration::days(1))
         .date_naive()
         .and_hms_opt(10, 0, 0)
         .unwrap();
     set_rule(&app, &owner, sid, "FREQ=WEEKLY;COUNT=16", first, 45).await;
-    let to = rfc(Utc::now() + Duration::days(120));
+    let to = rfc(Utc::now().trunc_subsecs(6) + Duration::days(120));
     let v = agenda_ok(&app, &owner, &format!("?to={to}&limit=200")).await;
     let list = items(&v);
     assert_eq!(list.len(), 16, "all 16 weekly occurrences within 120 days");
@@ -580,7 +594,7 @@ async fn cal05_recurrence_beyond_the_horizon_has_stable_identity() {
     app.state
         .meeting
         .recurrence
-        .materialize_due(Utc::now() + Duration::days(30), 10)
+        .materialize_due(Utc::now().trunc_subsecs(6) + Duration::days(30), 10)
         .await
         .unwrap();
     let v = agenda_ok(&app, &owner, &format!("?to={to}&limit=200")).await;
@@ -623,7 +637,7 @@ async fn cal06_series_edit_keeps_exceptions_and_end_retires_rescheduled() {
         &app.create_space(&owner, json!({ "title": "Daily", "timezone": "UTC" }))
             .await["id"],
     );
-    let first = (Utc::now() + Duration::days(1))
+    let first = (Utc::now().trunc_subsecs(6) + Duration::days(1))
         .date_naive()
         .and_hms_opt(10, 0, 0)
         .unwrap();
@@ -883,7 +897,7 @@ async fn cal07_temporal_matrix_across_zones() {
     );
 
     // Long conference: exactly 24 hours is allowed, longer is not.
-    let start = Utc::now() + Duration::days(5);
+    let start = Utc::now().trunc_subsecs(6) + Duration::days(5);
     let c = schedule(
         &app,
         &owner,
@@ -909,7 +923,7 @@ async fn cal08_cancellation_after_invite_reaches_agenda_and_ics() {
     let host = app.user("host").await;
     let guest = app.user("guest").await;
     let sid = uuid(&app.create_space(&host, json!({ "title": "Consult", "timezone": "America/New_York", "accessPolicy": "INVITE_ONLY" })).await["id"]);
-    let start = Utc::now() + Duration::days(4);
+    let start = Utc::now().trunc_subsecs(6) + Duration::days(4);
     let c = schedule(&app, &host, sid, start, Some(start + Duration::minutes(30))).await;
     let cid = uuid(&c["id"]);
     let (s, inv) = app
@@ -968,7 +982,7 @@ async fn cal09_concurrent_reschedule_and_cancel() {
     let owner = app.user("owner").await;
     let sid = uuid(&app.create_space(&owner, json!({ "title": "Race" })).await["id"]);
     for _ in 0..3 {
-        let start = Utc::now() + Duration::days(2);
+        let start = Utc::now().trunc_subsecs(6) + Duration::days(2);
         let c = schedule(&app, &owner, sid, start, Some(start + Duration::hours(1))).await;
         let cid = uuid(&c["id"]);
         let reschedule = app.post(
@@ -1012,7 +1026,7 @@ async fn cal10_reschedule_keeps_end_and_rejects_past_and_stale_versions() {
     let app = app!();
     let owner = app.user("owner").await;
     let sid = uuid(&app.create_space(&owner, json!({ "title": "R" })).await["id"]);
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     // Past starts are rejected on create (5-minute skew tolerance).
     let (s, v) = app
         .post(
@@ -1110,8 +1124,22 @@ async fn cal11_stale_occurrences_expire_and_never_are_canonical() {
         .await;
     let sid = uuid(&space["id"]);
     let code_ = space["meetingCode"].as_str().unwrap().to_string();
-    let next = schedule(&app, &owner, sid, Utc::now() + Duration::days(2), None).await;
-    let stale = schedule(&app, &owner, sid, Utc::now() + Duration::days(1), None).await;
+    let next = schedule(
+        &app,
+        &owner,
+        sid,
+        Utc::now().trunc_subsecs(6) + Duration::days(2),
+        None,
+    )
+    .await;
+    let stale = schedule(
+        &app,
+        &owner,
+        sid,
+        Utc::now().trunc_subsecs(6) + Duration::days(1),
+        None,
+    )
+    .await;
     let stale_id = uuid(&stale["id"]);
     app.db
         .conn
@@ -1144,10 +1172,14 @@ async fn cal11_stale_occurrences_expire_and_never_are_canonical() {
         "{v}"
     );
     let scheduler = backend::workers::ConferenceScheduler::new(app.state.meeting.clone());
-    let tick = scheduler.tick(Utc::now()).await.unwrap();
+    let tick = scheduler.tick(Utc::now().trunc_subsecs(6)).await.unwrap();
     assert_eq!(tick.expired, 1, "{tick:?}");
     assert_eq!(
-        scheduler.tick(Utc::now()).await.unwrap().expired,
+        scheduler
+            .tick(Utc::now().trunc_subsecs(6))
+            .await
+            .unwrap()
+            .expired,
         0,
         "idempotent"
     );
@@ -1173,7 +1205,7 @@ async fn cal11_stale_occurrences_expire_and_never_are_canonical() {
 async fn cal12_summary_views_agree_and_protect_healthcare_schedules() {
     let app = app!();
     let owner = app.user("owner").await;
-    let start = Utc::now() + Duration::days(3);
+    let start = Utc::now().trunc_subsecs(6) + Duration::days(3);
     for (profile, schedule_visible) in [("STANDARD", true), ("HEALTHCARE", false)] {
         let space = app
             .create_space(&owner, json!({ "title": format!("{profile} visit"), "accessPolicy": "PUBLIC", "securityProfile": profile }))
@@ -1245,7 +1277,7 @@ async fn cal13_ics_exports_are_valid_private_and_authorized() {
         .create_space(&owner, json!({ "title": "Weekly review; Q4, ops", "timezone": "America/New_York", "accessPolicy": "PUBLIC_PASSCODE", "passcode": passcode }))
         .await;
     let sid = uuid(&space["id"]);
-    let first = (Utc::now() + Duration::days(1))
+    let first = (Utc::now().trunc_subsecs(6) + Duration::days(1))
         .with_timezone(&chrono_tz::America::New_York)
         .date_naive()
         .and_hms_opt(9, 0, 0)
@@ -1275,7 +1307,7 @@ async fn cal13_ics_exports_are_valid_private_and_authorized() {
         )
         .await;
     assert_eq!(s, StatusCode::OK);
-    let start = Utc::now() + Duration::days(9);
+    let start = Utc::now().trunc_subsecs(6) + Duration::days(9);
     schedule(&app, &owner, sid, start, None).await;
 
     let space_uri = format!("/api/v2/meeting-spaces/{sid}/calendar.ics");
@@ -1395,7 +1427,7 @@ async fn cal14_healthcare_titles_hidden_from_non_managers() {
         .create_space(&clinician, json!({ "title": "Oncology follow-up", "securityProfile": "HEALTHCARE", "accessPolicy": "INVITE_ONLY" }))
         .await;
     let sid = uuid(&space["id"]);
-    let start = Utc::now() + Duration::days(2);
+    let start = Utc::now().trunc_subsecs(6) + Duration::days(2);
     let c = schedule(
         &app,
         &clinician,
@@ -1583,7 +1615,7 @@ async fn cal15_idempotent_space_and_conference_creation() {
     // Expired records are purged by the scheduler.
     app.db.conn.execute_unprepared("UPDATE meeting_idempotency_keys SET created_at = now() - interval '2 days', expires_at = now() - interval '1 day'").await.unwrap();
     backend::workers::ConferenceScheduler::new(app.state.meeting.clone())
-        .tick(Utc::now())
+        .tick(Utc::now().trunc_subsecs(6))
         .await
         .unwrap();
     assert_eq!(
@@ -1617,7 +1649,7 @@ async fn cal16_space_list_paginates_without_changing_the_legacy_list() {
         &app,
         &member_of,
         shared,
-        Utc::now() + Duration::days(1),
+        Utc::now().trunc_subsecs(6) + Duration::days(1),
         None,
     )
     .await;
