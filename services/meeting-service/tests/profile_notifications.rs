@@ -187,7 +187,9 @@ async fn s9_profile_reads_updates_clears_and_validates() {
     assert_eq!(profile(&app, &ada).await["displayName"], "Ada Lovelace");
 
     // Username: unique, trimmed, same rule as registration.
-    let taken = profile(&app, &other).await["username"].clone();
+    let taken = format!("taken_{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (s, v) = patch_profile(&app, &other, json!({ "username": taken })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
     let (s, v) = patch_profile(&app, &ada, json!({ "username": taken })).await;
     assert_eq!((s, code(&v)), (StatusCode::CONFLICT, "USERNAME_TAKEN"));
     let fresh = format!("ada_{}", &Uuid::new_v4().simple().to_string()[..8]);
@@ -264,31 +266,19 @@ async fn s9_v1_profile_uses_the_registration_rule_and_one_status_rendering() {
 
 #[tokio::test]
 async fn s9_display_name_is_what_other_people_see() {
-    let app = some!(TestApp::new().await);
+    let app = some!(TestApp::collab().await);
     let host = app.user("host").await;
     let (s, _) = patch_profile(&app, &host, json!({ "displayName": "Dr Ada" })).await;
     assert_eq!(s, StatusCode::OK);
-    let space = app
-        .create_space(
+    let (_, cid) = app
+        .live_conference(
             &host,
             json!({ "title": "Clinic prep", "accessPolicy": "PUBLIC" }),
         )
         .await;
-    let sid = uuid(&space["id"]);
-    let (s, c) = app
-        .post(
-            format!("/api/v2/meeting-spaces/{sid}/conferences"),
-            Auth::Bearer(&host.token),
-            json!({}),
-        )
-        .await;
-    assert_eq!(s, StatusCode::CREATED, "{c}");
-    let cid = uuid(&c["id"]);
+    // An anonymous visitor of the public meeting sees the chosen display name.
     let (s, v) = app
-        .get(
-            format!("/api/v2/conferences/{cid}/pre-join"),
-            Auth::Bearer(&host.token),
-        )
+        .get(format!("/api/v2/conferences/{cid}/pre-join"), Auth::None)
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["organizer"]["displayName"], "Dr Ada", "{v}");

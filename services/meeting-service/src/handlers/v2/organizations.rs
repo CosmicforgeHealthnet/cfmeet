@@ -881,12 +881,6 @@ pub async fn create_organization_invitation(
         let delivery = match (ctx.config.email_enabled, budget_ok, token, invitee) {
             (false, _, _, _) => EmailDelivery::Disabled,
             (true, true, Some(token), Some(to)) => {
-                let organization = <organizations::Entity as sea_orm::EntityTrait>::find_by_id(id)
-                    .one(&state.db)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|o| o.name);
                 let expires_at = reply.body["expiresAt"]
                     .as_str()
                     .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
@@ -899,7 +893,7 @@ pub async fn create_organization_invitation(
                     &ctx,
                     &inviter,
                     &to,
-                    organization.as_deref(),
+                    id,
                     reply.body["role"].as_str().unwrap_or("MEMBER"),
                     &token,
                     expires_at,

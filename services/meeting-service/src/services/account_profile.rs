@@ -141,6 +141,11 @@ pub fn locale(raw: &str) -> Result<String, Invalid> {
     Ok(out.join("-"))
 }
 
+/// The account record behind the profile.
+pub async fn load<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<Option<users::Model>> {
+    Ok(users::Entity::find_by_id(user_id).one(db).await?)
+}
+
 /// Records that the address was proven (verification code or Google) once.
 pub async fn mark_email_verified<C: ConnectionTrait>(conn: &C, user_id: Uuid) -> ApiResult<()> {
     conn.execute(Statement::from_sql_and_values(

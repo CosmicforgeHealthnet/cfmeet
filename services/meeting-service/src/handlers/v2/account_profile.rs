@@ -1,7 +1,6 @@
 //! Personal account profile (Blueprint v1.0 Section 9: ACC-021, ACC-022, DATA-016).
 
 use axum::{extract::State, Json};
-use sea_orm::EntityTrait;
 use serde::{Deserialize, Deserializer};
 use utoipa::ToSchema;
 
@@ -70,8 +69,7 @@ pub async fn get_my_profile(
     actor: ActorContext,
 ) -> ApiResult<Json<AccountProfile>> {
     let user = actor.require_registered()?;
-    let record = crate::models::users::Entity::find_by_id(user.user_id)
-        .one(&state.db)
+    let record = profile::load(&state.db, user.user_id)
         .await?
         .ok_or_else(signed_out)?;
     Ok(Json(AccountProfile::of(

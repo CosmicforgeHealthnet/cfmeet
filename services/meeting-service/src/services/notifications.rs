@@ -530,7 +530,7 @@ pub async fn send_organization_invitation(
     ctx: &NotificationContext,
     inviter_name: &str,
     to_email: &str,
-    organization_name: Option<&str>,
+    organization_id: Uuid,
     role: &str,
     token: &str,
     expires_at: Option<DateTime<Utc>>,
@@ -546,7 +546,15 @@ pub async fn send_organization_invitation(
     if account.as_ref().is_some_and(|a| !a.eligible()) {
         return EmailDelivery::Accepted;
     }
+    // The read-only organization projection (refreshed from Organizations); never written here.
+    let organization_name = crate::models::organizations::Entity::find_by_id(organization_id)
+        .one(&ctx.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|o| o.name);
     let org = organization_name
+        .as_deref()
         .map(|n| clean(n, 120))
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "an organization".into());
