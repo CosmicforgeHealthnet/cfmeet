@@ -53,6 +53,7 @@ impl Sandbox {
             "meeting-service",
             "messaging",
             "numbering",
+            "organizations",
             "platform-access",
             "privacy-relay",
             "sms-gateway",
@@ -300,6 +301,17 @@ fn part_vi_contracts_require_their_services() {
             &format!("owner `{service}` is not an existing deployable service"),
         );
     }
+}
+
+#[test]
+fn organizations_contracts_require_the_organizations_service() {
+    // Blueprint Sections 3-5: the Organizations contract exists only with services/organizations.
+    let s = Sandbox::new();
+    fs::remove_dir_all(s.repo.join("services/organizations")).unwrap();
+    assert_rejected(
+        &s.run(),
+        "owner `organizations` is not an existing deployable service",
+    );
 }
 
 #[test]
