@@ -82,6 +82,56 @@ jobs:
         run: python3 scripts/secret-scan/scan_secrets.py
 
 
+  # SEC-016: alert rules and Alertmanager routing as code (infra/monitoring). Lives here
+  # because a metric rename in services/** must re-run the metric-existence check.
+  # Official images pinned by digest; promtool / amtool only, nothing is started or
+  # deployed and no receiver is contacted.
+  monitoring-rules:
+    name: monitoring alert rules
+    runs-on: ubuntu-latest
+    env:
+      PROMETHEUS_IMAGE: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+      ALERTMANAGER_IMAGE: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Repository policy: severity / approval labels, APPROVAL REQUIRED annotations,
+      # runbook links that resolve, every expr metric exported by services/*/src, every
+      # critical alert unit-tested, no URL / key / token in the Alertmanager config.
+      - name: alert policy checker (mutation tests + gate)
+        run: |
+          python3 -m unittest discover -s scripts/monitoring -v
+          python3 scripts/monitoring/check_alert_rules.py
+
+      - name: promtool check rules
+        run: |
+          docker run --rm -v "$PWD/infra/monitoring:/monitoring:ro" -w /monitoring \
+            --entrypoint /bin/sh "$PROMETHEUS_IMAGE" -c 'promtool check rules prometheus/rules/*.rules.yml'
+
+      - name: promtool test rules
+        run: |
+          docker run --rm -v "$PWD/infra/monitoring:/monitoring:ro" -w /monitoring \
+            --entrypoint /bin/sh "$PROMETHEUS_IMAGE" -c 'promtool test rules prometheus/tests/*.test.yml'
+
+      # The example scrape config reads the meeting-service internal token from a file;
+      # an EMPTY placeholder is mounted there so the config (and every rule file it
+      # loads) is checked without any token existing.
+      - name: promtool check config (example)
+        run: |
+          : > "$RUNNER_TEMP/empty-placeholder"
+          docker run --rm -v "$PWD/infra/monitoring:/monitoring:ro" -w /monitoring \
+            -v "$RUNNER_TEMP/empty-placeholder:/etc/prometheus/secrets/meeting-service-internal-api:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" check config prometheus/prometheus.example.yml
+
+      - name: amtool check-config
+        run: |
+          docker run --rm -v "$PWD/infra/monitoring:/monitoring:ro" -w /monitoring \
+            --entrypoint amtool "$ALERTMANAGER_IMAGE" check-config alertmanager/alertmanager.yml
+
   database-isolation:
     name: per-service database roles
     runs-on: ubuntu-latest

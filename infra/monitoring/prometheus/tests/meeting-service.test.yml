@@ -1,0 +1,351 @@
+# promtool unit tests for ../rules/meeting-service.rules.yml (SEC-016).
+# Run: promtool test rules infra/monitoring/prometheus/tests/*.test.yml
+#
+# Every critical alert has a firing and a non-firing case; the APPROVAL REQUIRED warning
+# MeetingJoinLatencyP95High is covered as well. Counter series grow by a fixed amount per
+# minute ('0+5x30' = 0, 5, 10, ... for 30 minutes). Expected annotations must match the
+# rule file exactly (promtool compares them).
+
+rule_files:
+  - ../rules/meeting-service.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ------------------------------------------------------------------ MeetingServiceUnavailable
+  - name: target down for longer than 2 minutes pages; shorter does not
+    interval: 1m
+    input_series:
+      - series: 'up{job="meeting-service", instance="ms-1"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MeetingServiceUnavailable
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MeetingServiceUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+              job: meeting-service
+              instance: ms-1
+            exp_annotations:
+              summary: "meeting-service metrics endpoint unreachable for 2 minutes"
+              description: "Prometheus cannot scrape meeting-service /internal/metrics (process down, unreachable, or INTERNAL_API_TOKEN mismatch answering 404). Nearest available signal for the runbook condition 'Database unavailable': /health does not check PostgreSQL and no metric counts 503 SERVICE_UNAVAILABLE, so a database outage alone is not visible in the exposition."
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#join-failures"
+
+  - name: healthy target does not page
+    interval: 1m
+    input_series:
+      - series: 'up{job="meeting-service", instance="ms-1"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MeetingServiceUnavailable
+        exp_alerts: []
+
+  # ------------------------------------------------------------------ MeetingJoinSuccessRateLow
+  - name: join success rate 50 % (timeouts) fires; denials do not count
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_success_total'
+        values: '0+5x30'
+      - series: 'meeting_join_failure_total{outcome="timeout"}'
+        values: '0+5x30'
+      - series: 'meeting_join_failure_total{outcome="denied"}'
+        values: '0+50x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MeetingJoinSuccessRateLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "Join success rate below the starting-point target (90 % for 5 minutes)"
+              description: "Successful joins divided by successful plus failed joins (provider_failure, timeout, client_failure). Denials and waiting-room outcomes are excluded from the SLI, as the runbook requires. No traffic yields no alert."
+              threshold_status: "APPROVAL REQUIRED: starting point from 14-operational-runbook.md §84 (< 90 % for 5 min), not an approved SLA"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#join-failures"
+
+  - name: join success rate 95 % with many denials does not fire
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_success_total'
+        values: '0+100x30'
+      - series: 'meeting_join_failure_total{outcome="denied"}'
+        values: '0+100x30'
+      - series: 'meeting_join_failure_total{outcome="waiting"}'
+        values: '0+100x30'
+      - series: 'meeting_join_failure_total{outcome="timeout"}'
+        values: '0+5x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MeetingJoinSuccessRateLow
+        exp_alerts: []
+
+  - name: no join traffic does not fire
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_success_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MeetingJoinSuccessRateLow
+        exp_alerts: []
+
+  # ------------------------------------------------------- MeetingRtcProviderUnavailableForJoins
+  - name: provider failures dominate join outcomes
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_success_total'
+        values: '0+1x30'
+      - series: 'meeting_join_failure_total{outcome="provider_failure"}'
+        values: '0+9x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MeetingRtcProviderUnavailableForJoins
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "RTC_PROVIDER_UNAVAILABLE dominates join outcomes"
+              description: "More than half of non-denied join attempts end with provider_failure (RTC_PROVIDER_UNAVAILABLE) for 5 minutes. Check cfmeet_rtc_provider_errors_total and LiveKit reachability."
+              threshold_status: "APPROVAL REQUIRED: 14-operational-runbook.md §84 gives no value; 50 % share for 5 min is a repository placeholder for 'dominate', not an approved SLA"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#livekit-outage"
+
+  - name: occasional provider failures do not fire
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_success_total'
+        values: '0+9x30'
+      - series: 'meeting_join_failure_total{outcome="provider_failure"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MeetingRtcProviderUnavailableForJoins
+        exp_alerts: []
+
+  # --------------------------------------------------------- MeetingConferenceTerminationFailing
+  - name: room termination failing continuously fires
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_room_terminate_failures_total'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingConferenceTerminationFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "Provider room termination failing for 10 minutes (conferences stay ENDING)"
+              description: "Nearest available signal for the runbook condition 'Large stuck ENDING backlog': the count of conference_sessions in ENDING is SQL-only and not exported. Continuous room termination failures keep conferences in ENDING (the reconciler never marks ENDED without confirmed absence)."
+              threshold_status: "APPROVAL REQUIRED: 14-operational-runbook.md §84 asks for an approved ENDING-older-than-10-min count; this proxy (any termination failure sustained for 10 min) is a repository placeholder"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#stuck-ending-conference"
+
+  - name: a short burst of termination failures does not fire
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_room_terminate_failures_total'
+        values: '0+1x4 4x36'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingConferenceTerminationFailing
+        exp_alerts: []
+
+  # ---------------------------------------------------------- MeetingOutboxDeadLettersIncreasing
+  - name: dead letters increasing for 10 minutes fires
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_outbox_dead_lettered_total'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingOutboxDeadLettersIncreasing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "Outbox dead letters increasing for 10 minutes"
+              description: "outbox_events rows keep moving to FAILED (dead letter). Inspect them before any re-queue."
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#outbox-backlog"
+
+  - name: a single dead letter does not page
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_outbox_dead_lettered_total'
+        values: '0x3 1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingOutboxDeadLettersIncreasing
+        exp_alerts: []
+
+  # --------------------------------------------------------- MeetingOutboxRetriesWithoutProgress
+  - name: outbox retrying while nothing is published fires
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_outbox_retried_total'
+        values: '0+2x40'
+      - series: 'cfmeet_rtc_outbox_published_total'
+        values: '5x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingOutboxRetriesWithoutProgress
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "Outbox retrying without publishing anything for 10 minutes"
+              description: "Nearest available signal for 'PENDING older than 5 min growing': the PENDING backlog is SQL-only (it is in the JSON /internal/rtc/metrics, not in the Prometheus exposition). A stopped relay (no retries, no publishes) is not detectable from counters; use the runbook SQL."
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#outbox-backlog"
+
+  - name: retries while publishing continues do not fire
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_outbox_retried_total'
+        values: '0+2x40'
+      - series: 'cfmeet_rtc_outbox_published_total'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingOutboxRetriesWithoutProgress
+        exp_alerts: []
+
+  # ------------------------------------------------------------ MeetingRecordingFailureRatioHigh
+  - name: half of recordings failing fires
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_ops_recording_requested_total'
+        values: '0+4x120'
+      - series: 'cfmeet_ops_recording_failed_total'
+        values: '0+2x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MeetingRecordingFailureRatioHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "Systemic recording / storage failure: recording_failed / recording_requested above 25 % over 1 hour"
+              description: "Critical only where recording is business-critical (runbook §84); the owner may demote it to warning. No requests in the window yields no alert."
+              threshold_status: "APPROVAL REQUIRED: 14-operational-runbook.md §84 gives no value; 25 % over 1 h for 15 min is a repository placeholder, not an approved SLA"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#recording-failure"
+
+  - name: ten percent of recordings failing does not fire
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_ops_recording_requested_total'
+        values: '0+10x120'
+      - series: 'cfmeet_ops_recording_failed_total'
+        values: '0+1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MeetingRecordingFailureRatioHigh
+        exp_alerts: []
+
+  # ------------------------------------------- MeetingJoinLatencyP95High (APPROVAL REQUIRED)
+  - name: join p95 latency near 5 s fires
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_latency_seconds_bucket{le="1"}'
+        values: '0x30'
+      - series: 'meeting_join_latency_seconds_bucket{le="5"}'
+        values: '0+10x30'
+      - series: 'meeting_join_latency_seconds_bucket{le="+Inf"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingJoinLatencyP95High
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "Join p95 latency above 3 seconds for 10 minutes"
+              description: "p95 of join request to credential issued (meeting_join_latency_seconds). Compare with meeting_join_media_latency_seconds to separate API from media-path problems."
+              threshold_status: "APPROVAL REQUIRED: 14-operational-runbook.md §84 gives no value; p95 > 3 s for 10 min is a repository placeholder, not an approved SLA"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#join-failures"
+
+  - name: join p95 latency under 1 s does not fire
+    interval: 1m
+    input_series:
+      - series: 'meeting_join_latency_seconds_bucket{le="1"}'
+        values: '0+10x30'
+      - series: 'meeting_join_latency_seconds_bucket{le="5"}'
+        values: '0+10x30'
+      - series: 'meeting_join_latency_seconds_bucket{le="+Inf"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingJoinLatencyP95High
+        exp_alerts: []
+
+  # ------------------------------------------------- MeetingRtcDriftEscalated (any in 1 hour)
+  - name: one drift escalation warns for an hour, then clears
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_drift_escalated_total'
+        values: '0x10 1x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingRtcDriftEscalated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "Provider drift escalated in the last hour"
+              description: "The reconciler found drift it must not guess about (for example a cf-* room with no conference). Manual action only after confirming in PostgreSQL."
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#orphan-rtc-room"
+      - eval_time: 80m
+        alertname: MeetingRtcDriftEscalated
+        exp_alerts: []
+
+  # --------------------------------------------------------------------- MeetingRealtimeDegraded
+  - name: sustained websocket resyncs warn
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_ws_resync_required_total'
+        values: '0+1x40'
+      - series: 'cfmeet_collab_reactions_dropped_total'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingRealtimeDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: required
+              service: meeting-service
+            exp_annotations:
+              summary: "WebSocket resyncs or dropped reactions sustained for 15 minutes (Redis fanout degraded)"
+              description: "resync_required is sent when a client cannot resume gap-free; reactions are dropped when Redis fanout is unavailable. REST and PostgreSQL authority are unaffected."
+              threshold_status: "APPROVAL REQUIRED: the 15 min duration is from 14-operational-runbook.md §84; the spike magnitude is not stated, so any sustained rate is a repository placeholder"
+              runbook_url: "docs/phase2-certification/14-operational-runbook.md#redis-outage"
+
+  - name: quiet realtime counters do not warn
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_rtc_ws_resync_required_total'
+        values: '3x40'
+      - series: 'cfmeet_collab_reactions_dropped_total'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MeetingRealtimeDegraded
+        exp_alerts: []
