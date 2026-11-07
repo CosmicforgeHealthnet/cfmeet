@@ -24,6 +24,14 @@ Sections 6–7 routes (contract §8): teams and team members, `GET/PATCH …/pol
 `GET …/policies/effective`, `GET …/roles/capabilities`, `POST /internal/v1/organizations/scopes/resolve`
 and `POST /internal/v1/admin/organizations/{id}/provisioning/retry`.
 
+Section 12 follow-up (contract §8.5, 1.2.0; CAL-007 / ORG-012 / CAL-009):
+`GET` / `PUT` / `DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling`
+(`organization.administer`) record the Platform Access service account and credential **ids**
+an operator created inside the organization's own triple for Enterprise Calling;
+`scopes/resolve` answers them as `serviceBindings.calling` (`null` when none). Organizations
+never stores a credential value and never verifies the ids — Platform Access re-verifies the
+credential against the triple on every forwarded request.
+
 The registry in `packages/service-auth/src/permissions.rs` refuses any trust bundle that
 grants these elsewhere.
 

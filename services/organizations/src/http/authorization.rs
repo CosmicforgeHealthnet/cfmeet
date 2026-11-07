@@ -331,6 +331,17 @@ pub async fn resolve_scope(
     let Some(m) = mapping.filter(|_| ready) else {
         return Err(ApiError::new(ErrorCode::ProvisioningPending));
     };
+    // Section 12 follow-up (§8.5): the operator-recorded Calling binding inside this
+    // triple, ids only (`null` when none). Platform Access re-verifies it at use.
+    let calling = super::bindings::binding(
+        &state.db,
+        org.id,
+        capability,
+        super::bindings::CALLING,
+        false,
+    )
+    .await?
+    .map(|b| b.to_resolve_json());
     Ok(respond(
         StatusCode::OK,
         json!({
@@ -341,6 +352,7 @@ pub async fn resolve_scope(
             "environmentId": m.environment_id,
             "mappingVersion": m.mapping_version,
             "verifiedAt": m.verified_at.map(store::rfc3339),
+            "serviceBindings": { "calling": calling },
         }),
     ))
 }

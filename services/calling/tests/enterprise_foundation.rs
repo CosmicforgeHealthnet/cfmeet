@@ -113,6 +113,9 @@ async fn policies_are_typed_versioned_and_audited() {
             record["actorCredentialId"],
             e.admin.credential.id.to_string()
         );
+        // A customer credential acts for no human member (CAL-007: only organization-
+        // forwarded requests name one).
+        assert!(record["actorPrincipalId"].is_null());
         assert!(record["requestId"].as_str().unwrap().starts_with("req_"));
         assert!(!record["correlationId"].as_str().unwrap().is_empty());
         assert_eq!(record["resourceType"], "CALL_POLICY");

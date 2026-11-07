@@ -52,6 +52,7 @@ async fn migrations_apply_roll_back_and_reapply_and_own_only_organization_tables
         "organization_import_runs",
         "organization_platform_scopes",
         "organization_provisioning",
+        "organization_scope_service_bindings",
     ] {
         assert!(
             names.iter().any(|n| n == expected),

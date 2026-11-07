@@ -465,6 +465,30 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
 
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
+### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
+
+`CALLING_ORGANIZATION_FORWARDING_ENABLED` (`true` / `false`, **default `false`**). When
+on, customer routes accept a third authentication path next to the bearer credential and
+the API Gateway forward: a service token from the Meeting Service holding
+`calling-request.act-for-organization` (grantable only to the Meeting Service, sensitive;
+the issuer identity is checked as well as the grant). Its signed delegated context must
+name the organization's Calling credential (id only — Platform Access re-verifies it live
+through `/internal/v1/credentials/delegated-authority`, exactly like a gateway forward)
+and a `NATIVE_CF_USER` acting principal. Calling then requires a FIRST_PARTY tenant with
+the reserved organization slug `org-<32 hex>` (defence in depth; the Organizations
+mapping and Platform Access stay the authority) and resolves the principal, ACTIVE and
+`NATIVE_CF_USER`, inside the credential's tenant / application / environment. The
+principal is recorded on enterprise administrative audit rows (`actorPrincipalId`,
+migration `m20261201_000048_enterprise_audit_acting_principal`) so `/v1/enterprise/audit`
+names the human. Refusals are the normalized 401 (`forward_not_permitted`,
+`delegated_credential_missing`, `acting_principal_missing`, `not_organization_scope`,
+`acting_principal_out_of_scope` in the operator log); an unreachable authority is 503.
+With the flag off, the Meeting Service's token is refused like any non-gateway issuer.
+
+Enabling it is a release step: Calling's trust bundle must grant the Meeting Service
+`calling-request.act-for-organization`, and each organization needs an operator-created
+Calling service account + credential in its dedicated scope.
+
 ## Identity (owned by Platform Access, ADR 0032)
 
 Since Part IV the platform identity hierarchy is owned by **Platform Access**

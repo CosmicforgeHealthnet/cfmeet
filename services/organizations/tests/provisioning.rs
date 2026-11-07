@@ -672,3 +672,189 @@ async fn split_brain_mappings_and_drift_are_refused_and_reported() {
         .expect_error(409, "PROVISIONING_PENDING");
     assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = 'scope.mapping_changed' AND organization_id = '{a}' AND payload->'payload'->>'mappingState' = 'FAILED'")).await, 1);
 }
+
+// ---------------------------------------------------------------------------------------
+// Section 12 follow-up (§8.5): the per-organization Calling service binding
+// ---------------------------------------------------------------------------------------
+
+fn binding_path(org: &str) -> String {
+    format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/calling")
+}
+
+async fn put_binding(h: &Harness, org: &str, body: Value) -> common::Response {
+    h.by(&h.peers.operator)
+        .send(axum::http::Method::PUT, &binding_path(org), Some(body))
+        .await
+}
+
+async fn delete_binding(h: &Harness, org: &str) -> common::Response {
+    h.by(&h.peers.operator)
+        .send(axum::http::Method::DELETE, &binding_path(org), None)
+        .await
+}
+
+#[tokio::test]
+async fn calling_binding_is_operator_only_versioned_audited_and_carried_by_resolve() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let pa = FakePlatformAccess::default();
+    let owner = Uuid::new_v4();
+    let org = s(&h.create_org(owner, "bind-a").await["id"]);
+    let (sa, cred) = (Uuid::new_v4(), Uuid::new_v4());
+    let body = json!({ "serviceAccountId": sa, "credentialId": cred });
+
+    // No recorded triple yet: refused; unknown organization: non-enumerating 404.
+    put_binding(&h, &org, body.clone())
+        .await
+        .expect_error(409, "PROVISIONING_PENDING");
+    put_binding(&h, &Uuid::new_v4().to_string(), body.clone())
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    let r = run(&h, &pa).await;
+    assert_eq!(r.ready, 1, "{r:?}");
+
+    // READY without a binding: resolve says so explicitly.
+    let v = resolve(&h, &org).await.expect(200).clone();
+    assert_eq!(v["serviceBindings"], json!({ "calling": null }));
+    h.by(&h.peers.operator)
+        .get(&binding_path(&org))
+        .await
+        .expect_error(404, "NOT_FOUND");
+
+    // Only `organization.administer` callers: a read-only service is refused everywhere.
+    h.by(&h.peers.messaging)
+        .send(
+            axum::http::Method::PUT,
+            &binding_path(&org),
+            Some(body.clone()),
+        )
+        .await
+        .expect_error(403, "INTERNAL_PERMISSION_DENIED");
+    h.by(&h.peers.messaging)
+        .get(&binding_path(&org))
+        .await
+        .expect_error(403, "INTERNAL_PERMISSION_DENIED");
+    h.by(&h.peers.messaging)
+        .send(axum::http::Method::DELETE, &binding_path(&org), None)
+        .await
+        .expect_error(403, "INTERNAL_PERMISSION_DENIED");
+
+    // Strict bodies.
+    for bad in [
+        json!({ "serviceAccountId": sa }),
+        json!({ "serviceAccountId": sa, "credentialId": cred, "secret": "x" }),
+        json!({ "serviceAccountId": Uuid::nil(), "credentialId": cred }),
+        json!({ "serviceAccountId": sa, "credentialId": cred, "expectedVersion": -1 }),
+    ] {
+        put_binding(&h, &org, bad)
+            .await
+            .expect_error(400, "VALIDATION_ERROR");
+    }
+
+    // Create (expectedVersion 0 = none yet) with the relayed operator recorded as `boundBy`.
+    let operator = Uuid::new_v4();
+    let created = h
+        .by(&h.peers.meeting)
+        .actor(operator)
+        .send(
+            axum::http::Method::PUT,
+            &binding_path(&org),
+            Some(json!({ "serviceAccountId": sa, "credentialId": cred, "expectedVersion": 0 })),
+        )
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(created["version"], 1);
+    assert_eq!(created["service"], "calling");
+    assert_eq!(created["capability"], "primary");
+    assert_eq!(uuid(&created["boundBy"]), operator);
+    assert_eq!(uuid(&created["serviceAccountId"]), sa);
+    assert_eq!(uuid(&created["credentialId"]), cred);
+    // Idempotent repeat: same version, no second audit row.
+    let again = put_binding(&h, &org, body.clone())
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(again["version"], 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_audit_events WHERE action = 'scope.service_binding_set' AND organization_id = '{org}'")).await, 1);
+    // Stale expectedVersion.
+    put_binding(
+        &h,
+        &org,
+        json!({ "serviceAccountId": sa, "credentialId": Uuid::new_v4(), "expectedVersion": 0 }),
+    )
+    .await
+    .expect_error(409, "VERSION_CONFLICT");
+    // Replace (credential rotation).
+    let cred2 = Uuid::new_v4();
+    let replaced = put_binding(
+        &h,
+        &org,
+        json!({ "serviceAccountId": sa, "credentialId": cred2, "expectedVersion": 1 }),
+    )
+    .await
+    .expect(200)
+    .clone();
+    assert_eq!(replaced["version"], 2);
+    assert_eq!(
+        h.by(&h.peers.operator)
+            .get(&binding_path(&org))
+            .await
+            .expect(200)["credentialId"],
+        json!(cred2)
+    );
+    let v = resolve(&h, &org).await.expect(200).clone();
+    assert_eq!(
+        v["serviceBindings"]["calling"],
+        json!({ "serviceAccountId": sa, "credentialId": cred2, "version": 2 })
+    );
+    // Audit: ids only, operator actor, one row per real change.
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_audit_events WHERE action = 'scope.service_binding_set' AND organization_id = '{org}' AND actor_kind = 'OPERATOR'")).await, 2);
+
+    // Clear (idempotent); resolve answers null again.
+    assert_eq!(delete_binding(&h, &org).await.expect(200)["removed"], true);
+    assert_eq!(delete_binding(&h, &org).await.expect(200)["removed"], false);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_audit_events WHERE action = 'scope.service_binding_cleared' AND organization_id = '{org}'")).await, 1);
+    assert_eq!(
+        resolve(&h, &org).await.expect(200)["serviceBindings"],
+        json!({ "calling": null })
+    );
+
+    // A suspended organization's resolve is refused whatever the binding says.
+    put_binding(&h, &org, body.clone()).await.expect(200);
+    h.user(owner)
+        .post(
+            &format!("/internal/v1/organizations/{org}/suspend"),
+            json!({}),
+        )
+        .await
+        .expect(200);
+    resolve(&h, &org)
+        .await
+        .expect_error(409, "ORGANIZATION_SUSPENDED");
+
+    // An archived organization accepts no new binding; clearing stays possible.
+    h.user(owner)
+        .post(
+            &format!("/internal/v1/organizations/{org}/archive"),
+            json!({}),
+        )
+        .await
+        .expect(200);
+    put_binding(
+        &h,
+        &org,
+        json!({ "serviceAccountId": sa, "credentialId": Uuid::new_v4() }),
+    )
+    .await
+    .expect_error(409, "ORGANIZATION_ARCHIVED");
+    assert_eq!(delete_binding(&h, &org).await.expect(200)["removed"], true);
+    // The schema refuses an unknown service outright.
+    assert!(h
+        .exec(&format!(
+            "INSERT INTO organization_scope_service_bindings (organization_id, service, service_account_id, credential_id, created_at, updated_at) VALUES ('{org}', 'messaging', gen_random_uuid(), gen_random_uuid(), now(), now())"
+        ))
+        .await
+        .is_err());
+}

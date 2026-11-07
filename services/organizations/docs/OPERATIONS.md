@@ -81,6 +81,30 @@ Operator retry (idempotent; READY / in-flight workflows unchanged; archived refu
 POST /internal/v1/admin/organizations/{id}/provisioning/retry     (organization.administer)
 ```
 
+## Calling service binding (Section 12 follow-up, contract §8.5)
+
+Per-organization Enterprise Calling needs, inside the organization's READY triple, a
+Platform Access service account with a credential and the Calling scope grants — an explicit
+operator decision made in Platform Access (ADR 0058 §1: provisioning grants nothing). Once it
+exists, record its ids (never the credential value) here:
+
+```
+PUT    /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling
+       {"serviceAccountId": "<uuid>", "credentialId": "<uuid>", "expectedVersion": <current or 0>}
+GET    …/service-bindings/calling        (404 NOT_FOUND = none)
+DELETE …/service-bindings/calling        (idempotent; stops organization calling forwarding at once)
+```
+
+All three need `organization.administer`; changes are audited (`scope.service_binding_set` /
+`scope.service_binding_cleared`, actor `OPERATOR`, relayed operator as `boundBy`). Refusals:
+`PROVISIONING_PENDING` (no recorded triple), `ORGANIZATION_ARCHIVED`, `VERSION_CONFLICT`.
+Rotation = create the new credential in Platform Access, `PUT` the new `credentialId` with the
+current `expectedVersion`, then revoke the old credential. A wrong id cannot widen access:
+Platform Access refuses a credential outside the organization's triple. Rollback of the
+release that adds this: `organizations-migration down 1` drops
+`organization_scope_service_bindings` (bindings are lost; organization calling forwarding is
+off without them).
+
 ## Migration import runbook (Section 4 / 5)
 
 1. Meeting Service produces the read-only export (`export_organizations`; no source write).

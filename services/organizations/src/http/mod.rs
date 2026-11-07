@@ -9,6 +9,7 @@
 //! the error envelope.
 
 pub mod authorization;
+pub mod bindings;
 pub mod invitations;
 pub mod members;
 pub mod middleware;
@@ -161,6 +162,12 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/admin/organizations/:id/provisioning/retry",
             post(organizations::provisioning_retry),
+        )
+        .route(
+            "/admin/organizations/:id/scopes/primary/service-bindings/calling",
+            get(bindings::get_calling)
+                .put(bindings::put_calling)
+                .delete(bindings::delete_calling),
         )
         .route(
             "/migration/import",
@@ -408,6 +415,10 @@ mod tests {
             ("POST", "/internal/v1/organizations/memberships/resolve"),
             ("POST", "/internal/v1/organizations/authorization/evaluate"),
             ("POST", "/internal/v1/migration/import"),
+            (
+                "PUT",
+                "/internal/v1/admin/organizations/00000000-0000-4000-8000-000000000001/scopes/primary/service-bindings/calling",
+            ),
             ("GET", "/internal/v1/no-such-route"),
         ] {
             let response = app

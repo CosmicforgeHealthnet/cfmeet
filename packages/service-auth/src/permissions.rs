@@ -338,6 +338,13 @@ pub enum InternalPermission {
     /// grants, principals or any EXTERNAL tenant.
     #[serde(rename = "platform-identity.provision-first-party")]
     PlatformIdentityProvisionFirstParty,
+    /// Calling (Blueprint Section 12 follow-up, CAL-007): receive a first-party
+    /// organization request the Meeting Service authenticated for a human member. The
+    /// signed delegated context names the organization's Calling credential (id only,
+    /// re-verified live with Platform Access) and the acting member's principal.
+    /// Meeting Service only; FIRST_PARTY organization tenants only.
+    #[serde(rename = "calling-request.act-for-organization")]
+    CallingRequestActForOrganization,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -919,6 +926,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Create or return, verify and suspend / resume the dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment of one first-party organization (opaque organization id); Organizations only, never credentials, verifiers, scope grants or EXTERNAL tenants",
     },
+    PermissionDefinition {
+        permission: InternalPermission::CallingRequestActForOrganization,
+        name: "calling-request.act-for-organization",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Receive a first-party organization request Meeting Service authenticated for a human member: the organization's Calling credential (id only) re-verified live with Platform Access, the acting principal signed in; FIRST_PARTY organization tenants only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1009,6 +1024,7 @@ impl InternalPermission {
         InternalPermission::OrganizationAdminister,
         InternalPermission::OrganizationMigrate,
         InternalPermission::PlatformIdentityProvisionFirstParty,
+        InternalPermission::CallingRequestActForOrganization,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1493,14 +1509,20 @@ mod tests {
             [
                 "organization.act-for-user",
                 "organization.administer",
-                "organization.migrate"
+                "organization.migrate",
+                "calling-request.act-for-organization"
             ]
         );
         for d in REGISTRY
             .iter()
             .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
         {
-            assert_eq!(d.receiver, services::ORGANIZATIONS, "{}", d.name);
+            let expected = if d.permission == CallingRequestActForOrganization {
+                services::CALLING
+            } else {
+                services::ORGANIZATIONS
+            };
+            assert_eq!(d.receiver, expected, "{}", d.name);
         }
         // Identity administration and delegation stay out of reach.
         for p in [PlatformIdentityAdminister, PlatformIdentityDelegate] {
@@ -1575,6 +1597,29 @@ mod tests {
                 .definition()
                 .grantable_to,
             &[services::DEVELOPER_PLATFORM]
+        );
+    }
+
+    #[test]
+    fn organization_calling_forwarding_is_meeting_service_only() {
+        // Blueprint Section 12 follow-up (CAL-007): only the Meeting Service, which
+        // authenticated the human and checked the Organizations capability, may forward a
+        // first-party organization request to Calling; never the API Gateway.
+        let d = InternalPermission::CallingRequestActForOrganization.definition();
+        assert_eq!(
+            (d.name, d.receiver, d.grantable_to, d.sensitive),
+            (
+                "calling-request.act-for-organization",
+                services::CALLING,
+                &[services::MEETING_SERVICE][..],
+                true
+            )
+        );
+        assert_eq!(
+            InternalPermission::CallingRequestForward
+                .definition()
+                .grantable_to,
+            &[services::API_GATEWAY]
         );
     }
 
