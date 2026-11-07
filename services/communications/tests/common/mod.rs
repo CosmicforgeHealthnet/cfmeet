@@ -530,6 +530,7 @@ impl Harness {
                     vec![
                         "communications-user.forward",
                         "communications-account.apply",
+                        "communications-preferences.read",
                     ],
                 ),
                 (

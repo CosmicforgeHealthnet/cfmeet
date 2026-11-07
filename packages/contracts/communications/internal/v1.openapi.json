@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -360,6 +360,104 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PrincipalResolve"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/notification-preferences/resolve": {
+      "post": {
+        "operationId": "resolveNotificationPreferences",
+        "summary": "List the accounts that turned a notification category off",
+        "description": "List the accounts that turned a notification category off (Blueprint Section 11). Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-preferences.read is granted only by the receiving service trust policy and only the Meeting Service may call it. MEETINGS is the meetingInvitations preference (meeting invitation, change and reminder emails). Accounts without a Communications profile or without a stored preference are not listed (the default is enabled). Returns account references only, never preference values, profile data or principals. At most 100 account references per request.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-preferences.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Opted-out account references.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferenceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferenceQuery"
               }
             }
           }
@@ -1300,6 +1398,62 @@
           "requests",
           "denied",
           "eventsDelivered"
+        ]
+      },
+      "NotificationPreferenceQuery": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "MEETINGS"
+            ]
+          },
+          "accountReferences": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        "required": [
+          "category",
+          "accountReferences"
+        ]
+      },
+      "NotificationPreferenceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "MEETINGS"
+            ]
+          },
+          "optedOut": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "category",
+          "optedOut"
         ]
       },
       "PolicyCheck": {

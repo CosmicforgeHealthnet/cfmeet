@@ -83,6 +83,33 @@ pub struct AuthPolicy {
     /// Header set by the trusted reverse proxy with the client address (for example
     /// `x-real-ip`). Unset: per-address limits are off (the proxy address would be shared).
     pub client_ip_header: Option<axum::http::HeaderName>,
+    /// ACC-022: the `status` string of the v1 sign-in responses (register, login, Google
+    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). `ACCOUNT_STATUS_FORMAT=canonical`
+    /// returns the contract value (`pending_verification`); the default `legacy` keeps the
+    /// historical `pendingverification` spelling until every deployed client accepts both.
+    /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
+    pub status_format: AccountStatusFormat,
+}
+
+/// Wire format of the account status on the v1 sign-in responses (ACC-022).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountStatusFormat {
+    /// `pending_verification`, `active`, `inactive`, `suspended` (the contract).
+    Canonical,
+    /// As canonical, except `pendingverification` (the historical v1 spelling).
+    Legacy,
+}
+
+impl AccountStatusFormat {
+    pub fn render(self, status: &crate::models::users::UserStatus) -> &'static str {
+        match (self, status) {
+            (
+                AccountStatusFormat::Legacy,
+                crate::models::users::UserStatus::PendingVerification,
+            ) => "pendingverification",
+            (_, s) => s.as_contract_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,10 +145,20 @@ impl AuthPolicy {
             .map(|h| h.trim().to_ascii_lowercase())
             .filter(|h| !h.is_empty())
             .and_then(|h| axum::http::HeaderName::from_bytes(h.as_bytes()).ok());
+        let status_format = match get("ACCOUNT_STATUS_FORMAT")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "canonical" => AccountStatusFormat::Canonical,
+            _ => AccountStatusFormat::Legacy,
+        };
         Self {
             google_token_delivery,
             google_browser_binding,
             client_ip_header,
+            status_format,
         }
     }
 
@@ -820,6 +857,35 @@ pub async fn list_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_status_format_is_legacy_until_switched() {
+        use crate::models::users::UserStatus;
+        let legacy = AuthPolicy::from_lookup(|_| None).status_format;
+        assert_eq!(legacy, AccountStatusFormat::Legacy);
+        assert_eq!(
+            legacy.render(&UserStatus::PendingVerification),
+            "pendingverification"
+        );
+        assert_eq!(legacy.render(&UserStatus::Active), "active");
+        let canonical = AuthPolicy::from_lookup(|k| {
+            (k == "ACCOUNT_STATUS_FORMAT").then(|| " Canonical ".to_string())
+        })
+        .status_format;
+        assert_eq!(canonical, AccountStatusFormat::Canonical);
+        for s in [
+            UserStatus::PendingVerification,
+            UserStatus::Active,
+            UserStatus::Inactive,
+            UserStatus::Suspended,
+        ] {
+            assert_eq!(canonical.render(&s), s.as_contract_str());
+        }
+        assert_eq!(
+            canonical.render(&UserStatus::PendingVerification),
+            "pending_verification"
+        );
+    }
 
     #[test]
     fn policy_defaults_keep_live_client_compatibility_and_bind_browsers() {

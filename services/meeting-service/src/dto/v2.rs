@@ -17,6 +17,7 @@ use crate::{
         RecurrenceStatus, Role, SecurityProfile, SpaceStatus, TerminationReason, WaitingRoomPolicy,
     },
     services::meeting_permissions::{MediaPermissions, RolePolicy},
+    services::notifications::EmailDelivery,
     services::{realtime::RealtimeEnvelope, rtc_provider::TrackKind},
 };
 
@@ -354,6 +355,9 @@ pub struct CreateInvitationRequest {
     /// Default 168 (7 days); capped by server policy.
     pub expires_in_hours: Option<i64>,
     pub use_limit: Option<i32>,
+    /// Blueprint Section 11: also email the invitation link to `inviteeEmail` (required
+    /// with this flag). The result is reported in `emailDelivery`. Default false.
+    pub send_email: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -377,6 +381,11 @@ pub struct CreateInvitationResponse {
     pub invitation: InvitationResponse,
     /// Raw bearer token. Returned exactly once; only its hash is stored.
     pub token: String,
+    /// Only when `sendEmail` was true: DISABLED (notification email is off on this
+    /// deployment), ACCEPTED (queued, subject to the recipient's notification preferences)
+    /// or FAILED (temporary failure; share the link yourself).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_delivery: Option<EmailDelivery>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -1175,6 +1184,10 @@ pub struct CreateOrganizationInvitationRequest {
     pub email: String,
     /// ADMIN, MANAGER, MEMBER or GUEST.
     pub role: String,
+    /// Blueprint Section 11: also email the invitation link to `email` (default false).
+    /// Handled by this relay; the outcome is reported in `emailDelivery`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_email: Option<bool>,
 }
 
 /// An organization invitation. The raw `token` is returned once, at creation only.
@@ -1194,6 +1207,9 @@ pub struct OrganizationInvitation {
     pub decided_at: Option<DateTime<Utc>>,
     /// One-time invitation token (creation response only; never in URLs or logs).
     pub token: Option<String>,
+    /// Creation with `sendEmail: true` only: DISABLED, ACCEPTED or FAILED.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_delivery: Option<EmailDelivery>,
 }
 
 /// `POST /api/v2/organization-invitations/accept` and `/decline`.

@@ -30,6 +30,10 @@ pub fn app(state: State) -> Router {
             post(resolve_principal),
         )
         .route(
+            "/internal/v1/communications/notification-preferences/resolve",
+            post(crate::preferences::resolve),
+        )
+        .route(
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),
         )

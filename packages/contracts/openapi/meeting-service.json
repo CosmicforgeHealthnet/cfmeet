@@ -2189,7 +2189,7 @@
           "Users"
         ],
         "summary": "Get current authenticated user's information",
-        "description": "Returns the full user profile for the authenticated user.\nRequires authentication via JWT token.",
+        "description": "Returns the full user profile for the authenticated user.\nRequires authentication via JWT token. `status` is `pending_verification`, `active`,\n`inactive` or `suspended`; until `ACCOUNT_STATUS_FORMAT=canonical` is set the unverified\nstate is spelled `pendingverification` (historical v1 value). The full profile (display\nname, avatar, time zone, locale) is `GET /api/v2/me/profile`.",
         "operationId": "get_current_user",
         "responses": {
           "200": {
@@ -2220,7 +2220,7 @@
           "Users"
         ],
         "summary": "Update current authenticated user's profile",
-        "description": "Allows users to update their username. Email, role, status, and password\ncannot be updated through this endpoint.",
+        "description": "Allows users to update their username (3-50 letters, digits or underscores after\nsurrounding spaces are removed: the registration rule). Email, role, status, and password\ncannot be updated through this endpoint. Display name, avatar, time zone and locale are\nchanged with `PATCH /api/v2/me/profile`.",
         "operationId": "update_current_user",
         "requestBody": {
           "content": {
@@ -10659,6 +10659,108 @@
         ]
       }
     },
+    "/api/v2/me/profile": {
+      "get": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Get my profile",
+        "description": "Returns the signed-in account's profile: username, display name, avatar reference, time\nzone, locale, email verification and the canonical account status. The Account is the\nauthority for these fields; the Communications profile shows the same display name and\navatar. Phone verification is not available yet (`PROVIDER_BLOCKED`, never required).",
+        "operationId": "v2_get_my_profile",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Update my profile",
+        "description": "Changes any of username, display name, avatar reference, time zone and locale (send only\nthe fields to change; `null` clears an optional field). The same rules apply as at\nregistration and on `PATCH /api/v1/users/me`. Returns the updated profile. A username that\nbelongs to another account answers `409 USERNAME_TAKEN`.",
+        "operationId": "v2_update_my_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccountProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "USERNAME_TAKEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/sessions": {
       "get": {
         "tags": [
@@ -11664,7 +11766,7 @@
           "Invitations (v2)"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -11699,8 +11801,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -14965,7 +15087,7 @@
           "Organizations (v2)"
         ],
         "summary": "Invite someone to an organization by email.",
-        "description": "Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "description": "Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nWith `sendEmail: true` the invitation link is also emailed to the invitee when notification\nemail is enabled on the deployment (`emailDelivery` reports the outcome; an idempotent replay\nre-issues the token and emails the new link). Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
         "operationId": "v2_create_organization_invitation",
         "parameters": [
           {
@@ -15032,6 +15154,16 @@
           },
           "409": {
             "description": "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15969,6 +16101,86 @@
           }
         },
         "additionalProperties": false
+      },
+      "AccountProfile": {
+        "type": "object",
+        "description": "`GET/PATCH /api/v2/me/profile` representation.",
+        "required": [
+          "userId",
+          "username",
+          "effectiveDisplayName",
+          "email",
+          "emailVerified",
+          "status",
+          "authType",
+          "createdAt",
+          "phoneVerification"
+        ],
+        "properties": {
+          "authType": {
+            "type": "string",
+            "description": "`local` or `google`."
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "`https://` avatar reference (`null` when not set).",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Chosen display name (`null` when not set).",
+            "nullable": true
+          },
+          "effectiveDisplayName": {
+            "type": "string",
+            "description": "What other people see: `displayName`, otherwise `username`."
+          },
+          "email": {
+            "type": "string"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "emailVerifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "locale": {
+            "type": "string",
+            "description": "BCP 47 language tag (`null`: clients use the device language).",
+            "nullable": true
+          },
+          "phoneVerification": {
+            "$ref": "#/components/schemas/PhoneVerificationStatus"
+          },
+          "profileUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Canonical account status: `pending_verification`, `active`, `inactive` or `suspended`.",
+            "example": "active"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone (`null`: clients use the device zone).",
+            "nullable": true
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
       },
       "AccountSessionListResponse": {
         "type": "object",
@@ -18573,6 +18785,11 @@
             ],
             "nullable": true
           },
+          "sendEmail": {
+            "type": "boolean",
+            "description": "Blueprint Section 11: also email the invitation link to `inviteeEmail` (required\nwith this flag). The result is reported in `emailDelivery`. Default false.",
+            "nullable": true
+          },
           "useLimit": {
             "type": "integer",
             "format": "int32",
@@ -18588,6 +18805,14 @@
           "token"
         ],
         "properties": {
+          "emailDelivery": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailDelivery"
+              }
+            ],
+            "nullable": true
+          },
           "invitation": {
             "$ref": "#/components/schemas/InvitationResponse"
           },
@@ -18786,6 +19011,11 @@
           "role": {
             "type": "string",
             "description": "ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "sendEmail": {
+            "type": "boolean",
+            "description": "Blueprint Section 11: also email the invitation link to `email` (default false).\nHandled by this relay; the outcome is reported in `emailDelivery`.",
+            "nullable": true
           }
         }
       },
@@ -19055,6 +19285,15 @@
         },
         "additionalProperties": false
       },
+      "EmailDelivery": {
+        "type": "string",
+        "description": "What happened to a requested invitation email.",
+        "enum": [
+          "DISABLED",
+          "ACCEPTED",
+          "FAILED"
+        ]
+      },
       "EndMeetingApiResponse": {
         "type": "object",
         "description": "API response wrapper for end meeting",
@@ -19213,6 +19452,7 @@
           "INVITATION_REQUIRED",
           "ORGANIZATION_POLICY_RESTRICTED",
           "ORGANIZATION_CALLING_DISABLED",
+          "USERNAME_TAKEN",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -20960,6 +21200,14 @@
             "format": "date-time",
             "nullable": true
           },
+          "emailDelivery": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailDelivery"
+              }
+            ],
+            "nullable": true
+          },
           "expiresAt": {
             "type": "string",
             "format": "date-time"
@@ -21444,6 +21692,23 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "PhoneVerificationStatus": {
+        "type": "object",
+        "description": "Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or\nverification provider is approved, and never required.",
+        "required": [
+          "status",
+          "required"
+        ],
+        "properties": {
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "example": "PROVIDER_BLOCKED"
           }
         }
       },
@@ -23135,7 +23400,8 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`."
           },
           "user_id": {
             "type": "string",
@@ -24493,6 +24759,43 @@
           }
         }
       },
+      "UpdateAccountProfileRequest": {
+        "type": "object",
+        "description": "Fields to change. Omitted fields stay as they are; `null` clears an optional field.",
+        "properties": {
+          "avatarUrl": {
+            "type": "string",
+            "description": "`https://` avatar image reference (at most 512 characters); `null` clears it.",
+            "example": "https://cdn.example.com/avatars/ada.png",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "description": "1-64 characters shown to other people instead of the username; `null` clears it.",
+            "example": "Ada Lovelace",
+            "nullable": true
+          },
+          "locale": {
+            "type": "string",
+            "description": "BCP 47 language tag; `null` clears it.",
+            "example": "en-GB",
+            "nullable": true
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone used to present times to you (for example in notification emails);\n`null` clears it.",
+            "example": "Europe/London",
+            "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "description": "3-50 letters, digits or underscores (surrounding spaces are removed). Unique.",
+            "example": "ada_lovelace",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateAudioRequest": {
         "type": "object",
         "description": "Request to update audio state",
@@ -24565,6 +24868,7 @@
         "properties": {
           "username": {
             "type": "string",
+            "description": "3-50 letters, digits or underscores (validated after trimming, as at registration).",
             "nullable": true
           }
         }
@@ -24830,7 +25134,8 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`."
           },
           "username": {
             "type": "string"
@@ -24863,7 +25168,9 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.",
+            "example": "active"
           },
           "username": {
             "type": "string"
@@ -25389,6 +25696,10 @@
     {
       "name": "Authentication",
       "description": "User authentication endpoints"
+    },
+    {
+      "name": "Account profile (v2)",
+      "description": "Blueprint Section 9: the signed-in user's account profile (username, display name, avatar reference, time zone, locale, email verification and the canonical account status). The Account is the authority; the Communications profile shows the same display name and avatar."
     },
     {
       "name": "Account sessions (v2)",

@@ -221,6 +221,9 @@ async fn migration_certification_synthetic_dataset() {
     migration::MeetingsCalendarMigrator::up(c, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
+        .await
+        .unwrap();
     let mut concurrent = vec![];
     for h in handles {
         concurrent.push(h.await.unwrap());

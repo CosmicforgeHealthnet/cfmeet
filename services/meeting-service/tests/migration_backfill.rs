@@ -206,6 +206,9 @@ async fn m01_backfill_maps_legacy_and_is_idempotent() {
     migration::MeetingsCalendarMigrator::up(c, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
+        .await
+        .unwrap();
 
     let txn = c.begin().await.unwrap();
     let report = phase2_backfill::evidence(&txn, None).await.unwrap();
@@ -305,6 +308,9 @@ async fn m02_rollback_and_reapply() {
     migration::MeetingsCalendarMigrator::up(c, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
+        .await
+        .unwrap();
     let spaces = count(c, "SELECT count(*) FROM meeting_spaces").await;
     // Part VI environment-owned meetings down-migration alone first: only its columns,
     // constraints and outbox channel go (no environment-owned meeting exists here).
@@ -362,6 +368,9 @@ async fn m02_rollback_and_reapply() {
     migration::MeetingsCalendarMigrator::up(c, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
+        .await
+        .unwrap();
     assert_eq!(count(c, main_cursor_index).await, 1, "re-applied");
     // All eight Phase 2 migrations (schema, backfill, organizations, recurrence
     // exceptions, Part E rtc control plane, Part F collaboration, Parts G–I, Part M index)
@@ -376,6 +385,9 @@ async fn m02_rollback_and_reapply() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(c, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
         .await
         .unwrap();
     assert_eq!(
@@ -395,6 +407,9 @@ async fn m03_legacy_conferences_are_legacy_managed() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let app = TestApp::on(db, TestOptions::default());
@@ -488,6 +503,9 @@ async fn m04_legacy_delete_is_reflected() {
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let app = TestApp::on(db, TestOptions::default());
     // Legacy delete only removes scheduled meetings with no children.
     exec(
@@ -513,6 +531,9 @@ async fn m05_v2_conference_in_legacy_space() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let app = TestApp::on(db, TestOptions::default());
@@ -557,6 +578,9 @@ async fn m06_legacy_admit_is_meeting_scoped() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let app = TestApp::on(db, TestOptions::default());
@@ -673,6 +697,9 @@ async fn k_e2e_01_02_05_resolution_code_and_participant_mapping_are_stable() {
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let app = TestApp::on(db, TestOptions::default());
     let c = &app.db.conn;
     let space_by_code = {
@@ -756,6 +783,9 @@ async fn k_e2e_03_04_partial_backfill_resumes_without_duplicates() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let c = &db.conn;
@@ -850,6 +880,9 @@ async fn k_backfill_handles_missing_and_inconsistent_legacy_metadata() {
     migration::MeetingsCalendarMigrator::up(c, None)
         .await
         .unwrap();
+    migration::ProfileNotificationsMigrator::up(c, None)
+        .await
+        .unwrap();
     let txn = c.begin().await.unwrap();
     let report = phase2_backfill::evidence(&txn, None).await.unwrap();
     txn.commit().await.unwrap();
@@ -871,6 +904,9 @@ async fn k_e2e_06_07_v2_writes_are_canonical_and_compat_reads_follow() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let app = TestApp::on(db, TestOptions::default());
@@ -968,6 +1004,9 @@ async fn k_e2e_08_shadow_comparison_detects_injected_mismatch() {
         .await
         .unwrap();
     migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    migration::ProfileNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     let app = TestApp::on(db, TestOptions::default());

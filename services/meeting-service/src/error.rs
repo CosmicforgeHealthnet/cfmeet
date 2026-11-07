@@ -144,6 +144,8 @@ pub enum ErrorCode {
     /// Per-organization Enterprise Calling is not enabled in this deployment
     /// (`ORGANIZATION_CALLING_SCOPE=shared`) or not bound for this organization yet.
     OrganizationCallingDisabled,
+    /// Blueprint Section 9: the requested username belongs to another account.
+    UsernameTaken,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -251,6 +253,7 @@ impl ErrorCode {
             ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
             ErrorCode::OrganizationPolicyRestricted => "ORGANIZATION_POLICY_RESTRICTED",
             ErrorCode::OrganizationCallingDisabled => "ORGANIZATION_CALLING_DISABLED",
+            ErrorCode::UsernameTaken => "USERNAME_TAKEN",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -353,7 +356,8 @@ impl ErrorCode {
             | ErrorCode::IdempotencyConflict
             | ErrorCode::ProvisioningPending
             | ErrorCode::InvitationRequired
-            | ErrorCode::OrganizationCallingDisabled => StatusCode::CONFLICT,
+            | ErrorCode::OrganizationCallingDisabled
+            | ErrorCode::UsernameTaken => StatusCode::CONFLICT,
             ErrorCode::OrganizationPolicyRestricted => StatusCode::FORBIDDEN,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {

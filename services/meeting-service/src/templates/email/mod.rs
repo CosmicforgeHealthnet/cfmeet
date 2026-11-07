@@ -1,4 +1,5 @@
 mod base;
+pub mod meeting;
 mod notification;
 mod password_reset;
 mod verification;

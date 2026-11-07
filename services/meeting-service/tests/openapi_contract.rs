@@ -343,6 +343,9 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/me/sessions/revoke-all"),
         ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
         ("get", "/api/v2/admin/audit-events"),
+        // Blueprint Section 9 — personal account profile
+        ("get", "/api/v2/me/profile"),
+        ("patch", "/api/v2/me/profile"),
     ];
     for (method, path) in expected {
         assert!(

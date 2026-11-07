@@ -41,8 +41,14 @@ async fn limit_by_client(
     Ok(())
 }
 
-fn status_string(user: &users::Model) -> String {
-    format!("{:?}", user.status).to_lowercase()
+/// ACC-022: one rendering of the account status for every v1 sign-in response
+/// (`ACCOUNT_STATUS_FORMAT`, see `AuthPolicy::status_format`).
+fn status_string(state: &AppState, user: &users::Model) -> String {
+    state
+        .auth_policy
+        .status_format
+        .render(&user.status)
+        .to_owned()
 }
 
 /// Uniform answer for the account-recovery endpoints, whether or not an account exists
@@ -121,6 +127,7 @@ pub async fn register(
         created_at: Set(now_utc()),
         updated_at: Set(now_utc()),
         last_login: Set(None),
+        ..Default::default()
     };
 
     let user = user.insert(&state.db).await?;
@@ -155,7 +162,7 @@ pub async fn register(
         user_id: user.id,
         email: user.email.clone(),
         role: format!("{:?}", user.role).to_lowercase(),
-        status: status_string(&user),
+        status: status_string(&state, &user),
     };
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -212,6 +219,8 @@ pub async fn verify_email(
     let mut user: users::ActiveModel = user.into();
     user.status = Set(users::UserStatus::Active);
     user.updated_at = Set(now_utc());
+    // Blueprint Section 9 (DATA-016): the proof is recorded, independent of `status`.
+    user.email_verified_at = Set(Some(chrono::Utc::now()));
 
     user.update(&state.db).await?;
     security::record_event_best_effort(
@@ -333,7 +342,7 @@ pub async fn login(
             id: user.id,
             username: user.username.clone(),
             role: security::role_claim(&user),
-            status: status_string(&user),
+            status: status_string(&state, &user),
         },
     };
 
@@ -1111,7 +1120,7 @@ pub async fn oauth_google_callback(
             }
         };
     let role = security::role_claim(&user);
-    let status = status_string(&user);
+    let status = status_string(&state, &user);
 
     let target = match state.auth_policy.google_token_delivery {
         security::GoogleTokenDelivery::ExchangeCode => {
@@ -1490,6 +1499,8 @@ pub async fn resolve_google_account(
                 (user, "GOOGLE_LINKED")
             };
             security::bind_google_subject(&txn, user.id, &identity.subject).await?;
+            // Google proved the address (claims validated, `email_verified`).
+            crate::services::account_profile::mark_email_verified(&txn, user.id).await?;
             txn.commit().await?;
             Ok((user, event))
         }
@@ -1507,6 +1518,9 @@ pub async fn resolve_google_account(
                 created_at: Set(now_utc()),
                 updated_at: Set(now_utc()),
                 last_login: Set(None),
+                // Google proved the address (claims validated, `email_verified`).
+                email_verified_at: Set(Some(chrono::Utc::now())),
+                ..Default::default()
             }
             .insert(&txn)
             .await?;

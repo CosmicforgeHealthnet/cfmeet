@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     middleware::request_id::current_request_id,
-    models::users::{self, AuthType, UserRole, UserStatus},
+    models::users::{self, UserRole, UserStatus},
     state::AppState,
 };
 
@@ -321,8 +321,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                     "Account is not active",
                 ));
             }
-            let email_verified = user.auth_type == AuthType::Google
-                || (user.status == UserStatus::Active && state.require_email_verification);
+            let email_verified = user.email_verified(state.require_email_verification);
             // Account revocation epoch (always enforced) plus the Communications epoch when
             // configured, and the account session. A session token is revocation-checked in
             // PostgreSQL, so a Redis outage no longer leaves it unchecked (SEC-007).
@@ -341,7 +340,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             return Ok(ActorContext {
                 kind: ActorKind::RegisteredUser(RegisteredActor {
                     user_id: user.id,
-                    display_name: user.username.clone(),
+                    display_name: user.presentation_name(),
                     verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
                     platform_admin: user.role == UserRole::Admin,
                     revocation_checked,

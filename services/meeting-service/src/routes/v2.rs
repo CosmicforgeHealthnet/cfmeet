@@ -599,6 +599,12 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/me/workspaces/:workspace_id/capabilities",
             get(crate::handlers::v2::workspaces::my_workspace_capabilities),
         )
+        // Blueprint Section 9: the personal account profile
+        .route(
+            "/me/profile",
+            get(crate::handlers::v2::account_profile::get_my_profile)
+                .patch(crate::handlers::v2::account_profile::update_my_profile),
+        )
         // Blueprint Section 2: account sessions and the security audit
         .route(
             "/me/sessions",

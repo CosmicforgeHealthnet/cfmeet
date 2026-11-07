@@ -1552,12 +1552,13 @@ class CreateInvitationRequest {
   const CreateInvitationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateInvitationRequest.create({String? conferenceId, int? expiresInHours, String? inviteeEmail, Role? role, int? useLimit}) =>
+  factory CreateInvitationRequest.create({String? conferenceId, int? expiresInHours, String? inviteeEmail, Role? role, bool? sendEmail, int? useLimit}) =>
       CreateInvitationRequest.fromJson(<String, Object?>{
         if (conferenceId != null) 'conferenceId': conferenceId,
         if (expiresInHours != null) 'expiresInHours': expiresInHours,
         if (inviteeEmail != null) 'inviteeEmail': inviteeEmail,
         if (role != null) 'role': role,
+        if (sendEmail != null) 'sendEmail': sendEmail,
         if (useLimit != null) 'useLimit': useLimit,
       });
 
@@ -1574,6 +1575,9 @@ class CreateInvitationRequest {
 
   Role? get role => json['role'] as String?;
 
+  /// Blueprint Section 11: also email the invitation link to `inviteeEmail` (required with this flag). The result is reported in `emailDelivery`. Default false.
+  bool? get sendEmail => json['sendEmail'] as bool?;
+
   int? get useLimit => (json['useLimit'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
@@ -1584,14 +1588,17 @@ class CreateInvitationResponse {
   const CreateInvitationResponse.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateInvitationResponse.create({required InvitationResponse invitation, required String token}) =>
+  factory CreateInvitationResponse.create({EmailDelivery? emailDelivery, required InvitationResponse invitation, required String token}) =>
       CreateInvitationResponse.fromJson(<String, Object?>{
+        if (emailDelivery != null) 'emailDelivery': emailDelivery,
         'invitation': invitation.toJson(),
         'token': token,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  EmailDelivery? get emailDelivery => json['emailDelivery'] as String?;
 
   InvitationResponse get invitation => InvitationResponse.fromJson(json['invitation']! as Map<String, Object?>);
 
@@ -1804,6 +1811,11 @@ class DuplicateMeetingSpaceRequest {
 
   Map<String, Object?> toJson() => json;
 }
+
+/// What happened to a requested invitation email.
+///
+/// One of: DISABLED, ACCEPTED, FAILED.
+typedef EmailDelivery = String;
 
 class ErrorBody {
   /// Wraps a decoded JSON object (unknown fields are kept).
