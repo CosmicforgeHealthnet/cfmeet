@@ -10,16 +10,27 @@
 //! | `CF_SERVICE_ID` | no | if set, must be `cfmeet.organizations` |
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the receiver-authoritative trust bundle of `cfmeet.organizations` |
+//! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
+//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning | `kid` of the Organizations signing key |
+//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning | PKCS#8 PEM Ed25519 private key FILE |
+//! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`) |
+//! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
+//! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
-//! Organizations calls no other service yet (its outbox has no delivery target until
-//! Sections 7–14), so it holds no signing key; inline keys are refused regardless.
-//! Error messages never echo a value.
+//! Outbound, Organizations calls only Platform Access, and only when provisioning is
+//! enabled (it then signs with its own key file; inline keys are refused regardless).
+//! With provisioning off (the default) organizations stay PENDING and the provisioning
+//! read reports it truthfully. Error messages never echo a value.
 
 use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use cf_service_auth::{
-    services, RuntimeEnvironment, ServiceId, ServiceTokenVerifier, SharedClock, TrustPolicy,
+    client::{InternalServiceClient, InternalTargets},
+    services, KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner,
+    ServiceTokenVerifier, SharedClock, TokenTtl, TrustPolicy,
 };
+
+use crate::provisioning::{HttpPlatformScopes, PlatformScopes};
 use secrecy::{ExposeSecret, SecretString};
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +61,16 @@ pub fn organizations_service_id() -> ServiceId {
     ServiceId::parse(services::ORGANIZATIONS).expect("canonical identity")
 }
 
+/// Outbound service authentication for the provisioning saga.
+#[derive(Debug, Clone)]
+pub struct OutboundSettings {
+    pub key_id: KeyId,
+    pub private_key_file: PathBuf,
+    pub platform_access_base_url: String,
+    pub token_ttl: TokenTtl,
+    pub http_timeout: Duration,
+}
+
 pub struct OrganizationsConfig {
     pub database_url: SecretString,
     pub database_max_connections: u32,
@@ -58,6 +79,8 @@ pub struct OrganizationsConfig {
     pub log_format: LogFormat,
     pub runtime_environment: RuntimeEnvironment,
     pub trust_bundle_file: PathBuf,
+    /// `Some` iff `ORGANIZATIONS_PROVISIONING_ENABLED=true`.
+    pub provisioning: Option<OutboundSettings>,
 }
 
 impl fmt::Debug for OrganizationsConfig {
@@ -68,6 +91,7 @@ impl fmt::Debug for OrganizationsConfig {
             .field("bind_address", &self.bind_address)
             .field("worker_interval", &self.worker_interval)
             .field("runtime_environment", &self.runtime_environment)
+            .field("provisioning_enabled", &self.provisioning.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -157,6 +181,49 @@ impl OrganizationsConfig {
                 var: "CF_SERVICE_TRUST_BUNDLE_FILE",
             },
         )?);
+        let enabled = match get("ORGANIZATIONS_PROVISIONING_ENABLED").as_deref() {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(_) => {
+                return Err(invalid(
+                    "ORGANIZATIONS_PROVISIONING_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
+        let provisioning = if enabled {
+            let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
+            let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
+                .map_err(|_| invalid("CF_SERVICE_AUTH_KEY_ID", "is not a valid key id"))?;
+            let token_ttl = match get("CF_SERVICE_TOKEN_TTL_SECONDS") {
+                None => TokenTtl::default(),
+                Some(v) => v
+                    .parse::<u64>()
+                    .ok()
+                    .and_then(|s| TokenTtl::seconds(s).ok())
+                    .ok_or_else(|| {
+                        invalid(
+                            "CF_SERVICE_TOKEN_TTL_SECONDS",
+                            "must be an integer between 10 and 300",
+                        )
+                    })?,
+            };
+            Some(OutboundSettings {
+                key_id,
+                private_key_file: PathBuf::from(required("CF_SERVICE_AUTH_PRIVATE_KEY_FILE")?),
+                platform_access_base_url: required("CF_PLATFORM_ACCESS_BASE_URL")?,
+                token_ttl,
+                http_timeout: Duration::from_millis(bounded(
+                    &get,
+                    "CF_INTERNAL_HTTP_TIMEOUT_MS",
+                    5_000,
+                    100,
+                    30_000,
+                )? as u64),
+            })
+        } else {
+            None
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -165,7 +232,38 @@ impl OrganizationsConfig {
             log_format,
             runtime_environment,
             trust_bundle_file,
+            provisioning,
         })
+    }
+
+    /// The Platform Access port of the provisioning saga (`None` when provisioning is
+    /// off). Loads the signing key and validates the target URL; fails closed.
+    pub fn platform_scopes(
+        &self,
+        clock: SharedClock,
+    ) -> Result<Option<Arc<dyn PlatformScopes>>, ConfigError> {
+        let Some(s) = &self.provisioning else {
+            return Ok(None);
+        };
+        let key = ServiceSigningKey::from_pkcs8_pem_file(s.key_id.clone(), &s.private_key_file)
+            .map_err(|e| invalid("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", e.to_string()))?;
+        let signer = Arc::new(ServiceTokenSigner::new(
+            organizations_service_id(),
+            self.runtime_environment,
+            key,
+            s.token_ttl,
+            clock,
+        ));
+        let mut targets = InternalTargets::new(self.runtime_environment);
+        targets
+            .insert(
+                ServiceId::parse(services::PLATFORM_ACCESS).expect("canonical identity"),
+                &s.platform_access_base_url,
+            )
+            .map_err(|e| invalid("CF_PLATFORM_ACCESS_BASE_URL", e.to_string()))?;
+        let client = InternalServiceClient::new(signer, targets, s.http_timeout)
+            .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
+        Ok(Some(Arc::new(HttpPlatformScopes::new(Arc::new(client)))))
     }
 
     pub fn database_url(&self) -> &str {
@@ -223,6 +321,43 @@ mod tests {
                 OrganizationsConfig::from_lookup(lookup(&pairs)).is_err(),
                 "{missing}"
             );
+        }
+    }
+
+    #[test]
+    fn provisioning_is_off_by_default_and_needs_its_outbound_settings_when_on() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(cfg.provisioning.is_none());
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push(("ORGANIZATIONS_PROVISIONING_ENABLED", "true"));
+        assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
+        on.extend([
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            (
+                "CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+                "/run/secrets/organizations.pem",
+            ),
+            (
+                "CF_PLATFORM_ACCESS_BASE_URL",
+                "https://platform-access.internal:8443",
+            ),
+        ]);
+        let cfg = OrganizationsConfig::from_lookup(lookup(&on)).unwrap();
+        let s = cfg.provisioning.as_ref().unwrap();
+        assert_eq!(s.http_timeout, Duration::from_millis(5_000));
+        // A missing key file fails closed when the port is built.
+        assert!(cfg
+            .platform_scopes(Arc::new(cf_service_auth::SystemClock))
+            .is_err());
+        for (var, value) in [
+            ("ORGANIZATIONS_PROVISIONING_ENABLED", "yes-please"),
+            ("CF_SERVICE_TOKEN_TTL_SECONDS", "9999"),
+            ("CF_INTERNAL_HTTP_TIMEOUT_MS", "7"),
+        ] {
+            let mut pairs: Vec<_> = on.iter().filter(|(k, _)| *k != var).copied().collect();
+            pairs.push((var, value));
+            let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
+            assert!(!err.to_string().contains(value), "{var}");
         }
     }
 

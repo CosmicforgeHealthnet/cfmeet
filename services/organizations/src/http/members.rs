@@ -120,6 +120,10 @@ async fn change_membership(
         _ => "STATUS_CHANGED",
     });
     store::history(txn, ctx, now, Some(before), &after, kind).await?;
+    if status_changed && status == MembershipStatus::Removed {
+        // A removed member leaves every team (Section 6: only ACTIVE members are in teams).
+        super::teams::end_team_memberships(txn, ctx, now, after.id).await?;
+    }
     let mut version = before.version;
     let status_event = |v: i64| -> Option<Event<'static>> {
         if !status_changed {

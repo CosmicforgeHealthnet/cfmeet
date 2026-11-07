@@ -25,6 +25,9 @@ async fn main() -> anyhow::Result<()> {
     let verifier = config
         .verifier(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("service authentication configuration error", e));
+    let platform_scopes = config
+        .platform_scopes(Arc::new(cf_service_auth::SystemClock))
+        .unwrap_or_else(|e| fatal("provisioning configuration error", e));
     if check_only {
         println!(
             "{}",
@@ -34,24 +37,28 @@ async fn main() -> anyhow::Result<()> {
                 "runtimeEnvironment": config.runtime_environment.as_str(),
                 "bindAddress": config.bind_address.to_string(),
                 "outboxDelivery": "disabled",
+                "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
             })
         );
         return Ok(());
     }
     tracing::info!(
         runtime_environment = %config.runtime_environment,
+        provisioning = platform_scopes.is_some(),
         "organizations configuration loaded"
     );
     let db = organizations::connect(config.database_url(), config.database_max_connections).await?;
     let worker_db = db.clone();
     let interval = config.worker_interval;
-    let worker = tokio::spawn(worker::run(
+    let provisioning_enabled = platform_scopes.is_some();
+    let worker = tokio::spawn(worker::run_with(
         worker_db,
         Arc::new(DisabledDispatcher),
+        platform_scopes,
         interval,
         organizations::shutdown_signal(),
     ));
-    let app = http::app(AppState::new(db, verifier));
+    let app = http::app(AppState::new(db, verifier).with_provisioning(provisioning_enabled));
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "organizations listening");
     axum::serve(listener, app)

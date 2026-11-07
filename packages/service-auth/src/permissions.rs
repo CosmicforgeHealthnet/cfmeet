@@ -331,6 +331,13 @@ pub enum InternalPermission {
     /// migration reconciliation (Section 4 / 5 migration only).
     #[serde(rename = "organization.migrate")]
     OrganizationMigrate,
+    /// Platform Access (Blueprint Section 7, ADR 0058): create or return, read back and
+    /// suspend / resume the dedicated FIRST_PARTY tenant + first-party application +
+    /// PRODUCTION-kind environment of one first-party business organization (keyed by the
+    /// opaque organization id). Organizations only; never credentials, verifiers, scope
+    /// grants, principals or any EXTERNAL tenant.
+    #[serde(rename = "platform-identity.provision-first-party")]
+    PlatformIdentityProvisionFirstParty,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -904,6 +911,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Import the Meeting Service organization export idempotently and read the migration reconciliation; Section 4 migration only",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityProvisionFirstParty,
+        name: "platform-identity.provision-first-party",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::ORGANIZATIONS],
+        sensitive: true,
+        description: "Create or return, verify and suspend / resume the dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment of one first-party organization (opaque organization id); Organizations only, never credentials, verifiers, scope grants or EXTERNAL tenants",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -993,6 +1008,7 @@ impl InternalPermission {
         InternalPermission::OrganizationActForUser,
         InternalPermission::OrganizationAdminister,
         InternalPermission::OrganizationMigrate,
+        InternalPermission::PlatformIdentityProvisionFirstParty,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1537,10 +1553,29 @@ mod tests {
                 ),
             ]
         );
-        // Organizations calls nobody yet (its outbox has no delivery target in Section 5).
-        assert!(REGISTRY
+        // Section 7 (ADR 0058): Organizations calls only Platform Access, and only to
+        // provision / verify / suspend the FIRST_PARTY scope of its organizations.
+        let granted: Vec<_> = REGISTRY
             .iter()
-            .all(|d| !d.grantable_to.contains(&services::ORGANIZATIONS)));
+            .filter(|d| d.grantable_to.contains(&services::ORGANIZATIONS))
+            .map(|d| (d.name, d.receiver, d.grantable_to, d.sensitive))
+            .collect();
+        assert_eq!(
+            granted,
+            [(
+                "platform-identity.provision-first-party",
+                services::PLATFORM_ACCESS,
+                &[services::ORGANIZATIONS][..],
+                true
+            )]
+        );
+        // The EXTERNAL workspace delegation stays the Developer Platform's only.
+        assert_eq!(
+            InternalPermission::PlatformIdentityDelegate
+                .definition()
+                .grantable_to,
+            &[services::DEVELOPER_PLATFORM]
+        );
     }
 
     #[test]

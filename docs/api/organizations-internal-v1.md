@@ -10,7 +10,7 @@ Operations performed for a human carry the acting user in `X-CF-Acting-User: <uu
 
 ## 2. Envelope and errors
 
-JSON, camelCase. Errors: `{"schemaVersion":1,"error":{"code","message","requestId"}}` with `Cache-Control: no-store`. Stable codes: `VALIDATION_ERROR` 400, `ORGANIZATION_NOT_FOUND` 404 (also for organizations the actor may not see — non-enumerating), `MEMBERSHIP_REQUIRED` 403, `PERMISSION_DENIED` 403, `ORGANIZATION_SUSPENDED` 409, `ORGANIZATION_ARCHIVED` 409, `LAST_OWNER` 409, `VERSION_CONFLICT` 409, `SLUG_TAKEN` 409, `INVITE_EXPIRED` 410, `INVITATION_INVALID` 404, `IDEMPOTENCY_CONFLICT` 409, `PROVISIONING_PENDING` 409, `RATE_LIMITED` 429, `ACTOR_NOT_ALLOWED` 403, `INTERNAL_AUTHENTICATION_FAILED` 401, `INTERNAL_PERMISSION_DENIED` 403, `SERVICE_UNAVAILABLE` 503. Writes accept `Idempotency-Key` (replay with the same body returns the stored response; a different body returns `IDEMPOTENCY_CONFLICT`). Updates take `expectedVersion` (optimistic concurrency).
+JSON, camelCase. Errors: `{"schemaVersion":1,"error":{"code","message","requestId"}}` with `Cache-Control: no-store`. Stable codes: `VALIDATION_ERROR` 400, `ORGANIZATION_NOT_FOUND` 404 (also for organizations the actor may not see — non-enumerating), `MEMBERSHIP_REQUIRED` 403, `PERMISSION_DENIED` 403, `ORGANIZATION_SUSPENDED` 409, `ORGANIZATION_ARCHIVED` 409, `LAST_OWNER` 409, `VERSION_CONFLICT` 409, `SLUG_TAKEN` 409, `INVITE_EXPIRED` 410, `INVITATION_INVALID` 404, `IDEMPOTENCY_CONFLICT` 409, `PROVISIONING_PENDING` 409, `RATE_LIMITED` 429, `ACTOR_NOT_ALLOWED` 403, `INTERNAL_AUTHENTICATION_FAILED` 401, `INTERNAL_PERMISSION_DENIED` 403, `SERVICE_UNAVAILABLE` 503; Section 6: `POLICY_RESTRICTED` 403, `TEAM_NOT_FOUND` 404, `TEAM_ARCHIVED` 409, `TEAM_NAME_TAKEN` 409. Writes accept `Idempotency-Key` (replay with the same body returns the stored response; a different body returns `IDEMPOTENCY_CONFLICT`). Updates take `expectedVersion` (optimistic concurrency).
 
 ## 3. Resources
 
@@ -51,7 +51,7 @@ JSON, camelCase. Errors: `{"schemaVersion":1,"error":{"code","message","requestI
 | `calling.enterprise.manage` | ✓ | ✓ | — | — | — |
 | `messaging.organization.moderate` | ✓ | ✓ | — | — | — |
 
-A SUSPENDED or ARCHIVED organization grants no capability except `organization.read` to its OWNERs (so they can see the status). A non-ACTIVE membership grants nothing.
+A SUSPENDED or ARCHIVED organization grants no capability except `organization.read` to its OWNERs (so they can see the status). A non-ACTIVE membership grants nothing. The organization policy (§8.2) can only REMOVE a capability this matrix grants (decision reason `POLICY_RESTRICTED`); it never grants one and never restricts OWNER administration.
 
 ## 4. Operations
 
@@ -118,3 +118,57 @@ Where §1–§6 leave a choice open, the implementation (and `packages/contracts
 * **Slugs.** New and changed slugs follow §3; imported legacy slugs keep the Meeting Service rule (`^[a-z0-9][a-z0-9-]*$`, ≤ 100) unchanged.
 * **Import.** The import route accepts bodies up to 32 MiB. `imported` / `unchanged` count rows (organizations + memberships); the report also carries per-entity tallies and `runId`. Conflict kinds: `ORGANIZATION_DIFFERS`, `MEMBERSHIP_DIFFERS` (with field names), `SLUG_TAKEN` (another organization holds the slug), `MEMBERSHIP_DUPLICATE`, `ORGANIZATION_NOT_IMPORTED`. Orphan memberships refuse the whole import (nothing is written). Reconciliation recomputes the checksum over the imported rows in their current state, so it is directly comparable with a fresh export.
 * **Infrastructure codes.** Unknown routes / methods and oversized bodies answer `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PAYLOAD_TOO_LARGE` (and `INTERNAL_ERROR`) in the same envelope.
+
+## 8. Sections 6–7 (teams, policies, technical scope) — contract 1.1.0
+
+Decision record: [ADR 0058](../decisions/0058-first-party-organization-scopes-and-provisioning.md). Machine-readable: `cfmeet.organizations.internal-api` 1.1.0.
+
+### 8.1 Teams
+
+**Team** `{"id","organizationId","name":"1-120","description":"≤500|null","parentTeamId":"uuid|null","status":"ACTIVE|ARCHIVED","createdBy","createdAt","updatedAt","archivedAt","version","memberCount"}` — **TeamMember** `{"id","organizationId","teamId","membershipId","userId","role":"TEAM_MANAGER|TEAM_MEMBER","status":"ACTIVE|REMOVED","addedBy","createdAt","updatedAt","removedAt","version"}`.
+
+* Teams are organization-scoped, flat by default, with an optional parent in the same organization (no cycles, depth ≤ 5, ≤ 500 ACTIVE teams). Names are unique among ACTIVE teams (case-folded). Users join through an ACTIVE organization membership and may be in several teams; removing an organization membership ends its team memberships (`MEMBERSHIP_ENDED`).
+* OWNER / ADMIN create, change, re-parent and archive any team and assign TEAM_MANAGER — only to organization MANAGERs, ADMINs and OWNERs. A MANAGER manages only teams they are TEAM_MANAGER of (rename, add / remove TEAM_MEMBERs, step down) and creates a team only when `delegatedAdministration.managersMayCreateTeams` is true (becoming its TEAM_MANAGER). Nobody raises their own team role; everyone leaves a team themselves. A TEAM_MANAGER row grants nothing once the organization role no longer holds `organization.teams.manage`.
+* Archival (OWNER / ADMIN) is refused while ACTIVE child teams exist and ends every ACTIVE team membership. Team-member history is append-only; every mutation writes an audit event and an outbox event (`team.*`).
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET / POST | `/internal/v1/organizations/{id}/teams` | `organization.read` / `organization.write` | list (`status`, cursor) / create (`Idempotency-Key`) |
+| GET / PATCH | `/internal/v1/organizations/{id}/teams/{teamId}` | read / write | detail / `{expectedVersion, name?, description?, parentTeamId?}` (`null` detaches) |
+| POST | `/internal/v1/organizations/{id}/teams/{teamId}/archive` | write | `{expectedVersion?}`; idempotent |
+| GET / POST | `/internal/v1/organizations/{id}/teams/{teamId}/members` | read / write | list / `{membershipId \| userId, role}` |
+| PATCH | `/internal/v1/organizations/{id}/teams/{teamId}/members/{teamMemberId}` | write | `{expectedVersion, role}` |
+| POST | `/internal/v1/organizations/{id}/teams/{teamId}/members/{teamMemberId}/remove` | write | idempotent |
+
+Reads need `organization.members.read` for an actor (policy-aware); service reads without an actor are allowed.
+
+### 8.2 Policies
+
+`GET /internal/v1/organizations/{id}/policies` → `{schemaVersion, organizationId, revision, policy, updatedBy, updatedAt, legacyMeetingProfilePolicy}`; `PATCH` `{expectedRevision, policy}` merges a partial document (compare-and-swap; stale → 409 `VERSION_CONFLICT`; unknown keys / bounds → 400). Requires `organization.policies.manage`; `delegatedAdministration` is OWNER-only. An absent policy is revision 0 with the defaults below (= the §3 matrix). `GET …/policies/effective` returns the organization-level constraints owner services combine with their own policy (**stricter wins**) plus lifecycle and provisioning state.
+
+| Key | Default | Effect |
+|---|---|---|
+| `memberDirectory.visibility` (`MEMBERS`/`MANAGERS`/`ADMINS`) | `MEMBERS` | minimum role for `organization.members.read` |
+| `memberDirectory.searchable` | `true` | colleague-discovery hint (Communications Hub keeps its own privacy rules) |
+| `guests.invitationsAllowed` | `true` | GUEST invitations created / accepted |
+| `meetings.hostCreation` (tier) | `MEMBERS` | minimum role for `meetings.organization.create` |
+| `features.{meetings,messaging,calling}` | `true` | a disabled feature removes its capabilities for every role |
+| `retention.hintDays` | `null` | 1–3650; a hint, owner retention applies |
+| `delegatedAdministration.managersMayInvite` | `true` | MANAGER `organization.members.invite` |
+| `delegatedAdministration.managersMayCreateTeams` | `false` | MANAGERs create teams |
+| `delegatedAdministration.adminsMayManagePolicies` | `true` | ADMIN `organization.policies.manage` |
+
+The Meeting Service `profile_policy` JSON is carried verbatim as `legacyMeetingProfilePolicy` (the Meeting Service still enforces it). There is no separate role-grant table in this version (ADR 0058 §3). A stored policy that no longer parses fails requests closed (503).
+
+### 8.3 Authorization reads
+
+* `GET /internal/v1/organizations/{id}/roles/capabilities` — every capability, each role's matrix capabilities and `effectiveCapabilities` under the current policy and status, and the team roles (UIs).
+* `memberships/resolve` adds `policyRevision` and `teams[] {teamId, role}`; `authorization/evaluate` accepts `teamId` and returns `teamId` / `teamRole` — with `organization.teams.manage` a MANAGER is allowed only as that team's TEAM_MANAGER. Capabilities everywhere (`viewer`, user organizations, resolve, evaluate) are policy-aware.
+
+### 8.4 Technical scope (Section 7)
+
+* The provisioning saga (ADR 0058) maps each ACTIVE organization to one Platform Access FIRST_PARTY tenant + first-party application + PRODUCTION environment through `platform-identity.provision-first-party`, verifies it server-side and only then records the mapping READY and the organization `provisioningState: READY` (`organization.provisioned`, `scope.mapping_changed`). It is **off by default** (`ORGANIZATIONS_PROVISIONING_ENABLED=false`): organizations then stay `PENDING`.
+* `GET …/provisioning` adds `provisioningEnabled`, `nextAttemptAt` and `scopes[]` (mapping state / version, ids, verification time, desired / applied tenant status, sync retries).
+* `POST /internal/v1/organizations/scopes/resolve` `{organizationId, capability?: "primary", userId?}` (`organization.read`) returns `{organizationId, capability, tenantId, applicationId, environmentId, mappingVersion, verifiedAt}` only when the organization is ACTIVE, provisioning READY, the mapping READY and its tenant status applied in Platform Access; otherwise 409 `PROVISIONING_PENDING` / `ORGANIZATION_SUSPENDED` / `ORGANIZATION_ARCHIVED`. With `userId` (or an acting user) the user must hold an ACTIVE membership (404 otherwise). Calling is not switched to it yet.
+* `POST /internal/v1/admin/organizations/{id}/provisioning/retry` (`organization.administer`) — operator retry of a FAILED / cancelled workflow (idempotent; READY and in-flight workflows unchanged; archived 409).
+* Suspending / archiving an organization suspends its mapping and tenant (fail closed locally at once, Platform Access applied with retries); reactivation restores a verified mapping once the tenant is resumed.

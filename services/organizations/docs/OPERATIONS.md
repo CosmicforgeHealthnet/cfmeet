@@ -23,9 +23,19 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | `CF_SERVICE_ID` | no | must be `cfmeet.organizations` if set |
 | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging`, `production` |
 | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | receiver-authoritative trust bundle (`receiver: cfmeet.organizations`) |
+| `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 provisioning saga (ADR 0058) |
+| `CF_SERVICE_AUTH_KEY_ID` | when provisioning | `kid` of the Organizations signing key |
+| `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning | PKCS#8 PEM Ed25519 private key file |
+| `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (https outside local / test) |
+| `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300, default 120 |
+| `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000, default 5000 |
 
-The service calls no other service yet, so it holds no signing key (inline keys are
-refused). Invalid values fail startup without echoing the value.
+With provisioning off (the default) the service calls nobody and holds no signing key;
+organizations stay `PENDING` and `GET …/provisioning` reports `provisioningEnabled:
+false`. With it on, Organizations calls only Platform Access, signing with its own key file
+(inline keys are refused); Platform Access's trust bundle must grant
+`cfmeet.organizations` the permission `platform-identity.provision-first-party`. Invalid
+values fail startup without echoing the value.
 
 ## Database roles
 
@@ -46,6 +56,30 @@ sweep idempotency records older than 24 h, expire PENDING invitations past `expi
 (`invitation.expired` event + audit, `FOR UPDATE SKIP LOCKED`), and deliver outbox rows
 when a dispatcher is enabled. **Delivery is disabled in Section 5**: events are recorded
 for destination `cfmeet.reconciliation` and stay PENDING; `/ready` shows the backlog.
+
+## Provisioning saga (`src/provisioning.rs::run_once`, Section 7, ADR 0058)
+
+Runs in the same loop when enabled: enqueue one workflow per ACTIVE `PENDING`
+organization (stable key `org-scope:{id}:primary`), advance due workflows (Platform Access
+`PUT` → checkpoint → `GET` + server-side verification → READY), apply desired tenant
+statuses (suspension / resumption / compensation, retried forever with backoff) and
+re-verify READY mappings every 6 h (drift → `FAILED`, `SCOPE_DRIFT`).
+
+| Symptom (`GET /internal/v1/organizations/{id}/provisioning`) | Meaning | Action |
+|---|---|---|
+| `provisioningEnabled: false` | the saga is off in this deployment | none (organizations stay PENDING) |
+| `workflowState: IN_PROGRESS`, `lastErrorClass: PLATFORM_ACCESS_UNAVAILABLE`, `nextAttemptAt` | Platform Access unreachable; capped backoff (5 s … 15 min), FAILED after 8 attempts | restore Platform Access |
+| `FAILED` + `PLATFORM_ACCESS_REFUSED` | 401/403/4xx from Platform Access (trust bundle, key, permission) | fix the configuration, then retry |
+| `FAILED` + `PLATFORM_SCOPE_CONFLICT` | the reserved tenant slug is held outside the scope registry | investigate in Platform Access (never adopted), then retry |
+| `FAILED` + `SCOPE_VERIFICATION_FAILED` / `SCOPE_MISMATCH` / `SCOPE_DRIFT` | the triple does not verify, differs from the recorded one or vanished | investigate; any recorded tenant is being suspended (compensation) |
+| `step: WAITING_FOR_ACTIVE_ORGANIZATION` | the organization is suspended; nothing is created | reactivate the organization |
+| `scopes[0].lastSyncErrorClass` set | a tenant suspension / resumption is being retried | restore Platform Access; scope resolution refuses until applied |
+
+Operator retry (idempotent; READY / in-flight workflows unchanged; archived refused):
+
+```
+POST /internal/v1/admin/organizations/{id}/provisioning/retry     (organization.administer)
+```
 
 ## Migration import runbook (Section 4 / 5)
 

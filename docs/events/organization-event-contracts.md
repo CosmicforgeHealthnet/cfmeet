@@ -11,7 +11,7 @@
 | `eventType` | string | One of §2; dotted, past tense |
 | `schemaVersion` | integer | Additive changes keep the version; breaking changes add a new `eventType` version |
 | `organizationId` | UUID | Always present (aggregate root) |
-| `aggregateType` | `organization` \| `membership` \| `invitation` \| `team` \| `policy` \| `scope` \| `provisioning` | |
+| `aggregateType` | `organization` \| `membership` \| `invitation` \| `team` \| `team_member` \| `policy` \| `scope` \| `provisioning` | |
 | `aggregateId` | UUID | |
 | `aggregateVersion` | integer | Monotonic per aggregate; consumers ignore versions ≤ the last applied |
 | `occurredAt` | RFC 3339 UTC | Database commit time of the change |
@@ -37,9 +37,14 @@ Transport: outbox rows are delivered at least once to each consumer's signed int
 | `membership.suspended` / `membership.removed` | Status change or leave | `userId` | **Fail closed**: revoke organization privileges, organization conversation access, enterprise admin; personal data untouched |
 | `invitation.created` / `invitation.accepted` / `invitation.declined` / `invitation.revoked` / `invitation.expired` | Invitation lifecycle | `invitationId`, `role`, `inviteeUserId?` (never the email or token) | Notification owner delivers transactional email (Section 11) |
 | `ownership.transferred` | Atomic transfer | `fromUserId`, `toUserId` | Audit display |
-| `team.created` / `team.updated` / `team.archived`, `team.member_added` / `team.member_removed` | Section 6 | `teamId`, `userId?` | Team-scoped resources re-check |
-| `policy.updated` | Organization policy revision | `policyRevision`, `changedKeys[]` | Owners re-read effective policy; owner policy stays stricter-wins |
-| `scope.mapping_changed` | Technical scope mapping version change | `capability`, ids, `mappingState` | Calling/Messaging refresh scope resolution |
+| `team.created` / `team.updated` / `team.archived` | Section 6 (aggregate `team`, version = team version) | `teamId`, `parentTeamId?`, `changedFields?`, `teamVersion` | Team-scoped resources re-check |
+| `team.member_added` / `team.member_role_changed` / `team.member_removed` | Section 6 (aggregate `team_member`, id = team-membership id, version = team-membership version) | `teamId`, `userId`, `role` / `fromRole`+`toRole` / `reason` (`REMOVED`, `MEMBERSHIP_ENDED`, `TEAM_ARCHIVED`), `teamMemberVersion` | Team-scoped resources re-check; removal fails closed |
+| `policy.updated` | Organization policy revision (aggregate `policy`, id = organization id, version = revision) | `policyRevision`, `changedKeys[]` | Owners re-read `GET …/policies/effective`; owner policy stays stricter-wins |
+| `scope.mapping_changed` | Technical scope mapping version change (aggregate `scope`, id = mapping id, version = `mappingVersion`) | `capability`, ids, `mappingState`, `mappingVersion` | Calling/Messaging refresh scope resolution (`POST /internal/v1/organizations/scopes/resolve`) |
+
+Section 7 note: `organization.provisioning_changed` and `organization.provisioned` use the
+`provisioning` aggregate (id = workflow id, version = workflow version); READY emits only
+`organization.provisioned`. Provisioning never bumps the organization version.
 
 ## 3. Ordering and safety rules
 

@@ -6,7 +6,10 @@
 //! 2. sweep idempotency records older than 24 hours;
 //! 3. expire PENDING invitations past `expires_at` (`invitation.expired` event + audit,
 //!    rows claimed with `FOR UPDATE SKIP LOCKED`);
-//! 4. deliver due outbox rows when a dispatcher is enabled (none is in Section 5).
+//! 4. deliver due outbox rows when a dispatcher is enabled (none is in Section 5);
+//! 5. when provisioning is enabled, one pass of the Section 7 saga
+//!    ([`crate::provisioning::run_once`]: enqueue, advance, tenant-status sync,
+//!    reconciliation).
 
 use std::{sync::Arc, time::Duration};
 
@@ -17,6 +20,7 @@ use uuid::Uuid;
 use crate::{
     db,
     outbox::{self, EventDispatcher},
+    provisioning::{self, PlatformScopes},
     store::{self, Event, InvitationRow, OpContext, INVITATION_COLUMNS},
 };
 
@@ -118,6 +122,17 @@ pub async fn run(
     interval: Duration,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
+    run_with(db, dispatcher, None, interval, shutdown).await
+}
+
+/// [`run`] plus, when `provisioner` is set, one provisioning pass per tick.
+pub async fn run_with(
+    db: DatabaseConnection,
+    dispatcher: Arc<dyn EventDispatcher>,
+    provisioner: Option<Arc<dyn PlatformScopes>>,
+    interval: Duration,
+    shutdown: impl std::future::Future<Output = ()>,
+) {
     tokio::pin!(shutdown);
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -132,6 +147,17 @@ pub async fn run(
                         "organizations maintenance pass"),
                     Ok(_) => {}
                     Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations maintenance pass failed"),
+                }
+                if let Some(port) = &provisioner {
+                    match provisioning::run_once(&db, port.as_ref()).await {
+                        Ok(r) if r != provisioning::ProvisioningReport::default() => tracing::info!(
+                            enqueued = r.enqueued, ready = r.ready, failed = r.failed, retried = r.retried,
+                            waiting = r.waiting, synced = r.synced, sync_failed = r.sync_failed,
+                            reconciled = r.reconciled, drifted = r.drifted,
+                            "organizations provisioning pass"),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations provisioning pass failed"),
+                    }
                 }
             }
         }
