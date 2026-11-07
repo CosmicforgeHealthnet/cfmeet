@@ -540,6 +540,13 @@ pub async fn logout(
                             .session(session_id),
                     )
                     .await;
+                    // Section 14: the Hub devices this sign-in linked end with it.
+                    if let Err(e) =
+                        crate::services::communications::session_ended(&state, user_id, session_id)
+                            .await
+                    {
+                        tracing::error!(error = ?e, "session-bound device revocation not queued");
+                    }
                 }
                 None => {
                     // Legacy token: its refresh token is unknown, so end every credential.
@@ -792,6 +799,7 @@ pub async fn reset_password(
             .actor(ActorKind::Anonymous, None),
     )
     .await;
+    crate::services::communications::credentials_ended(&state, user_id, "PASSWORD_CHANGED").await;
 
     Ok(Json(MessageResponse {
         message: "Password reset successfully".to_string(),
@@ -923,6 +931,7 @@ pub async fn change_password(
         SecurityEvent::new("PASSWORD_CHANGED", Outcome::Success).by_user(user_id),
     )
     .await;
+    crate::services::communications::credentials_ended(&state, user_id, "PASSWORD_CHANGED").await;
 
     Ok(Json(MessageResponse {
         message: "Password changed successfully".to_string(),
