@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -370,7 +370,7 @@
       "post": {
         "operationId": "applyCommunicationsAccountEvent",
         "summary": "Apply monotonic Account authority events",
-        "description": "Apply monotonic Account authority events. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "description": "Account lifecycle event from the account authority. STATUS_CHANGED / SESSION_REVOKED: when credentials end (SESSION_REVOKED, or a SUSPENDED / DEACTIVATED state) the revocation reaches Calling and Messaging through the durable outbox (`communications.account.changed` with principalId and credentialsNotBefore), for a Hub profile or, since 1.3.0, for an account without one (the principal is read from Account; fanOut PRINCIPAL). ACCOUNT_SESSION_ENDED (1.3.0): one Account session ended; the Hub devices that session linked are revoked at their owners and become REVOKED (ACCOUNT_SESSION_ENDED); the account epoch and version are unchanged. An owner failure answers 503 and the producer retries the same event. Apply monotonic Account authority events. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-account.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
         "tags": [
           "Communications integration"
         ],
@@ -488,7 +488,7 @@
       "post": {
         "operationId": "applyCommunicationsBlockEvent",
         "summary": "Ingest owner block metadata without replacing canonical block rules",
-        "description": "Ingest owner block metadata without replacing canonical block rules. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-block.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "description": "DEPRECATED (1.3.0, Blueprint Section 14 MSG-016 / DATA-006): no service produces block events. Calling and Messaging remain the authorities for their own block rules and every Hub policy decision reads them live; rows written here are never used for a decision. Kept unchanged for compatibility; removed in the next major version. Ingest owner block metadata without replacing canonical block rules. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission communications-block.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
         "tags": [
           "Communications integration"
         ],
@@ -599,7 +599,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/internal/v1/communications/backfill": {
@@ -977,7 +978,8 @@
             "type": "string",
             "enum": [
               "STATUS_CHANGED",
-              "SESSION_REVOKED"
+              "SESSION_REVOKED",
+              "ACCOUNT_SESSION_ENDED"
             ]
           },
           "state": {
@@ -992,6 +994,11 @@
           "occurredAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "accountSessionRef": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "ACCOUNT_SESSION_ENDED only (required there, refused on every other kind): the Account session that ended. Opaque, domain-separated reference of one Account session (SHA-256 of 'cfmeet-account-session:v1|environment|session', lowercase hex). Receivers can match it, never reverse it."
           }
         },
         "required": [
@@ -1001,7 +1008,8 @@
           "kind",
           "state",
           "occurredAt"
-        ]
+        ],
+        "description": "Account lifecycle event from the account authority. STATUS_CHANGED / SESSION_REVOKED: when credentials end (SESSION_REVOKED, or a SUSPENDED / DEACTIVATED state) the revocation reaches Calling and Messaging through the durable outbox (`communications.account.changed` with principalId and credentialsNotBefore), for a Hub profile or, since 1.3.0, for an account without one (the principal is read from Account; fanOut PRINCIPAL). ACCOUNT_SESSION_ENDED (1.3.0): one Account session ended; the Hub devices that session linked are revoked at their owners and become REVOKED (ACCOUNT_SESSION_ENDED); the account epoch and version are unchanged. An owner failure answers 503 and the producer retries the same event."
       },
       "Backfill": {
         "type": "object",
@@ -1238,6 +1246,20 @@
           },
           "duplicate": {
             "type": "boolean"
+          },
+          "fanOut": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "PROFILE",
+              "PRINCIPAL"
+            ],
+            "description": "Account events (1.3.0): how a credential revocation was fanned out (PRINCIPAL: account without a Hub profile)."
+          },
+          "devicesRevoked": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "ACCOUNT_SESSION_ENDED (1.3.0): devices revoked because the session ended."
           }
         },
         "required": [
@@ -1461,6 +1483,11 @@
                 "type": "null"
               }
             ]
+          },
+          "accountSessionRef": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Sent by Account only on device link and device revoke (1.3.0): the Account session making the request. A link records it; a revoke of a bound device then returns the bound reference for Account to end that session (Account consumes it; it is never shown to clients). Opaque, domain-separated reference of one Account session (SHA-256 of 'cfmeet-account-session:v1|environment|session', lowercase hex). Receivers can match it, never reverse it."
           }
         },
         "required": [

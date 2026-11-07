@@ -25,5 +25,5 @@ const List<ContractRef> contracts = <ContractRef>[
   ContractRef('cfmeet.numbering.public-api', '1.12.0', 'openapi', 'bundled/public/numbering/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.sms-gateway.public-api', '1.2.0', 'openapi', 'bundled/public/sms/v1.openapi.json', 'beta'),
   ContractRef('cfmeet.developer-platform.public-api', '1.5.0', 'openapi', 'bundled/public/developer-platform/v1.openapi.json', 'beta'),
-  ContractRef('cfmeet.communications.public-api', '1.1.0', 'openapi', 'bundled/public/communications/v1.openapi.json', 'beta'),
+  ContractRef('cfmeet.communications.public-api', '1.2.0', 'openapi', 'bundled/public/communications/v1.openapi.json', 'beta'),
 ];

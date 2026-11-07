@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants."
   },
   "components": {
@@ -938,6 +938,67 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/account-status": {
+      "post": {
+        "operationId": "mirrorAccountStatus",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "Mirror a first-party account status onto its principal",
+        "description": "Blueprint v1.0 Section 14 (ACC-010). The first-party account authority (the Meeting Service, permission platform-principal.ensure, signed delegated context of a FULL-authority FIRST_PARTY tenant) sets the NATIVE_CF_USER principal of externalReference to the account's CURRENT status: ACTIVE, SUSPENDED or DEACTIVATED. Idempotent (changed=false when already so). Never creates a principal (unknown reference: NOT_FOUND) and never changes a tombstoned one (INVALID_STATE).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/AccountStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/AccountStatusResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           }
         }
