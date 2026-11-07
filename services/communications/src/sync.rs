@@ -131,7 +131,16 @@ impl State {
 
     /// U02: the Hub overlay for the Messaging conversation list (mute, clear-for-me,
     /// latest activity card). Messaging owns the list itself, ordering and unread counts.
-    pub async fn inbox(&self, p: &Profile, limit: i64, cursor: Uuid) -> Result<Value> {
+    /// Section 14 (MSG-016): rows are limited to conversations the viewer still belongs
+    /// to, checked with Messaging (the same check `activity` makes); a conversation the
+    /// viewer left keeps its private preferences but is no longer listed.
+    pub async fn inbox(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        limit: i64,
+        cursor: Uuid,
+    ) -> Result<Value> {
         let data:Vec<Value>=rows(&self.store.db,"WITH ids AS (
               SELECT conversation_id FROM communication_conversation_preferences WHERE owner_profile_id=$1
               UNION SELECT conversation_id FROM communication_conversation_watermarks WHERE owner_profile_id=$1
@@ -145,14 +154,28 @@ impl State {
             LEFT JOIN communication_conversation_watermarks w ON w.owner_profile_id=$1 AND w.conversation_id=i.conversation_id
             WHERE i.conversation_id>$2 ORDER BY i.conversation_id LIMIT $3",vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
         let more = data.len() > limit as usize;
-        let data: Vec<Value> = data.into_iter().take(limit as usize).collect();
+        let page: Vec<Value> = data.into_iter().take(limit as usize).collect();
+        // The cursor follows the scanned rows, so a filtered row never repeats or hides
+        // a later one; a page may therefore hold fewer than `limit` rows.
         let next = if more {
-            data.last().map(|d| d["conversationId"].clone())
+            page.last().map(|d| d["conversationId"].clone())
         } else {
             None
         };
+        let mut data = Vec::with_capacity(page.len());
+        for row in page {
+            let id = row["conversationId"]
+                .as_str()
+                .and_then(|v| Uuid::parse_str(v).ok())
+                .ok_or(Error::Unavailable)?;
+            match self.conversation(scope, p, id, None).await {
+                Ok(_) => data.push(row),
+                Err(Error::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+        }
         Ok(json!({"schemaVersion":1,"data":data,"nextCursor":next,
-            "membership":"Overlay rows are references; membership is enforced when a conversation is opened"}))
+            "membership":"Only conversations the viewer is a current member of (checked with Messaging)"}))
     }
 
     /// U05: allowed actions and per-user state for one conversation.

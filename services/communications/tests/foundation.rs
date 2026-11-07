@@ -876,3 +876,108 @@ async fn concurrent_invitation_creation_cannot_survive_disabling_and_reenabling_
     }
     h.close().await;
 }
+
+/// Section 14 (ACC-010): an account that never opened the Hub still has its Messaging
+/// and Calling credentials revoked. The Hub asks Account for the principal and fans the
+/// revocation out durably, exactly once per Account event.
+#[tokio::test]
+async fn account_revocations_without_a_profile_fan_out_to_owners_by_principal() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let path = "/internal/v1/communications/account-events";
+    let at = chrono::Utc::now();
+    let event = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":3,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":at});
+    let (status, result) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        (result["applied"].clone(), result["fanOut"].clone()),
+        (json!(true), json!("PRINCIPAL"))
+    );
+    let rows: Value = one(&h.state.store.db,
+        "SELECT jsonb_agg(jsonb_build_object('destination',destination,'aggregate',aggregate_id,'payload',payload) ORDER BY destination) doc FROM communication_outbox WHERE event_type='communications.account.changed'",
+        vec![]).await.unwrap().unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, destination) in rows.iter().zip(["CALLING", "MESSAGING"]) {
+        assert_eq!(row["destination"], destination);
+        assert_eq!(row["aggregate"], json!(a.principal_id));
+        assert_eq!(row["payload"]["principalId"], json!(a.principal_id));
+        assert_eq!(
+            row["payload"]["credentialsNotBefore"],
+            json!(at.timestamp())
+        );
+    }
+    // No profile was created as a side effect.
+    let profiles: Value = one(
+        &h.state.store.db,
+        "SELECT jsonb_build_object('n',count(*)) doc FROM communication_profiles",
+        vec![],
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(profiles["n"], 0);
+    // A retry of the same event is a duplicate and enqueues nothing more.
+    let (_, duplicate) = h
+        .http(&h.account_signer, path, event, h.scope.clone())
+        .await;
+    assert_eq!(duplicate["duplicate"], true);
+    // Suspension and deactivation revoke too; a plain reactivation does not.
+    for (state, fans_out) in [("SUSPENDED", true), ("ACCOUNT_CREATED", false)] {
+        let e = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":4,"kind":"STATUS_CHANGED","state":state,"occurredAt":chrono::Utc::now()});
+        let (_, r) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+        assert_eq!(r["applied"], fans_out, "{state}");
+    }
+    let count: Value = one(&h.state.store.db,
+        "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.account.changed'",
+        vec![]).await.unwrap().unwrap();
+    assert_eq!(count["n"], 4);
+    // An account Account has never mapped to a principal has nothing to revoke.
+    let unknown = json!({"eventId":Uuid::new_v4(),"accountReference":format!("cfmeet-user:{}",Uuid::new_v4()),"sourceVersion":1,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+    let (status, r) = h
+        .http(&h.account_signer, path, unknown, h.scope.clone())
+        .await;
+    assert_eq!((status.as_u16(), r["applied"].clone()), (200, json!(false)));
+    // The fan-out is delivered to both owners through the normal leased outbox.
+    assert_eq!(h.state.deliver_due().await.unwrap(), 4);
+    // Account down: the event is not acknowledged, so Account's durable outbox retries.
+    let b = h.account();
+    h.stop_owners();
+    let e = json!({"eventId":Uuid::new_v4(),"accountReference":b.account_reference,"sourceVersion":2,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+    let (status, _) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+    assert_ne!(status, 200);
+    h.close().await;
+}
+
+/// Section 14 (ACC-008): ACCOUNT_SESSION_ENDED carries exactly one well-formed session
+/// reference, and no other kind may carry one.
+#[tokio::test]
+async fn account_session_events_are_shape_checked() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let _p = h.profile(&a).await;
+    let path = "/internal/v1/communications/account-events";
+    let reference = "ab".repeat(32);
+    for (kind, session, ok) in [
+        ("ACCOUNT_SESSION_ENDED", Some(reference.clone()), true),
+        ("ACCOUNT_SESSION_ENDED", None, false),
+        ("ACCOUNT_SESSION_ENDED", Some("AB".repeat(32)), false),
+        ("SESSION_REVOKED", Some(reference.clone()), false),
+    ] {
+        let mut e = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":1,"kind":kind,"state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+        if let Some(s) = session {
+            e["accountSessionRef"] = json!(s);
+        }
+        let (status, r) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+        assert_eq!(status.as_u16() == 200, ok, "{kind} {r}");
+        if ok {
+            assert_eq!(r["devicesRevoked"], 0);
+        }
+    }
+    // A session end never touches the account epoch or activation.
+    let p = h.profile(&a).await;
+    assert!(p.credentials_not_before.is_none());
+    h.close().await;
+}
