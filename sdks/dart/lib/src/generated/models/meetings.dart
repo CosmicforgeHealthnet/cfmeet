@@ -5653,3 +5653,235 @@ class WithdrawalResponse {
 
   Map<String, Object?> toJson() => json;
 }
+
+/// One workspace context of the caller.
+class Workspace {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const Workspace.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory Workspace.create({required WorkspaceCapabilitySummary capabilities, required String displayName, required String id, required WorkspaceKind kind, String? organizationId, String? organizationStatus, String? provisioningState, String? role, String? slug}) =>
+      Workspace.fromJson(<String, Object?>{
+        'capabilities': capabilities.toJson(),
+        'displayName': displayName,
+        'id': id,
+        'kind': kind,
+        if (organizationId != null) 'organizationId': organizationId,
+        if (organizationStatus != null) 'organizationStatus': organizationStatus,
+        if (provisioningState != null) 'provisioningState': provisioningState,
+        if (role != null) 'role': role,
+        if (slug != null) 'slug': slug,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  WorkspaceCapabilitySummary get capabilities => WorkspaceCapabilitySummary.fromJson(json['capabilities']! as Map<String, Object?>);
+
+  /// `Personal`, or the organization name.
+  String get displayName => json['displayName']! as String;
+
+  /// `personal`, or the organization id.
+  String get id => json['id']! as String;
+
+  WorkspaceKind get kind => json['kind']! as String;
+
+  /// ORGANIZATION only.
+  String? get organizationId => json['organizationId'] as String?;
+
+  /// ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only.
+  String? get organizationStatus => json['organizationStatus'] as String?;
+
+  /// NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service; null for PERSONAL and when the legacy directory answers (no provisioning there).
+  String? get provisioningState => json['provisioningState'] as String?;
+
+  /// The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows OWNER, ADMIN and MEMBER). ORGANIZATION only.
+  String? get role => json['role'] as String?;
+
+  /// ORGANIZATION only.
+  String? get slug => json['slug'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Which store answered: the meeting-service organization directory (`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service (authoritative).
+///
+/// One of: LEGACY_DIRECTORY, ORGANIZATIONS_SERVICE.
+typedef WorkspaceAuthority = String;
+
+/// `GET /api/v2/me/workspaces/{workspaceId}/capabilities`.
+class WorkspaceCapabilities {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const WorkspaceCapabilities.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory WorkspaceCapabilities.create({required WorkspaceAuthority authority, required List<WorkspaceCapability> capabilities, required String evaluatedAt, required WorkspaceFeatures features, required WorkspaceKind kind, String? organizationId, String? organizationStatus, String? personalCommunicationsCapabilities, int? policyRevision, String? provisioningState, String? role, required String workspaceId}) =>
+      WorkspaceCapabilities.fromJson(<String, Object?>{
+        'authority': authority,
+        'capabilities': capabilities.map((e) => e.toJson()).toList(),
+        'evaluatedAt': evaluatedAt,
+        'features': features.toJson(),
+        'kind': kind,
+        if (organizationId != null) 'organizationId': organizationId,
+        if (organizationStatus != null) 'organizationStatus': organizationStatus,
+        if (personalCommunicationsCapabilities != null) 'personalCommunicationsCapabilities': personalCommunicationsCapabilities,
+        if (policyRevision != null) 'policyRevision': policyRevision,
+        if (provisioningState != null) 'provisioningState': provisioningState,
+        if (role != null) 'role': role,
+        'workspaceId': workspaceId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  WorkspaceAuthority get authority => json['authority']! as String;
+
+  /// Every capability of the vocabulary with its decision.
+  List<WorkspaceCapability> get capabilities => (json['capabilities']! as List<Object?>).map((e) => WorkspaceCapability.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// When the answer was computed (it is never cached server-side).
+  String get evaluatedAt => json['evaluatedAt']! as String;
+
+  WorkspaceFeatures get features => WorkspaceFeatures.fromJson(json['features']! as Map<String, Object?>);
+
+  WorkspaceKind get kind => json['kind']! as String;
+
+  String? get organizationId => json['organizationId'] as String?;
+
+  String? get organizationStatus => json['organizationStatus'] as String?;
+
+  /// PERSONAL only: the Communications Hub read that owns personal communications capabilities (`/api/v2/communications/me/capabilities`).
+  String? get personalCommunicationsCapabilities => json['personalCommunicationsCapabilities'] as String?;
+
+  /// Organization policy revision the answer was computed with (Organizations Service).
+  int? get policyRevision => (json['policyRevision'] as num?)?.toInt();
+
+  String? get provisioningState => json['provisioningState'] as String?;
+
+  String? get role => json['role'] as String?;
+
+  /// `personal`, or the organization id.
+  String get workspaceId => json['workspaceId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// One capability decision.
+class WorkspaceCapability {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const WorkspaceCapability.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory WorkspaceCapability.create({required String capability, required bool granted, required WorkspaceCapabilityReason reason}) =>
+      WorkspaceCapability.fromJson(<String, Object?>{
+        'capability': capability,
+        'granted': granted,
+        'reason': reason,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Capability name, e.g. `meetings.organization.create`.
+  String get capability => json['capability']! as String;
+
+  bool get granted => json['granted']! as bool;
+
+  WorkspaceCapabilityReason get reason => json['reason']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Why a capability is (not) granted in a workspace.
+///
+/// One of: ALLOWED, CAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, FEATURE_DISABLED.
+typedef WorkspaceCapabilityReason = String;
+
+/// A small summary of what the caller can do in a workspace.
+class WorkspaceCapabilitySummary {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const WorkspaceCapabilitySummary.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory WorkspaceCapabilitySummary.create({required bool canAdminister, required bool canCreateMeetings, required bool canInviteMembers, required List<String> granted}) =>
+      WorkspaceCapabilitySummary.fromJson(<String, Object?>{
+        'canAdminister': canAdminister,
+        'canCreateMeetings': canCreateMeetings,
+        'canInviteMembers': canInviteMembers,
+        'granted': granted,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Organization administration: profile, member management or policies.
+  bool get canAdminister => json['canAdminister']! as bool;
+
+  /// Meetings can be created in this context.
+  bool get canCreateMeetings => json['canCreateMeetings']! as bool;
+
+  /// Members can be invited (`organization.members.invite`).
+  bool get canInviteMembers => json['canInviteMembers']! as bool;
+
+  /// Every capability granted now (default deny).
+  List<String> get granted => (json['granted']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Features the workspace context does not disable. Owner services still apply their own policy (stricter wins) and re-verify every request.
+class WorkspaceFeatures {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const WorkspaceFeatures.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory WorkspaceFeatures.create({required bool calling, required bool meetings, required bool messaging}) =>
+      WorkspaceFeatures.fromJson(<String, Object?>{
+        'calling': calling,
+        'meetings': meetings,
+        'messaging': messaging,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get calling => json['calling']! as bool;
+
+  bool get meetings => json['meetings']! as bool;
+
+  bool get messaging => json['messaging']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Kind of workspace context.
+///
+/// One of: PERSONAL, ORGANIZATION.
+typedef WorkspaceKind = String;
+
+/// `GET /api/v2/me/workspaces`.
+class WorkspacePage {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const WorkspacePage.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory WorkspacePage.create({required WorkspaceAuthority authority, required List<Workspace> items, String? nextCursor}) =>
+      WorkspacePage.fromJson(<String, Object?>{
+        'authority': authority,
+        'items': items.map((e) => e.toJson()).toList(),
+        if (nextCursor != null) 'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  WorkspaceAuthority get authority => json['authority']! as String;
+
+  /// PERSONAL first, then organizations ordered by id.
+  List<Workspace> get items => (json['items']! as List<Object?>).map((e) => Workspace.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Pass back as `cursor` for the next page; null on the last page.
+  String? get nextCursor => json['nextCursor'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}

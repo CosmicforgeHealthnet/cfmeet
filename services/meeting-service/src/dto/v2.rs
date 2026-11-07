@@ -1213,6 +1213,153 @@ pub struct OrganizationLifecycleRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Workspace context (Blueprint Section 8, ADR 0056 §5)
+//
+// A workspace is a per-request context: "Personal" or one organization the caller is an
+// ACTIVE member of. The server never stores an "active organization"; every
+// organization-scoped request still names its organization and is re-verified.
+// ---------------------------------------------------------------------------
+
+/// Kind of workspace context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceKind {
+    /// The caller's own personal context (`id` = `personal`).
+    Personal,
+    /// A first-party business organization (`id` = the organization id).
+    Organization,
+}
+
+/// Which store answered: the meeting-service organization directory
+/// (`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service
+/// (authoritative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceAuthority {
+    LegacyDirectory,
+    OrganizationsService,
+}
+
+/// Why a capability is (not) granted in a workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceCapabilityReason {
+    Allowed,
+    /// The caller's role does not hold it.
+    CapabilityNotGranted,
+    /// The role holds it but the organization policy removes it.
+    PolicyRestricted,
+    /// The organization is suspended: it grants nothing (except what the authority still
+    /// grants its OWNERs, such as `organization.read`).
+    OrganizationSuspended,
+    /// Not available in this deployment (the Organizations Service is not authoritative).
+    FeatureDisabled,
+}
+
+/// A small summary of what the caller can do in a workspace.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapabilitySummary {
+    /// Every capability granted now (default deny).
+    pub granted: Vec<String>,
+    /// Meetings can be created in this context.
+    pub can_create_meetings: bool,
+    /// Members can be invited (`organization.members.invite`).
+    pub can_invite_members: bool,
+    /// Organization administration: profile, member management or policies.
+    pub can_administer: bool,
+}
+
+/// One workspace context of the caller.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    /// `personal`, or the organization id.
+    pub id: String,
+    pub kind: WorkspaceKind,
+    /// `Personal`, or the organization name.
+    pub display_name: String,
+    /// ORGANIZATION only.
+    pub organization_id: Option<Uuid>,
+    /// ORGANIZATION only.
+    pub slug: Option<String>,
+    /// The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows
+    /// OWNER, ADMIN and MEMBER). ORGANIZATION only.
+    pub role: Option<String>,
+    /// ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only.
+    pub organization_status: Option<String>,
+    /// NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;
+    /// null for PERSONAL and when the legacy directory answers (no provisioning there).
+    pub provisioning_state: Option<String>,
+    pub capabilities: WorkspaceCapabilitySummary,
+}
+
+/// `GET /api/v2/me/workspaces`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePage {
+    /// PERSONAL first, then organizations ordered by id.
+    pub items: Vec<Workspace>,
+    /// Pass back as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<String>,
+    pub authority: WorkspaceAuthority,
+}
+
+/// `GET /api/v2/me/workspaces` paging.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceListQuery {
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u32>,
+}
+
+/// One capability decision.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapability {
+    /// Capability name, e.g. `meetings.organization.create`.
+    pub capability: String,
+    pub granted: bool,
+    pub reason: WorkspaceCapabilityReason,
+}
+
+/// Features the workspace context does not disable. Owner services still apply their
+/// own policy (stricter wins) and re-verify every request.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFeatures {
+    pub meetings: bool,
+    pub messaging: bool,
+    pub calling: bool,
+}
+
+/// `GET /api/v2/me/workspaces/{workspaceId}/capabilities`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapabilities {
+    /// `personal`, or the organization id.
+    pub workspace_id: String,
+    pub kind: WorkspaceKind,
+    pub authority: WorkspaceAuthority,
+    pub organization_id: Option<Uuid>,
+    pub role: Option<String>,
+    pub organization_status: Option<String>,
+    pub provisioning_state: Option<String>,
+    /// Organization policy revision the answer was computed with (Organizations Service).
+    pub policy_revision: Option<i64>,
+    pub features: WorkspaceFeatures,
+    /// Every capability of the vocabulary with its decision.
+    pub capabilities: Vec<WorkspaceCapability>,
+    /// PERSONAL only: the Communications Hub read that owns personal communications
+    /// capabilities (`/api/v2/communications/me/capabilities`).
+    pub personal_communications_capabilities: Option<String>,
+    /// When the answer was computed (it is never cached server-side).
+    pub evaluated_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
 // Recurrence exceptions (independent of materialization)
 // ---------------------------------------------------------------------------
 

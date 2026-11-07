@@ -44,6 +44,7 @@ pub mod secrets;
 pub mod session_bridge;
 pub mod specialized;
 pub mod unified_messaging;
+pub mod workspaces;
 
 pub use otp::OtpService;
 pub use rate_limiter::RateLimiterService;

@@ -2197,6 +2197,18 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/me/workspaces",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/workspaces/{workspaceId}/capabilities",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/me/conferences",
       "class": "PUBLIC_CUSTOMER"
     },

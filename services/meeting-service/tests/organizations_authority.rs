@@ -152,7 +152,80 @@ struct FakeState {
     members: Mutex<HashMap<Uuid, Vec<Value>>>,
     /// (METHOD, path) → scripted answer.
     overrides: Mutex<HashMap<(String, String), (u16, Value)>>,
+    /// organization → fake policy `{revision, features:{meetings,messaging,calling},
+    /// restrict:{ROLE:[capability]}}` (Section 8 capability reads).
+    policies: Mutex<HashMap<Uuid, Value>>,
     down: AtomicBool,
+}
+
+/// The contract role → capability matrix (`docs/api/organizations-internal-v1.md` §3).
+const CAPABILITIES: &[&str] = &[
+    "organization.read",
+    "organization.members.read",
+    "organization.profile.write",
+    "organization.members.invite",
+    "organization.members.manage",
+    "organization.ownership.transfer",
+    "organization.lifecycle.manage",
+    "organization.audit.read",
+    "organization.policies.manage",
+    "organization.teams.manage",
+    "meetings.organization.create",
+    "meetings.organization.manage",
+    "calling.enterprise.manage",
+    "messaging.organization.moderate",
+];
+
+fn matrix_grants(role: &str, capability: &str) -> bool {
+    match capability {
+        "organization.read" => true,
+        "organization.members.read" | "meetings.organization.create" => role != "GUEST",
+        "organization.members.invite" | "organization.teams.manage" => {
+            matches!(role, "OWNER" | "ADMIN" | "MANAGER")
+        }
+        "organization.ownership.transfer" | "organization.lifecycle.manage" => role == "OWNER",
+        _ => matches!(role, "OWNER" | "ADMIN"),
+    }
+}
+
+fn matrix_of(role: &str) -> Vec<String> {
+    CAPABILITIES
+        .iter()
+        .filter(|c| matrix_grants(role, c))
+        .map(|c| c.to_string())
+        .collect()
+}
+
+/// Effective capabilities of a membership, as the fake authority computes them.
+fn effective_of(policy: &Value, role: &str, membership: &str, org_status: &str) -> Vec<String> {
+    if membership != "ACTIVE" {
+        return vec![];
+    }
+    if org_status != "ACTIVE" {
+        return if role == "OWNER" {
+            vec!["organization.read".to_string()]
+        } else {
+            vec![]
+        };
+    }
+    let restricted = |c: &str| {
+        policy["restrict"][role]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|x| x == c))
+    };
+    let disabled = |c: &str| {
+        ["meetings", "messaging", "calling"]
+            .iter()
+            .any(|f| c.starts_with(&format!("{f}.")) && policy["features"][f] == json!(false))
+    };
+    matrix_of(role)
+        .into_iter()
+        .filter(|c| !restricted(c) && !disabled(c))
+        .collect()
+}
+
+fn default_policy() -> Value {
+    json!({ "revision": 0, "features": { "meetings": true, "messaging": true, "calling": true }, "restrict": {} })
 }
 
 struct Fake {
@@ -357,6 +430,11 @@ async fn fake_handler(
             "organizationId": id(o), "provisioningState": "PENDING", "step": null, "failureClass": null })),
         ("GET", ["users", u, "organizations"]) => {
             let user = id(u);
+            // Contract: an actor reads only their own organizations.
+            if header("x-cf-acting-user").is_some_and(|a| a != user.to_string()) {
+                return (StatusCode::FORBIDDEN, Json(envelope("PERMISSION_DENIED")))
+                    .into_response();
+            }
             let memberships = state
                 .memberships
                 .lock()
@@ -365,20 +443,75 @@ async fn fake_handler(
                 .cloned()
                 .unwrap_or_default();
             let orgs = state.orgs.lock().unwrap();
+            let policies = state.policies.lock().unwrap();
             let items: Vec<Value> = memberships
                 .iter()
+                .filter(|m| m["status"] != "REMOVED")
                 .filter_map(|m| {
-                    let org = orgs.get(&id(m["organizationId"].as_str().unwrap()))?;
+                    let org_id = id(m["organizationId"].as_str().unwrap());
+                    let org = orgs.get(&org_id)?;
+                    let status = org["lifecycleStatus"].as_str().unwrap_or("ACTIVE");
+                    if status == "ARCHIVED" {
+                        return None;
+                    }
+                    let policy = policies.get(&org_id).cloned().unwrap_or_else(default_policy);
+                    let role = m["role"].as_str().unwrap_or("GUEST");
+                    let membership = m["status"].as_str().unwrap_or("ACTIVE");
                     Some(json!({
                         "organization": { "id": org["id"], "name": org["name"], "slug": org["slug"],
-                                          "lifecycleStatus": org["lifecycleStatus"], "provisioningState": "PENDING", "version": 1 },
+                                          "lifecycleStatus": status, "provisioningState": org["provisioningState"], "version": 1 },
                         "membership": { "id": m["membershipId"], "organizationId": org["id"], "userId": user,
-                                        "role": m["role"], "status": m["status"], "version": 1 },
-                        "capabilities": m["capabilities"],
+                                        "role": role, "status": membership, "version": 1 },
+                        "capabilities": effective_of(&policy, role, membership, status),
                     }))
                 })
                 .collect();
             ok(json!({ "userId": user, "items": items }))
+        }
+        ("GET", ["organizations", o, "roles", "capabilities"]) => {
+            let org = id(o);
+            let status = match fake_member_access(&state, org, header("x-cf-acting-user")) {
+                Ok(status) => status,
+                Err(response) => return response,
+            };
+            let policy = state
+                .policies
+                .lock()
+                .unwrap()
+                .get(&org)
+                .cloned()
+                .unwrap_or_else(default_policy);
+            let roles: Vec<Value> = ["OWNER", "ADMIN", "MANAGER", "MEMBER", "GUEST"]
+                .iter()
+                .map(|r| {
+                    json!({ "role": r, "capabilities": matrix_of(r),
+                            "effectiveCapabilities": effective_of(&policy, r, "ACTIVE", &status) })
+                })
+                .collect();
+            ok(json!({ "organizationId": org, "lifecycleStatus": status,
+                       "policyRevision": policy["revision"], "capabilities": CAPABILITIES,
+                       "roles": roles, "teamRoles": [] }))
+        }
+        ("GET", ["organizations", o, "policies", "effective"]) => {
+            let org = id(o);
+            let status = match fake_member_access(&state, org, header("x-cf-acting-user")) {
+                Ok(status) => status,
+                Err(response) => return response,
+            };
+            let policy = state
+                .policies
+                .lock()
+                .unwrap()
+                .get(&org)
+                .cloned()
+                .unwrap_or_else(default_policy);
+            let provisioning = state.orgs.lock().unwrap()[&org]["provisioningState"].clone();
+            ok(
+                json!({ "organizationId": org, "lifecycleStatus": status, "provisioningState": provisioning,
+                       "revision": policy["revision"],
+                       "constraints": { "enabledFeatures": policy["features"], "combination": "STRICTER_WINS" },
+                       "legacyMeetingProfilePolicy": {} }),
+            )
         }
         ("GET", ["admin", "organizations"]) => {
             let items: Vec<Value> = state.orgs.lock().unwrap().values().cloned().collect();
@@ -410,7 +543,80 @@ async fn fake_handler(
     }
 }
 
+/// The contract's `organization.read` check for an acting user: unknown organization or no
+/// ACTIVE membership → 404; a non-OWNER of a suspended / archived organization → 409.
+/// Returns the organization's lifecycle status.
+#[allow(clippy::result_large_err)]
+fn fake_member_access(
+    state: &FakeState,
+    org: Uuid,
+    actor: Option<String>,
+) -> Result<String, Response> {
+    let not_found = || {
+        (
+            StatusCode::NOT_FOUND,
+            Json(envelope("ORGANIZATION_NOT_FOUND")),
+        )
+            .into_response()
+    };
+    let status = match state.orgs.lock().unwrap().get(&org) {
+        Some(doc) => doc["lifecycleStatus"]
+            .as_str()
+            .unwrap_or("ACTIVE")
+            .to_string(),
+        None => return Err(not_found()),
+    };
+    let Some(user) = actor.and_then(|a| Uuid::parse_str(&a).ok()) else {
+        return Ok(status);
+    };
+    let role = state.memberships.lock().unwrap().get(&user).and_then(|l| {
+        l.iter()
+            .find(|m| m["organizationId"] == json!(org) && m["status"] == "ACTIVE")
+            .map(|m| m["role"].as_str().unwrap_or("GUEST").to_string())
+    });
+    match role {
+        None => Err(not_found()),
+        Some(role) if status != "ACTIVE" && role != "OWNER" => Err((
+            StatusCode::CONFLICT,
+            Json(envelope(if status == "ARCHIVED" {
+                "ORGANIZATION_ARCHIVED"
+            } else {
+                "ORGANIZATION_SUSPENDED"
+            })),
+        )
+            .into_response()),
+        Some(_) => Ok(status),
+    }
+}
+
 impl Fake {
+    /// Sets an organization's lifecycle status (ACTIVE, SUSPENDED or ARCHIVED).
+    fn set_org_status(&self, org: Uuid, status: &str) {
+        self.state.orgs.lock().unwrap().get_mut(&org).unwrap()["lifecycleStatus"] = json!(status);
+    }
+
+    /// Sets the status of `user`'s membership of `org`.
+    fn set_membership_status(&self, user: Uuid, org: Uuid, status: &str) {
+        let mut memberships = self.state.memberships.lock().unwrap();
+        for m in memberships.get_mut(&user).unwrap() {
+            if m["organizationId"] == json!(org) {
+                m["status"] = json!(status);
+            }
+        }
+    }
+
+    fn set_policy(&self, org: Uuid, policy: Value) {
+        self.state.policies.lock().unwrap().insert(org, policy);
+    }
+
+    fn unscript(&self, method: &str, path: &str) {
+        self.state
+            .overrides
+            .lock()
+            .unwrap()
+            .remove(&(method.to_string(), path.to_string()));
+    }
+
     async fn start(jwk: PublicJwk) -> Self {
         let state = Arc::new(FakeState {
             verify: Verify::for_key(jwk),
@@ -420,6 +626,7 @@ impl Fake {
             orgs: Mutex::new(HashMap::new()),
             members: Mutex::new(HashMap::new()),
             overrides: Mutex::new(HashMap::new()),
+            policies: Mutex::new(HashMap::new()),
             down: AtomicBool::new(false),
         });
         let router = Router::new()
@@ -1427,5 +1634,629 @@ async fn s4_every_first_party_route_relays_in_authoritative_mode() {
         (s, code(&v)),
         (StatusCode::NOT_FOUND, "ORGANIZATION_NOT_FOUND")
     );
+    assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Blueprint Section 8 — workspace context (per request; ADR 0056 §5)
+// ---------------------------------------------------------------------------------------
+
+fn workspace_ids(page: &Value) -> Vec<String> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn find_workspace<'a>(page: &'a Value, id: &str) -> Option<&'a Value> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == id)
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect()
+}
+
+fn granted_capabilities(caps: &Value) -> Vec<String> {
+    caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["granted"] == true)
+        .map(|c| c["capability"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn reason_of(caps: &Value, capability: &str) -> String {
+    caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["capability"] == capability)
+        .unwrap_or_else(|| panic!("{capability} missing: {caps}"))["reason"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn caps_uri(workspace: impl std::fmt::Display) -> String {
+    format!("/api/v2/me/workspaces/{workspace}/capabilities")
+}
+
+/// The same denial for an organization of someone else, an unknown id and a malformed id.
+async fn assert_not_found(app: &TestApp, user: &User, workspaces: &[String]) {
+    let mut messages = std::collections::BTreeSet::new();
+    for w in workspaces {
+        let (s, v) = app.get(caps_uri(w), Auth::Bearer(&user.token)).await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::NOT_FOUND, "ORGANIZATION_NOT_FOUND"),
+            "{w}: {v}"
+        );
+        assert!(v["error"]["requestId"].is_string(), "{v}");
+        messages.insert(v["error"]["message"].as_str().unwrap().to_string());
+    }
+    assert_eq!(messages.len(), 1, "non-enumerating: {messages:?}");
+}
+
+#[tokio::test]
+async fn s8_legacy_workspaces_follow_the_meeting_directory() {
+    let app = some!(app_with(None).await);
+    let admin = app.admin("platform").await;
+    let owner = app.user("owner").await;
+    let member = app.user("member").await;
+    let other = app.user("other").await;
+    let outsider = app.user("outsider").await;
+    let a = create_legacy_org(&app, &admin, "ws-legacy-a", &owner).await;
+    let b = create_legacy_org(&app, &admin, "ws-legacy-b", &other).await;
+    let (s, v) = app
+        .call(
+            Method::PUT,
+            &format!("/api/v2/organizations/{a}/members/{}", member.id),
+            Auth::Bearer(&owner.token),
+            Some(json!({ "role": "MEMBER", "status": "ACTIVE" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (s, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    assert_eq!(page["authority"], "LEGACY_DIRECTORY");
+    assert_eq!(
+        workspace_ids(&page),
+        vec!["personal".to_string(), a.to_string()]
+    );
+    assert!(page["nextCursor"].is_null());
+    let personal = &page["items"][0];
+    assert_eq!(personal["kind"], "PERSONAL");
+    assert_eq!(personal["displayName"], "Personal");
+    assert!(personal["organizationId"].is_null() && personal["role"].is_null());
+    assert_eq!(
+        strings(&personal["capabilities"]["granted"]),
+        vec!["meetings.personal.create"],
+        "no organization creation before the Organizations Service is authoritative"
+    );
+    let wa = &page["items"][1];
+    assert_eq!(wa["kind"], "ORGANIZATION");
+    assert_eq!(uuid(&wa["organizationId"]), a);
+    assert_eq!(wa["displayName"], "ws-legacy-a");
+    assert_eq!(wa["slug"], "ws-legacy-a");
+    assert_eq!(wa["role"], "OWNER");
+    assert_eq!(wa["organizationStatus"], "ACTIVE");
+    assert!(
+        wa["provisioningState"].is_null(),
+        "no provisioning in legacy mode"
+    );
+    assert_eq!(wa["capabilities"]["canAdminister"], true);
+    assert_eq!(wa["capabilities"]["canInviteMembers"], false);
+    assert_eq!(wa["capabilities"]["canCreateMeetings"], true);
+
+    let (s, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&member.token))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let wa = find_workspace(&page, &a.to_string()).unwrap();
+    assert_eq!(wa["role"], "MEMBER");
+    assert_eq!(
+        strings(&wa["capabilities"]["granted"]),
+        vec!["organization.read", "meetings.organization.create"]
+    );
+    assert_eq!(wa["capabilities"]["canAdminister"], false);
+    assert!(find_workspace(&page, &b.to_string()).is_none());
+
+    let (s, caps) = app.get(caps_uri(a), Auth::Bearer(&member.token)).await;
+    assert_eq!(s, StatusCode::OK, "{caps}");
+    assert_eq!(caps["workspaceId"], a.to_string());
+    assert_eq!(caps["kind"], "ORGANIZATION");
+    assert_eq!(caps["authority"], "LEGACY_DIRECTORY");
+    assert_eq!(caps["role"], "MEMBER");
+    assert!(caps["policyRevision"].is_null());
+    assert_eq!(
+        caps["features"],
+        json!({ "meetings": true, "messaging": true, "calling": true })
+    );
+    assert_eq!(
+        caps["capabilities"].as_array().unwrap().len(),
+        CAPABILITIES.len()
+    );
+    assert_eq!(
+        reason_of(&caps, "organization.members.read"),
+        "CAPABILITY_NOT_GRANTED"
+    );
+    assert_eq!(
+        reason_of(&caps, "organization.members.invite"),
+        "FEATURE_DISABLED"
+    );
+    assert_eq!(reason_of(&caps, "meetings.organization.create"), "ALLOWED");
+
+    let (s, caps) = app
+        .get(caps_uri("personal"), Auth::Bearer(&member.token))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{caps}");
+    assert_eq!(caps["kind"], "PERSONAL");
+    assert_eq!(reason_of(&caps, "meetings.personal.create"), "ALLOWED");
+    assert_eq!(reason_of(&caps, "organizations.create"), "FEATURE_DISABLED");
+    assert_eq!(
+        caps["personalCommunicationsCapabilities"],
+        "/api/v2/communications/me/capabilities"
+    );
+
+    // Isolation and non-enumeration: another organization, an unknown id, a malformed id.
+    assert_not_found(
+        &app,
+        &owner,
+        &[
+            b.to_string(),
+            Uuid::new_v4().to_string(),
+            "not-a-uuid".into(),
+        ],
+    )
+    .await;
+    let (s, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&outsider.token))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(workspace_ids(&page), vec!["personal".to_string()]);
+
+    // Paging: one item per page, PERSONAL first.
+    let (s, first) = app
+        .get("/api/v2/me/workspaces?limit=1", Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(workspace_ids(&first), vec!["personal".to_string()]);
+    let cursor = first["nextCursor"].as_str().unwrap().to_string();
+    let (s, second) = app
+        .get(
+            format!("/api/v2/me/workspaces?limit=1&cursor={cursor}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(workspace_ids(&second), vec![a.to_string()]);
+    assert!(second["nextCursor"].is_null());
+    for bad in ["limit=0", "limit=201", "cursor=bogus", "active=true"] {
+        let (s, v) = app
+            .get(
+                format!("/api/v2/me/workspaces?{bad}"),
+                Auth::Bearer(&owner.token),
+            )
+            .await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
+            "{bad}"
+        );
+    }
+    let (s, v) = app.get("/api/v2/me/workspaces", Auth::None).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
+    );
+
+    // A suspended organization is listed with its status and grants nothing.
+    let (s, v) = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v2/admin/organizations/{a}"),
+            Auth::Bearer(&admin.token),
+            Some(json!({ "status": "SUSPENDED" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    for user in [&owner, &member] {
+        let (_, page) = app
+            .get("/api/v2/me/workspaces", Auth::Bearer(&user.token))
+            .await;
+        let wa = find_workspace(&page, &a.to_string()).unwrap();
+        assert_eq!(wa["organizationStatus"], "SUSPENDED");
+        assert!(strings(&wa["capabilities"]["granted"]).is_empty());
+        let (s, caps) = app.get(caps_uri(a), Auth::Bearer(&user.token)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(caps["organizationStatus"], "SUSPENDED");
+        assert!(granted_capabilities(&caps).is_empty());
+        assert_eq!(
+            caps["features"],
+            json!({ "meetings": false, "messaging": false, "calling": false })
+        );
+        assert!(caps["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["reason"] == "ORGANIZATION_SUSPENDED"));
+    }
+}
+
+#[tokio::test]
+async fn s8_shadow_mode_serves_the_legacy_workspaces() {
+    let (signer, fake) = organizations().await;
+    let shadow = authority(&signer, &fake.url(), AuthorityMode::Shadow);
+    let app = some!(app_with(Some(shadow)).await);
+    let admin = app.admin("platform").await;
+    let owner = app.user("owner").await;
+    let org = create_legacy_org(&app, &admin, "ws-shadow", &owner).await;
+    // Organizations knows another organization for the owner: never served in shadow mode.
+    let elsewhere = fake.add_org("ws-shadow-elsewhere", &[(owner.id, "OWNER")]);
+    let (s, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{page}");
+    assert_eq!(page["authority"], "LEGACY_DIRECTORY");
+    assert_eq!(
+        workspace_ids(&page),
+        vec!["personal".to_string(), org.to_string()]
+    );
+    let (s, caps) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(caps["authority"], "LEGACY_DIRECTORY");
+    assert_eq!(reason_of(&caps, "organization.members.manage"), "ALLOWED");
+    assert_not_found(&app, &owner, &[elsewhere.to_string()]).await;
+    // Shadow mode only compares memberships in the background; no workspace read reaches
+    // Organizations.
+    assert!(fake
+        .requests()
+        .iter()
+        .all(|r| r.method == "POST" && r.path == "/internal/v1/organizations/memberships/resolve"));
+}
+
+#[tokio::test]
+async fn s8_authoritative_workspaces_role_status_and_isolation_matrix() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let org_admin = app.user("orgadmin").await;
+    let manager = app.user("manager").await;
+    let member = app.user("member").await;
+    let guest = app.user("guest").await;
+    let other_owner = app.user("otherowner").await;
+    let outsider = app.user("outsider").await;
+    let one = fake.add_org(
+        "ws-one",
+        &[
+            (owner.id, "OWNER"),
+            (org_admin.id, "ADMIN"),
+            (manager.id, "MANAGER"),
+            (member.id, "MEMBER"),
+            (guest.id, "GUEST"),
+        ],
+    );
+    let two = fake.add_org(
+        "ws-two",
+        &[(other_owner.id, "OWNER"), (manager.id, "MEMBER")],
+    );
+
+    for (user, role) in [
+        (&owner, "OWNER"),
+        (&org_admin, "ADMIN"),
+        (&manager, "MANAGER"),
+        (&member, "MEMBER"),
+        (&guest, "GUEST"),
+    ] {
+        let (s, page) = app
+            .get("/api/v2/me/workspaces", Auth::Bearer(&user.token))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{role}: {page}");
+        assert_eq!(page["authority"], "ORGANIZATIONS_SERVICE");
+        assert_eq!(page["items"][0]["id"], "personal");
+        assert_eq!(
+            strings(&page["items"][0]["capabilities"]["granted"]),
+            vec!["meetings.personal.create", "organizations.create"]
+        );
+        let w = find_workspace(&page, &one.to_string()).unwrap();
+        assert_eq!(w["role"], role);
+        assert_eq!(w["organizationStatus"], "ACTIVE");
+        assert_eq!(w["provisioningState"], "PENDING");
+        assert_eq!(w["displayName"], "ws-one Health");
+        assert_eq!(
+            strings(&w["capabilities"]["granted"]),
+            matrix_of(role),
+            "{role}"
+        );
+        assert_eq!(
+            find_workspace(&page, &two.to_string()).is_some(),
+            role == "MANAGER",
+            "{role} sees only their own organizations"
+        );
+        let users = fake.last(
+            "GET",
+            &format!("/internal/v1/users/{}/organizations", user.id),
+        );
+        assert_eq!(users.acting_user, Some(user.id.to_string()));
+
+        let (s, caps) = app.get(caps_uri(one), Auth::Bearer(&user.token)).await;
+        assert_eq!(s, StatusCode::OK, "{role}: {caps}");
+        assert_eq!(caps["authority"], "ORGANIZATIONS_SERVICE");
+        assert_eq!(caps["role"], role);
+        assert_eq!(caps["organizationStatus"], "ACTIVE");
+        assert_eq!(caps["provisioningState"], "PENDING");
+        assert_eq!(caps["policyRevision"], 0);
+        assert_eq!(
+            caps["features"],
+            json!({ "meetings": true, "messaging": true, "calling": true })
+        );
+        assert_eq!(granted_capabilities(&caps), matrix_of(role), "{role}");
+        for c in caps["capabilities"].as_array().unwrap() {
+            if c["granted"] == false {
+                assert_eq!(c["reason"], "CAPABILITY_NOT_GRANTED", "{role} {c}");
+            }
+        }
+        for path in ["roles/capabilities", "policies/effective"] {
+            let r = fake.last("GET", &format!("/internal/v1/organizations/{one}/{path}"));
+            assert_eq!(r.acting_user, Some(user.id.to_string()), "{path}");
+        }
+    }
+
+    // One person, two organizations, two roles: each context is computed on its own.
+    let (_, caps) = app.get(caps_uri(two), Auth::Bearer(&manager.token)).await;
+    assert_eq!(caps["role"], "MEMBER");
+    assert_eq!(granted_capabilities(&caps), matrix_of("MEMBER"));
+
+    // Isolation and non-enumeration.
+    for (user, target) in [
+        (&other_owner, one.to_string()),
+        (&outsider, one.to_string()),
+        (&owner, two.to_string()),
+    ] {
+        assert_not_found(
+            &app,
+            user,
+            &[target, Uuid::new_v4().to_string(), "x".into()],
+        )
+        .await;
+    }
+    let (_, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&outsider.token))
+        .await;
+    assert_eq!(workspace_ids(&page), vec!["personal".to_string()]);
+
+    // A suspended membership is not a workspace.
+    fake.set_membership_status(member.id, one, "SUSPENDED");
+    let (_, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&member.token))
+        .await;
+    assert!(find_workspace(&page, &one.to_string()).is_none());
+    assert_not_found(&app, &member, &[one.to_string()]).await;
+
+    // A suspended organization is listed and grants nothing (OWNERs keep reading it).
+    fake.set_org_status(one, "SUSPENDED");
+    let before = fake.requests().len();
+    for (user, role) in [(&owner, "OWNER"), (&org_admin, "ADMIN"), (&guest, "GUEST")] {
+        let expected: Vec<String> = if role == "OWNER" {
+            vec!["organization.read".into()]
+        } else {
+            vec![]
+        };
+        let (_, page) = app
+            .get("/api/v2/me/workspaces", Auth::Bearer(&user.token))
+            .await;
+        let w = find_workspace(&page, &one.to_string()).unwrap();
+        assert_eq!(w["organizationStatus"], "SUSPENDED");
+        assert_eq!(strings(&w["capabilities"]["granted"]), expected, "{role}");
+        assert_eq!(w["capabilities"]["canCreateMeetings"], false);
+        let (s, caps) = app.get(caps_uri(one), Auth::Bearer(&user.token)).await;
+        assert_eq!(s, StatusCode::OK, "{role}: {caps}");
+        assert_eq!(caps["organizationStatus"], "SUSPENDED");
+        assert!(caps["policyRevision"].is_null());
+        assert_eq!(
+            caps["features"],
+            json!({ "meetings": false, "messaging": false, "calling": false })
+        );
+        assert_eq!(granted_capabilities(&caps), expected, "{role}");
+        for c in caps["capabilities"].as_array().unwrap() {
+            if c["granted"] == false {
+                assert_eq!(c["reason"], "ORGANIZATION_SUSPENDED", "{role} {c}");
+            }
+        }
+    }
+    assert!(
+        fake.requests()[before..]
+            .iter()
+            .all(|r| !r.path.ends_with("/roles/capabilities")
+                && !r.path.ends_with("/policies/effective")),
+        "a suspended organization needs no role or policy question"
+    );
+
+    // An archived organization is no workspace at all.
+    fake.set_org_status(one, "ARCHIVED");
+    let (_, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+        .await;
+    assert!(find_workspace(&page, &one.to_string()).is_none());
+    assert_not_found(&app, &owner, &[one.to_string()]).await;
+    assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn s8_authoritative_policy_restricted_capabilities() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let manager = app.user("manager").await;
+    let member = app.user("member").await;
+    let org = fake.add_org(
+        "ws-policy",
+        &[
+            (owner.id, "OWNER"),
+            (manager.id, "MANAGER"),
+            (member.id, "MEMBER"),
+        ],
+    );
+    fake.set_policy(
+        org,
+        json!({ "revision": 4,
+                "features": { "meetings": true, "messaging": true, "calling": false },
+                "restrict": { "MANAGER": ["organization.members.invite"],
+                              "MEMBER": ["meetings.organization.create"] } }),
+    );
+
+    let (s, caps) = app.get(caps_uri(org), Auth::Bearer(&manager.token)).await;
+    assert_eq!(s, StatusCode::OK, "{caps}");
+    assert_eq!(caps["policyRevision"], 4);
+    assert_eq!(
+        caps["features"],
+        json!({ "meetings": true, "messaging": true, "calling": false })
+    );
+    assert_eq!(
+        reason_of(&caps, "organization.members.invite"),
+        "POLICY_RESTRICTED"
+    );
+    assert_eq!(reason_of(&caps, "organization.teams.manage"), "ALLOWED");
+    assert_eq!(
+        reason_of(&caps, "organization.audit.read"),
+        "CAPABILITY_NOT_GRANTED"
+    );
+    let (_, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&manager.token))
+        .await;
+    let w = find_workspace(&page, &org.to_string()).unwrap();
+    assert_eq!(w["capabilities"]["canInviteMembers"], false);
+    assert!(!strings(&w["capabilities"]["granted"])
+        .contains(&"organization.members.invite".to_string()));
+
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&member.token)).await;
+    assert_eq!(
+        reason_of(&caps, "meetings.organization.create"),
+        "POLICY_RESTRICTED"
+    );
+    let (_, page) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&member.token))
+        .await;
+    assert_eq!(
+        find_workspace(&page, &org.to_string()).unwrap()["capabilities"]["canCreateMeetings"],
+        false
+    );
+
+    // A disabled feature removes its capabilities for every role, OWNER included.
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(
+        reason_of(&caps, "calling.enterprise.manage"),
+        "POLICY_RESTRICTED"
+    );
+    assert_eq!(reason_of(&caps, "organization.policies.manage"), "ALLOWED");
+}
+
+#[tokio::test]
+async fn s8_authoritative_workspaces_fail_closed() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let org = fake.add_org("ws-closed", &[(owner.id, "OWNER")]);
+    let (s, _) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let unavailable = |s: StatusCode, v: &Value, what: &str| {
+        assert_eq!(
+            (s, code(v)),
+            (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            "{what}: {v}"
+        );
+        assert!(v["error"]["requestId"].is_string(), "{what}: {v}");
+        assert!(v.get("items").is_none() && v.get("capabilities").is_none());
+    };
+
+    // Organizations unreachable: never a partial list, never a capability.
+    fake.state.down.store(true, Ordering::SeqCst);
+    let (s, v) = app
+        .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+        .await;
+    unavailable(s, &v, "list while down");
+    let (s, v) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    unavailable(s, &v, "capabilities while down");
+    // The personal context needs no organization answer.
+    let (s, caps) = app
+        .get(caps_uri("personal"), Auth::Bearer(&owner.token))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{caps}");
+    assert_eq!(reason_of(&caps, "organizations.create"), "ALLOWED");
+    fake.state.down.store(false, Ordering::SeqCst);
+
+    // Server errors, a refused service credential and malformed answers.
+    let users = format!("/internal/v1/users/{}/organizations", owner.id);
+    for (status, doc) in [
+        (500, envelope("INTERNAL_ERROR")),
+        (403, envelope("ACTOR_NOT_ALLOWED")),
+        (401, envelope("INTERNAL_AUTHENTICATION_FAILED")),
+        (200, json!({ "userId": owner.id })),
+    ] {
+        fake.script("GET", &users, status, doc.clone());
+        let (s, v) = app
+            .get("/api/v2/me/workspaces", Auth::Bearer(&owner.token))
+            .await;
+        unavailable(s, &v, &format!("list {status} {doc}"));
+        let (s, v) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+        unavailable(s, &v, &format!("capabilities {status} {doc}"));
+    }
+    fake.unscript("GET", &users);
+
+    let roles = format!("/internal/v1/organizations/{org}/roles/capabilities");
+    let policy = format!("/internal/v1/organizations/{org}/policies/effective");
+    for (path, status, doc) in [
+        (&roles, 500, envelope("INTERNAL_ERROR")),
+        (&roles, 200, json!({ "organizationId": org })),
+        (
+            &policy,
+            200,
+            json!({ "organizationId": org, "lifecycleStatus": "ACTIVE", "revision": 1,
+                    "constraints": { "enabledFeatures": { "meetings": true } } }),
+        ),
+        (
+            &policy,
+            200,
+            json!({ "organizationId": Uuid::new_v4(), "lifecycleStatus": "ACTIVE", "revision": 1,
+                    "constraints": { "enabledFeatures": { "meetings": true, "messaging": true, "calling": true } } }),
+        ),
+        (&policy, 503, envelope("SERVICE_UNAVAILABLE")),
+    ] {
+        fake.script("GET", path, status, doc.clone());
+        let (s, v) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+        unavailable(s, &v, &format!("{path} {status} {doc}"));
+        fake.unscript("GET", path);
+    }
+    // The membership ended between the reads: the authority's refusal is relayed.
+    fake.script("GET", &roles, 404, envelope("ORGANIZATION_NOT_FOUND"));
+    let (s, v) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::NOT_FOUND, "ORGANIZATION_NOT_FOUND")
+    );
+    fake.unscript("GET", &roles);
+    let (s, caps) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(s, StatusCode::OK, "{caps}");
+    assert_eq!(granted_capabilities(&caps), matrix_of("OWNER"));
     assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
 }
