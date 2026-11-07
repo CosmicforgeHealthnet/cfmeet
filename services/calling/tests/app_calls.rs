@@ -132,7 +132,8 @@ async fn video_calls_grant_camera_and_removed_sessions_lose_access() {
     let Some(a) = AppWorld::new().await else {
         return;
     };
-    let (call, _caller, callee) = a.connected_call("VIDEO").await;
+    // A group Call: the removal leaves two parties (a one-to-one Call would end, CAL-001).
+    let (call, _caller, callee, _third) = a.connected_group_call("VIDEO").await;
     let room = AppWorld::room(call);
     for p in a.media().participants(&room) {
         assert!(
@@ -152,7 +153,8 @@ async fn video_calls_grant_camera_and_removed_sessions_lose_access() {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    assert_eq!(a.media().participants(&room).len(), 1);
+    assert_eq!(a.media().participants(&room).len(), 2);
+    assert_eq!(a.state(call).await.0, CallState::Connected);
     let r = a.media_credential(call, session).await;
     assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
 }

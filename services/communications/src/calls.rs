@@ -458,7 +458,8 @@ impl State {
         query: &BTreeMap<String, String>,
     ) -> Result<Value> {
         let (limit, cursor) = timeline_page(query)?;
-        self.conversation(scope, p, conversation, None).await?;
+        let c = self.conversation(scope, p, conversation, None).await?;
+        self.materialize_meeting_cards(p, &c).await?;
         let (mark, cleared_at) = self.watermark_full(p, conversation).await?;
         let (after_at, after_key) = cursor.unwrap_or_else(|| ("-infinity".into(), String::new()));
         let mut entries:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$1 AND conversation_id=$2 AND (occurred_at,entry_key)>($3::timestamptz,$4) AND NOT (COALESCE((data->>'anchorSequence')::bigint,0)<$5 OR (COALESCE((data->>'anchorSequence')::bigint,0)=$5 AND occurred_at<=$6::timestamptz)) ORDER BY occurred_at,entry_key LIMIT $7",
@@ -491,6 +492,35 @@ impl State {
             "stale":!stale_due.is_empty() && !fresh,"data":data,"nextCursor":next,
             "merge":"Order with Messaging history by anchorSequence, then occurredAt, then entryId"}),
         )
+    }
+
+    /// Section 14 (MSG-009): a meeting shared into a conversation is visible to every
+    /// member, but cards were only written for members who had a Hub profile at that
+    /// moment. A current member opening the timeline gets the missing invitation cards,
+    /// copied from the conversation's existing cards, unless the share predates the
+    /// history Messaging lets this member see (`visibleFromSequence`). Call cards are
+    /// per call party (Calling decides) and are not copied.
+    async fn materialize_meeting_cards(
+        &self,
+        p: &Profile,
+        c: &crate::owners::Conversation,
+    ) -> Result<()> {
+        let visible_from = c.raw["visibleFromSequence"].as_i64().unwrap_or(0);
+        let added = execute(&self.store.db,"INSERT INTO communication_timeline_entries(viewer_profile_id,conversation_id,entry_key,kind,source,source_id,occurred_at,source_version,data)
+            SELECT DISTINCT ON (e.entry_key) $1,e.conversation_id,e.entry_key,e.kind,e.source,e.source_id,e.occurred_at,e.source_version,e.data||jsonb_build_object('sharedByViewer',false)
+            FROM communication_timeline_entries e
+            WHERE e.conversation_id=$2 AND e.kind='MEETING_INVITATION' AND e.viewer_profile_id<>$1
+              AND COALESCE((e.data->>'anchorSequence')::bigint,0)+1>=$3
+              AND NOT EXISTS (SELECT 1 FROM communication_timeline_entries x WHERE x.viewer_profile_id=$1 AND x.conversation_id=$2 AND x.entry_key=e.entry_key)
+            ORDER BY e.entry_key,e.occurred_at
+            ON CONFLICT DO NOTHING",
+            vec![p.id.into(),c.id.into(),visible_from.into()]).await?;
+        if added > 0 {
+            self.store
+                .change(&self.store.db, p.id, "MEETING_LINK", Some(c.id), None)
+                .await?;
+        }
+        Ok(())
     }
 
     /// U03: the viewer's recent activity cards across conversations they still belong to.

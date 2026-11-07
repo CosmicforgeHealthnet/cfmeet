@@ -437,7 +437,8 @@ impl AppCallService {
                     }
                     MediaEventOutcome::Applied
                 } else {
-                    // An active Call lost its resource: reconciliation re-ensures it.
+                    // An active Call lost its resource: reconciliation re-ensures it —
+                    // unless nobody is left (CAL-001: then the Call ends instead).
                     self.schedule_reconcile_now(call.id).await?;
                     MediaEventOutcome::Applied
                 }
@@ -679,6 +680,9 @@ impl AppCallService {
             .disconnect_session_in(&txn, &cmd, &call, session, reason)
             .await?;
         txn.commit().await?;
+        // CAL-001: the disconnected session still counts during the participation grace
+        // (reconnects); the others may already be gone.
+        self.evaluate_participation(call.id).await;
         Ok(true)
     }
 
@@ -799,6 +803,25 @@ impl AppCallService {
             .await
             .map_err(|_| CallError::MediaUnavailable)?;
         let mut repairs = 0usize;
+        if !snapshot.exists
+            && matches!(call.current_state, CallState::Connected | CallState::Held)
+            && self.sessions_live(call.id).await? == Some(false)
+        {
+            // CAL-001: an active Call whose sessions are all gone past the grace lost its
+            // resource because nobody is there — it is never re-created; the Call ends.
+            if !self.end_if_participation_ended(call.id).await? {
+                tracing::info!(call_id = %call.id, "abandoned call's media resource not re-created; the reaper decides");
+                let txn = self.db().begin().await?;
+                if let Some(binding) = self.calls.media_binding_in(&txn, call.id).await? {
+                    let next = self.calls.now() + self.config.reconcile_interval;
+                    self.calls
+                        .mark_media_reconciled_in(&txn, binding, false, next)
+                        .await?;
+                }
+                txn.commit().await?;
+            }
+            return Ok(1);
+        }
         if !snapshot.exists {
             // The Call still needs its resource: re-ensure it (same canonical name).
             provider

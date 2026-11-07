@@ -29,8 +29,8 @@ use super::{
     policy::{NewPolicy, PolicyChange, PolicyRules, ResourceStatus},
     queues::{QueueChange, QueueMember, QueueSettings},
     recording::{
-        CallRecordingView, ConsentDecision, ConsentParticipants, RecordingMode,
-        RecordingPolicyChange, RecordingPolicySettings, RecordingRequester,
+        CallRecordingView, ConsentDecision, ConsentParticipants, RecordingFilter, RecordingMode,
+        RecordingPolicyChange, RecordingPolicySettings, RecordingRequester, RecordingState,
     },
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     voicemail::{
@@ -229,6 +229,7 @@ pub fn routes() -> Router<AppState> {
             "/v1/calls/:call_id/recording-authorizations",
             get(list_recording_authorizations),
         )
+        .route("/v1/enterprise/recordings", get(list_recordings))
         .route(
             "/v1/enterprise/recordings/:recording_id",
             get(get_call_recording).delete(delete_call_recording),
@@ -2284,6 +2285,60 @@ async fn list_recording_authorizations(
         )
         .await?;
     Ok(ok(list))
+}
+
+/// `GET /v1/enterprise/recordings` (CAL-017): the scope's recordings, newest first,
+/// filtered by Call, participant principal, state and start time; keyset-paginated. A
+/// recording administrator (no `principalId`, enterprise.recording.manage) lists every
+/// recording of the scope; with `principalId` only recordings of that principal's Calls.
+async fn list_recordings(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::ENTERPRISE_RECORDING_READ)?;
+    let q = QueryParams::parse(
+        query,
+        &[
+            "limit",
+            "cursor",
+            "principalId",
+            "callId",
+            "participantPrincipalId",
+            "state",
+            "startedFrom",
+            "startedBefore",
+        ],
+    )?;
+    let instant = |key: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, CallingError> {
+        q.get(key)
+            .map(|v| {
+                chrono::DateTime::parse_from_rfc3339(v)
+                    .map(|t| t.with_timezone(&chrono::Utc))
+                    .map_err(|_| CallingError::Validation("A time filter is invalid (RFC 3339)."))
+            })
+            .transpose()
+    };
+    let filter = RecordingFilter {
+        call_id: q.uuid("callId")?,
+        participant_principal_id: q.uuid("participantPrincipalId")?,
+        state: q
+            .get("state")
+            .map(|v| RecordingState::parse(v).ok_or(CallingError::Validation("state is invalid.")))
+            .transpose()?,
+        started_from: instant("startedFrom")?,
+        started_before: instant("startedBefore")?,
+    };
+    let page = state
+        .enterprise
+        .list_recordings(
+            &AdminActor::of(&ctx),
+            recording_requester(&ctx, q.uuid("principalId")?)?,
+            filter,
+            &q.page()?,
+        )
+        .await?;
+    Ok(ok(page))
 }
 
 async fn get_call_recording(

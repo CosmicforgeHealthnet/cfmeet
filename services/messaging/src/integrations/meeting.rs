@@ -99,6 +99,8 @@ pub async fn resolve(
             read_receipts: None,
             expected_policy_version: None,
             managed_disclosure_acknowledged: request.managed_disclosure_acknowledged,
+            title: None,
+            avatar_ref: None,
         },
         &key,
     )

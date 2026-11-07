@@ -199,6 +199,27 @@ mod tests {
         assert!(serde_json::from_str::<Action>("\"ALLOW_ALL\"").is_err());
         assert!(serde_json::from_str::<PolicyCheck>(r#"{"action":"DIRECT_CALL","actorPrincipalId":"00000000-0000-0000-0000-000000000001","targetPrincipalId":"00000000-0000-0000-0000-000000000002","credentialIssuedAt":null,"allow":true}"#).is_err());
     }
+    #[test]
+    fn account_session_reference_is_optional_and_omitted_when_absent() {
+        let legacy = r#"{"accountReference":"cfmeet-user:x","principalId":"00000000-0000-0000-0000-000000000001","displayName":"A","avatarReference":null,"authenticatedAt":1}"#;
+        let account: VerifiedAccount = serde_json::from_str(legacy).unwrap();
+        assert!(account.account_session_ref.is_none());
+        // An Account image without a session reference keeps the exact previous wire.
+        assert!(!serde_json::to_string(&account)
+            .unwrap()
+            .contains("accountSessionRef"));
+        assert!(valid_account_session_ref(&"a1".repeat(32)));
+        let bad = [
+            String::new(),
+            "a1".into(),
+            "g".repeat(64),
+            "A".repeat(64),
+            "a".repeat(63),
+        ];
+        for value in bad {
+            assert!(!valid_account_session_ref(&value), "{value}");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +231,21 @@ pub struct VerifiedAccount {
     pub avatar_reference: Option<String>,
     /// Timestamp of credential authentication, not access-token refresh time.
     pub authenticated_at: Option<i64>,
+    /// Blueprint v1.0 Section 14 (ACC-008, ADR 0057 amendment A1): the opaque,
+    /// domain-separated reference of the Account session that made this request
+    /// (`SHA-256("cfmeet-account-session:v1|environment|session")`, lowercase hex). Account
+    /// sends it only where the Hub binds a resource to the sign-in (device links); the Hub
+    /// can match it, never reverse it. Absent for older Account images.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_session_ref: Option<String>,
+}
+
+/// True for a well-formed Account session reference (64 lowercase hex characters).
+pub fn valid_account_session_ref(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

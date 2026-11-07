@@ -414,8 +414,8 @@ mod tests {
         let document = public_calling_document();
         let paths = document["paths"].as_object().expect("paths");
 
-        assert_eq!(paths.len(), 85);
-        assert_eq!(operation_count(&document), 129);
+        assert_eq!(paths.len(), 86);
+        assert_eq!(operation_count(&document), 130);
         assert!(paths.contains_key("/v1/calls"));
         assert!(paths.contains_key("/v1/calling/endpoints"));
         assert!(paths.contains_key("/v1/enterprise/extensions"));

@@ -158,6 +158,32 @@ impl PlatformService {
     }
 }
 
+impl PlatformService {
+    /// Renames a tenant (display name only: the slug, classification and currency are
+    /// immutable). Renaming to the current name is a no-op (no revision, no change row).
+    pub(crate) async fn rename_tenant_in<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        id: TenantId,
+        new_display_name: &str,
+    ) -> PlatformResult<TenantView> {
+        let name = display_name(new_display_name)?;
+        let model = tenants::Entity::find_by_id(id.as_uuid())
+            .one(db)
+            .await?
+            .ok_or(PlatformError::NotFound("tenant"))?;
+        if model.display_name == name {
+            return Ok(model.into());
+        }
+        let mut active: tenants::ActiveModel = model.into();
+        active.display_name = Set(name);
+        active.updated_at = Set(self.clock.now());
+        let model = active.update(db).await?;
+        tracing::info!(tenant_id = %model.id, "tenant renamed");
+        Ok(model.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

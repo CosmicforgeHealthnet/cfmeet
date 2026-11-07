@@ -1,0 +1,2236 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet messaging private Communications integration",
+    "version": "1.2.0",
+    "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+  },
+  "tags": [
+    {
+      "name": "Communications integration",
+      "description": "Narrow owner-authenticated metadata and policy interfaces."
+    }
+  ],
+  "paths": {
+    "/internal/v1/communications/blocks/check": {
+      "post": {
+        "operationId": "checkMessagingCommunicationsBlocks",
+        "summary": "Read canonical domain blocks",
+        "description": "Read canonical domain blocks. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blocked"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pair"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/capabilities": {
+      "post": {
+        "operationId": "readMessagingCommunicationsCapabilities",
+        "summary": "Read actual backend capability",
+        "description": "Read actual backend capability. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capability"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Principal"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/events": {
+      "post": {
+        "operationId": "applyMessagingCommunicationsEvent",
+        "summary": "Deduplicate restrictive Hub metadata events",
+        "description": "Deduplicate restrictive Hub metadata events. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommittedEvent"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/common-groups": {
+      "post": {
+        "operationId": "readMessagingCommonGroups",
+        "summary": "Read canonical groups both principals can view",
+        "description": "Read canonical groups both principals can view. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Groups"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pair"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/conversations/access": {
+      "post": {
+        "operationId": "readMessagingCommunicationsConversationAccess",
+        "summary": "Read the delegated user's current access to one conversation",
+        "description": "Read the delegated user's current access to one conversation. A non-member and an unknown conversation are the same member:false answer; a message before the member's history window, of another kind or unknown is NOT_FOUND. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationAccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationAccessRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/conversations/attachments": {
+      "post": {
+        "operationId": "listMessagingCommunicationsConversationAttachments",
+        "summary": "List attachment metadata visible to the delegated member",
+        "description": "List attachment metadata visible to the delegated member. Only attachments of ACTIVE application messages inside the member's history window, after afterSequence and not hidden for the member, newest first. PRIVATE_E2EE attachments are always ENCRYPTED and are never decrypted, inspected or scanned. A non-member is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationAttachments"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationAttachmentsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/storage-summary": {
+      "post": {
+        "operationId": "readMessagingCommunicationsStorageSummary",
+        "summary": "Read the storage the delegated user's uploads occupy",
+        "description": "Read the storage the delegated user's uploads occupy. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Principal"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/devices/verify": {
+      "post": {
+        "operationId": "verifyMessagingCommunicationsDevice",
+        "summary": "Verify that a Messaging device belongs to the delegated user",
+        "description": "Verify that a Messaging device belongs to the delegated user. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/devices/revoke": {
+      "post": {
+        "operationId": "revokeMessagingCommunicationsDevice",
+        "summary": "Revoke one of the delegated user's Messaging devices",
+        "description": "Revoke one of the delegated user's Messaging devices. Runs the canonical device revocation (key transparency, MLS removal, sessions and push). A device the user does not own is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRevocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRevokeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/devices/push": {
+      "post": {
+        "operationId": "applyMessagingCommunicationsDevicePush",
+        "summary": "Register or remove the push registration of the delegated user's device",
+        "description": "Register or remove the push registration of the delegated user's device. registration is exactly the customer push-registration body and runs the canonical registration; the handle is passed through and never echoed or logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevicePush"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevicePushRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/push-status": {
+      "post": {
+        "operationId": "readMessagingCommunicationsPushStatus",
+        "summary": "Read push delivery configuration and the delegated user's device push state",
+        "description": "Read push delivery configuration and the delegated user's device push state. pushServices reports what this deployment can deliver to (NOT_CONFIGURED without credentials); failure classes never carry delivery error text. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "messaging-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Principal"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer EdDSA service JWT from cf-service-auth; audience, runtime, request IDs, scope, expiration and receiver-granted permission are verified."
+      }
+    },
+    "schemas": {
+      "Blocked": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blocked"
+        ]
+      },
+      "Capability": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "AVAILABLE",
+              "DISABLED",
+              "DEVICE_SECURITY_SETUP_REQUIRED"
+            ]
+          },
+          "securityReady": {
+            "type": "boolean"
+          },
+          "managed": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.2.0: MANAGED personal messaging, independent of E2EE readiness. available: sending enabled and a DIRECT or GROUP context allows MANAGED; realtime SESSION_DEVICE when session devices are enabled (MESSAGING_SESSION_DEVICES_ENABLED) and client tokens can be signed, otherwise POLLING. available / securityReady / reason keep their PRIVATE_E2EE meaning.",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "MANAGED_NOT_ALLOWED"
+                ]
+              },
+              "realtime": {
+                "type": "string",
+                "enum": [
+                  "SESSION_DEVICE",
+                  "POLLING"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason",
+              "realtime"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "reason"
+        ]
+      },
+      "CommittedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "aggregateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^communications[.][a-z.]+$",
+            "maxLength": 80
+          },
+          "data": {
+            "type": "object",
+            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media."
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "eventId",
+          "aggregateId",
+          "version",
+          "type",
+          "data"
+        ]
+      },
+      "ConversationAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "member": {
+            "type": "boolean"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contextClass": {
+            "type": "string"
+          },
+          "securityProfile": {
+            "type": "string",
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "lifecycleState": {
+            "type": "string"
+          },
+          "lastSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "visibleFromSequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "retentionSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MODERATOR",
+              "MEMBER",
+              "READ_ONLY",
+              "BOT_SERVICE"
+            ]
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "memberPrincipalIds": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "ACTIVE members, sorted ascending, at most 256."
+          },
+          "message": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "VISIBLE",
+                  "DELETED",
+                  "HIDDEN_FOR_ME",
+                  "EXPIRED",
+                  "NOT_FOUND"
+                ]
+              },
+              "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "senderPrincipalId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "messageId",
+              "sequence",
+              "state",
+              "sentAt",
+              "senderPrincipalId"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "member"
+        ],
+        "description": "member:false carries nothing else; member:true carries every property except message, which is present only when messageId was requested."
+      },
+      "ConversationAccessRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "principalId",
+          "conversationId"
+        ]
+      },
+      "ConversationAttachments": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "attachmentId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "messageId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "messageSequence": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "INTENT_CREATED",
+                    "VERIFYING",
+                    "READY",
+                    "QUARANTINED",
+                    "REJECTED",
+                    "EXPIRED",
+                    "DELETED"
+                  ]
+                },
+                "sizeBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "mediaClass": {
+                  "type": "string",
+                  "enum": [
+                    "IMAGE",
+                    "VIDEO",
+                    "AUDIO",
+                    "DOCUMENT",
+                    "OTHER",
+                    "ENCRYPTED"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "uploaderPrincipalId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "attachmentId",
+                "messageId",
+                "messageSequence",
+                "state",
+                "sizeBytes",
+                "mediaClass",
+                "createdAt",
+                "uploaderPrincipalId"
+              ]
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data",
+          "nextCursor"
+        ]
+      },
+      "ConversationAttachmentsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Opaque keyset cursor from nextCursor."
+          },
+          "afterSequence": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Excludes attachments whose message sequence is <= afterSequence."
+          }
+        },
+        "required": [
+          "principalId",
+          "conversationId",
+          "limit"
+        ]
+      },
+      "DevicePush": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pushRegistered": {
+            "type": "boolean"
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH",
+              "LOCAL_TEST",
+              null
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "deviceId",
+          "pushRegistered",
+          "platform"
+        ]
+      },
+      "DevicePushRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "REGISTER",
+              "REMOVE"
+            ]
+          },
+          "registration": {
+            "$ref": "#/components/schemas/PushRegistration"
+          }
+        },
+        "required": [
+          "principalId",
+          "deviceId",
+          "action"
+        ],
+        "description": "registration is required for REGISTER and refused for REMOVE."
+      },
+      "DeviceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "principalId",
+          "deviceId"
+        ]
+      },
+      "DeviceRevocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "alreadyRevoked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "revoked",
+          "alreadyRevoked"
+        ]
+      },
+      "DeviceRevokeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "USER_REQUESTED",
+              "COMPROMISED"
+            ]
+          }
+        },
+        "required": [
+          "principalId",
+          "deviceId",
+          "reason"
+        ]
+      },
+      "DeviceVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "owned": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ACTIVE",
+              "REVOKED",
+              null
+            ]
+          },
+          "pushRegistered": {
+            "type": "boolean"
+          },
+          "pushPlatform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH",
+              "LOCAL_TEST",
+              null
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "owned",
+          "status",
+          "pushRegistered",
+          "pushPlatform"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "AUTHENTICATION_REQUIRED",
+                  "PERMISSION_DENIED",
+                  "NOT_FOUND",
+                  "VALIDATION_ERROR",
+                  "VERSION_CONFLICT",
+                  "IDEMPOTENCY_CONFLICT",
+                  "REQUEST_PENDING",
+                  "RATE_LIMITED",
+                  "RECENT_AUTHENTICATION_REQUIRED",
+                  "COMMUNICATIONS_UNAVAILABLE"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ]
+      },
+      "EventReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "duplicate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "applied",
+          "duplicate"
+        ]
+      },
+      "Groups": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "groups": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "contextClass": {
+                  "type": "string",
+                  "enum": [
+                    "GROUP"
+                  ]
+                }
+              },
+              "required": [
+                "conversationId",
+                "contextClass"
+              ]
+            }
+          }
+        },
+        "required": [
+          "groups"
+        ]
+      },
+      "Pair": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actorPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "actorPrincipalId",
+          "targetPrincipalId"
+        ]
+      },
+      "Principal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "principalId"
+        ]
+      },
+      "PushRegistration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH",
+              "LOCAL_TEST"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 4096,
+            "writeOnly": true,
+            "description": "Opaque push handle; passed to the canonical registration, never returned or logged."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "platform",
+          "handle"
+        ],
+        "description": "Exactly the customer push-registration request body."
+      },
+      "PushStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "pushServices": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "APNS": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              },
+              "FCM": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              },
+              "WEB_PUSH": {
+                "type": "string",
+                "enum": [
+                  "CONFIGURED",
+                  "NOT_CONFIGURED"
+                ]
+              }
+            },
+            "required": [
+              "APNS",
+              "FCM",
+              "WEB_PUSH"
+            ],
+            "description": "Whether this deployment holds delivery credentials for each push service."
+          },
+          "devices": {
+            "type": "array",
+            "maxItems": 100,
+            "description": "The user's ACTIVE devices.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "deviceId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "pushRegistered": {
+                  "type": "boolean"
+                },
+                "platform": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "APNS",
+                    "FCM",
+                    "WEB_PUSH",
+                    "LOCAL_TEST",
+                    null
+                  ]
+                },
+                "lastJobState": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "PENDING",
+                    "SENT",
+                    "FAILED",
+                    "EXPIRED",
+                    "DISABLED",
+                    "NOT_CONFIGURED",
+                    null
+                  ]
+                },
+                "lastFailureClass": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "INVALID_HANDLE",
+                    "DELIVERY_FAILED",
+                    "NOT_CONFIGURED",
+                    "EXPIRED",
+                    "DISABLED",
+                    "RETRYING",
+                    null
+                  ]
+                },
+                "lastAttemptAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "deviceId",
+                "pushRegistered",
+                "platform",
+                "lastJobState",
+                "lastFailureClass",
+                "lastAttemptAt"
+              ]
+            }
+          },
+          "pendingJobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deadJobs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "pushServices",
+          "devices",
+          "pendingJobs",
+          "deadJobs"
+        ]
+      },
+      "StorageSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "attachmentCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attachmentBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "backupBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "environmentQuotaBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "The environment storage budget shared by every user; null when unlimited."
+          },
+          "measuredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "attachmentCount",
+          "attachmentBytes",
+          "backupBytes",
+          "environmentQuotaBytes",
+          "measuredAt"
+        ]
+      }
+    }
+  }
+}

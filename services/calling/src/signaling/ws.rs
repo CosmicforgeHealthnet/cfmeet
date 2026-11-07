@@ -6,7 +6,9 @@
 //!   answers with `cfmeet.signaling.v1`). Platform API credentials are never accepted.
 //! * Delivery only: the channel forwards the endpoint's signals (stamped with the target
 //!   endpoint / principal), answers `{"type":"ping"}` with `signaling.pong`, refreshes the
-//!   endpoint's presence hint, and closes (4001) when the credential expires. Commands go
+//!   endpoint's presence hint, closes (4001) when the credential expires and (4401) when
+//!   its authority is revoked — the endpoint revoked, its principal or minting credential
+//!   chain no longer valid (re-checked every 5 s and before each delivery). Commands go
 //!   through the HTTP API; a lost signal never loses state (recover with
 //!   `GET /v1/calling/invitations`).
 
@@ -33,6 +35,10 @@ pub const SUBPROTOCOL: &str = "cfmeet.signaling.v1";
 const BEARER_PROTOCOL_PREFIX: &str = "bearer.";
 /// Close code: the signaling credential expired; reconnect with a fresh one.
 pub const CLOSE_CREDENTIAL_EXPIRED: u16 = 4001;
+/// Close code: the channel's authority was revoked (the endpoint was revoked, its
+/// principal or the minting credential chain is no longer valid, or communications
+/// authorization was withdrawn). Reconnecting with the same credential is refused.
+pub const CLOSE_AUTHORITY_REVOKED: u16 = 4401;
 /// Minimum interval between presence refreshes of one connection.
 const PRESENCE_REFRESH_SECONDS: i64 = 30;
 
@@ -97,6 +103,15 @@ pub async fn signaling(
     response
 }
 
+/// Whether the identity's persisted authority is definitely gone (ACC-024). A transient
+/// read failure is not a revocation: the next tick re-checks.
+async fn authority_revoked(state: &AppState, identity: &SignalingIdentity) -> bool {
+    matches!(
+        state.signaling.recheck(identity).await,
+        Err(CallingError::AuthenticationFailed)
+    )
+}
+
 async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSocket) {
     if state.require_personal_signaling(&identity).await.is_err() {
         return;
@@ -127,7 +142,22 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
     let mut policy_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tokio::select! {
-            _=policy_tick.tick()=> {if state.require_personal_signaling(&identity).await.is_err() {let _=socket.send(Message::Close(Some(CloseFrame{code:4401,reason:"communications authorization unavailable".into()}))).await;break;}},
+            _ = policy_tick.tick() => {
+                if state.require_personal_signaling(&identity).await.is_err() {
+                    let _ = socket.send(Message::Close(Some(CloseFrame {
+                        code: CLOSE_AUTHORITY_REVOKED,
+                        reason: "communications authorization unavailable".into(),
+                    }))).await;
+                    break;
+                }
+                if authority_revoked(&state, &identity).await {
+                    let _ = socket.send(Message::Close(Some(CloseFrame {
+                        code: CLOSE_AUTHORITY_REVOKED,
+                        reason: "signaling authority revoked".into(),
+                    }))).await;
+                    break;
+                }
+            },
             _ = &mut expiry => {
                 let _ = socket.send(Message::Close(Some(CloseFrame {
                     code: CLOSE_CREDENTIAL_EXPIRED,
@@ -138,6 +168,15 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
             signal = subscription.recv() => {
                 let Some(signal) = signal else { break };
                 if state.require_personal_signaling(&identity).await.is_err() {break;}
+                // A revoked endpoint receives nothing more (e.g. its own RING_CANCELLED
+                // signals emitted by the revocation): the channel closes instead.
+                if authority_revoked(&state, &identity).await {
+                    let _ = socket.send(Message::Close(Some(CloseFrame {
+                        code: CLOSE_AUTHORITY_REVOKED,
+                        reason: "signaling authority revoked".into(),
+                    }))).await;
+                    break;
+                }
                 let stamped = signals::for_target(signal, endpoint_id.as_uuid(), principal_id.as_uuid());
                 if socket.send(Message::Text(stamped.to_string())).await.is_err() {
                     break;

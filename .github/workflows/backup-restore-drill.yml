@@ -1,0 +1,83 @@
+name: Backup and restore drill
+
+# Execution proof for infra/deployment/backup (SEC-010 / SEC-011): on a throwaway
+# PostgreSQL 16 service container, every catalog service database is backed up with a
+# read-only role, encrypted with age to a public recipient, copied to a simulated off-host
+# location (dir, rsync and rclone targets), decrypted with the owner identity and restored
+# into fresh drill_ databases that are verified against their manifests. Refusals are
+# asserted too: tampered archives, restores over existing / non-drill databases, missing or
+# private-key recipients, the wrong service's database. Never contacts production: no
+# secrets, no SSH, no schedule.
+on:
+  push:
+    branches: [main, staging, "blueprint/**"]
+    paths:
+      - "infra/deployment/backup/**"
+      - ".github/workflows/backup-restore-drill.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-restore-drill-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drill:
+    name: backup → encrypt → off-host copy → decrypt → restore → verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install age, rsync, rclone and the PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q age rsync rclone postgresql-client shellcheck
+          pg_dump --version
+          age --version
+          rsync --version | head -n 1
+          rclone version | head -n 1
+          shellcheck --version | head -n 2
+          # pg_dump must be at least the server's major version (16).
+          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n 1)" -ge 16
+
+      - name: Syntax and lint (bash -n, shellcheck)
+        run: |
+          set -euo pipefail
+          for f in infra/deployment/backup/*.sh infra/deployment/backup/tests/*.sh; do bash -n "$f"; done
+          shellcheck -x -s bash --severity=warning infra/deployment/backup/*.sh infra/deployment/backup/tests/*.sh
+          python3 -m py_compile infra/deployment/backup/manifest.py
+
+      - name: Unit tests (no database)
+        env:
+          CFMEET_BACKUP_TESTS_STRICT: "1"
+        run: bash infra/deployment/backup/tests/unit.sh
+
+      - name: Backup / restore drill against PostgreSQL 16
+        env:
+          # Throwaway CI service container only.
+          CFMEET_DRILL_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          CFMEET_DRILL_EVIDENCE_DIR: ${{ runner.temp }}/backup-drill-evidence
+        run: bash infra/deployment/backup/tests/ci-drill.sh
+
+      - name: Upload drill evidence (manifests and run summaries only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-drill-${{ github.run_id }}
+          path: ${{ runner.temp }}/backup-drill-evidence
+          if-no-files-found: ignore

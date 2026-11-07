@@ -239,6 +239,8 @@ pub struct Peers {
     pub developer_platform: Arc<ServiceTokenSigner>,
     /// Part VI §51: the API Gateway (credential authentication only).
     pub gateway: Arc<ServiceTokenSigner>,
+    /// Blueprint Section 7: the Organizations Service (FIRST_PARTY organization scopes).
+    pub organizations: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but signing with a key the bundle does not list.
@@ -282,6 +284,8 @@ pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
 /// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity.
 pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] =
     &["platform-identity.read", "platform-identity.delegate"];
+/// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes.
+pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &["platform-identity.provision-first-party"];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -300,6 +304,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let meeting = key("meeting-test-1");
     let developer_platform = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
+    let organizations = key("organizations-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
@@ -335,6 +340,11 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                     &["platform-credential.authenticate"],
                 ),
                 (
+                    cf_service_auth::services::ORGANIZATIONS,
+                    vec![organizations.public_jwk()],
+                    ORGANIZATIONS_PERMISSIONS,
+                ),
+                (
                     cf_service_auth::services::OPERATOR_CONSOLE,
                     vec![operator.public_jwk()],
                     &["platform-identity.administer"],
@@ -368,6 +378,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
         meeting: signer(ServiceId::meeting_service(), meeting),
         developer_platform: signer(ServiceId::developer_platform(), developer_platform),
         gateway: signer(ServiceId::api_gateway(), gateway),
+        organizations: signer(ServiceId::organizations(), organizations),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         clock,

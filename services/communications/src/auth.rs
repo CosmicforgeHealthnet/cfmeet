@@ -52,6 +52,10 @@ pub async fn middleware(
         "/internal/v1/communications/admin/suspend" => {
             InternalPermission::CommunicationsProfileSuspend
         }
+        // Blueprint Section 11: the Account's notification preference read.
+        "/internal/v1/communications/notification-preferences/resolve" => {
+            InternalPermission::CommunicationsPreferencesRead
+        }
         _ => return Error::NotFound.into_response(),
     };
     if ctx.require_permission(permission).is_err() {

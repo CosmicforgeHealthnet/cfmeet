@@ -611,7 +611,7 @@
           "Authentication"
         ],
         "summary": "Change password for authenticated user",
-        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in.",
+        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in. A change signs the account\nout of every session, including the current one; sign in again with the new password.",
         "operationId": "change_password",
         "requestBody": {
           "content": {
@@ -654,7 +654,7 @@
           "Authentication"
         ],
         "summary": "Request password reset",
-        "description": "Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an\nemail-and-password account. Public endpoint. Returns 404 if no account uses the email, 400 for\nGoogle sign-in accounts, and 429 after 5 requests per email within 15 minutes. Finish with\n`POST /api/v1/auth/reset-password`.",
+        "description": "Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an\nemail-and-password account. Public endpoint. The answer is the same whether or not such an\naccount exists (no email is sent for unknown or Google sign-in accounts); at most 5 codes per\nemail are sent within 15 minutes. Finish with `POST /api/v1/auth/reset-password`.",
         "operationId": "forgot_password",
         "requestBody": {
           "content": {
@@ -668,7 +668,7 @@
         },
         "responses": {
           "200": {
-            "description": "Password reset code sent",
+            "description": "Request accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -679,9 +679,6 @@
           },
           "400": {
             "description": "Validation error"
-          },
-          "404": {
-            "description": "User not found"
           },
           "429": {
             "description": "Too many requests"
@@ -695,7 +692,7 @@
           "Authentication"
         ],
         "summary": "Login user",
-        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days) and basic user info. Public endpoint. Accounts still pending email\nverification can log in, so check `user.status` and route to verification if needed; deactivated\naccounts get 403. More than 5 attempts per email within 15 minutes returns 429; a successful\nlogin resets the count.",
+        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account\nsession that lasts at most 30 days and can be listed and revoked from\n`/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so\ncheck `user.status` and route to verification if needed; deactivated accounts get 403. More than\n5 attempts per email within 15 minutes returns 429; a successful login resets the count.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -736,7 +733,7 @@
           "Authentication"
         ],
         "summary": "Logout user",
-        "description": "Revokes the bearer access token sent in the `Authorization` header so it is rejected for the\nrest of its lifetime. When the Messaging integration is enabled, it also ends the account's\nMessaging sessions; a Messaging outage does not block logout. Clients should also discard their\nstored refresh token.",
+        "description": "Ends the current session: the bearer access token is revoked and the session's refresh\ntoken stops working. Tokens issued before account sessions existed cannot be told apart, so\nfor those this signs the account out everywhere. Other sessions stay signed in; use\n`POST /api/v2/me/sessions/revoke-all` to sign out everywhere. When the Messaging integration is\nenabled, it also ends the account's Messaging sessions; a Messaging outage does not block\nlogout.",
         "operationId": "logout",
         "responses": {
           "200": {
@@ -766,10 +763,10 @@
           "Authentication"
         ],
         "summary": "Initiate Google OAuth flow",
-        "description": "Generates a secure state token, stores it in Redis, and redirects\nthe user to Google's OAuth consent page.",
+        "description": "Generates single-use `state` and `nonce` values, binds them to this browser with an HttpOnly\ncookie, and redirects the user to Google's consent page. Public endpoint.",
         "operationId": "oauth_google_init",
         "responses": {
-          "302": {
+          "303": {
             "description": "Redirect to Google OAuth consent page"
           },
           "500": {
@@ -784,7 +781,7 @@
           "Authentication"
         ],
         "summary": "Google OAuth callback handler",
-        "description": "Validates the state token, exchanges the authorization code for tokens,\nverifies the ID token, and creates/authenticates the user.",
+        "description": "Consumes the single-use state, checks the browser binding, exchanges the authorization code,\nvalidates the ID token (issuer, audience, expiry, nonce, verified email) and signs the user in.\nIt then redirects to `{APP_URL}/google/callback`. With `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`\nthe redirect carries only a 60-second single-use `exchange_code` for\n`POST /api/v1/auth/oauth/google/exchange`; the legacy mode (tokens in the query string) is kept\nonly until the live web client adopts the exchange. Errors redirect with a short `error` code.",
         "operationId": "oauth_google_callback",
         "parameters": [
           {
@@ -807,8 +804,33 @@
           }
         ],
         "responses": {
+          "303": {
+            "description": "Redirect to the web application's Google callback page"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/google/exchange": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Exchange a one-time Google sign-in code for tokens",
+        "description": "Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.\nThe code from the callback redirect is valid once, for 60 seconds. Returns the same body as\n`POST /api/v1/auth/login`. Public endpoint.",
+        "operationId": "oauth_google_exchange",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
           "200": {
-            "description": "Login successful",
+            "description": "Signed in",
             "content": {
               "application/json": {
                 "schema": {
@@ -818,13 +840,7 @@
             }
           },
           "400": {
-            "description": "Invalid state or code"
-          },
-          "401": {
-            "description": "Authentication failed"
-          },
-          "403": {
-            "description": "Email verification required or account deactivated"
+            "description": "Invalid or expired exchange code"
           }
         }
       }
@@ -835,7 +851,7 @@
           "Authentication"
         ],
         "summary": "Refresh access token",
-        "description": "Exchanges a valid, unexpired refresh token for a new access token (valid 15 minutes) and a new\nrefresh token (valid 7 days). Public endpoint: send the refresh token in the request body, not\nin the `Authorization` header. Returns 401 if the token is invalid or expired.",
+        "description": "Exchanges a valid, unexpired refresh token for a new access token (valid 15 minutes) and a new\nrefresh token (valid 7 days). Public endpoint: send the refresh token in the request body, not\nin the `Authorization` header. Refresh tokens are single-use: presenting a superseded refresh\ntoken ends the whole session. A session lasts at most 30 days from sign-in. Returns 401 if the\ntoken is invalid, expired, revoked or not a refresh token.",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {
@@ -870,7 +886,7 @@
           "Authentication"
         ],
         "summary": "Register a new user",
-        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nReturns 409 if the email or username is already in use.",
+        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. Returns 409 if the email or\nusername is already in use.",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -898,6 +914,9 @@
           },
           "409": {
             "description": "User already exists"
+          },
+          "429": {
+            "description": "Too many requests"
           }
         }
       }
@@ -908,7 +927,7 @@
           "Authentication"
         ],
         "summary": "Resend verification email",
-        "description": "Generates a new 6-digit verification code for an account that is still pending verification and\nemails it, replacing the previous code. Public endpoint. Limited to 5 sends per email within 15\nminutes (429 after that). Returns 400 if the account is already verified.",
+        "description": "Sends a new 6-digit verification code to an account that is still pending verification,\nreplacing the previous code. Public endpoint. The answer is the same whether or not such an\naccount exists; at most 5 codes per email are sent within 15 minutes.",
         "operationId": "resend_verification_email",
         "requestBody": {
           "content": {
@@ -922,7 +941,7 @@
         },
         "responses": {
           "200": {
-            "description": "Verification email sent",
+            "description": "Request accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -933,9 +952,6 @@
           },
           "400": {
             "description": "Validation error"
-          },
-          "404": {
-            "description": "User not found"
           },
           "429": {
             "description": "Too many requests"
@@ -949,7 +965,7 @@
           "Authentication"
         ],
         "summary": "Reset password with token",
-        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429).",
+        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the\naccount out of every session.",
         "operationId": "reset_password",
         "requestBody": {
           "content": {
@@ -987,7 +1003,7 @@
           "Authentication"
         ],
         "summary": "Verify email with token",
-        "description": "Activates a newly registered account using the 6-digit code emailed at registration. Public\nendpoint. The code is single-use; repeated wrong codes for the same email are rate-limited\n(429). Returns 400 if the code is wrong or expired, or if the account is already verified.",
+        "description": "Activates a newly registered account using the 6-digit code emailed at registration. Public\nendpoint. The code is single-use; repeated wrong codes for the same email are rate-limited\n(429). Returns 400 if the code is wrong or expired; the answer does not reveal whether an\naccount exists or is already verified.",
         "operationId": "verify_email",
         "requestBody": {
           "content": {
@@ -1011,10 +1027,10 @@
             }
           },
           "400": {
-            "description": "Invalid or expired token"
+            "description": "Invalid or expired code"
           },
-          "404": {
-            "description": "User not found"
+          "429": {
+            "description": "Too many attempts"
           }
         }
       }
@@ -1025,7 +1041,7 @@
           "Authentication"
         ],
         "summary": "Verify password reset token",
-        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted\ncode must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does\nthat). Returns 400 if no reset is pending and 404 if the email is unknown.",
+        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted\ncode must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does\nthat). Returns 400 if no reset is pending, including when the email is unknown.",
         "operationId": "verify_reset_token",
         "requestBody": {
           "content": {
@@ -1049,10 +1065,7 @@
             }
           },
           "400": {
-            "description": "Invalid or expired token"
-          },
-          "404": {
-            "description": "User not found"
+            "description": "No pending reset"
           }
         }
       }
@@ -2176,7 +2189,7 @@
           "Users"
         ],
         "summary": "Get current authenticated user's information",
-        "description": "Returns the full user profile for the authenticated user.\nRequires authentication via JWT token.",
+        "description": "Returns the full user profile for the authenticated user.\nRequires authentication via JWT token. `status` is `pending_verification`, `active`,\n`inactive` or `suspended`; until `ACCOUNT_STATUS_FORMAT=canonical` is set the unverified\nstate is spelled `pendingverification` (historical v1 value). The full profile (display\nname, avatar, time zone, locale) is `GET /api/v2/me/profile`.",
         "operationId": "get_current_user",
         "responses": {
           "200": {
@@ -2207,7 +2220,7 @@
           "Users"
         ],
         "summary": "Update current authenticated user's profile",
-        "description": "Allows users to update their username. Email, role, status, and password\ncannot be updated through this endpoint.",
+        "description": "Allows users to update their username (3-50 letters, digits or underscores after\nsurrounding spaces are removed: the registration rule). Email, role, status, and password\ncannot be updated through this endpoint. Display name, avatar, time zone and locale are\nchanged with `PATCH /api/v2/me/profile`.",
         "operationId": "update_current_user",
         "requestBody": {
           "content": {
@@ -2452,6 +2465,98 @@
         ]
       }
     },
+    "/api/v2/admin/audit-events": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Read the account security audit (platform administrators)",
+        "description": "Append-only account security events — sign-ins, sign-outs, password changes and resets,\nGoogle linking, refresh-token reuse — newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
+        "operationId": "v2_admin_list_account_audit_events",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "description": "Exact event type, for example LOGIN, LOGOUT_ALL or REFRESH_TOKEN_REUSE.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "`nextCursor` from the previous page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1-200, default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityEventPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/admin/chat-migration": {
       "get": {
         "tags": [
@@ -2680,12 +2785,101 @@
       }
     },
     "/api/v2/admin/organizations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List all business organizations (platform administrators).",
+        "description": "Returns every first-party organization in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1–200, default 50), optionally filtered by `status` (ACTIVE, SUSPENDED or\nARCHIVED). Requires a platform administrator bearer token. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_admin_list_organizations",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "ACTIVE, SUSPENDED or ARCHIVED",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organizations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "Organizations (v2)"
         ],
         "summary": "Create an organization (platform administrators).",
-        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token.",
+        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator create (creation source PLATFORM_ADMIN, the administrator recorded as creator)\nand the response keeps this shape.",
         "operationId": "v2_create_organization",
         "requestBody": {
           "content": {
@@ -2708,8 +2902,38 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2732,7 +2956,7 @@
           "Organizations (v2)"
         ],
         "summary": "Suspend or reactivate an organization (platform administrators).",
-        "description": "Sets the organization's status to ACTIVE or SUSPENDED. While an organization is suspended, its\nown OWNERs and ADMINs can no longer list or manage its members. Requires a platform\nadministrator bearer token.",
+        "description": "Sets the organization's status to ACTIVE or SUSPENDED. While an organization is suspended, its\nown OWNERs and ADMINs can no longer list or manage its members. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator lifecycle change and the response keeps this shape.",
         "operationId": "v2_update_organization",
         "parameters": [
           {
@@ -2776,6 +3000,26 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / ORGANIZATION_NOT_FOUND (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2791,7 +3035,7 @@
           "Conferences (v2)"
         ],
         "summary": "Read a conference. Callers without authority get the SUMMARY view.",
-        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with only the id, meeting space id and status.",
+        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings — the scheduled start and end (pre-join countdown).",
         "operationId": "v2_get_conference",
         "parameters": [
           {
@@ -4329,6 +4573,78 @@
           },
           "409": {
             "description": "BREAKOUT_CLOSED / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/calendar.ics": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Export one conference occurrence as an iCalendar (RFC 5545) file.",
+        "description": "One VEVENT with a stable UID (per occurrence, unchanged by materialization), SEQUENCE that\nincreases with every change, DTSTART/DTEND in the meeting timezone (TZID + VTIMEZONE; UTC for\nUTC meetings; a start-only occurrence lasts 60 minutes) and STATUS:CANCELLED once cancelled.\nAllowed for the space owner and members, admitted participants, holders of an active\ninvitation bound to their verified email, webinar registrants and the owning machine caller;\nothers get PERMISSION_DENIED. The file carries the meeting link but never a passcode,\ninvitation token or provider identifier; the title of a HEALTHCARE / HIGH_SECURITY meeting is\nreplaced unless the caller manages it. Served with `Cache-Control: no-store`.",
+        "operationId": "v2_conference_calendar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar file",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT (no scheduled time)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9066,7 +9382,7 @@
           "Conferences (v2)"
         ],
         "summary": "Reschedule one unstarted occurrence (series untouched).",
-        "description": "Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the\nstart) for a conference still in state CREATED; any other state returns\nCONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For\nan occurrence of a recurring series only that occurrence moves.",
+        "description": "Sets a new `scheduledStartAt` (required; more than 5 minutes in the past is rejected) for a\nconference still in state CREATED; any other state returns CONFERENCE_STATE_CONFLICT. An omitted\n`scheduledEndAt` keeps the occurrence's duration (the end is never cleared); an explicit one must\nbe after the start and at most 24 hours later. An optional `version` guards against concurrent\nchanges (MEETING_VERSION_CONFLICT). Requires a bearer user token whose role holds\n`conference.start`. For an occurrence of a recurring series only that occurrence moves.",
         "operationId": "v2_reschedule_conference",
         "parameters": [
           {
@@ -9101,8 +9417,18 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "CONFERENCE_STATE_CONFLICT",
+            "description": "CONFERENCE_STATE_CONFLICT / MEETING_VERSION_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -10151,13 +10477,145 @@
         ]
       }
     },
+    "/api/v2/me/conferences": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "List the caller's occurrences across meeting spaces (agenda / calendar range).",
+        "description": "Returns scheduled occurrences whose start lies in `[from, to)` (default: the next 31 days;\nat most 366 days), ordered by start, across every meeting space the caller owns, is an\nactive member of, holds an active invitation for (bound to the caller's verified email),\nis registered for, or took part in. A machine caller gets its own environment's meetings.\nRecurring occurrences beyond the 30-day materialization horizon are included with\n`materialized: false` and `conferenceId: null`; `occurrenceKey` is stable, so the entry keeps\nits identity once the occurrence is materialized. Filters: `status` and `role` (the caller's\nrelation: OWNER, MEMBER, INVITEE, REGISTRANT, PARTICIPANT, ORGANIZATION), both\ncomma-separated. `organizationId` restricts the agenda to that organization and adds its\norganization-visible meetings; the caller must be a verified member, and an unknown or\nunauthorized organization gets the same PERMISSION_DENIED. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`. Only managers of a space (FULL view) see\nmanagement detail; titles of HEALTHCARE / HIGH_SECURITY spaces are omitted otherwise.",
+        "operationId": "v2_my_conferences",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339, inclusive (default now)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339, exclusive (default from + 31 days, at most 366 days)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Comma-separated ConferenceStatus values",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "Comma-separated AgendaRelation values",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "description": "Organization of which the caller is a verified member",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agenda page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (organizationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
           "Organizations (v2)"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
-        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token. Once the Organizations\nService is authoritative the list comes from it (active, non-GUEST memberships of active\norganizations) and each item also carries `organizationRole`.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -10182,6 +10640,411 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/profile": {
+      "get": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Get my profile",
+        "description": "Returns the signed-in account's profile: username, display name, avatar reference, time\nzone, locale, email verification and the canonical account status. The Account is the\nauthority for these fields; the Communications profile shows the same display name and\navatar. Phone verification is not available yet (`PROVIDER_BLOCKED`, never required).",
+        "operationId": "v2_get_my_profile",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Update my profile",
+        "description": "Changes any of username, display name, avatar reference, time zone and locale (send only\nthe fields to change; `null` clears an optional field). The same rules apply as at\nregistration and on `PATCH /api/v1/users/me`. Returns the updated profile. A username that\nbelongs to another account answers `409 USERNAME_TAKEN`.",
+        "operationId": "v2_update_my_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccountProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "USERNAME_TAKEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "List my sessions",
+        "description": "Lists the signed-in user's account sessions (one per sign-in), newest first, marking the\nsession this request was made with as `current`. Sessions last at most 30 days.",
+        "operationId": "v2_list_my_sessions",
+        "parameters": [
+          {
+            "name": "includeEnded",
+            "in": "query",
+            "description": "Also return revoked and expired sessions (most recent 100 in total).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/revoke-all": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out everywhere",
+        "description": "Ends every session of the signed-in user, including the current one, and every token issued\nbefore sessions existed. Connected CF Meet services are told through the account's durable\nrevocation events. Sign in again afterwards.",
+        "operationId": "v2_revoke_all_my_sessions",
+        "responses": {
+          "200": {
+            "description": "Every session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/{sessionId}/revoke": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out one session",
+        "description": "Ends one of the signed-in user's sessions (for example a lost device): its access and refresh\ntokens stop working immediately on every CF Meet service that checks account sessions, and\neverything that sign-in holds ends with it: its MANAGED-realtime session devices and the\nCommunications devices it linked (Messaging device, push registration, Calling endpoint).\nUnknown or foreign session ids get the same 404.",
+        "operationId": "v2_revoke_my_session",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked (or already ended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/workspaces": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List the caller's workspaces (Personal and organizations).",
+        "description": "Returns the caller's workspace contexts: `personal` first, then every organization in which\nthe caller holds an ACTIVE membership, ordered by id, each with the caller's role, the\norganization's status (a SUSPENDED organization is listed and grants nothing), its\nprovisioning state and a small capability summary. Workspace context is per request: the\nserver stores no active organization, so organization-scoped calls keep naming their\norganization. Once the Organizations Service is authoritative the list comes from it (all\nroles, including GUEST; capabilities under the organization policy); before that it comes\nfrom the meeting-service organization directory with the rule of `GET\n/api/v2/me/organizations` and `provisioningState` is null. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`.",
+        "operationId": "v2_my_workspaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable; never a partial list)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/workspaces/{workspaceId}/capabilities": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Capabilities of one workspace, derived by the server.",
+        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` — `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
+        "operationId": "v2_my_workspace_capabilities",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "description": "`personal`, or an organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -10197,8 +11060,32 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "List meeting spaces the caller owns or is a member of.",
-        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next upcoming one, else the latest). Owners, hosts\nand co-hosts get the full view, other members the summary view. Not paginated.",
+        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next unstarted one whose start window is still\nopen, else the latest). Owners, hosts and co-hosts get the full view, other members the summary\nview. Without `limit` and `cursor` the complete list is returned (legacy behaviour); with\neither, one page of `limit` (1-200, default 50) items and `nextCursor` while more exist.",
         "operationId": "v2_list_meeting_spaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50 when paginating)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Spaces",
@@ -10206,6 +11093,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeetingSpaceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -10238,8 +11135,20 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Create a meeting space. The owner is always the authenticated caller.",
-        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`.",
+        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`. Send an\n`Idempotency-Key` header (1-128 visible ASCII characters, kept 24 hours per caller) to make\nretries safe: a retry with the same key and body returns the same space (header\n`Idempotent-Replayed: true`); the same key with a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_meeting_space",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10252,7 +11161,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -10283,6 +11192,16 @@
           },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -10499,6 +11418,65 @@
         "x-cfmeet-required-scope": "meetings.write"
       }
     },
+    "/api/v2/meeting-spaces/{id}/calendar.ics": {
+      "get": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Export a meeting space's schedule as an iCalendar (RFC 5545) file.",
+        "description": "The active recurring series as one VEVENT with RRULE (UNTIL in UTC), EXDATE for cancelled\noccurrences and RECURRENCE-ID overrides for rescheduled ones, all in the meeting timezone with\na generated VTIMEZONE; plus the space's one-off scheduled occurrences (up to 200, from 90 days\nago; cancelled ones with STATUS:CANCELLED). UIDs are stable per series / occurrence and\nSEQUENCE increases on every change. Allowed for the space owner and members, holders of an\nactive space invitation bound to their verified email, webinar registrants and the owning\nmachine caller. No passcodes, invitation tokens or provider identifiers. Served with\n`Cache-Control: no-store`.",
+        "operationId": "v2_meeting_space_calendar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar file",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/meeting-spaces/{id}/conferences": {
       "get": {
         "tags": [
@@ -10578,7 +11556,7 @@
           "Conferences (v2)"
         ],
         "summary": "Create a one-time scheduled conference occurrence.",
-        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later). Requires a bearer user token whose space role may start conferences\n(`conference.start`).",
+        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later; a start more than 5 minutes in the past is rejected). Requires a bearer\nuser token whose space role may schedule conferences. Send an `Idempotency-Key` header (1-128\nvisible ASCII characters, kept 24 hours per caller and space) to make retries safe: the same\nkey and body return the same conference (header `Idempotent-Replayed: true`); the same key\nwith a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_conference",
         "parameters": [
           {
@@ -10589,6 +11567,16 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
             }
           }
         ],
@@ -10604,7 +11592,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -10613,8 +11601,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -10758,7 +11766,7 @@
           "Invitations (v2)"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -10793,8 +11801,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -11371,8 +12399,8 @@
         "tags": [
           "Scheduling (v2)"
         ],
-        "summary": "Create or replace the space's recurrence (RFC 5545 RRULE in the space timezone).",
-        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone) and a duration of 1–1440 minutes. An existing active rule is ended and\nits unstarted future occurrences are removed or cancelled before the new rule takes effect;\noccurrences within the scheduling horizon are created right away. Requires permission to\nschedule conferences (owner and host; co-host by default) and v2 meetings enabled for the\naccount. Archived spaces cannot recur.",
+        "summary": "Create or edit the space's recurrence (RFC 5545 RRULE in the space timezone).",
+        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone; it must exist and be unambiguous there) and a duration of 1–1440\nminutes. Editing an active series keeps the same rule id and occurrence keys: future\noccurrences that are still occurrences of the edited rule are kept (with the new duration;\nrescheduled ones keep their own time) together with their exceptions, while occurrences that\nno longer match are removed or cancelled and their exceptions dropped; past occurrences are\nnever touched. Occurrences within the scheduling horizon are created right away. Requires\npermission to schedule conferences (owner and host; co-host by default) and v2 meetings enabled\nfor the account. Archived spaces cannot recur.",
         "operationId": "v2_set_recurrence",
         "parameters": [
           {
@@ -11438,8 +12466,8 @@
         "tags": [
           "Scheduling (v2)"
         ],
-        "summary": "End the recurring series (past and exception occurrences are preserved).",
-        "description": "Ends the space's active recurrence: future unstarted occurrences of the series are removed or\ncancelled, while started or past occurrences and recorded exceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
+        "summary": "End the recurring series (past occurrences are preserved).",
+        "description": "Ends the space's active recurrence: every future unstarted occurrence of the series, including\nrescheduled ones, is removed or cancelled, while started or past occurrences and the recorded\nexceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
         "operationId": "v2_end_recurrence",
         "parameters": [
           {
@@ -12727,6 +13755,1022 @@
             "bearer_auth": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message).",
+        "description": "Forwards an allowlisted PATCH of the Messaging client API (updating a conversation's\nlifecycle, expiry, retention or display title, changing a member's role, or editing a\nMANAGED message with its `expectedEditCount`) to the Messaging service, acting as the\ncaller's own principal, which is never taken from the request. The JSON body (at most\n1 MiB; empty means `{}`) is forwarded as-is; Messaging enforces ownership, roles and\noptimistic concurrency. Paths outside the allowlist return ENDPOINT_NOT_FOUND and are\nnot forwarded. Messaging's status and JSON body are returned unchanged.",
+        "operationId": "v2_messaging_relay_patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/session-tokens": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed).",
+        "description": "Blueprint Section 13 (ADR 0049 amendment A1): returns a Messaging client token bound to\na *session device* of the signed-in user. A session device is not an MLS device: it can\nonly open the realtime gateway and subscribe to MANAGED conversations; it cannot publish\nKeyPackages, join MLS groups, receive PRIVATE_E2EE ciphertext, use device-direct REST\noperations or count as an end-to-end encrypted device. It is bound to the caller's\naccount session: the token never outlives the presented access token, every renewal\nre-verifies the session, and signing out (this session, everywhere, or a security\nrevocation) ends it. Send `sessionDeviceId` to renew the same session device (an open\nconnection then continues with `auth.refresh`). Answers FEATURE_DISABLED while\nMessaging has session devices switched off.",
+        "operationId": "v2_messaging_session_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Session-device client token (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (no session-bound sign-in)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organization-invitations/accept": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Accept an organization invitation.",
+        "description": "Joins the organization with the invitation's role. The signed-in account must have a verified\nemail equal to the invited address (the account's verified email is sent by the server, never\ntaken from the request). An expired invitation answers INVITE_EXPIRED; an unknown, used or\nrevoked token answers INVITATION_INVALID. Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "operationId": "v2_accept_organization_invitation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationInvitationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Membership created by the invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (verified email does not match)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITATION_INVALID / INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organization-invitations/decline": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Decline an organization invitation.",
+        "description": "Declines a PENDING invitation addressed to the signed-in user so it can no longer be accepted.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_decline_organization_invitation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationInvitationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Declined invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITATION_INVALID / INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create a business organization (the caller becomes OWNER).",
+        "description": "Creates a first-party business organization in the Organizations Service with the signed-in\nuser as its OWNER (creation source SELF_SERVICE; at most 5 per user per 24 hours). This is the\nCF Meet business organization, not a developer-platform API workspace. Send an\n`Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "operationId": "v2_create_business_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBusinessOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Get a business organization.",
+        "description": "Returns the organization with its profile, member count and the caller's own membership\n(`viewer`: role, status and capabilities). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_get_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Update a business organization's name, slug or profile.",
+        "description": "Changes the name, slug and profile fields given (an omitted profile field is unchanged and\n`null` clears it). `expectedVersion` must be the organization's current `version`, otherwise\nVERSION_CONFLICT. Requires the `organization.profile.write` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBusinessOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / SLUG_TAKEN / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/archive": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Archive a business organization (OWNER).",
+        "description": "Archives an organization its OWNERs suspended; archiving is final for members (only OWNERs can\nstill read it) and existing organization meetings lose organization access. Requires the\n`organization.lifecycle.manage` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_archive_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Archived organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/audit-events": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "An organization's audit history.",
+        "description": "Returns the organization's audit events, newest first (`before` = the `seq` of the oldest\nevent already seen; `limit` 1–200, default 50): who changed what, when, and through which\nservice. Requires the `organization.audit.read` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_list_organization_audit_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return events older than this sequence number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items: audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/invitations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List an organization's invitations.",
+        "description": "Returns the organization's invitations (masked invitee email, never a token), optionally\nfiltered by `status`. Requires the `organization.members.invite` capability. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_list_organization_invitations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items: invitations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Invite someone to an organization by email.",
+        "description": "Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nWith `sendEmail: true` the invitation link is also emailed to the invitee when notification\nemail is enabled on the deployment (`emailDelivery` reports the outcome; an idempotent replay\nre-issues the token and emails the new link). Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "operationId": "v2_create_organization_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Invitation with its one-time token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/invitations/{invitationId}/revoke": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Revoke an organization invitation.",
+        "description": "Revokes a PENDING invitation so its token can no longer be accepted (idempotent: revoking a\nrevoked invitation succeeds). Requires the `organization.members.invite` capability. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_revoke_organization_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/api/v2/organizations/{id}/members": {
@@ -12735,7 +14779,7 @@
           "Organizations (v2)"
         ],
         "summary": "List members (platform admins, organization OWNER/ADMIN).",
-        "description": "Returns every membership of the organization, whatever its status, oldest first. Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization.",
+        "description": "Returns every membership of the organization, whatever its status, oldest first. Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list) and each item also carries\n`organizationRole` and `version`.",
         "operationId": "v2_list_organization_members",
         "parameters": [
           {
@@ -12772,6 +14816,106 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / ORGANIZATION_NOT_FOUND (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/members/me/leave": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Leave an organization.",
+        "description": "Ends the signed-in user's own membership. The last OWNER cannot leave (LAST_OWNER): transfer\nownership first. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_leave_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The ended membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LAST_OWNER",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -12787,7 +14931,7 @@
           "Organizations (v2)"
         ],
         "summary": "Add or change a membership (platform admins, organization OWNER/ADMIN within limits).",
-        "description": "Creates or updates the user's role and status in the organization; status REMOVED ends an\nexisting membership. Platform administrators and OWNERs may set any role, while ADMINs may only\nmanage MEMBER memberships. Except for platform administrators, callers cannot change their own\nmembership.",
+        "description": "Creates or updates the user's role and status in the organization; status REMOVED ends an\nexisting membership. Platform administrators and OWNERs may set any role, while ADMINs may only\nmanage MEMBER memberships. Except for platform administrators, callers cannot change their own\nmembership. Once the Organizations Service is authoritative, an existing member's change is\nrelayed to it (its role rules apply) and a user who is not yet a member gets\n`409 INVITATION_REQUIRED`: new members join by invitation.",
         "operationId": "v2_upsert_organization_member",
         "parameters": [
           {
@@ -12834,6 +14978,459 @@
           },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "INVITATION_REQUIRED / LAST_OWNER (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Change a member's role or status.",
+        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the membership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_organization_membership",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "Membership id (the `id` of a member list item)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBusinessMembershipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / LAST_OWNER",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/ownership-transfer": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Transfer organization ownership.",
+        "description": "Atomically makes the membership `toMembershipId` an OWNER and the calling OWNER an ADMIN.\n`expectedVersion` must be the organization's current `version`. Requires the\n`organization.ownership.transfer` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_transfer_organization_ownership",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationOwnershipTransferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Transfer result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/provisioning": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "An organization's technical provisioning state.",
+        "description": "Returns the truthful provisioning state of the organization's technical scope (NOT_REQUIRED,\nPENDING, IN_PROGRESS, READY or FAILED), the current step and, on failure, the failure class.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_get_organization_provisioning",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provisioning state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/reactivate": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Reactivate a business organization (OWNER).",
+        "description": "Reactivates an organization its OWNERs suspended (a suspension imposed by an operator can only\nbe lifted by an operator). Requires the `organization.lifecycle.manage` capability (OWNER).\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_reactivate_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reactivated organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/suspend": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Suspend a business organization (OWNER).",
+        "description": "Suspends an ACTIVE organization: no member keeps any capability except that OWNERs can still\nread it, so organization meetings, invitations and colleague lists stop. Requires the\n`organization.lifecycle.manage` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_suspend_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Suspended organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -12997,6 +15594,114 @@
           }
         },
         "additionalProperties": false
+      },
+      "AccountProfile": {
+        "type": "object",
+        "description": "`GET/PATCH /api/v2/me/profile` representation.",
+        "required": [
+          "userId",
+          "username",
+          "effectiveDisplayName",
+          "email",
+          "emailVerified",
+          "status",
+          "authType",
+          "createdAt",
+          "phoneVerification"
+        ],
+        "properties": {
+          "authType": {
+            "type": "string",
+            "description": "`local` or `google`."
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "`https://` avatar reference (`null` when not set).",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Chosen display name (`null` when not set).",
+            "nullable": true
+          },
+          "effectiveDisplayName": {
+            "type": "string",
+            "description": "What other people see: `displayName`, otherwise `username`."
+          },
+          "email": {
+            "type": "string"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "emailVerifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "locale": {
+            "type": "string",
+            "description": "BCP 47 language tag (`null`: clients use the device language).",
+            "nullable": true
+          },
+          "phoneVerification": {
+            "$ref": "#/components/schemas/PhoneVerificationStatus"
+          },
+          "profileUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Canonical account status: `pending_verification`, `active`, `inactive` or `suspended`.",
+            "example": "active"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone (`null`: clients use the device zone).",
+            "nullable": true
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "AccountSessionListResponse": {
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionRecord"
+            }
+          }
+        }
+      },
+      "AccountSessionRevokeResponse": {
+        "type": "object",
+        "required": [
+          "revokedCount"
+        ],
+        "properties": {
+          "revokedCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of sessions this request ended (0 when the session had already ended).",
+            "minimum": 0
+          }
+        }
       },
       "AddMemberRequest": {
         "type": "object",
@@ -13319,6 +16024,221 @@
           }
         },
         "additionalProperties": false
+      },
+      "AgendaItem": {
+        "type": "object",
+        "description": "One occurrence on the caller's agenda.",
+        "required": [
+          "occurrenceKey",
+          "meetingSpaceId",
+          "materialized",
+          "view",
+          "status",
+          "kind",
+          "scheduledStartAt",
+          "isException",
+          "relations",
+          "meetingSpace"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The conference id; null for a recurring occurrence beyond the materialization\nhorizon (it becomes a conference later, under the same `occurrenceKey`).",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "FULL view only.",
+            "nullable": true
+          },
+          "isException": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ConferenceKind"
+          },
+          "materialized": {
+            "type": "boolean",
+            "description": "False for an occurrence computed from the recurrence rule (not yet materialized)."
+          },
+          "meetingSpace": {
+            "$ref": "#/components/schemas/AgendaSpace"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurrenceKey": {
+            "type": "string",
+            "description": "Stable occurrence identity within the meeting space (unchanged by materialization)."
+          },
+          "originalStartAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "FULL view only.",
+            "nullable": true
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaRelation"
+            }
+          },
+          "scheduledEndAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "FULL view only.",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConferenceStatus"
+          },
+          "view": {
+            "$ref": "#/components/schemas/ResourceView"
+          },
+          "viewerRole": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "AgendaQuery": {
+        "type": "object",
+        "description": "`GET /api/v2/me/conferences` query.",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous page's `nextCursor`.",
+            "nullable": true
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inclusive lower bound on the scheduled start (RFC 3339). Default: now.",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Page size, 1-200 (default 50).",
+            "nullable": true,
+            "minimum": 0
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Restrict to one organization's meetings (the caller must be a verified member).",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "Comma-separated relations of the caller (`AgendaRelation`), e.g. `OWNER,INVITEE`.",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Comma-separated conference statuses, e.g. `CREATED,LIVE`.",
+            "nullable": true
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exclusive upper bound (RFC 3339). Default: `from` + 31 days; at most 366 days after `from`.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgendaRelation": {
+        "type": "string",
+        "description": "Why an occurrence is on the caller's agenda.",
+        "enum": [
+          "OWNER",
+          "MEMBER",
+          "INVITEE",
+          "REGISTRANT",
+          "PARTICIPANT",
+          "ORGANIZATION"
+        ]
+      },
+      "AgendaResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaItem"
+            },
+            "description": "Ordered by scheduled start, then meeting space, then occurrence key."
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Pass back as `cursor` for the next page; null on the last page.",
+            "nullable": true
+          }
+        }
+      },
+      "AgendaSpace": {
+        "type": "object",
+        "description": "Meeting-space fields an agenda entry may show.",
+        "required": [
+          "meetingCode",
+          "meetingType",
+          "status",
+          "timezone",
+          "accessPolicy",
+          "requiresPasscode"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "meetingCode": {
+            "type": "string"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/MeetingType"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "FULL view only.",
+            "nullable": true
+          },
+          "requiresPasscode": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SpaceStatus"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone of the meeting: show times in this zone and in the viewer's zone."
+          },
+          "title": {
+            "type": "string",
+            "description": "Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space.",
+            "nullable": true
+          }
+        }
       },
       "AnnouncementResponse": {
         "type": "object",
@@ -14157,6 +17077,173 @@
               "format": "uuid"
             },
             "description": "Already in the requested state (idempotent retry)."
+          }
+        }
+      },
+      "BusinessOrganization": {
+        "type": "object",
+        "description": "A first-party business organization (the Organizations Service resource).",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "lifecycleStatus",
+          "provisioningState",
+          "creationSource",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the organization was created on CF Meet (never an incorporation date)."
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "creationSource": {
+            "type": "string",
+            "description": "SELF_SERVICE, PLATFORM_ADMIN or IMPORTED."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycleStatus": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or ARCHIVED."
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "provisioningState": {
+            "type": "string",
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "viewer": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationViewer"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "BusinessOrganizationMembership": {
+        "type": "object",
+        "description": "One membership of a first-party organization.",
+        "required": [
+          "id",
+          "organizationId",
+          "userId",
+          "role",
+          "status",
+          "joinedVia",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "joinedVia": {
+            "type": "string",
+            "description": "CREATOR, INVITATION, IMPORTED, OPERATOR or OWNERSHIP_TRANSFER."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "removedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or REMOVED."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "BusinessOrganizationPage": {
+        "type": "object",
+        "description": "A page of organizations (platform administrators).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessOrganization"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last page.",
+            "nullable": true
           }
         }
       },
@@ -15122,6 +18209,32 @@
         },
         "additionalProperties": false
       },
+      "CreateBusinessOrganizationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations`.",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "1–200 characters."
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "description": "3–63 lowercase letters, digits and `-`, starting and ending with a letter or digit."
+          }
+        }
+      },
       "CreateConferenceRequest": {
         "type": "object",
         "properties": {
@@ -15165,6 +18278,11 @@
             ],
             "nullable": true
           },
+          "sendEmail": {
+            "type": "boolean",
+            "description": "Blueprint Section 11: also email the invitation link to `inviteeEmail` (required\nwith this flag). The result is reported in `emailDelivery`. Default false.",
+            "nullable": true
+          },
           "useLimit": {
             "type": "integer",
             "format": "int32",
@@ -15180,6 +18298,14 @@
           "token"
         ],
         "properties": {
+          "emailDelivery": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailDelivery"
+              }
+            ],
+            "nullable": true
+          },
           "invitation": {
             "$ref": "#/components/schemas/InvitationResponse"
           },
@@ -15362,6 +18488,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateOrganizationInvitationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/invitations`.",
+        "required": [
+          "email",
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The invitee's email address; only an account with this verified email can accept."
+          },
+          "role": {
+            "type": "string",
+            "description": "ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "sendEmail": {
+            "type": "boolean",
+            "description": "Blueprint Section 11: also email the invitation link to `email` (default false).\nHandled by this relay; the outcome is reported in `emailDelivery`.",
+            "nullable": true
+          }
+        }
       },
       "CreateOrganizationRequest": {
         "type": "object",
@@ -15629,6 +18778,15 @@
         },
         "additionalProperties": false
       },
+      "EmailDelivery": {
+        "type": "string",
+        "description": "What happened to a requested invitation email.",
+        "enum": [
+          "DISABLED",
+          "ACCEPTED",
+          "FAILED"
+        ]
+      },
       "EndMeetingApiResponse": {
         "type": "object",
         "description": "API response wrapper for end meeting",
@@ -15690,6 +18848,7 @@
         "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
+          "SESSION_NOT_FOUND",
           "MEETING_ACCESS_DENIED",
           "MEETING_PASSCODE_REQUIRED",
           "MEETING_PASSCODE_INVALID",
@@ -15773,6 +18932,18 @@
           "CHAT_UNAVAILABLE",
           "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
+          "ORGANIZATION_NOT_FOUND",
+          "MEMBERSHIP_REQUIRED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_ARCHIVED",
+          "LAST_OWNER",
+          "VERSION_CONFLICT",
+          "SLUG_TAKEN",
+          "INVITE_EXPIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROVISIONING_PENDING",
+          "INVITATION_REQUIRED",
+          "USERNAME_TAKEN",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -15897,6 +19068,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "GoogleExchangeRequest": {
+        "type": "object",
+        "description": "One-time Google sign-in exchange (ACC-005): the callback redirect carries only a\nshort-lived, single-use `exchange_code`, never tokens.",
+        "required": [
+          "exchange_code"
+        ],
+        "properties": {
+          "exchange_code": {
+            "type": "string"
+          }
+        }
       },
       "HandRaiseResponse": {
         "type": "object",
@@ -16447,6 +19630,25 @@
         },
         "additionalProperties": false
       },
+      "ListMeetingSpacesQuery": {
+        "type": "object",
+        "description": "`GET /api/v2/meeting-spaces` paging (both optional; omitting both keeps the legacy\ncomplete list).",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous page's `nextCursor`.",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Page size, 1-200 (default 50 when `cursor` is sent without `limit`).",
+            "nullable": true,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "LoginRequest": {
         "type": "object",
         "required": [
@@ -16841,6 +20043,11 @@
             "items": {
               "$ref": "#/components/schemas/MeetingSpaceResponse"
             }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Present only on paginated requests (`limit` or `cursor` sent) when another page\nexists: pass it back as `cursor`.",
+            "nullable": true
           }
         }
       },
@@ -17443,6 +20650,11 @@
           "organization": {
             "$ref": "#/components/schemas/OrganizationResponse"
           },
+          "organizationRole": {
+            "type": "string",
+            "description": "Once the Organizations Service is authoritative: the caller's full role (OWNER,\nADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER.",
+            "nullable": true
+          },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"
           }
@@ -17456,6 +20668,122 @@
           "ETHERNET",
           "UNKNOWN"
         ]
+      },
+      "OrganizationInvitation": {
+        "type": "object",
+        "description": "An organization invitation. The raw `token` is returned once, at creation only.",
+        "required": [
+          "id",
+          "organizationId",
+          "role",
+          "status",
+          "inviteeEmailHint",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "emailDelivery": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailDelivery"
+              }
+            ],
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "inviteeEmailHint": {
+            "type": "string",
+            "description": "Masked invitee email, e.g. `a***@example.com`."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED."
+          },
+          "token": {
+            "type": "string",
+            "description": "One-time invitation token (creation response only; never in URLs or logs).",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationInvitationTokenRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organization-invitations/accept` and `/decline`.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The invitation token received by the invitee."
+          }
+        }
+      },
+      "OrganizationLegalRegistration": {
+        "type": "object",
+        "description": "Optional legal registration of an organization (self-declared until an operator\nverifies it; never the CF Meet creation time).",
+        "properties": {
+          "incorporatedOn": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`.",
+            "nullable": true
+          },
+          "registeredName": {
+            "type": "string",
+            "description": "Up to 200 characters.",
+            "nullable": true
+          },
+          "registrationNumber": {
+            "type": "string",
+            "description": "Up to 100 characters.",
+            "nullable": true
+          },
+          "verification": {
+            "type": "string",
+            "description": "`SELF_DECLARED` or `VERIFIED` (read-only; set by an operator).",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationLifecycleRequest": {
+        "type": "object",
+        "description": "Suspend, reactivate or archive an organization.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Optional organization `version` the change is based on.",
+            "nullable": true
+          }
+        }
       },
       "OrganizationMemberResponse": {
         "type": "object",
@@ -17481,6 +20809,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "organizationRole": {
+            "type": "string",
+            "description": "Once the Organizations Service is authoritative: the member's full role (OWNER,\nADMIN, MANAGER, MEMBER or GUEST); `role` then shows MANAGER and GUEST as MEMBER.",
+            "nullable": true
+          },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"
           },
@@ -17494,6 +20827,12 @@
           "userId": {
             "type": "string",
             "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Once the Organizations Service is authoritative: the membership version, used as\n`expectedVersion` by `PATCH /api/v2/organizations/{id}/members/{userId}`.",
+            "nullable": true
           }
         }
       },
@@ -17504,6 +20843,80 @@
           "SUSPENDED",
           "REMOVED"
         ]
+      },
+      "OrganizationOwnershipTransferRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/ownership-transfer`.",
+        "required": [
+          "toMembershipId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The organization `version` the transfer is based on."
+          },
+          "toMembershipId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The membership that becomes OWNER."
+          }
+        }
+      },
+      "OrganizationProfile": {
+        "type": "object",
+        "description": "Organization profile. On update, an omitted field is unchanged and `null` clears it.",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "Up to 120 characters.",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 country code.",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Up to 2000 characters.",
+            "nullable": true
+          },
+          "industry": {
+            "type": "string",
+            "description": "Up to 60 characters.",
+            "nullable": true
+          },
+          "legalRegistration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationLegalRegistration"
+              }
+            ],
+            "nullable": true
+          },
+          "logoRef": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "operatingAddress": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "organizationType": {
+            "type": "string",
+            "description": "Up to 60 characters.",
+            "nullable": true
+          },
+          "publicContactEmail": {
+            "type": "string",
+            "description": "Up to 254 characters.",
+            "nullable": true
+          }
+        }
       },
       "OrganizationResponse": {
         "type": "object",
@@ -17548,6 +20961,37 @@
           "ACTIVE",
           "SUSPENDED"
         ]
+      },
+      "OrganizationViewer": {
+        "type": "object",
+        "description": "The caller's own membership, as seen on an organization.",
+        "required": [
+          "membershipId",
+          "role",
+          "status",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Capabilities the caller holds in this organization (default deny)."
+          },
+          "membershipId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE or SUSPENDED."
+          }
+        }
       },
       "OwnerTransferRequest": {
         "type": "object",
@@ -17739,6 +21183,23 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "PhoneVerificationStatus": {
+        "type": "object",
+        "description": "Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or\nverification provider is approved, and never required.",
+        "required": [
+          "status",
+          "required"
+        ],
+        "properties": {
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "example": "PROVIDER_BLOCKED"
           }
         }
       },
@@ -19430,7 +22891,8 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`."
           },
           "user_id": {
             "type": "string",
@@ -19634,11 +23096,19 @@
           "scheduledEndAt": {
             "type": "string",
             "format": "date-time",
+            "description": "New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays\nstart-only). At most 24 hours after the start.",
             "nullable": true
           },
           "scheduledStartAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "New start; more than 5 minutes in the past is rejected."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Optional optimistic-concurrency guard: the conference `version` last read.",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -19984,6 +23454,86 @@
           }
         }
       },
+      "SecurityEventPage": {
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecurityEventRecord"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
+      "SecurityEventRecord": {
+        "type": "object",
+        "description": "One account security audit event (administrator view; never secrets or contact data).",
+        "required": [
+          "seq",
+          "eventId",
+          "eventType",
+          "outcome",
+          "actorKind",
+          "detail",
+          "occurredAt"
+        ],
+        "properties": {
+          "actorKind": {
+            "type": "string",
+            "description": "USER, ADMIN, SYSTEM or ANONYMOUS."
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "detail": {
+            "type": "object"
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "SUCCESS, FAILURE or DENIED."
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cursor value: pass it as `before` to page further back."
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
       "SecurityProfile": {
         "type": "string",
         "enum": [
@@ -20095,6 +23645,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "SessionRecord": {
+        "type": "object",
+        "description": "One account session as shown to its owner.",
+        "required": [
+          "sessionId",
+          "authMethod",
+          "authenticatedAt",
+          "createdAt",
+          "expiresAt",
+          "status",
+          "current"
+        ],
+        "properties": {
+          "authMethod": {
+            "type": "string",
+            "description": "PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward)."
+          },
+          "authenticatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clientLabel": {
+            "type": "string",
+            "description": "Shortened User-Agent of the client that signed in.",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True for the session the request was made with."
+          },
+          "endReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The session ends here at the latest, whatever the refresh activity."
+          },
+          "lastRefreshedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, REVOKED or EXPIRED."
+          }
+        }
       },
       "SessionState": {
         "type": "string",
@@ -20637,6 +24250,43 @@
           }
         }
       },
+      "UpdateAccountProfileRequest": {
+        "type": "object",
+        "description": "Fields to change. Omitted fields stay as they are; `null` clears an optional field.",
+        "properties": {
+          "avatarUrl": {
+            "type": "string",
+            "description": "`https://` avatar image reference (at most 512 characters); `null` clears it.",
+            "example": "https://cdn.example.com/avatars/ada.png",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "description": "1-64 characters shown to other people instead of the username; `null` clears it.",
+            "example": "Ada Lovelace",
+            "nullable": true
+          },
+          "locale": {
+            "type": "string",
+            "description": "BCP 47 language tag; `null` clears it.",
+            "example": "en-GB",
+            "nullable": true
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone used to present times to you (for example in notification emails);\n`null` clears it.",
+            "example": "Europe/London",
+            "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "description": "3-50 letters, digits or underscores (surrounding spaces are removed). Unique.",
+            "example": "ada_lovelace",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateAudioRequest": {
         "type": "object",
         "description": "Request to update audio state",
@@ -20649,12 +24299,67 @@
           }
         }
       },
+      "UpdateBusinessMembershipRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}/members/{userId}`.",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The membership `version` the change is based on."
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST.",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or REMOVED.",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateBusinessOrganizationRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}`.",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The organization `version` the change is based on (optimistic concurrency)."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "UpdateMeRequest": {
         "type": "object",
         "description": "Request for PATCH /api/v1/users/me",
         "properties": {
           "username": {
             "type": "string",
+            "description": "3-50 letters, digits or underscores (validated after trimming, as at registration).",
             "nullable": true
           }
         }
@@ -20920,7 +24625,8 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`."
           },
           "username": {
             "type": "string"
@@ -20953,7 +24659,9 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.",
+            "example": "active"
           },
           "username": {
             "type": "string"
@@ -21203,6 +24911,249 @@
             "$ref": "#/components/schemas/WithdrawalMode"
           }
         }
+      },
+      "Workspace": {
+        "type": "object",
+        "description": "One workspace context of the caller.",
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/WorkspaceCapabilitySummary"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "`Personal`, or the organization name."
+          },
+          "id": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ORGANIZATION only.",
+            "nullable": true
+          },
+          "organizationStatus": {
+            "type": "string",
+            "description": "ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only.",
+            "nullable": true
+          },
+          "provisioningState": {
+            "type": "string",
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;\nnull for PERSONAL and when the legacy directory answers (no provisioning there).",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows\nOWNER, ADMIN and MEMBER). ORGANIZATION only.",
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "description": "ORGANIZATION only.",
+            "nullable": true
+          }
+        }
+      },
+      "WorkspaceAuthority": {
+        "type": "string",
+        "description": "Which store answered: the meeting-service organization directory\n(`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service\n(authoritative).",
+        "enum": [
+          "LEGACY_DIRECTORY",
+          "ORGANIZATIONS_SERVICE"
+        ]
+      },
+      "WorkspaceCapabilities": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces/{workspaceId}/capabilities`.",
+        "required": [
+          "workspaceId",
+          "kind",
+          "authority",
+          "features",
+          "capabilities",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceCapability"
+            },
+            "description": "Every capability of the vocabulary with its decision."
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the answer was computed (it is never cached server-side)."
+          },
+          "features": {
+            "$ref": "#/components/schemas/WorkspaceFeatures"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "organizationStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "personalCommunicationsCapabilities": {
+            "type": "string",
+            "description": "PERSONAL only: the Communications Hub read that owns personal communications\ncapabilities (`/api/v2/communications/me/capabilities`).",
+            "nullable": true
+          },
+          "policyRevision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Organization policy revision the answer was computed with (Organizations Service).",
+            "nullable": true
+          },
+          "provisioningState": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          }
+        }
+      },
+      "WorkspaceCapability": {
+        "type": "object",
+        "description": "One capability decision.",
+        "required": [
+          "capability",
+          "granted",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability name, e.g. `meetings.organization.create`."
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WorkspaceCapabilityReason"
+          }
+        }
+      },
+      "WorkspaceCapabilityReason": {
+        "type": "string",
+        "description": "Why a capability is (not) granted in a workspace.",
+        "enum": [
+          "ALLOWED",
+          "CAPABILITY_NOT_GRANTED",
+          "POLICY_RESTRICTED",
+          "ORGANIZATION_SUSPENDED",
+          "FEATURE_DISABLED"
+        ]
+      },
+      "WorkspaceCapabilitySummary": {
+        "type": "object",
+        "description": "A small summary of what the caller can do in a workspace.",
+        "required": [
+          "granted",
+          "canCreateMeetings",
+          "canInviteMembers",
+          "canAdminister"
+        ],
+        "properties": {
+          "canAdminister": {
+            "type": "boolean",
+            "description": "Organization administration: profile, member management or policies."
+          },
+          "canCreateMeetings": {
+            "type": "boolean",
+            "description": "Meetings can be created in this context."
+          },
+          "canInviteMembers": {
+            "type": "boolean",
+            "description": "Members can be invited (`organization.members.invite`)."
+          },
+          "granted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every capability granted now (default deny)."
+          }
+        }
+      },
+      "WorkspaceFeatures": {
+        "type": "object",
+        "description": "Features the workspace context does not disable. Owner services still apply their\nown policy (stricter wins) and re-verify every request.",
+        "required": [
+          "meetings",
+          "messaging",
+          "calling"
+        ],
+        "properties": {
+          "calling": {
+            "type": "boolean"
+          },
+          "meetings": {
+            "type": "boolean"
+          },
+          "messaging": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkspaceKind": {
+        "type": "string",
+        "description": "Kind of workspace context.",
+        "enum": [
+          "PERSONAL",
+          "ORGANIZATION"
+        ]
+      },
+      "WorkspacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces`.",
+        "required": [
+          "items",
+          "authority"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workspace"
+            },
+            "description": "PERSONAL first, then organizations ordered by id."
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Pass back as `cursor` for the next page; null on the last page.",
+            "nullable": true
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -21236,6 +25187,14 @@
     {
       "name": "Authentication",
       "description": "User authentication endpoints"
+    },
+    {
+      "name": "Account profile (v2)",
+      "description": "Blueprint Section 9: the signed-in user's account profile (username, display name, avatar reference, time zone, locale, email verification and the canonical account status). The Account is the authority; the Communications profile shows the same display name and avatar."
+    },
+    {
+      "name": "Account sessions (v2)",
+      "description": "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."
     },
     {
       "name": "API Keys",
@@ -21335,7 +25294,7 @@
     },
     {
       "name": "Organizations (v2)",
-      "description": "Authoritative CF organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it."
+      "description": "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."
     },
     {
       "name": "Compatibility (v2)",

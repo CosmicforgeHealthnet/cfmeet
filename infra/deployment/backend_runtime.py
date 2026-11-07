@@ -56,7 +56,7 @@ def release(image,run_id):
     p.write_private(folder/'original.private.json',json.dumps(c))
     migration_env=env_file(folder/'migration.private.env',p.env_of(c))
     try:
-        for binary in (['migration','account-communications-migration'] if p.env_of(c).get('CF_COMMUNICATIONS_BASE_URL') else ['migration']):
+        for binary in (['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-communications-migration'] if p.env_of(c).get('CF_COMMUNICATIONS_BASE_URL') else ['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration']):
             p.run('docker','run','--rm','--network','container:'+NAME,'--env-file',str(migration_env),
                 '--entrypoint','/app/'+binary,immutable,'up')
     finally:migration_env.unlink(missing_ok=True)

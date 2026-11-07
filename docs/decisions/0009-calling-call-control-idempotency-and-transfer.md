@@ -102,3 +102,56 @@ transfer without a second target path.
   endpoint, internal service) and evidenced in `call_events` + outbox.
 * Clients must send `expectedVersion` and should send `Idempotency-Key` on every
   command; both are part of the public contract.
+
+## Amendment — Blueprint v1.0 §12: automatic end and party control (2026-11)
+
+### Automatic end (CAL-001)
+
+A Call never outlives its parties. Calling ends it through **the same path as `end`**
+(ENDING; live offers, an in-flight transfer and pending attempts stopped; provider
+cleanup; ENDED on cleanup evidence; usage finalized), as a system command whose
+`CALL_STATE_CHANGED` → ENDING event carries `end_trigger`:
+
+| `end_trigger` | Rule | When evaluated |
+|---|---|---|
+| `PARTICIPATION_ENDED` | a CONNECTED / HELD Call with fewer than two parties with live participation | session removal ("leave"), provider disconnect, transfer completion / failure, and the reaper (grace expiry) |
+| `IDLE_TIMEOUT` | CONNECTED / HELD with no connected session and no connected network leg for `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (600); or still ANSWERED that long after the answer | reaper |
+| `MAX_DURATION` | any ANSWERED / CONNECTED / HELD / TRANSFERRING Call older than `CALLING_MAX_CALL_DURATION_SECONDS` (28800) since its first connection (else answer) | reaper |
+
+A **party** is an active participant with a CONNECTED session, a session DISCONNECTED (or
+created, not yet connected) within `CALLING_PARTICIPATION_GRACE_SECONDS` (60 — reloads and
+network roaming), a live SIP / public leg or a live ring offer; or a live public leg owned
+by no participant. The shared APPLICATION leg (the media binding) and recording captures
+are never parties. Pre-connect Calls are never touched: enterprise IVR menus, queue waits
+and voicemail recordings — one human plus server legs — run while the Call is still
+RINGING and keep their own deadlines (and the setup deadline). A TRANSFERRING Call waits
+for its transfer (join deadline) and is re-evaluated when it completes or fails; the
+retired transferor never counts. The reaper runs on every instance each reconcile
+interval over the partial index of non-terminal Calls and re-decides each Call under its
+row lock (`SKIP LOCKED`); a client END racing an automatic end yields one ENDED and one
+usage set. Reconciliation never re-creates the media resource of a CONNECTED / HELD Call
+whose sessions are all gone past the grace — the Call ends instead. Configuration is
+validated at start-up (grace < idle timeout < maximum duration).
+
+### Who may control a Call (CAL-002) — rules for clients
+
+The Calling API authorizes control commands at **application scope** (`calls.write` in
+the credential's tenant / application / environment); it has no initiator-only rule.
+Applications acting for their users (the CF Meet web adapter included) must apply these
+party rules, using the Call view (`participants[].endedAt`, `role`) or the owner
+participation interface:
+
+* **Leave** (`POST /v1/calls/{id}/sessions/{sid}/remove` of one's own session): any
+  participant — caller, callee, transfer target. Leaving a one-to-one Call ends it for
+  both (above); in a group Call the others continue while two remain.
+* **End for all** (`POST /v1/calls/{id}/end`): any active (not ended) participant. After
+  a transfer the remaining parties may be non-initiators — they must still be able to end.
+* **Hold / resume** (`…/hold`, `…/resume`): any active participant (the hold is Call-wide
+  and symmetric; resume re-derives permissions from current state).
+* **Transfer**: an active participant transferring **its own** place
+  (`transferringParticipantId` = the acting user's participant).
+* **Cancel** is pre-answer only and belongs to the initiator; a recipient declines its
+  offer instead. Decline remains per device (CAL-018, product decision pending).
+* `GET /v1/calls/{id}/actions` reports what is valid for the Call's state and provider
+  capabilities; party membership is the client's check.
+

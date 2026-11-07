@@ -146,6 +146,26 @@ impl SignalingAuthority {
             tracing::info!("signaling authentication rejected (credential)");
             CallingError::AuthenticationFailed
         })?;
+        self.authority_holds(&claims, now).await?;
+        Ok(SignalingIdentity { claims, request })
+    }
+
+    /// Re-checks a live identity's persisted authority (ACC-024): the endpoint must still
+    /// be ACTIVE, its principal ACTIVE and the minting credential chain valid. An open
+    /// signaling channel calls this on every policy tick and before every delivery, so a
+    /// revoked endpoint's channel closes instead of living until the credential expires.
+    pub async fn recheck(&self, identity: &SignalingIdentity) -> Result<(), CallingError> {
+        self.authority_holds(&identity.claims, self.clock.now())
+            .await
+    }
+
+    /// The persisted authority behind `claims` at `now` (AUTHENTICATION_FAILED when any
+    /// link no longer holds; SERVICE_UNAVAILABLE when it cannot be read).
+    async fn authority_holds(
+        &self,
+        claims: &SignalingClaims,
+        now: DateTime<Utc>,
+    ) -> Result<(), CallingError> {
         let row = self
             .db
             .query_one(Statement::from_sql_and_values(
@@ -188,7 +208,7 @@ impl SignalingAuthority {
                 return Err(CallingError::AuthenticationFailed);
             }
         }
-        Ok(SignalingIdentity { claims, request })
+        Ok(())
     }
 }
 

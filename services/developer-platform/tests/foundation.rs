@@ -151,6 +151,9 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         "devplat_invitations.status",
         "devplat_invitations.token_digest",
         "devplat_organizations.display_name",
+        // Section 15 (ORG-013): a rename not yet propagated to Platform Access (a flag,
+        // never Platform Access's name).
+        "devplat_organizations.platform_name_sync_pending",
         "devplat_project_profiles.display_name",
         "devplat_project_profiles.status",
         "devplat_project_profiles.status_reason",

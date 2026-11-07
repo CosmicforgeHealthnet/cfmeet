@@ -536,6 +536,40 @@ impl AppWorld {
         (call, caller, callee)
     }
 
+    /// A CONNECTED group call between the world's initiator, recipient and a third
+    /// principal, each with one device admitted in the media resource: (call id, initiator
+    /// device, recipient device, third device). Removing one party's session leaves a live
+    /// two-party Call (a one-to-one Call would end automatically, CAL-001).
+    pub async fn connected_group_call(&self, kind: &str) -> (Uuid, Device, Device, Device) {
+        let third_principal = self.principal("group-third").await;
+        let caller = self.device(&self.w.initiator, "caller-main").await;
+        let callee = self.device(&self.w.recipient, "callee-main").await;
+        let third = self.device(&third_principal, "third-main").await;
+        let r = self
+            .create_call(
+                kind,
+                &self.w.initiator,
+                &caller,
+                &[&self.w.recipient, &third_principal],
+                &Uuid::new_v4().to_string(),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        for device in [&callee, &third] {
+            let invitation = self.invitation_for(call, device.endpoint).await.unwrap();
+            let (_, version) = self.state(call).await;
+            let r = self.accept(call, invitation, device, version).await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+        for device in [&caller, &callee, &third] {
+            let session = self.session_on(call, device.endpoint).await.unwrap();
+            self.connect(call, session).await;
+        }
+        assert_eq!(self.state(call).await.0, CallState::Connected);
+        (call, caller, callee, third)
+    }
+
     /// A short-lived signaling credential for `device`.
     pub async fn signaling_token(&self, device: &Device) -> String {
         let r = self

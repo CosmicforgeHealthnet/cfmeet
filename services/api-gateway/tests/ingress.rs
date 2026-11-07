@@ -721,6 +721,107 @@ async fn platform_request_quotas_aggregate_across_service_families() {
     assert_eq!(domains.len(), 2, "two service families: {ops:?}");
 }
 
+/// PLT-012: end-user / device traffic is held to a per-token ceiling (off by default),
+/// counted in the platform quota store but never as platform usage; credentials keep
+/// their platform quotas and anonymous requests are left to the services and the edge.
+#[tokio::test]
+async fn end_user_tokens_are_held_to_a_per_token_ceiling_when_configured() {
+    let tight = Arc::new(Tight::default());
+    let quota = Arc::new(QuotaEngine::new(None, "t:".into(), tight.clone()));
+    // Off (the default): no ceiling at all.
+    let off = Gateway::with(Options {
+        quota: Some(quota.clone()),
+        ..Options::default()
+    })
+    .await;
+    for _ in 0..12 {
+        assert_eq!(
+            off.get("/api/v2/test-spaces/s1", Some("eyJ.off.session"))
+                .await
+                .status,
+            StatusCode::OK
+        );
+    }
+    let g = Gateway::with(Options {
+        quota: Some(quota.clone()),
+        token_rate_limit: 10,
+        ..Options::default()
+    })
+    .await;
+    let session = "eyJ.meeting.session";
+    for _ in 0..10 {
+        assert_eq!(
+            g.get("/api/v2/test-spaces/s1", Some(session)).await.status,
+            StatusCode::OK
+        );
+    }
+    let before = g.meeting().count();
+    let r = g.get("/api/v2/test-spaces/s1", Some(session)).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.code(), "RATE_LIMITED");
+    assert!(r.headers.get("retry-after").is_some());
+    assert_eq!(
+        r.headers.get("x-cf-quota-window").unwrap(),
+        "requests-per-minute"
+    );
+    assert_eq!(r.headers.get("x-cf-quota-level").unwrap(), "GATEWAY_TOKEN");
+    assert!(!String::from_utf8_lossy(&r.bytes).contains(session));
+    conforms(ERR, &r.json);
+    assert_eq!(g.meeting().count(), before, "refused before the upstream");
+    // Another session, a participant token and a client token have their own windows.
+    assert_eq!(
+        g.get("/api/v2/test-spaces/s1", Some("eyJ.other.session"))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    for _ in 0..10 {
+        let r = g
+            .call(
+                Method::GET,
+                "/api/v2/test-spaces/s1",
+                &[("x-participant-token", "pt_ceiling")],
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+    }
+    let r = g
+        .call(
+            Method::GET,
+            "/api/v2/test-spaces/s1",
+            &[("x-participant-token", "pt_ceiling")],
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        g.call(
+            Method::GET,
+            "/v1/test/mixed",
+            &[("authorization", "CF-Client-Token ct_ceiling")],
+            None,
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    // A platform credential is metered by its platform quota, not by the token ceiling.
+    let mut c = customer(&["test.read"]);
+    c.environment_id = Uuid::new_v4();
+    g.authority.add(CRED, c);
+    let r = g.get("/v1/test/items/abc", Some(CRED)).await;
+    assert_eq!(r.headers.get("x-cf-quota-level"), None);
+    assert_eq!(r.headers.get("x-cf-quota-limit-minute").unwrap(), "2");
+    // End-user traffic is never platform usage.
+    assert!(quota.flush().await > 0);
+    let batches = tight.batches.lock().unwrap().clone();
+    assert!(batches
+        .iter()
+        .flat_map(|b| b.operations.iter())
+        .all(|o| o.domain != "meetings"));
+}
+
 #[tokio::test]
 async fn rollback_controls_disable_families_and_move_webhook_ownership() {
     let mut controls = RoutingControls::default();

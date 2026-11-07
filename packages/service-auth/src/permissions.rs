@@ -65,6 +65,10 @@ pub enum InternalPermission {
     /// Meeting Service: create one instant meeting owned by the delegated user.
     #[serde(rename = "meeting-communications.create")]
     MeetingCommunicationsCreate,
+    /// Communications: read which accounts turned a notification category off (Blueprint
+    /// Section 11; account references in, opted-out references out, nothing else).
+    #[serde(rename = "communications-preferences.read")]
+    CommunicationsPreferencesRead,
 
     /// Privacy Relay: authorize a communication.
     #[serde(rename = "communication.authorize")]
@@ -311,6 +315,33 @@ pub enum InternalPermission {
     /// (MANAGED attachments; never PRIVATE_E2EE ciphertext).
     #[serde(rename = "security-scan.submit")]
     SecurityScanSubmit,
+    /// Organizations (Blueprint Sections 3–5): read organizations, memberships and
+    /// capability decisions (service authorization, projections, colleague discovery).
+    #[serde(rename = "organization.read")]
+    OrganizationRead,
+    /// Organizations: mutate organizations, memberships and invitations on behalf of the
+    /// acting user the Meeting Service authenticated.
+    #[serde(rename = "organization.write")]
+    OrganizationWrite,
+    /// Organizations: assert the acting user (`X-CF-Acting-User`, verified email) of a
+    /// request. Only the account authority's relay (Meeting Service) holds it.
+    #[serde(rename = "organization.act-for-user")]
+    OrganizationActForUser,
+    /// Organizations: operator administration (listing, operator create, lifecycle
+    /// enforcement). Operator tooling and the Meeting Service platform-admin facade only.
+    #[serde(rename = "organization.administer")]
+    OrganizationAdminister,
+    /// Organizations: import the Meeting Service organization export and read the
+    /// migration reconciliation (Section 4 / 5 migration only).
+    #[serde(rename = "organization.migrate")]
+    OrganizationMigrate,
+    /// Platform Access (Blueprint Section 7, ADR 0058): create or return, read back and
+    /// suspend / resume the dedicated FIRST_PARTY tenant + first-party application +
+    /// PRODUCTION-kind environment of one first-party business organization (keyed by the
+    /// opaque organization id). Organizations only; never credentials, verifiers, scope
+    /// grants, principals or any EXTERNAL tenant.
+    #[serde(rename = "platform-identity.provision-first-party")]
+    PlatformIdentityProvisionFirstParty,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -342,6 +373,7 @@ pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::CommunicationsProfileSuspend, name: "communications-profile.suspend", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: true, description: "Suspend or restore one personal Communications profile with an audited reason" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsRead, name: "meeting-communications.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Resolve a meeting the delegated user may share; returns public meeting references only" },
     PermissionDefinition { permission: InternalPermission::MeetingCommunicationsCreate, name: "meeting-communications.create", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Create one instant meeting owned by the delegated user under existing Meetings rules" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsPreferencesRead, name: "communications-preferences.read", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Read which of the given accounts turned a notification category off before the Account sends them a notification; no preference values beyond the opt-out, no profile data" },
 
     PermissionDefinition {
         permission: InternalPermission::CommunicationAuthorize,
@@ -839,6 +871,59 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Submit one file's bytes for malware inspection; receive a signed verdict bound to the request and digest",
     },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationRead,
+        name: "organization.read",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::CALLING,
+            services::MESSAGING,
+            services::COMMUNICATIONS,
+        ],
+        sensitive: false,
+        description: "Read organizations, memberships, membership resolution and capability decisions (ids, roles and statuses; no email or token)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationWrite,
+        name: "organization.write",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Create and change organizations, memberships and invitations for the signed acting user; Organizations enforces every role rule",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationActForUser,
+        name: "organization.act-for-user",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Assert the account-authenticated acting user (and verified email) of an Organizations request; account authority relay only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationAdminister,
+        name: "organization.administer",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Operator administration of organizations (listing, operator create, lifecycle enforcement); operator tooling and the Meeting Service platform-admin facade only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationMigrate,
+        name: "organization.migrate",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Import the Meeting Service organization export idempotently and read the migration reconciliation; Section 4 migration only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityProvisionFirstParty,
+        name: "platform-identity.provision-first-party",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::ORGANIZATIONS],
+        sensitive: true,
+        description: "Create or return, verify and suspend / resume the dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment of one first-party organization (opaque organization id); Organizations only, never credentials, verifiers, scope grants or EXTERNAL tenants",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -862,6 +947,7 @@ impl InternalPermission {
         InternalPermission::CommunicationsProfileSuspend,
         InternalPermission::MeetingCommunicationsRead,
         InternalPermission::MeetingCommunicationsCreate,
+        InternalPermission::CommunicationsPreferencesRead,
         InternalPermission::CommunicationAuthorize,
         InternalPermission::CommunicationContextRead,
         InternalPermission::ProtectedContactResolveForExecution,
@@ -923,6 +1009,12 @@ impl InternalPermission {
         InternalPermission::WebhookMigrationImport,
         InternalPermission::DeveloperPlatformAdminister,
         InternalPermission::SecurityScanSubmit,
+        InternalPermission::OrganizationRead,
+        InternalPermission::OrganizationWrite,
+        InternalPermission::OrganizationActForUser,
+        InternalPermission::OrganizationAdminister,
+        InternalPermission::OrganizationMigrate,
+        InternalPermission::PlatformIdentityProvisionFirstParty,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1253,6 +1345,7 @@ mod tests {
         "sms-bridge.submit",
         "developer-event.publish",
         "security-scan.submit",
+        "organization.read",
     ];
 
     #[test]
@@ -1393,12 +1486,27 @@ mod tests {
                 "user-session.verify"
             ]
         );
-        for d in REGISTRY.iter().filter(|d| d.sensitive) {
-            assert!(
-                !d.grantable_to.contains(&services::MEETING_SERVICE),
-                "{}",
-                d.name
-            );
+        // The only sensitive grants the Meeting Service may hold are the Organizations
+        // relay permissions (ADR 0056 §3: it is the account authority that authenticates
+        // the acting human, relays platform-admin facades and exports the legacy rows).
+        let sensitive: Vec<&str> = REGISTRY
+            .iter()
+            .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            sensitive,
+            [
+                "organization.act-for-user",
+                "organization.administer",
+                "organization.migrate"
+            ]
+        );
+        for d in REGISTRY
+            .iter()
+            .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
+        {
+            assert_eq!(d.receiver, services::ORGANIZATIONS, "{}", d.name);
         }
         // Identity administration and delegation stay out of reach.
         for p in [PlatformIdentityAdminister, PlatformIdentityDelegate] {
@@ -1407,6 +1515,73 @@ mod tests {
                 .grantable_to
                 .contains(&services::MEETING_SERVICE));
         }
+    }
+
+    #[test]
+    fn organizations_flows_are_least_privilege() {
+        let receiving: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.receiver == services::ORGANIZATIONS)
+            .map(|d| (d.name, d.grantable_to, d.sensitive))
+            .collect();
+        assert_eq!(
+            receiving,
+            [
+                (
+                    "organization.read",
+                    &[
+                        services::MEETING_SERVICE,
+                        services::CALLING,
+                        services::MESSAGING,
+                        services::COMMUNICATIONS
+                    ][..],
+                    false
+                ),
+                (
+                    "organization.write",
+                    &[services::MEETING_SERVICE][..],
+                    false
+                ),
+                (
+                    "organization.act-for-user",
+                    &[services::MEETING_SERVICE][..],
+                    true
+                ),
+                (
+                    "organization.administer",
+                    &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    true
+                ),
+                (
+                    "organization.migrate",
+                    &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
+                    true
+                ),
+            ]
+        );
+        // Section 7 (ADR 0058): Organizations calls only Platform Access, and only to
+        // provision / verify / suspend the FIRST_PARTY scope of its organizations.
+        let granted: Vec<_> = REGISTRY
+            .iter()
+            .filter(|d| d.grantable_to.contains(&services::ORGANIZATIONS))
+            .map(|d| (d.name, d.receiver, d.grantable_to, d.sensitive))
+            .collect();
+        assert_eq!(
+            granted,
+            [(
+                "platform-identity.provision-first-party",
+                services::PLATFORM_ACCESS,
+                &[services::ORGANIZATIONS][..],
+                true
+            )]
+        );
+        // The EXTERNAL workspace delegation stays the Developer Platform's only.
+        assert_eq!(
+            InternalPermission::PlatformIdentityDelegate
+                .definition()
+                .grantable_to,
+            &[services::DEVELOPER_PLATFORM]
+        );
     }
 
     #[test]

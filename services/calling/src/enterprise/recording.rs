@@ -282,11 +282,12 @@ pub(crate) struct RecordingRow {
     pub delete_reason: Option<String>,
     pub delete_attempts: i32,
     pub version: i64,
+    pub created_at: DateTime<Utc>,
 }
 
 pub(crate) const RECORDING_COLUMNS: &str = "id, call_id, authorization_id, policy_id, \
     capture_source, call_leg_id, state, started_at, stopped_at, stop_reason, object_key, content_type, size_bytes, duration_ms, sha256, ready_at, \
-    failure_code, retention_until, deleted_at, delete_reason, delete_attempts, version";
+    failure_code, retention_until, deleted_at, delete_reason, delete_attempts, version, created_at";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -466,6 +467,21 @@ pub struct RecordingAccessRecord {
 #[serde(rename_all = "camelCase")]
 pub struct RecordingAccessList {
     pub records: Vec<RecordingAccessRecord>,
+}
+
+/// Filters of the enterprise recordings list (`GET /v1/enterprise/recordings`).
+#[derive(Debug, Clone, Default)]
+pub struct RecordingFilter {
+    /// Recordings of this Call only.
+    pub call_id: Option<Uuid>,
+    /// Recordings of Calls this principal took part in.
+    pub participant_principal_id: Option<Uuid>,
+    /// Recordings in this processing state only.
+    pub state: Option<RecordingState>,
+    /// Recordings started at or after this instant.
+    pub started_from: Option<DateTime<Utc>>,
+    /// Recordings started strictly before this instant.
+    pub started_before: Option<DateTime<Utc>>,
 }
 
 /// Who asks for recordings: a recording administrator (the credential holds
@@ -969,6 +985,107 @@ impl EnterpriseService {
         Ok(CallRecordingPage {
             recordings: rows.into_iter().map(recording_view).collect(),
             next_cursor: None,
+        })
+    }
+
+    /// The scope's recordings, newest first (CAL-017): a recording administrator sees
+    /// every recording of the credential's tenant / application / environment; a
+    /// principal (`RecordingRequester::Principal`) only recordings of Calls it took part
+    /// in. Keyset-paginated; integrity metadata only — never an object key or a URL
+    /// (media through `media-access`). Every listed recording is access-audited as a
+    /// READ_METADATA (reason LISTED), exactly like a single read.
+    pub async fn list_recordings(
+        &self,
+        actor: &AdminActor,
+        requester: RecordingRequester,
+        filter: RecordingFilter,
+        page: &PageRequest,
+    ) -> EnterpriseResult<CallRecordingPage> {
+        let limit = page.limit()?;
+        if let (Some(from), Some(before)) = (filter.started_from, filter.started_before) {
+            if from >= before {
+                return Err(EnterpriseError::Validation(
+                    "startedFrom must be before startedBefore.",
+                ));
+            }
+        }
+        let mut values = scope_values(actor.scope);
+        let mut sql = format!(
+            "SELECT {RECORDING_COLUMNS} FROM call_recordings r \
+             WHERE r.tenant_id = $1 AND r.application_id = $2 AND r.environment_id = $3"
+        );
+        let mut principals = Vec::new();
+        if let Some(p) = requester.principal() {
+            principals.push(p);
+        }
+        if let Some(p) = filter.participant_principal_id {
+            principals.push(p);
+        }
+        for principal in principals {
+            values.push(principal.into());
+            sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM call_participants p \
+                   WHERE p.call_id = r.call_id AND p.principal_id = ${})",
+                values.len()
+            ));
+        }
+        if let Some(call_id) = filter.call_id {
+            values.push(call_id.into());
+            sql.push_str(&format!(" AND r.call_id = ${}", values.len()));
+        }
+        if let Some(state) = filter.state {
+            values.push(state.as_str().into());
+            sql.push_str(&format!(" AND r.state = ${}", values.len()));
+        }
+        if let Some(from) = filter.started_from {
+            values.push(from.into());
+            sql.push_str(&format!(" AND r.started_at >= ${}", values.len()));
+        }
+        if let Some(before) = filter.started_before {
+            values.push(before.into());
+            sql.push_str(&format!(" AND r.started_at < ${}", values.len()));
+        }
+        if let Some((at, id)) = page.after()? {
+            values.push(at.into());
+            values.push(id.into());
+            sql.push_str(&format!(
+                " AND (r.created_at, r.id) < (${}, ${})",
+                values.len() - 1,
+                values.len()
+            ));
+        }
+        sql.push_str(&format!(
+            " ORDER BY r.created_at DESC, r.id DESC LIMIT {}",
+            limit + 1
+        ));
+        let mut rows = RecordingRow::find_by_statement(stmt(&sql, values))
+            .all(self.db())
+            .await?;
+        let next_cursor = if rows.len() as u64 > limit {
+            rows.truncate(limit as usize);
+            rows.last()
+                .map(|r| super::cursor::encode(r.created_at, r.id))
+        } else {
+            None
+        };
+        let now = self.now();
+        for row in &rows {
+            access_audit(
+                self.db(),
+                actor,
+                row.id,
+                row.call_id,
+                requester.principal(),
+                AccessOperation::ReadMetadata,
+                true,
+                Some("LISTED"),
+                now,
+            )
+            .await?;
+        }
+        Ok(CallRecordingPage {
+            recordings: rows.into_iter().map(recording_view).collect(),
+            next_cursor,
         })
     }
 

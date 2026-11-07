@@ -259,12 +259,23 @@ pub async fn update_user(
         user.role = Set(parse_role(&role)?);
     }
 
+    let previous_status = user.status.clone().unwrap();
     if let Some(status) = payload.status {
         user.status = Set(parse_status(&status)?);
     }
 
     user.updated_at = Set(now_utc());
     let user = user.update(&state.db).await?;
+    // Section 14 (ACC-010): a disabled account loses every credential everywhere; any
+    // status change is mirrored onto its Platform Access principal (durable outbox).
+    if user.status != previous_status {
+        if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended) {
+            crate::services::communications::credentials_ended(&state, user.id, "ACCOUNT_DISABLED")
+                .await;
+        } else {
+            let _ = crate::services::communications::deliver_due(&state).await;
+        }
+    }
 
     let response = AdminUserResponse {
         id: user.id,

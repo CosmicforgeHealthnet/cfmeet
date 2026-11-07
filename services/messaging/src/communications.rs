@@ -249,9 +249,36 @@ async fn capabilities(
         )
         .await?;
     let available = security && policy.sending_enabled;
+    let managed = managed_capability(&policy, &s.realtime);
+    // `available` / `securityReady` / `reason` keep their PRIVATE_E2EE meaning for older
+    // Hub images; `managed` (Blueprint Section 14) reports MANAGED messaging separately.
     Ok(Json(
-        json!({"available":available,"securityReady":security,"reason":if !security {"DEVICE_SECURITY_SETUP_REQUIRED"} else if !available {"DISABLED"} else {"AVAILABLE"}}),
+        json!({"available":available,"securityReady":security,"reason":if !security {"DEVICE_SECURITY_SETUP_REQUIRED"} else if !available {"DISABLED"} else {"AVAILABLE"},
+            "managed":managed}),
     ))
+}
+/// MANAGED (server-readable) personal messaging: allowed when sending is enabled and a
+/// personal context (DIRECT or GROUP) permits MANAGED. Live delivery without an E2EE
+/// device is the session device of ADR 0049 amendment A1, which needs
+/// `MESSAGING_SESSION_DEVICES_ENABLED` and the client-token signing key; otherwise MANAGED
+/// still works and clients poll. Never implies any E2EE readiness.
+fn managed_capability(
+    policy: &crate::conversations::policy::EffectivePolicy,
+    realtime: &crate::realtime::Realtime,
+) -> Value {
+    use crate::{conversations::ContextClass, domain::SecurityProfile};
+    let allowed = [ContextClass::Direct, ContextClass::Group].iter().any(|c| {
+        policy
+            .contexts
+            .get(c)
+            .is_some_and(|p| p.enabled && p.allowed_profiles.contains(&SecurityProfile::Managed))
+    });
+    let available = policy.sending_enabled && allowed;
+    let realtime =
+        available && realtime.settings.session_devices_enabled && realtime.keys.is_some();
+    json!({"available":available,
+        "reason":if available {"AVAILABLE"} else if !policy.sending_enabled {"DISABLED"} else {"MANAGED_NOT_ALLOWED"},
+        "realtime":if realtime {"SESSION_DEVICE"} else {"POLLING"}})
 }
 async fn common_groups(
     State(s): State<AppState>,

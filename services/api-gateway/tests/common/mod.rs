@@ -571,6 +571,8 @@ pub struct Options {
     pub quota: Option<Arc<QuotaEngine>>,
     pub cors: Vec<String>,
     pub controls: RoutingControls,
+    /// Per-token ceiling of end-user traffic (`0`: off).
+    pub token_rate_limit: u64,
 }
 
 impl Default for Options {
@@ -583,6 +585,7 @@ impl Default for Options {
             quota: None,
             cors: vec![],
             controls: RoutingControls::default(),
+            token_rate_limit: 0,
         }
     }
 }
@@ -667,7 +670,8 @@ impl Gateway {
             .with_controls(o.controls)
             .with_upstream_timeout(o.timeout)
             .with_max_body_bytes(o.max_body)
-            .with_cors_allowed_origins(o.cors);
+            .with_cors_allowed_origins(o.cors)
+            .with_token_rate_limit(o.token_rate_limit);
         if let Some(q) = o.quota {
             state = state.with_quota_engine(q);
         }

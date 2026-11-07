@@ -53,11 +53,14 @@ pub struct SessionRow {
     pub status: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    /// `E2EE_DEVICE` (a registered MLS device) or `SESSION_DEVICE` (Blueprint Section 13:
+    /// MANAGED realtime only; see [`super::session_devices`]).
+    pub device_kind: String,
 }
 
 const SESSION_COLUMNS: &str =
     "id, tenant_id, application_id, environment_id, environment_kind, service_account_id, \
-     principal_id, device_id, credential_id, scopes, status, expires_at, created_at";
+     principal_id, device_id, credential_id, scopes, status, expires_at, created_at, device_kind";
 
 impl SessionRow {
     pub fn owner_scope(&self) -> Option<OwnerScope> {
@@ -91,6 +94,11 @@ impl SessionRow {
 
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.split(' ').any(|s| s == scope)
+    }
+
+    /// A session device: realtime for MANAGED conversations only, never an E2EE device.
+    pub fn is_session_device(&self) -> bool {
+        self.device_kind == super::session_devices::SESSION_DEVICE
     }
 }
 
@@ -139,15 +147,31 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         .map_err(|_| Invalid::Unavailable)?
         .ok_or(Invalid::SessionRevoked)?;
     // The device first: a device revocation also revokes its sessions, and the reason a
-    // client sees must not depend on which signal reached this gateway first.
-    let device_active = db::scalar_i64(
-        &state.db,
-        "SELECT count(*) FROM messaging_devices WHERE id = $1 AND principal_id = $2 AND environment_id = $3 AND status = 'ACTIVE'",
-        vec![current.device_id.into(), current.principal_id.into(), current.environment_id.into()],
-    )
-    .await
-    .map_err(|_| Invalid::Unavailable)?;
-    if device_active != 1 {
+    // client sees must not depend on which signal reached this gateway first. A session
+    // device (Section 13) is checked in its own table, and ends when the operator
+    // switches session devices off.
+    let device_active = if current.is_session_device() {
+        super::session_devices::active(
+            &state.db,
+            state.realtime.settings.session_devices_enabled,
+            current.device_id,
+            current.principal_id,
+            current.environment_id,
+            state.now(),
+        )
+        .await
+        .map_err(|_| Invalid::Unavailable)?
+    } else {
+        db::scalar_i64(
+            &state.db,
+            "SELECT count(*) FROM messaging_devices WHERE id = $1 AND principal_id = $2 AND environment_id = $3 AND status = 'ACTIVE'",
+            vec![current.device_id.into(), current.principal_id.into(), current.environment_id.into()],
+        )
+        .await
+        .map_err(|_| Invalid::Unavailable)?
+            == 1
+    };
+    if !device_active {
         return Err(Invalid::DeviceRevoked);
     }
     if current.status != "ACTIVE" {
@@ -469,6 +493,14 @@ pub async fn revoke_all_sessions(
                   db::exec(txn,
                       "UPDATE messaging_push_registrations SET enabled=FALSE,disabled_reason='SESSIONS_REVOKED',updated_at=$3 WHERE principal_id=$1 AND environment_id=$2",
                       vec![acting.principal_id.into(),ctx2.scope.environment_id.into(),now.into()]).await?;
+                // Section 13: "log out everywhere" also ends every session device.
+                db::exec(
+                    txn,
+                    "UPDATE messaging_session_devices SET status = 'REVOKED', revoked_at = $3, revoked_reason = 'SESSIONS_REVOKED' \
+                     WHERE principal_id = $1 AND environment_id = $2 AND status = 'ACTIVE'",
+                    vec![acting.principal_id.into(), ctx2.scope.environment_id.into(), now.into()],
+                )
+                .await?;
                 for r in &revoked {
                     outbox::enqueue(
                         txn,

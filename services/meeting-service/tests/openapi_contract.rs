@@ -57,6 +57,10 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/invitations/{token}/resolve"),
         ("post", "/api/v2/meeting-spaces/{id}/conferences"),
         ("get", "/api/v2/meeting-spaces/{id}/conferences"),
+        // Blueprint Section 10 — first-party calendar
+        ("get", "/api/v2/me/conferences"),
+        ("get", "/api/v2/conferences/{id}/calendar.ics"),
+        ("get", "/api/v2/meeting-spaces/{id}/calendar.ics"),
         ("post", "/api/v2/instant-meetings"),
         ("get", "/api/v2/resolve/{identifier}"),
         ("get", "/api/v2/conferences/{id}"),
@@ -98,6 +102,7 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/messaging/devices/{deviceId}/key-packages"),
         ("post", "/api/v2/messaging/devices/{deviceId}/revoke"),
         ("post", "/api/v2/messaging/client-tokens"),
+        ("post", "/api/v2/messaging/session-tokens"),
         ("post", "/api/v2/messaging/client-sessions/revoke-all"),
         ("get", "/api/v2/messaging/me"),
         ("get", "/api/v2/messaging/directory"),
@@ -106,6 +111,7 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/messaging/relay/{path}"),
         ("post", "/api/v2/messaging/relay/{path}"),
         ("put", "/api/v2/messaging/relay/{path}"),
+        ("patch", "/api/v2/messaging/relay/{path}"),
         ("delete", "/api/v2/messaging/relay/{path}"),
         ("get", "/api/v2/admin/chat-migration"),
         ("post", "/api/v2/admin/chat-migration/transitions"),
@@ -117,6 +123,30 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/organizations/{id}/members"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
+        // Blueprint Section 8 — workspace context (per request; no switch endpoint)
+        ("get", "/api/v2/me/workspaces"),
+        ("get", "/api/v2/me/workspaces/{workspaceId}/capabilities"),
+        // Blueprint Section 4 — first-party organizations (Organizations Service relay)
+        ("post", "/api/v2/organizations"),
+        ("get", "/api/v2/organizations/{id}"),
+        ("patch", "/api/v2/organizations/{id}"),
+        ("patch", "/api/v2/organizations/{id}/members/{userId}"),
+        ("post", "/api/v2/organizations/{id}/members/me/leave"),
+        ("post", "/api/v2/organizations/{id}/ownership-transfer"),
+        ("post", "/api/v2/organizations/{id}/invitations"),
+        ("get", "/api/v2/organizations/{id}/invitations"),
+        (
+            "post",
+            "/api/v2/organizations/{id}/invitations/{invitationId}/revoke",
+        ),
+        ("post", "/api/v2/organization-invitations/accept"),
+        ("post", "/api/v2/organization-invitations/decline"),
+        ("post", "/api/v2/organizations/{id}/suspend"),
+        ("post", "/api/v2/organizations/{id}/reactivate"),
+        ("post", "/api/v2/organizations/{id}/archive"),
+        ("get", "/api/v2/organizations/{id}/audit-events"),
+        ("get", "/api/v2/organizations/{id}/provisioning"),
+        ("get", "/api/v2/admin/organizations"),
         // Part E — provider media control & realtime
         (
             "post",
@@ -302,6 +332,14 @@ fn every_v2_route_is_documented() {
         // Part I — quality
         ("post", "/api/v2/conferences/{id}/quality/samples"),
         ("get", "/api/v2/conferences/{id}/quality"),
+        // Blueprint Section 2 — account sessions and the security audit
+        ("get", "/api/v2/me/sessions"),
+        ("post", "/api/v2/me/sessions/revoke-all"),
+        ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
+        ("get", "/api/v2/admin/audit-events"),
+        // Blueprint Section 9 — personal account profile
+        ("get", "/api/v2/me/profile"),
+        ("patch", "/api/v2/me/profile"),
     ];
     for (method, path) in expected {
         assert!(
@@ -544,6 +582,11 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
             for (status, r) in responses {
                 if let Some(content) = r.get("content").and_then(Value::as_object) {
                     let types: Vec<_> = content.keys().collect();
+                    // Blueprint Section 10: RFC 5545 exports are the only non-JSON success.
+                    if path.ends_with("/calendar.ics") && status == "200" {
+                        assert_eq!(types, ["text/calendar"], "{method} {path} {status}");
+                        continue;
+                    }
                     assert_eq!(types, ["application/json"], "{method} {path} {status}");
                 }
             }

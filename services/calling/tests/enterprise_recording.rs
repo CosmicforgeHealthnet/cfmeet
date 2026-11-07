@@ -1787,3 +1787,215 @@ async fn retention_honours_holds_and_survives_a_storage_outage() {
         ["RETENTION"]
     );
 }
+
+/// Blueprint §12 (CAL-017): `GET /v1/enterprise/recordings` — scope-wide recording
+/// discovery for compliance review: newest first, keyset-paginated, filtered by Call,
+/// participant principal, state and start time; a principal sees only its own Calls'
+/// recordings; another scope sees nothing; integrity metadata only; every listed
+/// recording is access-audited like a single read.
+#[tokio::test]
+async fn the_scopes_recordings_are_listed_filtered_paginated_and_audited() {
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    let caller_2 = rec.desk("caller-two").await;
+    let callee_2 = rec.desk("callee-two").await;
+    let stranger = rec.desk("stranger").await;
+    e.extension("4250", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    e.extension("4251", "ENTERPRISE_MEMBER", callee_2.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", false, "NONE", 600).await;
+    // Recording A: finished (READY). Recording B, a minute later: still recording.
+    let call_a = rec.connected(&caller, "4250", &callee).await;
+    let rec_a = recording_id(&rec.start(call_a, None).await);
+    let (_, v) = e.a.state(call_a).await;
+    assert_eq!(e.a.command(call_a, "end", v).await.status, StatusCode::OK);
+    rec.tick().await;
+    rec.deliver(rec_a, call_a, &wav(800)).await;
+    assert_eq!(rec.recording_state(rec_a).await, "READY:CALL_ENDED:");
+    e.h().clock.advance(chrono::Duration::seconds(60));
+    let call_b = rec.connected(&caller_2, "4251", &callee_2).await;
+    let rec_b = recording_id(&rec.start(call_b, None).await);
+    let ids = |r: &TestResponse| -> Vec<Uuid> {
+        conforms("CallRecordingList", &r.json);
+        assert!(!r.text.contains("recordings/"), "no object key: {}", r.text);
+        assert!(!r.text.contains("http"), "no URL: {}", r.text);
+        r.json["recordings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| id_of(x, "recordingId"))
+            .collect()
+    };
+    // An administrator lists the whole scope, newest first.
+    let all = rec
+        .manage(Method::GET, "/v1/enterprise/recordings", None)
+        .await;
+    assert_eq!(all.status, StatusCode::OK, "{}", all.text);
+    assert_eq!(ids(&all), [rec_b, rec_a]);
+    assert!(all.json["nextCursor"].is_null());
+    let started_b = all.json["recordings"][0]["startedAt"]
+        .as_str()
+        .unwrap()
+        .replace('+', "%2B");
+    let list = |query: String| {
+        let rec = &rec;
+        async move {
+            rec.manage(
+                Method::GET,
+                &format!("/v1/enterprise/recordings?{query}"),
+                None,
+            )
+            .await
+        }
+    };
+    // Filters.
+    for (query, expected) in [
+        (format!("callId={call_a}"), vec![rec_a]),
+        ("state=READY".to_string(), vec![rec_a]),
+        ("state=RECORDING".to_string(), vec![rec_b]),
+        (
+            format!("participantPrincipalId={}", callee_2.principal.id()),
+            vec![rec_b],
+        ),
+        (
+            format!("participantPrincipalId={}", stranger.principal.id()),
+            vec![],
+        ),
+        (format!("startedFrom={started_b}"), vec![rec_b]),
+        (format!("startedBefore={started_b}"), vec![rec_a]),
+        (format!("callId={call_b}&state=READY"), vec![]),
+    ] {
+        let r = list(query.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{query}: {}", r.text);
+        assert_eq!(ids(&r), expected, "{query}");
+    }
+    for query in [
+        "state=PLAYING".to_string(),
+        "startedFrom=yesterday".to_string(),
+        format!("startedFrom={started_b}&startedBefore={started_b}"),
+        "callId=not-a-uuid".to_string(),
+        "limit=0".to_string(),
+        "limit=101".to_string(),
+        "cursor=garbage".to_string(),
+        "orderBy=startedAt".to_string(),
+    ] {
+        let r = list(query.clone()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{query}: {}", r.text);
+    }
+    // Keyset pagination.
+    let page = list("limit=1".to_string()).await;
+    assert_eq!(ids(&page), [rec_b]);
+    let cursor = page.json["nextCursor"].as_str().unwrap().to_string();
+    let page = list(format!("limit=1&cursor={cursor}")).await;
+    assert_eq!(ids(&page), [rec_a]);
+    assert!(page.json["nextCursor"].is_null());
+    // A principal sees only recordings of Calls it took part in; a reader without a
+    // principal is not an administrator.
+    let r = rec
+        .read(
+            Method::GET,
+            &format!(
+                "/v1/enterprise/recordings?principalId={}",
+                caller.principal.id()
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(ids(&r), [rec_a]);
+    let r = rec
+        .read(
+            Method::GET,
+            &format!(
+                "/v1/enterprise/recordings?principalId={}",
+                stranger.principal.id()
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(ids(&r), Vec::<Uuid>::new());
+    let r = rec
+        .read(Method::GET, "/v1/enterprise/recordings", None)
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    // Without enterprise.recording.read: 403; another tenant: nothing of this scope.
+    let no_scope = credential(
+        e.h(),
+        &e.a.w.consumer,
+        e.a.w.kind,
+        &[names::ENTERPRISE_CONFIG_READ],
+    )
+    .await;
+    let r = e
+        .send(
+            no_scope.secret.expose_once(),
+            Method::GET,
+            "/v1/enterprise/recordings",
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    let (other, _) = e.other_tenant("initech").await;
+    let other = credential(
+        e.h(),
+        &other,
+        e.a.w.kind,
+        &[
+            names::ENTERPRISE_RECORDING_READ,
+            names::ENTERPRISE_RECORDING_MANAGE,
+        ],
+    )
+    .await;
+    for query in [String::new(), format!("?callId={call_a}")] {
+        let r = e
+            .send(
+                other.secret.expose_once(),
+                Method::GET,
+                &format!("/v1/enterprise/recordings{query}"),
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(ids(&r), Vec::<Uuid>::new(), "cross-scope: {query}");
+    }
+    // Every listing is audited per recording (READ_METADATA, LISTED); a principal's
+    // listing is attributed to that principal. Empty listings audit nothing.
+    let trail = strings(
+        e.h().conn(),
+        &format!(
+            "SELECT operation || ':' || outcome || ':' || COALESCE(reason, '') || ':' || \
+               COALESCE(on_behalf_of_principal_id::text, '-') \
+               FROM call_recording_access_audit WHERE recording_id = '{rec_a}' ORDER BY seq"
+        ),
+    )
+    .await;
+    assert!(
+        trail
+            .iter()
+            .all(|t| t.starts_with("READ_METADATA:GRANTED:LISTED:")),
+        "{trail:?}"
+    );
+    // Administrator: all, callId, READY, startedBefore, page 2 — plus the caller's own.
+    assert_eq!(trail.len(), 6, "{trail:?}");
+    assert_eq!(
+        trail
+            .iter()
+            .filter(|t| t.ends_with(&caller.principal.id().to_string()))
+            .count(),
+        1
+    );
+    let audit = rec
+        .manage(
+            Method::GET,
+            &format!("/v1/enterprise/recordings/{rec_a}/access-audit"),
+            None,
+        )
+        .await;
+    conforms("RecordingAccessList", &audit.json);
+    assert_eq!(audit.json["records"][0]["reason"], "LISTED");
+}

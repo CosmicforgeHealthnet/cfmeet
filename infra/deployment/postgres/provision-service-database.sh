@@ -12,7 +12,7 @@
 # CONNECT is revoked from PUBLIC, so no other service's role (and no other login) can open
 # this database. Passwords are read from files (secret store mounts), never arguments.
 #
-#   provision-service-database.sh --service <communications|calling|platform-access|numbering|privacy-relay|telephony|sms-gateway|messaging|developer-platform> \
+#   provision-service-database.sh --service <communications|calling|platform-access|numbering|privacy-relay|telephony|sms-gateway|messaging|developer-platform|organizations> \
 #       --admin-url <superuser/createrole url> --migrator-password-file F --runtime-password-file F \
 #       [--database NAME] [--role-prefix PREFIX]
 #
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
     *) echo "provision: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-case "$service" in communications|calling|platform-access|numbering|privacy-relay|telephony|sms-gateway|messaging|developer-platform) ;; *) echo "provision: --service must be communications, calling, platform-access, numbering, privacy-relay, telephony, sms-gateway, messaging or developer-platform" >&2; exit 2 ;; esac
+case "$service" in communications|calling|platform-access|numbering|privacy-relay|telephony|sms-gateway|messaging|developer-platform|organizations) ;; *) echo "provision: --service must be communications, calling, platform-access, numbering, privacy-relay, telephony, sms-gateway, messaging, developer-platform or organizations" >&2; exit 2 ;; esac
 [ -n "$admin" ] && [ -f "$mig_file" ] && [ -f "$app_file" ] || { echo "provision: --admin-url and both password files are required" >&2; exit 2; }
 
 base="$(echo "$service" | tr '-' '_')"

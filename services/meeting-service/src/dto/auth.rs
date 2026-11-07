@@ -63,6 +63,8 @@ pub struct RegisterResponse {
     pub user_id: Uuid,
     pub email: String,
     pub role: String,
+    /// `pending_verification` (spelled `pendingverification` until
+    /// `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
     pub status: String,
 }
 
@@ -87,6 +89,8 @@ pub struct UserInfo {
     pub id: Uuid,
     pub username: String,
     pub role: String,
+    /// `pending_verification` (spelled `pendingverification` until
+    /// `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
     pub status: String,
 }
 
@@ -205,4 +209,12 @@ fn validate_change_passwords(req: &ChangePasswordRequest) -> Result<(), Validati
     }
 
     Ok(())
+}
+
+/// One-time Google sign-in exchange (ACC-005): the callback redirect carries only a
+/// short-lived, single-use `exchange_code`, never tokens.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct GoogleExchangeRequest {
+    #[validate(length(min = 20, max = 128, message = "Invalid exchange code"))]
+    pub exchange_code: String,
 }

@@ -4,8 +4,11 @@
 //! call one service method, and serialize. No role checks, transactions, policy
 //! orchestration or provider calls live here.
 
+pub mod account_profile;
+pub mod account_sessions;
 pub mod artifacts;
 pub mod breakouts;
+pub mod calendar;
 pub mod collaboration;
 pub mod compat;
 pub mod conferences;
@@ -20,6 +23,7 @@ pub mod spaces;
 pub mod specialized;
 pub mod unified_messaging;
 pub mod views;
+pub mod workspaces;
 
 use axum::{
     async_trait,
@@ -147,3 +151,69 @@ where
             .map_err(|_| ApiError::domain(ErrorCode::ValidationError, "Invalid query parameters"))
     }
 }
+
+/// JSON body plus the SHA-256 digest of its canonical form (`Idempotency-Key` request
+/// matching, SEC-014). Same rejections as [`V2Json`]; an empty body is `T::default()`
+/// when `OPTIONAL`.
+pub struct V2JsonDigest<T, const OPTIONAL: bool = false>(pub T, pub String);
+
+#[async_trait]
+impl<S, T, const OPTIONAL: bool> FromRequest<S> for V2JsonDigest<T, OPTIONAL>
+where
+    T: DeserializeOwned + Default,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let value = if OPTIONAL {
+            let bytes = axum::body::Bytes::from_request(req, state)
+                .await
+                .map_err(|_| {
+                    ApiError::domain(ErrorCode::ValidationError, "Invalid request body")
+                })?;
+            if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+                serde_json::Value::Object(Default::default())
+            } else {
+                serde_json::from_slice(&bytes).map_err(|e| {
+                    ApiError::domain(
+                        ErrorCode::ValidationError,
+                        format!("Invalid request body: {e}"),
+                    )
+                })?
+            }
+        } else {
+            V2Json::<serde_json::Value>::from_request(req, state)
+                .await?
+                .0
+        };
+        let digest = crate::services::idempotency::body_digest(&value);
+        let parsed = serde_json::from_value(value).map_err(|e| {
+            ApiError::domain(
+                ErrorCode::ValidationError,
+                format!("Invalid request body: {e}"),
+            )
+        })?;
+        Ok(V2JsonDigest(parsed, digest))
+    }
+}
+
+/// The optional `Idempotency-Key` header of a creating request.
+pub fn idempotency_key(headers: &axum::http::HeaderMap) -> Result<Option<String>, ApiError> {
+    headers
+        .get("idempotency-key")
+        .map(|v| {
+            let key = v.to_str().map_err(|_| {
+                ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "Idempotency-Key must be 1-128 visible ASCII characters",
+                )
+            })?;
+            crate::services::idempotency::validate_key(key)?;
+            Ok(key.to_string())
+        })
+        .transpose()
+}
+
+/// Response header marking an `Idempotency-Key` replay.
+pub const IDEMPOTENT_REPLAYED: &str = "idempotent-replayed";

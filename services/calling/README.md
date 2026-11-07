@@ -599,6 +599,23 @@ app refusals.
   Call events): a pre-connect Call with no Call event for that long fails (TIMEOUT)
   through the canonical transition — ring offers cancelled, media marked for teardown,
   public / SIP legs released in the same transaction. `SKIP LOCKED`, multi-instance safe.
+* **Automatic end** (Blueprint §12, CAL-001) — a Call never outlives its parties. Through
+  the END path (system command; `end_trigger` on the CALL_STATE_CHANGED → ENDING event;
+  `calling_calls_auto_ended_total{reason}`): a CONNECTED / HELD Call with fewer than two
+  parties with live participation ends `PARTICIPATION_ENDED` — evaluated on session
+  removal ("leave"), on a provider disconnect, after a transfer completes / fails and by the
+  reaper once `CALLING_PARTICIPATION_GRACE_SECONDS` (default 60) has passed for a dropped
+  connection. A party is an active participant with a CONNECTED session, a session
+  DISCONNECTED / not yet connected within the grace, a live SIP / public leg or a live
+  ring offer (or an unowned live public leg); the shared APPLICATION leg and recording
+  captures are never parties. The reaper (every reconcile interval, `SKIP LOCKED`) also
+  ends ANSWERED / CONNECTED / HELD Calls idle (nothing connected) for
+  `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (default 600, `IDLE_TIMEOUT`) and any answered Call
+  older than `CALLING_MAX_CALL_DURATION_SECONDS` (default 28800, `MAX_DURATION`).
+  Pre-connect Calls (IVR menus, queue waits, voicemail recordings — all still ringing) are
+  never touched; a TRANSFERRING Call waits for its transfer. The media resource of an
+  active Call whose sessions are all gone past the grace is never re-created. Usage is
+  finalized and parties / queue agents become free exactly as for a client END.
 * **Backlog** — the worker loop samples `calling_outbox_pending`,
   `calling_outbox_oldest_pending_age_seconds`, `calling_telephony_commands_pending`,
   `calling_telephony_commands_oldest_pending_age_seconds`,

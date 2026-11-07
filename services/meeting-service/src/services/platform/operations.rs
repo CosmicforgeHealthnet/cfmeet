@@ -129,6 +129,11 @@ mod tests {
             (Method::POST, "/api/v2/meeting-spaces/:id/owner-transfer"),
             (Method::POST, "/api/v2/meeting-spaces/:id/members"),
             (Method::GET, "/api/v2/me/organizations"),
+            (Method::GET, "/api/v2/me/workspaces"),
+            (
+                Method::GET,
+                "/api/v2/me/workspaces/:workspace_id/capabilities",
+            ),
             (Method::GET, "/api/v2/resolve/:identifier"),
             (Method::POST, "/api/v2/invitations/:token/resolve"),
         ] {

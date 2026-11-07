@@ -2,9 +2,71 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform API",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests."
   },
+  "tags": [
+    {
+      "name": "Organizations",
+      "description": "Developer organizations (API customer workspaces backed by EXTERNAL Platform Access tenants), ownership transfer and closure. Not CF Meet business organizations (/api/v2/organizations)."
+    },
+    {
+      "name": "Members",
+      "description": "Human members of a developer organization and their roles (OWNER, ADMIN, DEVELOPER, ANALYST, BILLING)."
+    },
+    {
+      "name": "Invitations",
+      "description": "Invitations to join a developer organization."
+    },
+    {
+      "name": "Projects",
+      "description": "Projects (Platform Access applications) of a developer organization."
+    },
+    {
+      "name": "Environments",
+      "description": "Environments of a project."
+    },
+    {
+      "name": "Service accounts",
+      "description": "Platform Access machine identities of an environment, delegated to Platform Access; never a credential."
+    },
+    {
+      "name": "Credentials",
+      "description": "Credential metadata, issuance, rotation and revocation for service accounts."
+    },
+    {
+      "name": "Scopes",
+      "description": "The scope registry and the scopes granted to a project."
+    },
+    {
+      "name": "Production access",
+      "description": "Requests for production access and their review history."
+    },
+    {
+      "name": "Commercial",
+      "description": "Commercial plans, plan assignments and billing-account references."
+    },
+    {
+      "name": "Usage",
+      "description": "Usage facts and summaries."
+    },
+    {
+      "name": "Limits",
+      "description": "Effective limits and limit warnings."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Developer Console webhook subscriptions, signing secret rotation, deliveries and replay."
+    },
+    {
+      "name": "Activity",
+      "description": "Immutable activity history of a developer organization."
+    },
+    {
+      "name": "Support",
+      "description": "Support profiles and incident status."
+    }
+  ],
   "servers": [
     {
       "url": "https://api.cfmeet.com",

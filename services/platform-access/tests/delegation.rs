@@ -477,3 +477,200 @@ async fn the_developer_platform_delegates_service_account_create_and_suspend_onl
         .await;
     assert_eq!(calling.status, StatusCode::FORBIDDEN);
 }
+
+/// Section 15 (ORG-013 / ORG-014): an EXTERNAL tenant can be renamed through delegation
+/// (audited, idempotent) and found by its creation slug; a FIRST_PARTY tenant can be
+/// neither renamed nor looked up that way.
+#[tokio::test]
+async fn delegated_rename_and_slug_lookup_are_external_only_and_audited() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let t = dp(
+        &h,
+        Method::POST,
+        "/internal/v1/delegation/tenants",
+        Some(json!({ "slug": "org-0123456789abcdef0123", "displayName": "Acme" })),
+        true,
+    )
+    .await;
+    assert_eq!(t.status, StatusCode::CREATED, "{}", t.body);
+    let tenant = uuid(&t.body["id"]);
+    // Lookup by slug finds it.
+    let found = dp(
+        &h,
+        Method::GET,
+        "/internal/v1/delegation/tenant-slugs/org-0123456789abcdef0123",
+        None,
+        false,
+    )
+    .await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.body);
+    assert_eq!(uuid(&found.body["id"]), tenant);
+    let missing = dp(
+        &h,
+        Method::GET,
+        "/internal/v1/delegation/tenant-slugs/org-ffffffffffffffffffff",
+        None,
+        false,
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    // Rename: named actor required, audited once, a repeat is a no-op.
+    let path = format!("/internal/v1/delegation/tenants/{tenant}/display-name");
+    let anon = dp(
+        &h,
+        Method::POST,
+        &path,
+        Some(json!({ "displayName": "Acme Labs" })),
+        false,
+    )
+    .await;
+    assert_eq!(anon.code(), "OPERATOR_REQUIRED");
+    for _ in 0..2 {
+        let r = dp(
+            &h,
+            Method::POST,
+            &path,
+            Some(json!({ "displayName": "  Acme Labs " })),
+            true,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+        assert_eq!(r.body["displayName"], "Acme Labs");
+    }
+    let renamed = h
+        .admin_ok(
+            Method::GET,
+            &format!("/internal/v1/admin/tenants/{tenant}"),
+            None,
+        )
+        .await;
+    assert_eq!(renamed["displayName"], "Acme Labs");
+    let audit = h
+        .admin_ok(
+            Method::GET,
+            &format!("/internal/v1/admin/audit?tenantId={tenant}&action=TENANT_RENAMED"),
+            None,
+        )
+        .await;
+    assert_eq!(audit["items"].as_array().unwrap().len(), 2, "{audit}");
+    assert_eq!(audit["items"][0]["actor"], format!("devplat.{ACTOR}"));
+    let bad = dp(
+        &h,
+        Method::POST,
+        &path,
+        Some(json!({ "displayName": "" })),
+        true,
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+    // FIRST_PARTY: operator-managed.
+    let fp = h.consumer("fp-co", "FIRST_PARTY", &[]).await;
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!(
+            "/internal/v1/delegation/tenants/{}/display-name",
+            fp.tenant_id
+        ),
+        Some(json!({ "displayName": "Renamed" })),
+        true,
+    )
+    .await;
+    assert_eq!(r.code(), "POLICY_VIOLATION", "{}", r.body);
+    let r = dp(
+        &h,
+        Method::GET,
+        "/internal/v1/delegation/tenant-slugs/fp-co",
+        None,
+        false,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+/// Section 15 (PLT-009): the operator audit trail is readable — operator-only, filtered,
+/// keyset-paginated newest first.
+#[tokio::test]
+async fn the_operator_audit_trail_is_readable_by_operators_only() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("audited", "EXTERNAL", &["calls.read"]).await;
+    // consumer(): tenant + application + scope + 3 environments + 3 service accounts.
+    let all = h
+        .admin_ok(
+            Method::GET,
+            &format!(
+                "/internal/v1/admin/audit?tenantId={}&limit=200",
+                c.tenant_id
+            ),
+            None,
+        )
+        .await;
+    let items = all["items"].as_array().unwrap();
+    assert_eq!(items.len(), 9, "{all}");
+    assert!(all["nextCursor"].is_null());
+    assert!(items.iter().any(|i| i["action"] == "TENANT_CREATED"));
+    assert!(items.iter().all(|i| i["actor"] == OPERATOR));
+    // Pages of 4 walk the same rows in the same order.
+    let mut walked = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!("/internal/v1/admin/audit?tenantId={}&limit=4", c.tenant_id);
+        if let Some(cur) = &cursor {
+            path.push_str(&format!("&cursor={cur}"));
+        }
+        let page = h.admin_ok(Method::GET, &path, None).await;
+        walked.extend(page["items"].as_array().unwrap().iter().cloned());
+        match page["nextCursor"].as_str() {
+            Some(next) => cursor = Some(next.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(&walked, items);
+    let envs = h
+        .admin_ok(
+            Method::GET,
+            &format!(
+                "/internal/v1/admin/audit?tenantId={}&action=ENVIRONMENT_CREATED",
+                c.tenant_id
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(envs["items"].as_array().unwrap().len(), 3);
+    for bad in [
+        "?action=NOT_AN_ACTION",
+        "?targetKind=GALAXY",
+        "?limit=0",
+        "?limit=201",
+        "?cursor=garbage",
+        "?actor=has%20space",
+        "?unknown=1",
+    ] {
+        let r = h
+            .admin(Method::GET, &format!("/internal/v1/admin/audit{bad}"), None)
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}: {}", r.body);
+    }
+    // Operator-only: a named operator is required, and no other service may read it.
+    let unnamed = h
+        .call(
+            &h.peers.operator,
+            Method::GET,
+            "/internal/v1/admin/audit",
+            None,
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(unnamed.code(), "OPERATOR_REQUIRED");
+    let calling = h
+        .as_calling(Method::GET, "/internal/v1/admin/audit", None, None)
+        .await;
+    assert_eq!(calling.status, StatusCode::FORBIDDEN);
+    let delegate = dp(&h, Method::GET, "/internal/v1/admin/audit", None, true).await;
+    assert_eq!(delegate.status, StatusCode::FORBIDDEN);
+}

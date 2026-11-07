@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    domain::{AccessPolicy, AdmissionState, ConferenceStatus, RecordOrigin, Role},
+    domain::{AccessPolicy, AdmissionState, ConferenceStatus, Role},
     error::ApiResult,
     models::{
         conference_participants, conference_sessions, meeting_spaces,
@@ -142,33 +142,13 @@ impl CompatService {
         Err(not_found_space())
     }
 
-    /// Canonical conference: the LIVE one, else the next upcoming unstarted one, else the latest.
+    /// Canonical conference: the LIVE one, else the next unstarted one whose start window
+    /// is still open, else the latest (one shared rule, see `services::calendar`).
     pub async fn canonical_conference(
         &self,
         space_id: Uuid,
     ) -> ApiResult<Option<conference_sessions::Model>> {
-        let all = conference_sessions::Entity::find()
-            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
-            .order_by_asc(conference_sessions::Column::ScheduledStartAt)
-            .all(&self.core.db)
-            .await?;
-        if let Some(live) = all
-            .iter()
-            .filter(|c| c.status == ConferenceStatus::Live)
-            .max_by_key(|c| (c.origin == RecordOrigin::V2, c.started_at))
-        {
-            return Ok(Some(live.clone()));
-        }
-        let now = Utc::now();
-        if let Some(next) = all.iter().find(|c| {
-            matches!(
-                c.status,
-                ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
-            ) && c.scheduled_end_at.map(|e| e > now).unwrap_or(true)
-        }) {
-            return Ok(Some(next.clone()));
-        }
-        Ok(all.into_iter().max_by_key(|c| c.created_at))
+        crate::services::calendar::canonical_conference(&self.core.db, space_id, Utc::now()).await
     }
 
     /// Run the idempotent backfill (all legacy meetings, or one).

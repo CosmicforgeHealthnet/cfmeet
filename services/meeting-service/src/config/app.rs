@@ -45,8 +45,10 @@ impl AppConfig {
             database_url: std::env::var("DATABASE_URL")
                 .map_err(|_| ApiError::InternalError("DATABASE_URL must be set".to_string()))?,
 
-            jwt_secret: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "your-secret-key-change-this-in-production".to_string()),
+            jwt_secret: validated_jwt_secret(
+                std::env::var("JWT_SECRET").ok(),
+                std::env::var("APP_ENV").ok(),
+            )?,
 
             host: std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
 
@@ -93,5 +95,68 @@ impl AppConfig {
     /// Generate join URL for a meeting
     pub fn join_url(&self, meeting_identifier: &str) -> String {
         format!("{}/join/{}", self.app_url, meeting_identifier)
+    }
+}
+
+/// The value shipped in `.env.example`; never acceptable outside development.
+const INSECURE_EXAMPLE_JWT_SECRET: &str = "your-secret-key-change-this-in-production";
+/// HS256 signing material shorter than this is refused outside development.
+pub const MIN_JWT_SECRET_BYTES: usize = 32;
+
+/// SEC-001 / ACC-018: refuse to start with missing, example or short signing material unless
+/// `APP_ENV` explicitly names a development environment. An unset `APP_ENV` is treated as
+/// production-like. The value itself is never logged.
+pub fn validated_jwt_secret(secret: Option<String>, app_env: Option<String>) -> ApiResult<String> {
+    let development = matches!(
+        app_env
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "dev" | "development" | "local" | "test"
+    );
+    let secret = secret.filter(|s| !s.is_empty());
+    match secret {
+        Some(s) if s != INSECURE_EXAMPLE_JWT_SECRET && s.len() >= MIN_JWT_SECRET_BYTES => Ok(s),
+        Some(s) if development => {
+            tracing::warn!("JWT_SECRET is weak; accepted only because APP_ENV is a development environment");
+            Ok(s)
+        }
+        None if development => {
+            tracing::warn!("JWT_SECRET is unset; using the development example value");
+            Ok(INSECURE_EXAMPLE_JWT_SECRET.to_string())
+        }
+        _ => Err(ApiError::InternalError(format!(
+            "JWT_SECRET must be set to at least {MIN_JWT_SECRET_BYTES} bytes of non-example secret material (APP_ENV is not a development environment)"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod jwt_secret_tests {
+    use super::*;
+
+    #[test]
+    fn production_like_environments_refuse_missing_example_or_short_secrets() {
+        for env in [None, Some("prod".to_string()), Some("staging".to_string())] {
+            assert!(validated_jwt_secret(None, env.clone()).is_err());
+            assert!(validated_jwt_secret(Some(String::new()), env.clone()).is_err());
+            assert!(
+                validated_jwt_secret(Some(INSECURE_EXAMPLE_JWT_SECRET.into()), env.clone())
+                    .is_err()
+            );
+            assert!(validated_jwt_secret(Some("short-secret".into()), env.clone()).is_err());
+            let strong = "0123456789abcdef0123456789abcdef".to_string();
+            assert_eq!(
+                validated_jwt_secret(Some(strong.clone()), env).unwrap(),
+                strong
+            );
+        }
+    }
+
+    #[test]
+    fn development_keeps_working_with_weak_material() {
+        assert!(validated_jwt_secret(None, Some("dev".into())).is_ok());
+        assert!(validated_jwt_secret(Some("test-secret".into()), Some("TEST".into())).is_ok());
     }
 }

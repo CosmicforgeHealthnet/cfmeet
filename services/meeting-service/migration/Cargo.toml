@@ -26,3 +26,15 @@ dotenvy = "0.15"
 [[bin]]
 name = "account-communications-migration"
 path = "src/communications-main.rs"
+
+[[bin]]
+name = "account-security-migration"
+path = "src/account-security-main.rs"
+
+[[bin]]
+name = "meetings-calendar-migration"
+path = "src/meetings-calendar-main.rs"
+
+[[bin]]
+name = "profile-notifications-migration"
+path = "src/profile-notifications-main.rs"

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.5.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments."
+    "version": "1.8.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal)."
   },
   "components": {
     "securitySchemes": {
@@ -107,6 +107,173 @@
             "minimum": 1
           }
         }
+      },
+      "OrganizationScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The governed FIRST_PARTY scope of one first-party organization (ids, statuses and classification only).",
+        "required": [
+          "organizationRef",
+          "capability",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "tenant",
+          "application",
+          "environment",
+          "verified",
+          "active",
+          "requestedBy",
+          "createdAt"
+        ],
+        "properties": {
+          "organizationRef": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "tenantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "applicationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "tenant": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "slug",
+              "classification",
+              "status",
+              "revision"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "classification": {
+                "type": "string",
+                "enum": [
+                  "FIRST_PARTY",
+                  "EXTERNAL"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "SUSPENDED"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "application": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "tenantId",
+              "slug",
+              "status",
+              "revision"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "tenantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "SUSPENDED"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "environment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "tenantId",
+              "applicationId",
+              "kind",
+              "status",
+              "revision"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "tenantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "applicationId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "SANDBOX",
+                  "TEST",
+                  "PRODUCTION"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "SUSPENDED"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "FIRST_PARTY tenant with the reserved slug owning the application owning a PRODUCTION environment."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Tenant, application and environment are all ACTIVE."
+          },
+          "requestedBy": {
+            "type": "string",
+            "pattern": "^cfmeet\\.[a-z][a-z0-9-]*$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -128,6 +295,10 @@
     }
   ],
   "tags": [
+    {
+      "name": "Internal Admin — Audit",
+      "description": "Operator audit trail read (Section 15, PLT-009)."
+    },
     {
       "name": "Internal Admin — Applications",
       "description": "Internal Admin — Applications operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
@@ -195,6 +366,10 @@
     {
       "name": "Service Health",
       "description": "Service Health operations in the Platform Access internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Organization Scopes",
+      "description": "Governed FIRST_PARTY organization scopes: the dedicated tenant, first-party application and PRODUCTION environment of one first-party organization (Organizations Service only, audited, ADR 0058)."
     }
   ],
   "paths": {
@@ -767,6 +942,67 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/account-status": {
+      "post": {
+        "operationId": "mirrorAccountStatus",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "Mirror a first-party account status onto its principal",
+        "description": "Blueprint v1.0 Section 14 (ACC-010). The first-party account authority (the Meeting Service, permission platform-principal.ensure, signed delegated context of a FULL-authority FIRST_PARTY tenant) sets the NATIVE_CF_USER principal of externalReference to the account's CURRENT status: ACTIVE, SUSPENDED or DEACTIVATED. Idempotent (changed=false when already so). Never creates a principal (unknown reference: NOT_FOUND) and never changes a tombstoned one (INVALID_STATE).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/AccountStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/AccountStatusResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -4438,6 +4674,611 @@
           "Internal Admin — Credentials"
         ],
         "summary": "Resume a suspended credential (operator)"
+      }
+    },
+    "/internal/v1/organization-scopes/{organizationRef}/{capability}": {
+      "put": {
+        "operationId": "provisionOrganizationScope",
+        "summary": "Create or return an organization's FIRST_PARTY scope",
+        "description": "Idempotent on the path: the first call creates the organization's dedicated FIRST_PARTY tenant (reserved slug `org-<32 hex>`), its first-party application (`organization`) and its PRODUCTION-kind environment plus the immutable scope row in ONE transaction and answers 201; every later call answers 200 with the same triple. Concurrent calls serialize. A tenant already holding the reserved slug outside the scope registry is never adopted (409 CONFLICT). No credential, service account, principal or scope grant is created. Every committed change writes the operator audit with the organization id as an opaque reference. Permission `platform-identity.provision-first-party` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED.",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationScope"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already provisioned (the same triple).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getOrganizationScope",
+        "summary": "Read back an organization's FIRST_PARTY scope",
+        "description": "The provisioned triple with the server-side facts the caller verifies before recording it (classification, reserved slug, ownership chain and PRODUCTION kind give `verified`; every level ACTIVE gives `active`). 404 NOT_FOUND when never provisioned. Permission `platform-identity.provision-first-party` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED.",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-scopes/{organizationRef}/{capability}/status": {
+      "post": {
+        "operationId": "setOrganizationScopeStatus",
+        "summary": "Suspend or resume an organization's FIRST_PARTY tenant",
+        "description": "Sets the status of the organization's tenant (SUSPENDED fails every subordinate credential immediately). Idempotent: an unchanged status writes nothing; a change writes one TENANT_STATUS_SET audit row with the organization reference. Permission `platform-identity.provision-first-party` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED.",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/tenants/{tenantId}/display-name": {
+      "post": {
+        "operationId": "delegateRenameTenant",
+        "description": "Section 15 (ORG-013): propagate a Developer Platform organization rename to its EXTERNAL tenant (audited `TENANT_RENAMED`; renaming to the current name is a no-op). A FIRST_PARTY tenant's name stays operator-managed: POLICY_VIOLATION. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "displayName"
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Rename a tenant"
+      }
+    },
+    "/internal/v1/delegation/tenant-slugs/{slug}": {
+      "get": {
+        "operationId": "delegateGetTenantBySlug",
+        "description": "Section 15 (ORG-014): the EXTERNAL tenant created under this slug (the creation reference of a Developer Platform organization), so an organization creation whose local commit never happened can be reconciled. Any other tenant: NOT_FOUND. Developer Platform delegation (Part VI §50): permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`) and write one append-only audit row.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": [
+          "Internal Delegation — Tenants"
+        ],
+        "summary": "Get a tenant by creation slug"
+      }
+    },
+    "/internal/v1/admin/audit": {
+      "get": {
+        "operationId": "listOperatorAudit",
+        "tags": [
+          "Internal Admin — Audit"
+        ],
+        "summary": "List the operator audit trail",
+        "description": "Section 15 (PLT-009): the append-only operator audit trail (`platform_access_audit`: every administration and delegation mutation, one row per committed change), newest first, keyset paginated. Operator-only: permission `platform-identity.administer` (operator console only) AND a named human operator (`X-CF-Operator`). Read-only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfOperator"
+          },
+          {
+            "name": "tenantId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "Only rows scoped to this tenant."
+          },
+          {
+            "name": "targetKind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "TENANT",
+                "APPLICATION",
+                "ENVIRONMENT",
+                "SERVICE_ACCOUNT",
+                "CREDENTIAL",
+                "PRINCIPAL",
+                "IDENTITY_IMPORT"
+              ]
+            },
+            "description": "Only rows about this kind of target."
+          },
+          {
+            "name": "targetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "Only rows about this target."
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            },
+            "description": "Only rows of this actor (an operator id, `devplat.<actor>` for delegation, or a service id)."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z_]{2,63}$"
+            },
+            "description": "Only rows of this audited action."
+          },
+          {
+            "name": "correlationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,64}$"
+            },
+            "description": "Only rows of this command."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "`nextCursor` of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "actor",
+                          "correlationId",
+                          "action",
+                          "targetKind",
+                          "targetId",
+                          "tenantId",
+                          "applicationId",
+                          "environmentId",
+                          "detail",
+                          "occurredAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                          },
+                          "actor": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+                          },
+                          "correlationId": {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          "action": {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          "targetKind": {
+                            "type": "string",
+                            "maxLength": 32
+                          },
+                          "targetId": {
+                            "oneOf": [
+                              {
+                                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "tenantId": {
+                            "oneOf": [
+                              {
+                                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "applicationId": {
+                            "oneOf": [
+                              {
+                                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "environmentId": {
+                            "oneOf": [
+                              {
+                                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "detail": {
+                            "type": "object",
+                            "description": "Bounded detail: opaque ids and codes only, never a secret."
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   }

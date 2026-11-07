@@ -37,6 +37,7 @@ It exposes no customer API. Consumers call the service-authenticated `/internal/
 | `POST /internal/v1/principals/telephone-endpoints` (delegated) | `platform-principal.register` | Calling |
 | `POST /internal/v1/principals/{id}/tombstone` | `platform-principal.register` | Calling |
 | `/internal/v1/admin/**` (+ `X-CF-Operator`) | `platform-identity.administer` | operator console |
+| `PUT` / `GET /internal/v1/organization-scopes/{organizationRef}/{capability}`, `POST …/status` | `platform-identity.provision-first-party` | Organizations only ([ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md)): idempotent create-or-return / read-back / suspend-resume of one FIRST_PARTY tenant + first-party application + PRODUCTION environment per first-party organization; no credentials or scope grants |
 
 "Delegated" operations require the signed delegated platform context; Platform Access
 re-validates its tenant / application / environment / service account against its own

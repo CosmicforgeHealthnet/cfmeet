@@ -12,6 +12,8 @@
 //! | Route | Scope |
 //! |---|---|
 //! | `POST /client-tokens` | `messages.read` |
+//! | `POST /session-devices` | `messages.read` (first-party only; Section 13 session device) |
+//! | `POST /session-devices/revoke` | `messages.send` (first-party only) |
 //! | `POST /client-sessions/{sessionId}/revoke` | `messages.send` |
 //! | `GET` / `PUT /presence/settings` | `messages.read` / `messages.send` |
 //! | `PUT` / `DELETE /devices/{deviceId}/push-registration` | `messages.send` |
@@ -30,6 +32,7 @@ use super::{
     hub::Admission,
     presence::{self, SettingsRequest},
     push::{self, RegistrationRequest},
+    session_devices,
     sessions::{self, IssueRequest},
     SUBPROTOCOL, TICKET_PROTOCOL_PREFIX,
 };
@@ -56,6 +59,8 @@ pub fn device_routes() -> Router<AppState> {
 pub fn customer_routes() -> Router<AppState> {
     Router::new()
         .route("/client-tokens", post(issue))
+        .route("/session-devices", post(issue_session_device))
+        .route("/session-devices/revoke", post(revoke_session_devices))
         .route("/client-sessions/:session_id/revoke", post(revoke))
         .route("/client-sessions/revoke-all", post(revoke_all))
         .route("/presence/settings", get(get_presence).put(put_presence))
@@ -312,6 +317,31 @@ async fn issue(
     Ok((
         StatusCode::CREATED,
         Json(sessions::issue_token(&state, caller.context(), &acting, body).await?),
+    ))
+}
+
+async fn issue_session_device(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<session_devices::IssueRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(session_devices::issue(&state, caller.context(), &acting, body).await?),
+    ))
+}
+
+async fn revoke_session_devices(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<session_devices::RevokeRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    Ok(Json(
+        session_devices::revoke(&state, caller.context(), &acting, body).await?,
     ))
 }
 

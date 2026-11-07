@@ -1,0 +1,69 @@
+# PROPOSAL / TEMPLATE — inactive. GitHub only runs files under .github/workflows/, and this
+# file must not be copied there until the owner approves the first production run
+# (docs/operations/backup-and-restore.md, "Owner actions"). Alternative to the systemd timer
+# in ./systemd: the repository's "GitHub Actions only" operating model, where production is
+# reached exclusively through workflows on main over SSH (as in cfmeet-calling-production.yml).
+#
+# What it does: ships this directory to the VPS at the exact workflow revision, runs
+# backup-all.sh with the root-only /etc/cfmeet-backup/backup.env, and uploads only the run
+# summary (no dumps, no URLs, no keys). The backup files never leave the VPS through GitHub.
+name: CF Meet scheduled database backup
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Refuse anything but main
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+      - name: Run the encrypted backup on the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          remote="/opt/cfmeet-backup/releases/$GITHUB_SHA"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/deployment/backup -cf - --exclude tests . |
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          set +e
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40 \
+            "$VPS_USER@$VPS_HOST" "bash '$remote/backup-all.sh' --config /etc/cfmeet-backup/backup.env" | tee backup-result.log
+          status=${PIPESTATUS[0]}
+          set -e
+          grep -E '^(BACKUP_RESULT|BACKUP_RUN_DIR|OFFSITE_STATUS|BACKUP_CLASSIFICATION)=' backup-result.log >> "$GITHUB_STEP_SUMMARY" || true
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cfmeet-db-backup-${{ github.run_id }}
+          path: backup-result.log
+          if-no-files-found: ignore

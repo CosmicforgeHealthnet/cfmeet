@@ -19,11 +19,96 @@ fn device_view(d: &Value) -> Value {
     json!({"deviceId":d["id"],"platform":d["platform"],"label":d["label"],"state":d["state"],
         "chatDeviceId":d["chat_device_ref"],"callEndpointId":d["call_endpoint_ref"],
         "push":{"registered":d["push_registered_at"].is_string(),"platform":d["push_platform"],"registeredAt":d["push_registered_at"]},
+        "accountSession":{"bound":d["account_session_ref"].is_string()},
         "acknowledgedSyncPosition":d["acknowledged_sync_position"],"revokedAt":d["revoked_at"],"revocationReason":d["revocation_reason"],
         "version":d["version"],"createdAt":d["created_at"]})
 }
 
+/// Section 14 (ACC-008, ADR 0057 A1): a device bound to an Account session ends that
+/// session when it is revoked. Account (the relay that authenticated the user) ends it:
+/// it passes its own session reference with the request, and only then does the answer
+/// carry the bound reference, which Account consumes and removes before replying.
+fn bound_session(result: &mut Value, d: &Value, account_relay: bool) {
+    let Some(bound) = d["account_session_ref"].as_str() else {
+        return;
+    };
+    if account_relay {
+        result["boundAccountSessionRef"] = json!(bound);
+    }
+    if result.get("effects").is_some() {
+        result["effects"]["accountSession"] =
+            json!(if account_relay { "ENDED" } else { "UNCHANGED" });
+    }
+}
+
 impl State {
+    /// Section 14 (ACC-008): the Account session that linked these devices ended (sign
+    /// out, session revoke). Each ACTIVE device bound to it is revoked at its canonical
+    /// owners first (idempotent; a device the owner no longer knows counts as done), then
+    /// marked REVOKED here. Any other owner failure is returned, so Account retries.
+    pub async fn end_session_devices(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        session_ref: &str,
+    ) -> Result<usize> {
+        let acting = scope.clone().with_initiating_principal(
+            p.principal_id,
+            cf_service_auth::DelegatedPrincipalKind::NativeCfUser,
+        );
+        let bound:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(d) doc FROM communication_devices d WHERE profile_id=$1 AND account_session_ref=$2 AND state='ACTIVE' ORDER BY created_at,id LIMIT 100",
+            vec![p.id.into(),session_ref.into()]).await?;
+        let mut ended = 0;
+        for d in &bound {
+            let id = uuid_field(d, "id")?;
+            if let Some(chat) = d["chat_device_ref"].as_str() {
+                match self
+                    .messaging(&acting)?
+                    .call(
+                        "/internal/v1/communications/devices/revoke",
+                        &json!({"principalId":p.principal_id,"deviceId":chat,"reason":"USER_REQUESTED"}),
+                    )
+                    .await
+                {
+                    Ok(_) | Err(Error::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(endpoint) = d["call_endpoint_ref"].as_str() {
+                match self
+                    .calling(&acting)?
+                    .call(
+                        "/internal/v1/communications/endpoints/revoke",
+                        &json!({"principalId":p.principal_id,"endpointId":endpoint}),
+                    )
+                    .await
+                {
+                    Ok(_) | Err(Error::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            let txn = self.store.begin().await?;
+            let row:Option<Value>=one(&txn,"UPDATE communication_devices d SET state='REVOKED',revoked_at=now(),revocation_reason='ACCOUNT_SESSION_ENDED',push_platform=NULL,push_registered_at=NULL,version=d.version+1,updated_at=now() WHERE id=$1 AND profile_id=$2 AND state='ACTIVE' RETURNING to_jsonb(d) doc",
+                vec![id.into(),p.id.into()]).await?;
+            if let Some(row) = row {
+                self.store
+                    .audit(
+                        &txn,
+                        p,
+                        "DEVICE_REVOKED",
+                        Some(id),
+                        json!({"reason":"ACCOUNT_SESSION_ENDED"}),
+                    )
+                    .await?;
+                self.store
+                    .change(&txn, p.id, "DEVICE", Some(id), row["version"].as_i64())
+                    .await?;
+                ended += 1;
+            }
+            txn.commit().await?;
+        }
+        Ok(ended)
+    }
     async fn owned_device<C: sea_orm::ConnectionTrait>(
         &self,
         db: &C,
@@ -125,6 +210,7 @@ impl State {
         p: &Profile,
         body: Value,
         key: Uuid,
+        session: Option<String>,
     ) -> Result<Value> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -207,8 +293,10 @@ impl State {
             return Err(Error::PolicyValidation);
         }
         let id = Uuid::new_v4();
-        let d:Value=one(&txn,"INSERT INTO communication_devices AS d (id,profile_id,platform,label,chat_device_ref,call_endpoint_ref,push_platform,push_registered_at) VALUES($1,$2,$3,$4,$5,$6,$7,CASE WHEN $8 THEN now() END) RETURNING to_jsonb(d) doc",
-            vec![id.into(),p.id.into(),input.platform.into(),input.label.into(),input.chat_device_id.into(),input.call_endpoint_id.into(),push.0.filter(|_| push.1).into(),push.1.into()]).await?.ok_or(Error::Unavailable)?;
+        // Section 14 (ACC-008): the sign-in that linked the device. Ending that Account
+        // session ends the device, and revoking the device ends the session.
+        let d:Value=one(&txn,"INSERT INTO communication_devices AS d (id,profile_id,platform,label,chat_device_ref,call_endpoint_ref,push_platform,push_registered_at,account_session_ref) VALUES($1,$2,$3,$4,$5,$6,$7,CASE WHEN $8 THEN now() END,$9) RETURNING to_jsonb(d) doc",
+            vec![id.into(),p.id.into(),input.platform.into(),input.label.into(),input.chat_device_id.into(),input.call_endpoint_id.into(),push.0.filter(|_| push.1).into(),push.1.into(),session.into()]).await?.ok_or(Error::Unavailable)?;
         self.store
             .audit(&txn, p, "DEVICE_LINKED", Some(id), json!({}))
             .await?;
@@ -295,6 +383,7 @@ impl State {
         id: Uuid,
         body: Value,
         key: Uuid,
+        current_session: Option<String>,
     ) -> Result<Value> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -307,7 +396,10 @@ impl State {
         }
         let d = self.owned_device(&self.store.db, p, id, false).await?;
         if d["state"] == "REVOKED" {
-            return Ok(json!({"schemaVersion":1,"device":device_view(&d),"alreadyRevoked":true}));
+            // A retry completes the Account half too (the bound session may still be open).
+            let mut v = json!({"schemaVersion":1,"device":device_view(&d),"alreadyRevoked":true});
+            bound_session(&mut v, &d, current_session.is_some());
+            return Ok(v);
         }
         // Each owner call is idempotent, so a partial failure is completed by a retry.
         if let Some(chat) = d["chat_device_ref"].as_str() {
@@ -350,9 +442,10 @@ impl State {
         self.store
             .change(&txn, p.id, "DEVICE", Some(id), row["version"].as_i64())
             .await?;
-        let result = json!({"schemaVersion":1,"device":device_view(&row),"alreadyRevoked":false,
+        let mut result = json!({"schemaVersion":1,"device":device_view(&row),"alreadyRevoked":false,
             "effects":{"messagingDevice":row["chat_device_ref"].is_string(),"callingEndpoint":row["call_endpoint_ref"].is_string(),
-                "accountSessions":"Use Account logout or revoke-all to end other sessions"}});
+                "accountSession":"NOT_BOUND"}});
+        bound_session(&mut result, &row, current_session.is_some());
         self.store
             .finish_idempotency(&txn, p, op, key, result.clone())
             .await?;

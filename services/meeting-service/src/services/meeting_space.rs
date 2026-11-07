@@ -4,8 +4,8 @@
 use chrono::Utc;
 use chrono_tz::Tz;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, QueryTrait, Set, TransactionTrait,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -309,6 +309,17 @@ impl MeetingSpaceService {
                     "You are not a verified member of that organization",
                 ));
             }
+            // Blueprint Section 4 (authoritative): the organization may exist only in the
+            // Organizations Service; upsert the local read-only projection row the
+            // `meeting_spaces.organization_id` foreign key needs.
+            if let Some(authority) = self
+                .core
+                .organization_authority
+                .as_ref()
+                .filter(|a| a.is_authoritative())
+            {
+                authority.ensure_projection(&self.core.db, org).await?;
+            }
         }
         Ok(())
     }
@@ -443,7 +454,24 @@ impl MeetingSpaceService {
         ctx: &ActorContext,
         req: CreateMeetingSpaceRequest,
     ) -> ApiResult<meeting_spaces::Model> {
+        self.create_idempotent(ctx, req, None).await.map(|(s, _)| s)
+    }
+
+    /// [`Self::create`] with an optional `Idempotency-Key` record (SEC-014). Returns the
+    /// space and whether it is a replay of an earlier request with the same key.
+    pub async fn create_idempotent(
+        &self,
+        ctx: &ActorContext,
+        req: CreateMeetingSpaceRequest,
+        idempotency: Option<crate::services::idempotency::IdempotencyRequest>,
+    ) -> ApiResult<(meeting_spaces::Model, bool)> {
+        use crate::services::idempotency;
         let owner = self.core.require_v2_writer(ctx)?;
+        if let Some(i) = &idempotency {
+            if let Some(id) = idempotency::prior(&self.core.db, i).await? {
+                return Ok((find_space(&self.core.db, id).await?, true));
+            }
+        }
         let draft = SpaceDraft::from_create(&req);
         if let Some(p) = &req.passcode {
             validate_passcode(p)?;
@@ -463,8 +491,18 @@ impl MeetingSpaceService {
             .await?;
         self.record_created(&txn, &AuditActor::from(ctx), &space, json!({}))
             .await?;
+        if let Some(i) = &idempotency {
+            if !idempotency::record(&txn, i, "MEETING_SPACE", space.id).await? {
+                // A concurrent request with the same key won: replay its result.
+                txn.rollback().await?;
+                return match idempotency::prior(&self.core.db, i).await? {
+                    Some(id) => Ok((find_space(&self.core.db, id).await?, true)),
+                    None => Err(idempotency::in_progress()),
+                };
+            }
+        }
         txn.commit().await?;
-        Ok(space)
+        Ok((space, false))
     }
 
     /// Instant meeting: MeetingSpace + LIVE ConferenceSession in one transaction.
@@ -566,8 +604,10 @@ impl MeetingSpaceService {
             .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
             .unwrap_or(false);
 
-        // Fetch the canonical conference (live > upcoming > latest)
-        let latest_conference = self.canonical_conference(space.id).await?;
+        // The canonical conference (live > open upcoming > latest; never a stale one).
+        let latest_conference =
+            crate::services::calendar::canonical_conference(&self.core.db, space.id, Utc::now())
+                .await?;
 
         Ok(SpaceView {
             space,
@@ -577,91 +617,141 @@ impl MeetingSpaceService {
         })
     }
 
-    /// Canonical conference: the LIVE one, else the next upcoming unstarted one, else the latest.
-    async fn canonical_conference(
+    /// Spaces the actor owns or is an active member of, newest first.
+    ///
+    /// MTG-018: a constant number of queries (spaces, memberships, canonical conferences)
+    /// for any page. `page = None` keeps the legacy complete list; `Some((cursor, limit))`
+    /// returns one page and the next cursor.
+    pub async fn list_for_actor(
         &self,
-        space_id: Uuid,
-    ) -> ApiResult<Option<conference_sessions::Model>> {
-        let all = conference_sessions::Entity::find()
-            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
-            .order_by_asc(conference_sessions::Column::ScheduledStartAt)
-            .all(&self.core.db)
-            .await?;
-
-        // Prefer LIVE conference
-        if let Some(live) = all
-            .iter()
-            .filter(|c| c.status == ConferenceStatus::Live)
-            .max_by_key(|c| (c.origin == RecordOrigin::V2, c.started_at))
-        {
-            return Ok(Some(live.clone()));
-        }
-
-        // Then prefer upcoming unstarted conference
-        let now = Utc::now();
-        if let Some(next) = all.iter().find(|c| {
-            matches!(
-                c.status,
-                ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
-            ) && c.scheduled_end_at.map(|e| e > now).unwrap_or(true)
-        }) {
-            return Ok(Some(next.clone()));
-        }
-
-        // Otherwise return the latest
-        Ok(all.into_iter().max_by_key(|c| c.created_at))
-    }
-
-    /// Spaces the actor owns or is an active member of.
-    pub async fn list_for_actor(&self, ctx: &ActorContext) -> ApiResult<Vec<SpaceView>> {
-        if let Some(p) = ctx.platform() {
+        ctx: &ActorContext,
+        page: Option<(Option<String>, u32)>,
+    ) -> ApiResult<(Vec<SpaceView>, Option<String>)> {
+        use crate::services::calendar::SpaceListCursor;
+        let cursor = page
+            .as_ref()
+            .and_then(|(c, _)| c.as_deref())
+            .map(SpaceListCursor::parse)
+            .transpose()?;
+        let limit = page.as_ref().map(|(_, l)| *l as u64);
+        let mut q = meeting_spaces::Entity::find()
+            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
+            .filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::Origin.ne(RecordOrigin::Legacy))
+                    .add(meeting_spaces::Column::LegacyMeetingId.is_not_null()),
+            );
+        let registered = if let Some(p) = ctx.platform() {
             // A machine caller lists exactly its own environment's spaces (the whole live
             // chain must match); user-owned spaces never appear.
-            let spaces = meeting_spaces::Entity::find()
+            q = q
                 .filter(meeting_spaces::Column::PlatformEnvironmentId.eq(p.environment_id))
                 .filter(meeting_spaces::Column::PlatformApplicationId.eq(p.application_id))
                 .filter(meeting_spaces::Column::PlatformTenantId.eq(p.tenant_id))
-                .filter(meeting_spaces::Column::OwnerUserId.is_null())
-                .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
-                .order_by_desc(meeting_spaces::Column::CreatedAt)
-                .all(&self.core.db)
-                .await?;
-            let mut out = Vec::with_capacity(spaces.len());
-            for s in spaces
-                .into_iter()
-                .filter(crate::services::meeting_core::space_is_visible)
-            {
-                out.push(self.view_of(ctx, s).await?);
-            }
-            return Ok(out);
-        }
-        let actor = ctx.require_registered()?;
-        let member_space_ids: Vec<Uuid> = meeting_members::Entity::find()
-            .filter(meeting_members::Column::UserId.eq(actor.user_id))
-            .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
-            .all(&self.core.db)
-            .await?
-            .into_iter()
-            .map(|m| m.meeting_space_id)
-            .collect();
-        let spaces = meeting_spaces::Entity::find()
-            .filter(
+                .filter(meeting_spaces::Column::OwnerUserId.is_null());
+            None
+        } else {
+            let actor = ctx.require_registered()?;
+            let member_spaces = meeting_members::Entity::find()
+                .select_only()
+                .column(meeting_members::Column::MeetingSpaceId)
+                .filter(meeting_members::Column::UserId.eq(actor.user_id))
+                .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
+                .into_query();
+            q = q.filter(
                 sea_orm::Condition::any()
                     .add(meeting_spaces::Column::OwnerUserId.eq(actor.user_id))
-                    .add(meeting_spaces::Column::Id.is_in(member_space_ids)),
-            )
-            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
-            .order_by_desc(meeting_spaces::Column::CreatedAt)
-            .all(&self.core.db)
-            .await?;
-        let mut out = Vec::with_capacity(spaces.len());
-        for s in spaces
-            .into_iter()
-            .filter(crate::services::meeting_core::space_is_visible)
-        {
-            out.push(self.view_of(ctx, s).await?);
+                    .add(meeting_spaces::Column::Id.in_subquery(member_spaces)),
+            );
+            Some(actor)
+        };
+        if let Some(c) = &cursor {
+            q = q.filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::CreatedAt.lt(c.created_at()))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(meeting_spaces::Column::CreatedAt.eq(c.created_at()))
+                            .add(meeting_spaces::Column::Id.lt(c.id)),
+                    ),
+            );
         }
-        Ok(out)
+        q = q
+            .order_by_desc(meeting_spaces::Column::CreatedAt)
+            .order_by_desc(meeting_spaces::Column::Id);
+        if let Some(l) = limit {
+            q = q.limit(l + 1);
+        }
+        let mut spaces = q.all(&self.core.db).await?;
+        let next_cursor = match limit {
+            Some(l) if spaces.len() as u64 > l => {
+                spaces.truncate(l as usize);
+                spaces.last().map(SpaceListCursor::of)
+            }
+            _ => None,
+        };
+        let ids: Vec<Uuid> = spaces.iter().map(|s| s.id).collect();
+        // Membership roles of a registered caller for this page (by user or verified email).
+        let mut member_roles: std::collections::HashMap<Uuid, Role> = Default::default();
+        if let Some(actor) = registered {
+            if !ids.is_empty() {
+                let mut who = sea_orm::Condition::any()
+                    .add(meeting_members::Column::UserId.eq(actor.user_id));
+                if let Some(email) = &actor.verified_email {
+                    who = who.add(
+                        sea_orm::Condition::all()
+                            .add(meeting_members::Column::PrincipalType.eq(PrincipalType::Email))
+                            .add(
+                                meeting_members::Column::PrincipalRef
+                                    .eq(email.to_ascii_lowercase()),
+                            ),
+                    );
+                }
+                for m in meeting_members::Entity::find()
+                    .filter(meeting_members::Column::MeetingSpaceId.is_in(ids.clone()))
+                    .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
+                    .filter(who)
+                    .all(&self.core.db)
+                    .await?
+                {
+                    let e = member_roles.entry(m.meeting_space_id).or_insert(m.role);
+                    *e = Role::max(*e, m.role);
+                }
+            }
+        }
+        let mut canonical =
+            crate::services::calendar::canonical_conferences(&self.core.db, &ids, Utc::now())
+                .await?;
+        let views = spaces
+            .into_iter()
+            .map(|space| {
+                let viewer_role = match registered {
+                    None => Some(Role::Owner),
+                    // An unverifiable session on a strict space only gets the summary view.
+                    Some(actor)
+                        if !actor.revocation_checked
+                            && crate::services::meeting_core::requires_verified_revocation(
+                                &space,
+                            ) =>
+                    {
+                        None
+                    }
+                    Some(actor) if space.owner_user_id == Some(actor.user_id) => Some(Role::Owner),
+                    Some(_) => member_roles.get(&space.id).copied(),
+                };
+                let pctx = PermissionContext::for_space(&space);
+                let full = viewer_role
+                    .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
+                    .unwrap_or(false);
+                SpaceView {
+                    latest_conference: canonical.remove(&space.id),
+                    space,
+                    viewer_role,
+                    full,
+                }
+            })
+            .collect();
+        Ok((views, next_cursor))
     }
 
     async fn require_space_permission<C: ConnectionTrait>(

@@ -62,6 +62,9 @@ fn expired_token(sub: Uuid, role: &str) -> String {
             role: role.into(),
             exp: now - 3600,
             iat: now - 7200,
+            typ: None,
+            sid: None,
+            rti: None,
         },
         &EncodingKey::from_secret(b"test-jwt-secret"),
     )

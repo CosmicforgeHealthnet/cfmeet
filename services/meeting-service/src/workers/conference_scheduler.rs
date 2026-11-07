@@ -7,7 +7,11 @@
 //!    `FOR UPDATE SKIP LOCKED`, inserts `ON CONFLICT DO NOTHING`);
 //! 2. requests the end (LIVE → ENDING, reason SCHEDULED_END) of conferences past their
 //!    scheduled end + auto-end grace. `end` locks the row and is idempotent, so
-//!    duplicate execution by several instances or after a crash is harmless.
+//!    duplicate execution by several instances or after a crash is harmless;
+//! 3. expires stale occurrences (Blueprint Section 10, MTG-010): unstarted occurrences
+//!    whose start window closed become CANCELLED (`system:expired`), claimed with
+//!    `FOR UPDATE SKIP LOCKED`;
+//! 4. purges expired `Idempotency-Key` records.
 //!
 //! No auto-start: starting is an authorized host decision. Notifications/reminders are
 //! never authorization dependencies.
@@ -43,6 +47,8 @@ const AUTO_END_DUE: &str = "EXISTS (SELECT 1 FROM meeting_spaces s \
 pub struct SchedulerTick {
     pub materialized: u64,
     pub end_requested: u64,
+    /// Stale unstarted occurrences expired this tick.
+    pub expired: u64,
 }
 
 pub struct ConferenceScheduler {
@@ -57,9 +63,12 @@ impl ConferenceScheduler {
     pub async fn tick(&self, now: DateTime<Utc>) -> ApiResult<SchedulerTick> {
         let materialized = self.meeting.recurrence.materialize_due(now, BATCH).await?;
         let end_requested = self.auto_end(now).await?;
+        let expired = crate::services::calendar::expire_stale(&self.meeting.core.db, now).await?;
+        crate::services::idempotency::purge_expired(&self.meeting.core.db, now).await?;
         Ok(SchedulerTick {
             materialized,
             end_requested,
+            expired,
         })
     }
 

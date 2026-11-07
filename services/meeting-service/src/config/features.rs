@@ -145,6 +145,8 @@ pub struct MeetingV2Config {
     /// Parts G–I: artefact storage / recording / quality tunables.
     pub artifacts: super::operations::ArtifactConfig,
     pub quality: super::operations::QualityConfig,
+    /// Blueprint Section 11 notifications (all off by default).
+    pub notifications: super::notifications::NotificationConfig,
 }
 
 impl Default for MeetingV2Config {
@@ -165,6 +167,7 @@ impl Default for MeetingV2Config {
             reconciler_presence_grace_secs: 30,
             artifacts: super::operations::ArtifactConfig::default(),
             quality: super::operations::QualityConfig::default(),
+            notifications: super::notifications::NotificationConfig::default(),
         }
     }
 }
@@ -214,6 +217,7 @@ impl MeetingV2Config {
             .max(0),
             artifacts: super::operations::ArtifactConfig::from_env(),
             quality: super::operations::QualityConfig::from_env(),
+            notifications: super::notifications::NotificationConfig::from_env(),
         }
     }
 }

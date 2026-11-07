@@ -31,6 +31,8 @@
 //! | `MESSAGING_MANAGED_KEYRING_FILE` | no | key-ring FILE sealing MANAGED message text at rest (`<id> <base64url 32-byte key>` per line, first = active). Without it MANAGED sending fails closed |
 //! | `MESSAGING_CLIENT_TOKEN_SIGNING_KEY_FILE` | no | PKCS#8 PEM Ed25519 key FILE signing Messaging Client Access Tokens (a Messaging-only secret). Without it no client token is issued: realtime is disabled (fail closed) |
 //! | `MESSAGING_CLIENT_TOKEN_TTL_SECONDS` / `MESSAGING_REALTIME_TICKET_TTL_SECONDS` | no | token lifetime (60–86400, default 900) / single-use ticket lifetime (5–300, default 30) |
+//! | `MESSAGING_SESSION_DEVICES_ENABLED` | no | `true` / `false`: first-party MANAGED-realtime session devices (Blueprint Section 13, ADR 0049 amendment A1). Default `true` only in `local` / `test`; permitted in `production` because a session device can never acquire E2EE privileges (it never enables `MESSAGING_E2EE_DEVICES_ENABLED`) |
+//! | `MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS` | no | session-device token lifetime (60–900, default 300); renewals go back through the first-party relay |
 //! | `MESSAGING_REALTIME_ALLOWED_ORIGINS` | no | comma-separated exact browser origins allowed to connect (default: none; native clients send no Origin) |
 //! | `MESSAGING_REALTIME_REQUIRE_TLS` | no | refuse handshakes not forwarded as `https` (default `true` outside local / test) |
 //! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |
@@ -710,7 +712,29 @@ impl MessagingConfig {
                 ))
             }
         };
+        // Blueprint Section 13 (ADR 0049 amendment A1): MANAGED-only session devices.
+        // Permitted in every runtime, production included: a session device can never
+        // become an E2EE device, and this switch never touches MESSAGING_E2EE_DEVICES_ENABLED.
+        let session_devices_enabled = match get("MESSAGING_SESSION_DEVICES_ENABLED").as_deref() {
+            None => runtime.allows_insecure_transport(),
+            Some("true") => true,
+            Some("false") => false,
+            Some(_) => {
+                return Err(ConfigError::invalid(
+                    "MESSAGING_SESSION_DEVICES_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
         let realtime = crate::realtime::RealtimeSettings {
+            session_devices_enabled,
+            session_device_token_ttl: chrono::Duration::seconds(bounded(
+                &get,
+                "MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS",
+                300,
+                60,
+                900,
+            )?),
             token_ttl: chrono::Duration::seconds(bounded(
                 &get,
                 "MESSAGING_CLIENT_TOKEN_TTL_SECONDS",
@@ -1090,6 +1114,46 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("MESSAGING_E2EE_DEVICES_ENABLED"), "{err}");
+    }
+
+    /// Blueprint Section 13 (D-5): production may enable MANAGED-realtime session devices
+    /// while E2EE device registration stays refused; neither switch implies the other.
+    #[test]
+    fn production_enables_session_devices_while_e2ee_devices_stay_refused() {
+        for env in [RuntimeEnvironment::Staging, RuntimeEnvironment::Production] {
+            let cfg = MessagingConfig::from_lookup(env, lookup(BASE)).unwrap();
+            assert!(
+                !cfg.realtime.session_devices_enabled,
+                "{env}: off by default"
+            );
+        }
+        let mut on = BASE.to_vec();
+        on.push(("MESSAGING_SESSION_DEVICES_ENABLED", "true"));
+        let cfg =
+            MessagingConfig::from_lookup(RuntimeEnvironment::Production, lookup(&on)).unwrap();
+        assert!(cfg.realtime.session_devices_enabled);
+        assert!(
+            !cfg.devices.enabled,
+            "session devices never enable E2EE devices"
+        );
+        assert_eq!(cfg.realtime.session_device_token_ttl.num_seconds(), 300);
+        // The production E2EE guard is untouched by the session-device switch.
+        on.push(("MESSAGING_E2EE_DEVICES_ENABLED", "true"));
+        let err = MessagingConfig::from_lookup(RuntimeEnvironment::Production, lookup(&on))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("MESSAGING_E2EE_DEVICES_ENABLED"), "{err}");
+        for (var, value) in [
+            ("MESSAGING_SESSION_DEVICES_ENABLED", "always"),
+            ("MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS", "3600"),
+        ] {
+            let mut pairs = BASE.to_vec();
+            pairs.push((var, value));
+            let err = MessagingConfig::from_lookup(RuntimeEnvironment::Production, lookup(&pairs))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(var), "{err}");
+        }
     }
 
     #[test]

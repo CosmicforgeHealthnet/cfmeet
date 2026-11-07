@@ -30,6 +30,10 @@ pub fn app(state: State) -> Router {
             post(resolve_principal),
         )
         .route(
+            "/internal/v1/communications/notification-preferences/resolve",
+            post(crate::preferences::resolve),
+        )
+        .route(
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),
         )
@@ -234,6 +238,14 @@ pub(crate) fn body(request: &Dispatch) -> Value {
 pub(crate) fn key(request: &Dispatch) -> Result<Uuid> {
     request.idempotency_key.ok_or(Error::Validation)
 }
+/// The Account session reference Account attached (Section 14); malformed is refused.
+pub(crate) fn session_ref(request: &Dispatch) -> Result<Option<String>> {
+    match request.account.account_session_ref.as_deref() {
+        None => Ok(None),
+        Some(r) if cf_communications_policy::valid_account_session_ref(r) => Ok(Some(r.to_owned())),
+        Some(_) => Err(Error::Validation),
+    }
+}
 pub(crate) fn id(value: &str) -> Result<Uuid> {
     Uuid::parse_str(value).map_err(|_| Error::NotFound)
 }
@@ -388,7 +400,7 @@ async fn dispatch_inner(
         ("GET", ["bootstrap"]) => s.bootstrap(scope, p).await,
         ("GET", ["inbox"]) => {
             let (n, c) = page(&r)?;
-            s.inbox(p, n, c).await
+            s.inbox(scope, p, n, c).await
         }
         ("GET", ["activity"]) => s.activity(scope, p, &r.query).await,
         ("GET", ["sync"]) => s.changes(p, &r.query, false).await,
@@ -485,7 +497,10 @@ async fn dispatch_inner(
             s.reconcile_devices(scope, p).await?;
             s.list_devices(p).await
         }
-        ("POST", ["devices", "link"]) => s.link_device(scope, p, body(&r), key(&r)?).await,
+        ("POST", ["devices", "link"]) => {
+            s.link_device(scope, p, body(&r), key(&r)?, session_ref(&r)?)
+                .await
+        }
         ("PUT", ["devices", device, "push"]) => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -500,7 +515,7 @@ async fn dispatch_inner(
             s.device_push(scope, p, id(device)?, None, key(&r)?).await
         }
         ("POST", ["devices", device, "revoke"]) => {
-            s.revoke_device(scope, p, id(device)?, body(&r), key(&r)?)
+            s.revoke_device(scope, p, id(device)?, body(&r), key(&r)?, session_ref(&r)?)
                 .await
         }
         ("GET", ["devices", device, "sync-state"]) => {

@@ -636,6 +636,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
                 &a.profile,
                 json!({"platform":"ANDROID","chatDeviceId":foreign}),
                 Uuid::new_v4(),
+                None,
             )
             .await,
     );
@@ -646,6 +647,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             &a.profile,
             json!({"platform":"ANDROID","chatDeviceId":own,"callEndpointId":ep}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -658,6 +660,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             &a.profile,
             json!({"platform":"ANDROID","chatDeviceId":own}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -729,6 +732,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             device,
             json!({"reason":"COMPROMISED"}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -1229,7 +1233,7 @@ async fn owner_side_revocations_reconcile_and_outages_change_nothing() {
     ] {
         let linked = h
             .state
-            .link_device(&sa, &a.profile, body, Uuid::new_v4())
+            .link_device(&sa, &a.profile, body, Uuid::new_v4(), None)
             .await
             .unwrap();
         ids.push(linked["device"]["deviceId"].as_str().unwrap().to_owned());
@@ -1562,5 +1566,279 @@ async fn every_published_communications_operation_is_routed() {
         .await;
     assert_eq!(status, 404);
     assert!(unmatched(&headers), "deferred phone routes are not served");
+    h.close().await;
+}
+
+/// Section 14 (ACC-008, ADR 0057 A1): a device linked from an Account session is bound
+/// to it. Ending that session revokes the device at its owners; revoking the device hands
+/// the bound session back to Account (the relay) to end. The binding is immutable.
+#[tokio::test]
+async fn devices_are_bound_to_the_account_session_that_linked_them() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let sa = h.delegated(&a.account);
+    let (bound_chat, free_chat, second_chat) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    {
+        let mut w = h.world.write().unwrap();
+        for d in [bound_chat, free_chat, second_chat] {
+            w.devices
+                .insert(d, (a.profile.principal_id, "ACTIVE".into()));
+        }
+    }
+    let ep = endpoint(&h, &a);
+    let session = "1f".repeat(32);
+    let other_session = "2e".repeat(32);
+    let bound = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"IOS","chatDeviceId":bound_chat,"callEndpointId":ep}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bound["device"]["accountSession"]["bound"], true);
+    assert!(
+        !bound.to_string().contains(&session),
+        "the reference is never shown"
+    );
+    let free = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"WEB","chatDeviceId":free_chat}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(free["device"]["accountSession"]["bound"], false);
+    let bound_id = bound["device"]["deviceId"].as_str().unwrap().to_owned();
+    assert!(execute(
+        &h.state.store.db,
+        "UPDATE communication_devices SET account_session_ref=$2,version=version+1 WHERE id=$1::uuid",
+        vec![bound_id.clone().into(), other_session.clone().into()]
+    )
+    .await
+    .is_err());
+    let path = "/internal/v1/communications/account-events";
+    let ended = |reference: &str| json!({"eventId":Uuid::new_v4(),"accountReference":a.account.account_reference,"sourceVersion":1,"kind":"ACCOUNT_SESSION_ENDED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now(),"accountSessionRef":reference});
+    let (_, other) = h
+        .http(
+            &h.account_signer,
+            path,
+            ended(&other_session),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(other["devicesRevoked"], 0);
+    // Owner outage: nothing is acknowledged, so Account retries the same event.
+    h.world.write().unwrap().calling_down = true;
+    let event = ended(&session);
+    let (status, _) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_ne!(status, 200);
+    h.world.write().unwrap().calling_down = false;
+    let (status, result) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["devicesRevoked"], 1);
+    let (_, duplicate) = h
+        .http(&h.account_signer, path, event, h.scope.clone())
+        .await;
+    assert_eq!(duplicate["duplicate"], true);
+    {
+        let w = h.world.read().unwrap();
+        assert!(w.revoked_devices.contains(&bound_chat));
+        assert!(!w.revoked_devices.contains(&free_chat));
+        assert_eq!(w.revoked_endpoints, vec![ep]);
+    }
+    let listed = h.state.list_devices(&a.profile).await.unwrap();
+    let states: BTreeMap<String, (String, Value)> = listed["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["deviceId"].as_str().unwrap().to_owned(),
+                (
+                    d["state"].as_str().unwrap().to_owned(),
+                    d["revocationReason"].clone(),
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(
+        states[&bound_id],
+        ("REVOKED".to_owned(), json!("ACCOUNT_SESSION_ENDED"))
+    );
+    assert_eq!(
+        states[free["device"]["deviceId"].as_str().unwrap()].0,
+        "ACTIVE"
+    );
+    // Revoking a bound device: only an Account relay (which sends its own session
+    // reference) receives the bound reference to end that session.
+    let second = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":second_chat}),
+            Uuid::new_v4(),
+            Some(other_session.clone()),
+        )
+        .await
+        .unwrap();
+    let second_id = Uuid::parse_str(second["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let relayed = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            second_id,
+            json!({"reason":"COMPROMISED"}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(relayed["boundAccountSessionRef"], json!(other_session));
+    assert_eq!(relayed["effects"]["accountSession"], "ENDED");
+    // A retry (already revoked) hands the reference back again, so Account can finish.
+    let retry = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            second_id,
+            json!({"reason":"COMPROMISED"}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry["alreadyRevoked"], true);
+    assert_eq!(retry["boundAccountSessionRef"], json!(other_session));
+    // Without the relay's reference nothing about the session is disclosed.
+    let free_id = Uuid::parse_str(free["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let plain = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            free_id,
+            json!({"reason":"USER_REQUESTED"}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(plain.get("boundAccountSessionRef").is_none());
+    assert_eq!(plain["effects"]["accountSession"], "NOT_BOUND");
+    h.close().await;
+}
+
+/// Section 14 (MSG-016): the inbox overlay lists only conversations the viewer still
+/// belongs to; the private preference row is kept, never shown for a left conversation.
+#[tokio::test]
+async fn inbox_lists_only_current_memberships() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let conv = conversation(&h, "GROUP", &[&a, &b], 1);
+    for u in [&a, &b] {
+        h.state
+            .put_conversation_preferences(&h.delegated(&u.account), &u.profile, conv, json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4())
+            .await
+            .unwrap();
+    }
+    let sb = h.delegated(&b.account);
+    let before = h
+        .state
+        .inbox(&sb, &b.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(before["data"].as_array().unwrap().len(), 1);
+    // B leaves the conversation in Messaging.
+    h.world
+        .write()
+        .unwrap()
+        .conversations
+        .get_mut(&conv)
+        .unwrap()
+        .members
+        .retain(|m| *m != b.profile.principal_id);
+    let after = h
+        .state
+        .inbox(&sb, &b.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(after["data"], json!([]));
+    let sa = h.delegated(&a.account);
+    let still = h
+        .state
+        .inbox(&sa, &a.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(still["data"][0]["conversationId"], json!(conv));
+    // A Messaging outage is a dependency failure, never an empty or stale list.
+    h.stop_owners();
+    assert!(matches!(
+        h.state.inbox(&sa, &a.profile, 30, Uuid::nil()).await,
+        Err(Error::Unavailable)
+    ));
+    h.close().await;
+}
+
+/// Section 14 (MSG-009): a member without a Hub profile when a meeting was shared gets
+/// the invitation card once they open the conversation timeline.
+#[tokio::test]
+async fn meeting_cards_reach_members_who_activate_later() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let late = h.account();
+    let id = Uuid::new_v4();
+    h.world.write().unwrap().conversations.insert(
+        id,
+        MockConversation {
+            context: "GROUP".into(),
+            members: vec![a.profile.principal_id, late.principal_id],
+            last_sequence: 4,
+            messages: BTreeMap::new(),
+        },
+    );
+    let sa = h.delegated(&a.account);
+    h.state
+        .instant_meeting(
+            &sa,
+            &a.profile,
+            id,
+            json!({"clientRequestId":Uuid::new_v4()}),
+        )
+        .await
+        .unwrap();
+    let late_profile = h.profile(&late).await;
+    let sl = h.delegated(&late);
+    let timeline = h
+        .state
+        .timeline(&sl, &late_profile, id, &q(&[]))
+        .await
+        .unwrap();
+    let data = timeline["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["kind"], "MEETING_INVITATION");
+    assert_eq!(data[0]["meeting"]["sharedByViewer"], false);
+    assert_eq!(data[0]["anchorSequence"], 4);
+    // Idempotent: reading again adds nothing.
+    let again = h
+        .state
+        .timeline(&sl, &late_profile, id, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(again["data"].as_array().unwrap().len(), 1);
     h.close().await;
 }

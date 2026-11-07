@@ -40,6 +40,7 @@ async fn migrations_apply_roll_back_and_reapply_cleanly() {
         "platform_auth_failure_windows",
         "platform_identity_imports",
         "platform_credential_principal_restrictions",
+        "platform_credential_usage",
         "platform_access_seaql_migrations",
     ] {
         assert!(up.contains(&t.to_string()), "{t} missing: {up:?}");

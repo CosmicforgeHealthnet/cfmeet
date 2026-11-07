@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/realtime/v1.schema.json",
   "title": "CF Meet Messaging realtime protocol v1",
-  "description": "Frames of the Messaging WebSocket gateway (subprotocol cfmeet.messaging.v1): JSON text frames with a `type`. Clients ignore unknown server frame types and unknown fields; the gateway answers unknown client frames with error UNSUPPORTED_FRAME without closing (forward compatibility). Durable events carry a per-conversation eventSequence (replay / ack cursor); clients order messages by their message sequence and drop duplicates by eventId. Typing and presence are ephemeral (never stored). Close codes: 1000 normal, 1001 idle timeout, 1008 policy (frame rate), 1009 frame too large, 1012 draining (reconnect after reconnectAfterMs), 1013 slow consumer (resume from the cursors in the preceding error), 4401 authorization ended (session expired / revoked, device revoked, principal inactive). A frame validates against ClientFrame or ServerFrame (typing frames exist in both directions).",
+  "description": "Frames of the Messaging WebSocket gateway (subprotocol cfmeet.messaging.v1): JSON text frames with a `type`. Clients ignore unknown server frame types and unknown fields; the gateway answers unknown client frames with error UNSUPPORTED_FRAME without closing (forward compatibility). Durable events carry a per-conversation eventSequence (replay / ack cursor); clients order messages by their message sequence and drop duplicates by eventId. Typing and presence are ephemeral (never stored). Close codes: 1000 normal, 1001 idle timeout, 1008 policy (frame rate), 1009 frame too large, 1012 draining (reconnect after reconnectAfterMs), 1013 slow consumer (resume from the cursors in the preceding error), 4401 authorization ended (session expired / revoked, device revoked, principal inactive). A frame validates against ClientFrame or ServerFrame (typing frames exist in both directions). Section 13 (ADR 0049 amendment A1): a session-device session (deviceKind SESSION_DEVICE) may subscribe to MANAGED conversations only; a PRIVATE_E2EE subscribe is answered with error E2EE_DEVICE_REQUIRED (the connection stays open) and it never receives device events. Omit subscribe.afterEventSequence to resume from the device's stored ack cursor (the REST replay names the same cursor `after`).",
   "$defs": {
     "ClientFrame": {
       "oneOf": [
@@ -28,7 +28,8 @@
             },
             "afterEventSequence": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Resume after this event cursor. Omit it to resume from this device's stored ack cursor (or the head when none); the answer's subscribed.afterEventSequence is the authoritative baseline."
             }
           },
           "additionalProperties": true

@@ -1,0 +1,49 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "organizations"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "organizations"
+description = "CF Meet Organizations Service (Blueprint v1.0 Sections 3-5, ADR 0056): the first-party business organization authority. Owns organizations, profiles, memberships, invitations, their audit history and outbox; owns no account credential, meeting, message or call data"
+
+[lib]
+name = "organizations"
+path = "src/lib.rs"
+
+[[bin]]
+name = "organizations"
+path = "src/main.rs"
+
+[[bin]]
+name = "organizations-import"
+path = "src/bin/organizations-import.rs"
+
+[dependencies]
+organizations-migration = { path = "migration" }
+# Shared internal service authentication protocol (packages/, never another service).
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+secrecy = "0.10"
+async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+sha2 = "0.10"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

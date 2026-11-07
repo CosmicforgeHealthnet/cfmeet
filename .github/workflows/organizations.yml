@@ -1,0 +1,190 @@
+name: Organizations service
+
+# services/organizations — the first-party business organization authority (Blueprint
+# v1.0 Sections 3-5, ADR 0056). It owns its own PostgreSQL database (organizations /
+# organization_* tables only) and depends only on packages/service-auth and its contract
+# (packages/contracts/organizations). It is reached over signed internal HTTP only.
+#
+# Validation only: nothing here deploys anywhere.
+
+on:
+  push:
+    branches: [main, staging, "blueprint/**"]
+    paths:
+      - "services/organizations/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/organizations/**"
+      - "packages/contracts/platform/common/**"
+      - "infra/deployment/postgres/**"
+      - "scripts/service-boundaries/**"
+      - ".github/workflows/organizations.yml"
+  pull_request:
+    paths:
+      - "services/organizations/**"
+      - "packages/service-auth/**"
+      - "packages/contracts/organizations/**"
+      - "packages/contracts/platform/common/**"
+      - "infra/deployment/postgres/**"
+      - "scripts/service-boundaries/**"
+      - ".github/workflows/organizations.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: organizations-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/organizations
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / clippy / guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/organizations -> target
+          key: lint
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Repository guards (no other service's source; organization tables only; no secrets)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E '"\.\./(calling|communications|platform-access|numbering|privacy-relay|telephony|meeting-service|sms-gateway|messaging|api-gateway|developer-platform)' \
+               services/organizations/Cargo.toml services/organizations/migration/Cargo.toml; then
+            echo "::error::services/organizations depends on another service"; exit 1
+          fi
+          if grep -rn -i -P 'CREATE TABLE (?!organization)' services/organizations/migration/src; then
+            echo "::error::services/organizations creates a table outside its domain"; exit 1
+          fi
+          # Invitation tokens are stored as digests only: no raw token column.
+          if grep -rn -i -P '^\s+(token|raw_token|invitation_token)\s' services/organizations/migration/src; then
+            echo "::error::services/organizations stores a raw token"; exit 1
+          fi
+      - name: Service boundaries and operations registry
+        working-directory: .
+        run: |
+          set -euo pipefail
+          python3 scripts/service-boundaries/check_service_boundaries.py
+          python3 scripts/service-boundaries/check_operations_registry.py
+
+  test:
+    name: test (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/organizations -> target
+          key: test
+      - name: Foundation — migrations, schema ownership, partial uniques
+        run: cargo test --locked --test foundation
+      - name: Journey — lifecycle, invitations, roles, ownership transfer, limits, idempotency
+        run: cargo test --locked --test journey
+      - name: Authorization — isolation, replay, forged actors, truth tables, operator, append-only
+        run: cargo test --locked --test authorization
+      - name: Migration import — shared checksum vector, re-import, conflicts, orphans, CLI
+        run: cargo test --locked --test import
+      - name: Teams — managers own teams only, ACTIVE members, hierarchy, history, audit / outbox (Section 6)
+        run: cargo test --locked --test teams
+      - name: Policies — role / resource matrix, CAS, restrictive-only policies (Section 6)
+        run: cargo test --locked --test policies
+      - name: Provisioning saga — fake Platform Access, every certified failure mode (Section 7)
+        run: cargo test --locked --test provisioning
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --no-fail-fast --locked
+
+  build:
+    name: build / migration smoke / isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/organizations -> target
+          key: build
+      - name: cargo build
+        run: cargo build --workspace --locked
+      - name: Migration smoke (up / reset / up)
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/organizations_migration_smoke
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE organizations_migration_smoke"
+          ./target/debug/organizations-migration up
+          ./target/debug/organizations-migration reset
+          ./target/debug/organizations-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d organizations_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM organizations_seaql_migrations")" = "$(grep -c '^mod m20' migration/src/lib.rs)"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'organizations_seaql_migrations' AND tablename <> 'organizations' AND tablename !~ '^organization_'")" = "0"
+      - name: Configuration preflight (--check-config)
+        run: |
+          set -euo pipefail
+          printf '{"bundle_version":1,"receiver":"cfmeet.organizations","runtime_environment":"test","trusted_issuers":[]}' > /tmp/org-trust.json
+          DATABASE_URL=postgres://unused@127.0.0.1/unused CF_RUNTIME_ENVIRONMENT=test CF_SERVICE_TRUST_BUNDLE_FILE=/tmp/org-trust.json \
+            ./target/debug/organizations --check-config | grep -q '"configuration":"valid"'
+          if DATABASE_URL=postgres://unused@127.0.0.1/unused CF_RUNTIME_ENVIRONMENT=test CF_SERVICE_TRUST_BUNDLE_FILE=/nonexistent \
+               ./target/debug/organizations --check-config; then
+            echo "::error::a missing trust bundle must fail closed"; exit 1
+          fi
+      - name: Per-service database roles with the real migrations
+        env:
+          ORGANIZATIONS_MIGRATION_BIN: ${{ github.workspace }}/services/organizations/target/debug/organizations-migration
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/infra/deployment/postgres/verify-service-isolation.sh" \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+  docker:
+    name: Docker image (repository-root context)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/organizations/Dockerfile -t cfmeet-organizations:ci .
+      - name: image contains only the Organizations binaries and no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-organizations:ci /app | tr '\n' ' ')" = "organizations organizations-import organizations-migration "
+          if docker run --rm --entrypoint /bin/sh cfmeet-organizations:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

@@ -1048,8 +1048,18 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .as_str()
         .context("new refresh token")?
         .into();
+    // Section 14: reactivation also returns the Platform Access principal to ACTIVE
+    // through Account's durable outbox (delivered within a worker tick).
+    let mut resumed = hub(s, &a, Method::GET, "/me", None).await?;
+    for _ in 0..40 {
+        if resumed.status == 200 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        resumed = hub(s, &a, Method::GET, "/me", None).await?;
+    }
     let resumed = status(
-        hub(s, &a, Method::GET, "/me", None).await?,
+        resumed,
         200,
         "server-controlled reactivation with fresh credentials",
     )?;
@@ -1138,4 +1148,513 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     assert!(!a.email.is_empty() && !a.password.is_empty());
     println!("PERSONAL_COMMUNICATIONS_REAL_E2E: identity_without_phone, principal_stability, public_swagger, private_internal_api, truthful_security_readiness, invitations, accepted_connections, direct_conversation_reuse, message_send_policy, voice_call_policy, video_call_policy, separate_aliases, common_groups, blocking, revocation, rotation, invitation_invalidation, tenant_isolation, truthful_delivery_status, delivery_status_owner_outage, fail_closed_outage, independent_meetings, durable_logout: PASS");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Blueprint v1.0 Section 14 (MSG-010, ACC-008, ACC-010): the Hub facades against the
+// REAL Messaging, Calling and Meeting processes, device <-> account-session binding and
+// account revocation fan-out for an account that never opened the Hub.
+// ---------------------------------------------------------------------------
+
+fn claims(token: &str) -> anyhow::Result<Value> {
+    Ok(serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token.split('.').nth(1).context("JWT claims")?)?,
+    )?)
+}
+async fn login(s: &PersonalStack, email: &str, password: &str) -> anyhow::Result<String> {
+    let login = status(
+        request(
+            s,
+            "meeting-service",
+            None,
+            None,
+            Method::POST,
+            "/api/v1/auth/login",
+            Some(json!({"email":email,"password":password})),
+        )
+        .await?,
+        200,
+        "additional sign-in",
+    )?;
+    Ok(login["access_token"]
+        .as_str()
+        .context("access token")?
+        .to_owned())
+}
+/// Polls an owner database (test-only evidence; no service reads another's database).
+async fn eventually(
+    url: &str,
+    sql: &str,
+    values: Vec<sea_orm::Value>,
+    what: &str,
+) -> anyhow::Result<()> {
+    let db = Database::connect(url).await?;
+    for _ in 0..60 {
+        if db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                sql,
+                values.clone(),
+            ))
+            .await?
+            .is_some()
+        {
+            db.close().await?;
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    db.close().await?;
+    bail!("{what}: not observed within 15 s")
+}
+async fn endpoint(s: &PersonalStack, a: &Account) -> anyhow::Result<Uuid> {
+    let r = status(request(s,"calling",Some(&s.customer.secret),None,Method::POST,"/v1/calling/endpoints",Some(json!({"principalId":a.principal,"endpointKey":format!("hub-{}",Uuid::new_v4()),"endpointKind":"WEB","capabilities":{"audio":true,"video":true}}))).await?,201,"canonical Calling endpoint")?;
+    Ok(Uuid::parse_str(
+        r["endpointId"].as_str().context("endpoint")?,
+    )?)
+}
+async fn device_state(s: &PersonalStack, a: &Account, device: &str) -> anyhow::Result<Value> {
+    let devices = status(
+        hub(s, a, Method::GET, "/devices", None).await?,
+        200,
+        "device list",
+    )?;
+    devices["data"]
+        .as_array()
+        .context("devices")?
+        .iter()
+        .find(|d| d["deviceId"] == device)
+        .cloned()
+        .context("listed device")
+}
+
+#[tokio::test]
+async fn hub_facades_device_sessions_and_revocation_fan_out_across_real_owners(
+) -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(section_14(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
+    let (a, b) = tokio::try_join!(account(s), account(s))?;
+    // MANAGED capability is reported apart from E2EE readiness: not allowed by the
+    // default (E2EE-only) policy, available with live session-device delivery once the
+    // isolated TEST policy allows MANAGED.
+    let before = status(
+        hub(s, &a, Method::GET, "/me/capabilities", None).await?,
+        200,
+        "capabilities before MANAGED",
+    )?;
+    assert_eq!(before["messaging"]["managed"]["available"], false);
+    assert_eq!(before["messaging"]["securityReady"], false);
+    let policy = status(
+        request(
+            s,
+            "messaging",
+            Some(&s.customer.secret),
+            None,
+            Method::GET,
+            "/v1/messaging/policy",
+            None,
+        )
+        .await?,
+        200,
+        "canonical Messaging policy",
+    )?;
+    status(request(s,"messaging",Some(&s.customer.secret),None,Method::PUT,"/v1/messaging/policy",Some(json!({"expectedVersion":policy["version"],"policy":{"contexts":{"DIRECT":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED","requestsRequireAcceptance":false},"GROUP":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED"}}}}))).await?,200,"isolated managed test policy")?;
+    let after = status(
+        hub(s, &a, Method::GET, "/me/capabilities", None).await?,
+        200,
+        "capabilities with MANAGED",
+    )?;
+    assert_eq!(after["messaging"]["available"], true, "{after}");
+    assert_eq!(after["messaging"]["managed"]["realtime"], "SESSION_DEVICE");
+    assert_eq!(after["messaging"]["privateE2ee"]["available"], false);
+
+    // MSG-010: conversation access -> call launch -> timeline card -> meeting share.
+    connected(s, &a, &b).await?;
+    let conversation = status(direct(s, &a, &b).await?, 201, "direct conversation")?;
+    let conversation = conversation["conversationId"]
+        .as_str()
+        .context("conversation")?
+        .to_owned();
+    let context = status(
+        hub(
+            s,
+            &a,
+            Method::GET,
+            &format!("/conversations/{conversation}/context"),
+            None,
+        )
+        .await?,
+        200,
+        "Hub conversation context from real Messaging access",
+    )?;
+    assert_eq!(context["contextClass"], "DIRECT");
+    assert_eq!(context["securityProfile"], "MANAGED");
+    assert_eq!(context["actions"]["voiceCall"], true);
+    let ep = endpoint(s, &a).await?;
+    let call = status(
+        hub(
+            s,
+            &a,
+            Method::POST,
+            &format!("/conversations/{conversation}/calls"),
+            Some(json!({"kind":"VOICE","clientRequestId":Uuid::new_v4(),"endpointId":ep})),
+        )
+        .await?,
+        200,
+        "Hub-launched call through real Calling",
+    )?;
+    let call_id = call["callId"].as_str().context("call id")?.to_owned();
+    let current = status(
+        request(
+            s,
+            "calling",
+            Some(&s.customer.secret),
+            None,
+            Method::GET,
+            &format!("/v1/calls/{call_id}"),
+            None,
+        )
+        .await?,
+        200,
+        "canonical call created by the Hub facade",
+    )?;
+    assert_eq!(current["callId"], call_id.as_str());
+    // Best-effort cleanup: the call may already have moved on (ringing timeout,
+    // auto-end), which Calling answers with CALL_STATE_CONFLICT.
+    let cleanup = request(
+        s,
+        "calling",
+        Some(&s.customer.secret),
+        None,
+        Method::POST,
+        &format!("/v1/calls/{call_id}/cancel"),
+        Some(json!({"expectedVersion":current["version"]})),
+    )
+    .await?;
+    assert!(
+        cleanup.status == 200 || cleanup.code() == Some("CALL_STATE_CONFLICT"),
+        "call cleanup: {} {:?}",
+        cleanup.status,
+        cleanup.code()
+    );
+    let instant = status(
+        hub(
+            s,
+            &a,
+            Method::POST,
+            &format!("/conversations/{conversation}/meetings/instant"),
+            Some(json!({"clientRequestId":Uuid::new_v4(),"title":"Section 14 journey"})),
+        )
+        .await?,
+        200,
+        "instant meeting through real Meetings",
+    )?;
+    let code = instant["meetingCode"]
+        .as_str()
+        .context("meeting code")?
+        .to_owned();
+    let timeline = status(
+        hub(
+            s,
+            &b,
+            Method::GET,
+            &format!("/conversations/{conversation}/timeline"),
+            None,
+        )
+        .await?,
+        200,
+        "peer timeline",
+    )?;
+    let kinds: Vec<&str> = timeline["data"]
+        .as_array()
+        .context("timeline")?
+        .iter()
+        .filter_map(|e| e["kind"].as_str())
+        .collect();
+    assert!(kinds.contains(&"CALL"), "{timeline}");
+    assert!(kinds.contains(&"MEETING_INVITATION"), "{timeline}");
+    let group = status(
+        request(
+            s,
+            "messaging",
+            Some(&s.customer.secret),
+            Some(a.principal),
+            Method::POST,
+            "/v1/conversations",
+            Some(json!({"contextClass":"GROUP","securityProfile":"MANAGED"})),
+        )
+        .await?,
+        201,
+        "group for the meeting share",
+    )?;
+    let group = group["conversationId"]
+        .as_str()
+        .context("group")?
+        .to_owned();
+    status(
+        hub(
+            s,
+            &a,
+            Method::POST,
+            &format!("/conversations/{group}/meetings/share"),
+            Some(json!({"clientRequestId":Uuid::new_v4(),"meetingCode":code})),
+        )
+        .await?,
+        200,
+        "owner shares the meeting into another conversation",
+    )?;
+    let inbox = status(
+        hub(s, &a, Method::GET, "/inbox", None).await?,
+        200,
+        "membership-checked inbox",
+    )?;
+    assert!(inbox["data"]
+        .as_array()
+        .context("inbox")?
+        .iter()
+        .any(|r| r["conversationId"] == conversation.as_str()));
+
+    // ACC-008: a device is bound to the sign-in that linked it. Ending that sign-in
+    // revokes the device at Calling; revoking a device ends the sign-in it was bound to.
+    let second = login(s, &a.email, &a.password).await?;
+    let second_session = claims(&second)?["sid"]
+        .as_str()
+        .context("session id")?
+        .to_owned();
+    let as_second = Account {
+        session: second.clone(),
+        ..clone_account(&a)
+    };
+    let ep1 = endpoint(s, &a).await?;
+    let linked = status(
+        hub(
+            s,
+            &as_second,
+            Method::POST,
+            "/devices/link",
+            Some(json!({"platform":"WEB","callEndpointId":ep1})),
+        )
+        .await?,
+        200,
+        "device linked from the second sign-in",
+    )?;
+    assert_eq!(linked["device"]["accountSession"]["bound"], true);
+    let device1 = linked["device"]["deviceId"]
+        .as_str()
+        .context("device")?
+        .to_owned();
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&a.session),
+            None,
+            Method::POST,
+            &format!("/api/v2/me/sessions/{second_session}/revoke"),
+            None,
+        )
+        .await?,
+        200,
+        "sign out the second session",
+    )?;
+    let mut ended = Value::Null;
+    for _ in 0..60 {
+        ended = device_state(s, &a, &device1).await?;
+        if ended["state"] == "REVOKED" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert_eq!(ended["state"], "REVOKED", "{ended}");
+    assert_eq!(ended["revocationReason"], "ACCOUNT_SESSION_ENDED");
+    let third = login(s, &a.email, &a.password).await?;
+    let as_third = Account {
+        session: third.clone(),
+        ..clone_account(&a)
+    };
+    let ep2 = endpoint(s, &a).await?;
+    let linked = status(
+        hub(
+            s,
+            &as_third,
+            Method::POST,
+            "/devices/link",
+            Some(json!({"platform":"ANDROID","callEndpointId":ep2})),
+        )
+        .await?,
+        200,
+        "device linked from the third sign-in",
+    )?;
+    let device2 = linked["device"]["deviceId"]
+        .as_str()
+        .context("device")?
+        .to_owned();
+    let revoked = status(
+        hub(
+            s,
+            &a,
+            Method::POST,
+            &format!("/devices/{device2}/revoke"),
+            Some(json!({"reason":"COMPROMISED"})),
+        )
+        .await?,
+        200,
+        "revoke the lost device",
+    )?;
+    assert_eq!(revoked["effects"]["accountSession"], "ENDED");
+    assert!(
+        revoked.get("boundAccountSessionRef").is_none(),
+        "the session reference never reaches the client"
+    );
+    assert_eq!(
+        request(
+            s,
+            "meeting-service",
+            Some(&third),
+            None,
+            Method::GET,
+            "/api/v2/me/sessions",
+            None
+        )
+        .await?
+        .status,
+        401,
+        "the lost device's sign-in is over"
+    );
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&a.session),
+            None,
+            Method::GET,
+            "/api/v2/me/sessions",
+            None,
+        )
+        .await?,
+        200,
+        "other sign-ins continue",
+    )?;
+
+    // ACC-010: an account that uses Messaging through the web bridge but never opened
+    // the Hub. A password change reaches Messaging and Calling by principal, and a
+    // suspension is mirrored onto its Platform Access principal (and back).
+    let email = format!("no-hub-{}@acceptance.invalid", Uuid::new_v4().simple());
+    let password = format!("P9!{}", Uuid::new_v4().simple());
+    let username = format!("nohub{}", &Uuid::new_v4().simple().to_string()[..10]);
+    let r=request(s,"meeting-service",None,None,Method::POST,"/api/v1/auth/register",Some(json!({"email":email,"username":username,"password":password,"confirm_password":password}))).await?;
+    if !(200..300).contains(&r.status) {
+        bail!("registration failed: {} {:?}", r.status, r.code());
+    }
+    let token = login(s, &email, &password).await?;
+    let user = claims(&token)?["sub"]
+        .as_str()
+        .context("subject")?
+        .to_owned();
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&token),
+            None,
+            Method::POST,
+            "/api/v2/messaging/session-tokens",
+            Some(json!({})),
+        )
+        .await?,
+        201,
+        "MANAGED realtime through the bridge (no Hub profile)",
+    )?;
+    let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
+    let row=db.query_one(Statement::from_sql_and_values(DbBackend::Postgres,"SELECT principal_id::text FROM communication_principal_links WHERE subject_kind='USER' AND subject_id=$1::uuid",[user.clone().into()])).await?.context("bridge principal")?;
+    let principal = row.try_get::<String>("", "principal_id")?;
+    db.close().await?;
+    let hub_db = Database::connect(&s.owner_urls["communications"]).await?;
+    assert!(hub_db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 FROM communication_profiles WHERE principal_id=$1::uuid",
+            [principal.clone().into()]
+        ))
+        .await?
+        .is_none());
+    hub_db.close().await?;
+    let new_password = format!("Q8!{}", Uuid::new_v4().simple());
+    status(
+        request(
+            s,
+            "meeting-service",
+            Some(&token),
+            None,
+            Method::POST,
+            "/api/v1/auth/change-password",
+            Some(json!({"current_password":password,"new_password":new_password,"confirm_password":new_password})),
+        )
+        .await?,
+        200,
+        "password change",
+    )?;
+    eventually(
+        &s.owner_urls["messaging"],
+        "SELECT 1 FROM messaging_communication_revocations WHERE principal_id=$1::uuid",
+        vec![principal.clone().into()],
+        "Messaging revocation for an account without a Hub profile",
+    )
+    .await?;
+    eventually(
+        &s.owner_urls["calling"],
+        "SELECT 1 FROM calling_communication_revocations WHERE principal_id=$1::uuid",
+        vec![principal.clone().into()],
+        "Calling revocation for an account without a Hub profile",
+    )
+    .await?;
+    let db = Database::connect(&s.owner_urls["meeting-service"]).await?;
+    for status_value in ["suspended", "active"] {
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE users SET status=$2::user_status WHERE id=$1::uuid",
+            [user.clone().into(), status_value.into()],
+        ))
+        .await?;
+        let expected = if status_value == "suspended" {
+            "SUSPENDED"
+        } else {
+            "ACTIVE"
+        };
+        eventually(
+            &s.owner_urls["platform-access"],
+            "SELECT 1 FROM platform_principals WHERE id=$1::uuid AND status=$2",
+            vec![principal.clone().into(), expected.into()],
+            "Platform Access principal mirrors the account status",
+        )
+        .await?;
+    }
+    db.close().await?;
+    assert!(!a.email.is_empty() && !a.password.is_empty() && !b.email.is_empty());
+    println!("SECTION_14_REAL_E2E: managed_capability, conversation_context, hub_call_launch, timeline_cards, instant_meeting, meeting_share, membership_inbox, session_ends_devices, device_ends_session, reference_never_relayed, revocation_without_profile_messaging, revocation_without_profile_calling, principal_status_mirror: PASS");
+    Ok(())
+}
+fn clone_account(a: &Account) -> Account {
+    Account {
+        id: a.id,
+        email: a.email.clone(),
+        password: a.password.clone(),
+        session: a.session.clone(),
+        refresh: a.refresh.clone(),
+        principal: a.principal,
+        public_id: a.public_id.clone(),
+    }
 }
