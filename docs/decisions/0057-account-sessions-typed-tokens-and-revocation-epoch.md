@@ -29,3 +29,37 @@ Meeting-service is the human account authority every other service trusts (ADR 0
 * Password change signs the current session out too (the trigger cannot tell sessions apart); the client signs in again.
 * Single-session logout no longer advances the Communications epoch; per-device fan-out to Hub devices belongs to Section 14.
 * The legacy guest JWT path is unchanged except that a guest refresh now requires the guest participant to exist.
+
+## Amendment A1 — Devices belong to sign-ins; revocation reaches every owner (Blueprint v1.0 Section 14)
+
+**Status:** Accepted for `staging` (Section 14; resolves ACC-008, ACC-010; implements the device half of DATA-005). Not deployed. Release order and steps: [communications-hub-section-14.md](../operations/communications-hub-section-14.md).
+
+### Relation between account sessions and devices
+
+The **account session** (Decision 2) is the root credential of one sign-in on one device. Every other credential a device holds is subordinate to a session or to the account:
+
+| Credential | Owner | Bound to | Ends when |
+|---|---|---|---|
+| CF Meet access / refresh tokens | Account | account session | the session ends, or the account epoch advances |
+| MANAGED session device (ADR 0049 A1) | Messaging | account session (`accountSessionRef`) | the session ends; renewal re-checks the session and epoch |
+| Hub device reference (`communication_devices`) linking a Messaging device, its push registration and/or a Calling endpoint | Hub (index), owners (credentials) | the account session that linked it (`account_session_ref`, new) | the session ends; or the device is revoked |
+| Messaging client sessions of the principal, Calling signaling credentials | Messaging, Calling | the principal | the account epoch advances (all of them) |
+
+The binding is the same opaque, domain-separated reference ADR 0049 A1 uses (`SHA-256("cfmeet-account-session:v1|environment|session")`); Account computes it, receivers can match it and never reverse it. It is immutable once recorded.
+
+### Decisions
+
+1. **Session → devices.** Ending one account session (`POST /api/v1/auth/logout` with a session token, `POST /api/v2/me/sessions/{id}/revoke`) ends its session devices at once (unchanged) and queues `ACCOUNT_SESSION_ENDED` in Account's durable outbox. The Hub revokes every ACTIVE device bound to that session at its owners (Messaging device incl. push registration and client sessions; Calling endpoint incl. live invitations and signaling) and marks it `REVOKED` with `revocationReason: ACCOUNT_SESSION_ENDED`. An owner failure answers 503 and the outbox retries the same event; owner calls are idempotent.
+2. **Device → session.** `POST /api/v2/communications/devices/link` binds the device to the sign-in making the request. `POST /api/v2/communications/devices/{id}/revoke` of a bound device signs that sign-in out: the Hub returns the bound reference only to the Account relay (which sent its own reference), and Account ends the matching open session (`USER_REVOKED`, security event `SESSION_REVOKED` with `trigger: DEVICE_REVOKED`) with its session devices and other bound devices. The reference is consumed by Account and never relayed to clients. A retry of an already-revoked device hands the reference back, so a partial failure completes.
+3. **Account-wide ends reach every owner, with or without a Hub profile (ACC-010).** Password change and reset, self-deactivation, admin deactivation or suspension, and logout-everywhere already advance both epochs in the database (trigger) and queue the Hub event. Now:
+   * the Hub applies the event even when the account never opened the Hub: it reads the principal from Account (`/internal/v1/accounts/communications/status`) and fans `communications.account.changed {principalId, credentialsNotBefore}` out to Calling and Messaging through its durable outbox (exactly once per Account event; owners keep the greatest epoch, so replays and reordering are harmless). A profile created later takes Account's epoch at activation, so no Hub-side tombstone is needed;
+   * Account also queues the durable Messaging `client-sessions/revoke-all` for the web-bridge principal on every such end (it did so only on logout), with reasons `PASSWORD_CHANGED` / `ACCOUNT_DISABLED`;
+   * Account's outbox worker mirrors the account's **current** status onto its Platform Access `NATIVE_CF_USER` principal (`POST /internal/v1/principals/account-status`: inactive → DEACTIVATED, suspended → SUSPENDED, otherwise ACTIVE), retried with the event. Reading the current status makes delivery order irrelevant; reactivation restores ACTIVE.
+4. **Device-management surface.** No new API. Sign-ins are listed and ended with `GET /api/v2/me/sessions`, `POST /api/v2/me/sessions/{id}/revoke`, `POST /api/v2/me/sessions/revoke-all`; linked devices with `GET /api/v2/communications/devices` (`accountSession.bound`) and `POST /api/v2/communications/devices/{id}/revoke`. Either action ends what the other holds. The client links its Messaging device / Calling endpoint after registering them (handoff §11).
+
+### Consequences
+
+* Revoking the device you are using signs you out (by design: the "lost phone" and "this device" cases are the same operation).
+* Devices linked before this amendment, or by an older Account image, are unbound (`accountSession.bound: false`); they keep the previous behaviour (revoking them does not end a sign-in). Re-linking does not bind an existing reference.
+* Deploy order: Platform Access and Communications before Meeting (an older Hub refuses `ACCOUNT_SESSION_ENDED` and the session reference; an older Platform Access answers 404 to the mirror, treated as "nothing to mirror"). Hub migration `m20261108_000001_device_session_binding` (third Hub history) before the Hub image.
+* Remaining window: a Calling signaling credential issued before the epoch advance stays valid until the receiving process applies the event (seconds; bounded by its 600 s lifetime), as before.
