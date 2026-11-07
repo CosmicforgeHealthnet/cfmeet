@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.15.0"
+      "description": "cfmeet.calling.http-api 1.16.0"
     },
     {
       "name": "privacy-relay",
@@ -30102,7 +30102,7 @@
           "calling"
         ],
         "summary": "Administrative audit records",
-        "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope.",
+        "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope. actorPrincipalId names the acting human member for first-party organization requests forwarded by the Meeting Service.",
         "security": [
           {
             "calling.platformCredential": [
@@ -54633,6 +54633,7 @@
           "actorKind",
           "actorServiceAccountId",
           "actorCredentialId",
+          "actorPrincipalId",
           "resourceType",
           "resourceId",
           "operation",
@@ -54667,6 +54668,17 @@
             ]
           },
           "actorCredentialId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorPrincipalId": {
+            "description": "The acting human member's principal (in this scope) when a first-party organization request forwarded by the Meeting Service made the change; null for API credentials, the operator CLI and Calling workers.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
@@ -69677,6 +69689,8 @@
           "IDEMPOTENCY_CONFLICT",
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
+          "ORGANIZATION_POLICY_RESTRICTED",
+          "ORGANIZATION_CALLING_DISABLED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
