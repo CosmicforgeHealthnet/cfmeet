@@ -20,6 +20,7 @@ use crate::{
     error::{ApiError, ApiResult},
     middleware::AuthContext,
     models::webhooks::{self, Entity as Webhooks, WebhookEventType, WebhookStatus},
+    services::legacy_credentials,
     state::AppState,
     utils::now_utc,
 };
@@ -90,7 +91,7 @@ fn format_datetime(dt: chrono::NaiveDateTime) -> String {
 /// Registers a webhook for one event type (`meeting_start`, `meeting_end`, `participant_join` or
 /// `participant_leave`), owned by the authenticated user and active from creation. Create one
 /// webhook per event type you need. The response includes a generated secret, which is returned
-/// only here and never by the list or update endpoints.
+/// only here: the service keeps only a one-way fingerprint of it, so it can never be shown again.
 #[utoipa::path(
     post,
     path = "/api/v1/webhooks",
@@ -123,7 +124,12 @@ pub async fn create_webhook(
         user_id: Set(auth_context.user_id),
         event_type: Set(event_type.clone()),
         endpoint_url: Set(payload.endpoint_url.clone()),
-        secret: Set(secret.clone()),
+        // DATA-003: legacy webhooks are never delivered (DATA-007), so the secret is never
+        // needed again: keep only a fingerprint, never the secret itself.
+        secret: Set(legacy_credentials::WEBHOOK_SECRET_PLACEHOLDER.to_owned()),
+        secret_sha256: Set(Some(legacy_credentials::webhook_secret_fingerprint(
+            &secret,
+        ))),
         status: Set(WebhookStatus::Active),
         created_at: Set(now),
         updated_at: Set(now),

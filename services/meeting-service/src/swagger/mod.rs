@@ -328,6 +328,7 @@ use utoipa::OpenApi;
             // User schemas
             crate::dto::UserMeResponse,
             crate::dto::UpdateMeRequest,
+            crate::dto::DeactivateAccountRequest,
             // Webhook schemas
             crate::dto::CreateWebhookRequest,
             crate::dto::UpdateWebhookRequest,
@@ -653,7 +654,7 @@ use utoipa::OpenApi;
         (name = "Waiting Room", description = "Admit/Deny participants from waiting room"),
         (name = "Media Control", description = "Control audio, video, and screen sharing"),
         (name = "Chat", description = "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) → LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"),
-        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens"),
+        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"),
         (name = "Webhooks", description = "Webhook management for event notifications.\n\n## Events\n- `meeting_start`: Triggered when a meeting begins\n- `meeting_end`: Triggered when a meeting ends\n- `participant_join`: Triggered when a participant joins\n- `participant_leave`: Triggered when a participant leaves\n\n## Security\n- Each webhook has a unique secret for payload signing\n- Secret is only shown once on creation\n- Payloads are signed using HMAC-SHA256\n\n## Notes\n- Webhooks are user-scoped\n- Delivery is async and failure-tolerant"),
         (name = "Meeting Spaces (v2)", description = "Phase 2 persistent meeting definitions. A MeetingSpace is not a live call. Owner is always the authenticated caller; meeting links/codes identify a meeting but never grant membership or roles."),
         (name = "Scheduling (v2)", description = "RFC 5545 recurrence interpreted in the meeting space timezone; bounded, idempotent occurrence materialization."),
@@ -685,7 +686,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.2.0",
+        version = "1.3.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",

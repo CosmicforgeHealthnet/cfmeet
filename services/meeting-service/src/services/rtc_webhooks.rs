@@ -50,6 +50,9 @@ pub enum WebhookOutcome {
     UnknownRecording,
     /// Part G: recording evidence whose room does not match (cross-conference guard).
     Rejected,
+    /// SEC-009: a removed legacy (`/api/v1`) participant reconnected to its legacy room
+    /// with an earlier credential and was removed again.
+    LegacyRemovedEvicted,
 }
 
 impl WebhookOutcome {
@@ -63,6 +66,7 @@ impl WebhookOutcome {
             WebhookOutcome::Ignored => "IGNORED",
             WebhookOutcome::UnknownRecording => "UNKNOWN_RECORDING",
             WebhookOutcome::Rejected => "REJECTED",
+            WebhookOutcome::LegacyRemovedEvicted => "LEGACY_REMOVED_EVICTED",
         }
     }
 }
@@ -172,6 +176,29 @@ impl RtcWebhookService {
             None => None,
         };
         let Some(conference) = conference else {
+            // SEC-009: legacy rooms are not conferences; a kicked legacy participant that
+            // reconnects with a credential issued before the kick is removed again.
+            if let (ProviderEventKind::ParticipantJoined, Some(room), Some(identity)) =
+                (e.kind, e.room_name.as_deref(), e.media_identity.as_deref())
+            {
+                if let Some((meeting, participant)) =
+                    crate::services::legacy_media::kicked_legacy_participant(&txn, room, identity)
+                        .await?
+                {
+                    self.finish(&txn, e, None, WebhookOutcome::LegacyRemovedEvicted)
+                        .await?;
+                    txn.commit().await?;
+                    crate::services::legacy_media::evict(
+                        self.core.rtc.as_ref(),
+                        meeting,
+                        room,
+                        participant,
+                        "LEGACY_REMOVED_RECONNECT",
+                    )
+                    .await;
+                    return Ok(WebhookOutcome::LegacyRemovedEvicted);
+                }
+            }
             self.finish(&txn, e, None, WebhookOutcome::UnknownRoom)
                 .await?;
             txn.commit().await?;

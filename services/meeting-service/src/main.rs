@@ -155,6 +155,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Profile/notifications migration is required (profile-notifications-migration up)");
     }
 
+    // Blueprint Sections 2-3 hardening: hashed legacy API keys and webhook secrets live in
+    // their own additive history (`account-hardening-migration up`).
+    if !migration::account_hardening_ready(&state.db)
+        .await
+        .expect("Account hardening migration readiness")
+    {
+        panic!("Account hardening migration is required (account-hardening-migration up)");
+    }
+
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
     // stopped startup there).

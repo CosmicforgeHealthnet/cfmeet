@@ -15,7 +15,7 @@ The short version:
 
 | Service | Required history | Optional (additive) histories, recorded when present | Production database (as far as the repository shows) |
 |---|---|---|---|
-| meeting-service (account authority) | `seaql_migrations` + tables `users`, `meetings` | `account_communications_migrations`, `account_communications_facade_migrations`, `account_security_migrations`, `meetings_calendar_migrations`, `profile_notifications_migrations` | inside the legacy `cosmicforge-db` container; name and version REQUIRES_VALIDATION |
+| meeting-service (account authority) | `seaql_migrations` + tables `users`, `meetings` | `account_communications_migrations`, `account_communications_facade_migrations`, `account_security_migrations`, `meetings_calendar_migrations`, `profile_notifications_migrations`, `account_hardening_migrations` | inside the legacy `cosmicforge-db` container; name and version REQUIRES_VALIDATION |
 | communications (Hub) | `communications_seaql_migrations` + table `communication_profiles` | `communications_unified_seaql_migrations` | `cfmeet_comm_production_hub` on `cfmeet-core-db` |
 | platform-access | `platform_access_seaql_migrations` | — | `cfmeet_platform_access` on `cfmeet-core-db` |
 | calling | `calling_seaql_migrations` | `calling_communications_migrations` | `cfmeet_calling` on `cfmeet-core-db` |

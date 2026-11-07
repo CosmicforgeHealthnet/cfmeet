@@ -190,8 +190,17 @@ impl JwtService {
     }
 }
 
+/// bcrypt only uses the first 72 bytes of its input (ACC-025). New passwords longer than
+/// that are refused instead of being silently truncated; existing hashes still verify.
+pub const MAX_PASSWORD_BYTES: usize = 72;
+
 // Password hashing utilities
 pub fn hash_password(password: &str) -> ApiResult<String> {
+    if password.len() > MAX_PASSWORD_BYTES {
+        return Err(ApiError::ValidationError(format!(
+            "Password must be at most {MAX_PASSWORD_BYTES} bytes"
+        )));
+    }
     bcrypt::hash(password, bcrypt::DEFAULT_COST)
         .map_err(|e| ApiError::InternalError(format!("Failed to hash password: {}", e)))
 }
@@ -209,34 +218,22 @@ pub fn generate_verification_code() -> String {
     code.to_string()
 }
 
-/// Check if user can authenticate based on email verification requirement
-///
-/// Returns Ok(()) if user can proceed, Err if verification is needed
-pub fn check_email_verification(
-    user: &crate::models::users::Model,
-    require_verification: bool,
-) -> ApiResult<()> {
-    use crate::models::users::UserStatus;
-
-    // If verification not required, allow all non-inactive users
-    if !require_verification {
-        return Ok(());
-    }
-
-    // If verification required, check status
-    if user.status == UserStatus::PendingVerification {
-        return Err(ApiError::Forbidden(
-            "Email verification required. Please check your email and verify your account."
-                .to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod communications_authentication_tests {
     use super::*;
+    #[test]
+    fn passwords_beyond_the_bcrypt_input_limit_are_refused_not_truncated() {
+        let long = "é".repeat(37); // 74 bytes, 37 characters
+        assert!(matches!(
+            hash_password(&long),
+            Err(ApiError::ValidationError(_))
+        ));
+        assert!(matches!(
+            hash_password(&"a".repeat(MAX_PASSWORD_BYTES + 1)),
+            Err(ApiError::ValidationError(_))
+        ));
+    }
+
     #[test]
     fn refresh_preserves_credential_authentication_time_and_legacy_absence() {
         let service = JwtService::new("test-only-authentication-time-fixture-0123456789".into());

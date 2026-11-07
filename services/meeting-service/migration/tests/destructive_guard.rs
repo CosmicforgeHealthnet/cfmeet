@@ -8,11 +8,12 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-const BINARIES: [&str; 5] = [
+const BINARIES: [&str; 6] = [
     env!("CARGO_BIN_EXE_migration"),
     env!("CARGO_BIN_EXE_account-security-migration"),
     env!("CARGO_BIN_EXE_meetings-calendar-migration"),
     env!("CARGO_BIN_EXE_profile-notifications-migration"),
+    env!("CARGO_BIN_EXE_account-hardening-migration"),
     env!("CARGO_BIN_EXE_account-communications-migration"),
 ];
 

@@ -234,6 +234,13 @@ async fn relay(
     if !user.revocation_checked {
         return Err(unavailable());
     }
+    // ACC-016 (owner decision, off by default): unverified accounts stay out of the Hub.
+    state
+        .auth_policy
+        .require_verified_email_for_communications(
+            state.require_email_verification,
+            user.verified_email.as_deref(),
+        )?;
     let bridge = state.communications.as_ref().ok_or_else(unavailable)?;
     if !matches!(
         method,

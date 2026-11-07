@@ -32,6 +32,7 @@ mod m20261106_000001_account_security;
 mod m20261107_000001_meetings_calendar;
 mod m20261108_000001_account_profile;
 mod m20261108_000002_meeting_notifications;
+mod m20261109_000001_account_hardening;
 
 pub mod phase2_backfill;
 
@@ -304,6 +305,54 @@ pub async fn profile_notifications_ready<C: sea_orm_migration::sea_orm::Connecti
         ))
         .await?;
     let known: std::collections::BTreeSet<_> = ProfileNotificationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
+/// Blueprint v1.0 Sections 2–3 hardening: hashed legacy API keys and webhook secrets
+/// (PLT-002, DATA-003). A SEPARATE additive history so the previously deployed image still
+/// starts after it is applied (rollback safety).
+pub struct AccountHardeningMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountHardeningMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261109_000001_account_hardening::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("account_hardening_migrations").into_iden()
+    }
+}
+
+/// Exactly the known account-hardening history has been applied.
+pub async fn account_hardening_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.account_hardening_migrations') IS NOT NULL AS present"
+                .to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM account_hardening_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = AccountHardeningMigrator::migrations()
         .iter()
         .map(|m| m.name().to_owned())
         .collect();

@@ -240,7 +240,9 @@ pub async fn verify_email(
 /// token (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account
 /// session that lasts at most 30 days and can be listed and revoked from
 /// `/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so
-/// check `user.status` and route to verification if needed; deactivated accounts get 403. More than
+/// check `user.status` and route to verification if needed (unless the deployment enforces
+/// verification at sign-in: then such an account gets `403 EMAIL_VERIFICATION_REQUIRED` after a
+/// correct password); deactivated accounts get 403. More than
 /// 5 attempts per email within 15 minutes returns 429; a successful login resets the count.
 #[utoipa::path(
     post,
@@ -308,6 +310,26 @@ pub async fn login(
         return Err(ApiError::Forbidden(
             "Account has been deactivated".to_string(),
         ));
+    }
+
+    // ACC-016 (owner decision, off by default): optionally refuse pending accounts at
+    // sign-in. Checked only after a correct password, so it reveals nothing to others.
+    if state.require_email_verification
+        && state
+            .auth_policy
+            .email_verification_enforcement
+            .covers_login()
+        && user.status == users::UserStatus::PendingVerification
+    {
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("LOGIN", Outcome::Denied)
+                .user(user.id)
+                .actor(ActorKind::Anonymous, None)
+                .detail(serde_json::json!({ "method": "PASSWORD", "reason": "EMAIL_VERIFICATION_REQUIRED" })),
+        )
+        .await;
+        return Err(security::email_verification_required());
     }
 
     // Clear rate limit on successful login
@@ -520,22 +542,10 @@ pub async fn logout(
         ));
     }
 
-    // Calculate remaining TTL from token expiry
-    let now = chrono::Utc::now().timestamp();
-    let ttl_secs = if claims.exp > now {
-        (claims.exp - now) as u64
-    } else {
-        0 // Already expired, but blacklist briefly anyway
-    };
-
-    // Only blacklist if there's remaining TTL
-    if ttl_secs > 0 {
-        state
-            .token_blacklist
-            .blacklist_token(token, ttl_secs)
-            .await?;
-    }
-
+    // ACC-025: the database revocation below is authoritative (session row / account
+    // epoch, checked on every request) and runs first: if it fails nothing is half done
+    // and the client may retry. The Redis blacklist afterwards is defence in depth and
+    // never turns a completed logout into an error.
     if claims.role != "guest" {
         if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
             match claims.session_id() {
@@ -572,6 +582,21 @@ pub async fn logout(
                     .await;
                 }
             }
+        }
+    }
+
+    let now = chrono::Utc::now().timestamp();
+    if claims.exp > now {
+        if let Err(e) = state
+            .token_blacklist
+            .blacklist_token(token, (claims.exp - now) as u64)
+            .await
+        {
+            if claims.role == "guest" {
+                // Guest tokens have no session row: the blacklist is their only revocation.
+                return Err(e);
+            }
+            tracing::warn!(error = ?e, "logout: token blacklist unavailable; session revocation already recorded");
         }
     }
 

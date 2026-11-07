@@ -39,3 +39,7 @@ path = "src/meetings-calendar-main.rs"
 [[bin]]
 name = "profile-notifications-migration"
 path = "src/profile-notifications-main.rs"
+
+[[bin]]
+name = "account-hardening-migration"
+path = "src/account-hardening-main.rs"
