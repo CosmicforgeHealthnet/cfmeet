@@ -28,6 +28,7 @@ pub mod meeting_space;
 pub mod membership;
 pub mod ops_metrics;
 pub mod organization_export;
+pub mod organization_policy;
 pub mod organizations;
 pub mod organizations_authority;
 pub mod outbox;

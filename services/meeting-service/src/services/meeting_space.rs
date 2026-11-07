@@ -312,6 +312,10 @@ impl MeetingSpaceService {
             // Blueprint Section 4 (authoritative): the organization may exist only in the
             // Organizations Service; upsert the local read-only projection row the
             // `meeting_spaces.organization_id` foreign key needs.
+            // Blueprint Section 12 follow-up: the organization policy decides, exactly as
+            // the workspace capabilities read reports it (authoritative mode only).
+            crate::services::organization_policy::require_meeting_creation(&self.core, actor, org)
+                .await?;
             if let Some(authority) = self
                 .core
                 .organization_authority
@@ -1058,6 +1062,13 @@ impl MeetingSpaceService {
         if let Some(org) = draft.organization_id {
             if !ctx.verified_organizations.contains(&org) {
                 draft.organization_id = None;
+            } else {
+                // A copy that stays in the organization is an organization meeting
+                // creation: the organization policy applies (authoritative mode).
+                crate::services::organization_policy::require_meeting_creation(
+                    &self.core, ctx, org,
+                )
+                .await?;
             }
         }
         draft.validate(&self.core.flags)?;

@@ -521,8 +521,25 @@ pub async fn capabilities(
         answer.capabilities = legacy_decisions(&context.role, context.active);
         return Ok(answer);
     };
-    let acting = ActingUser::of(user);
-    let context = authoritative_contexts(authority, &acting)
+    authoritative_organization_answer(authority, &ActingUser::of(user), organization, answer).await
+}
+
+/// The authoritative answer for one organization (Organizations Service): membership,
+/// role matrix under the current policy and the effective constraints. This is THE single
+/// evaluation of organization capabilities in meeting-service: the capabilities read
+/// returns it and every organization-scoped write path enforces it through
+/// [`require_organization_capability`], so the read and the action always agree.
+pub async fn authoritative_organization_answer(
+    authority: &OrganizationsAuthority,
+    acting: &ActingUser,
+    organization: Uuid,
+    mut answer: WorkspaceCapabilities,
+) -> ApiResult<WorkspaceCapabilities> {
+    answer.workspace_id = organization.to_string();
+    answer.kind = WorkspaceKind::Organization;
+    answer.authority = WorkspaceAuthority::OrganizationsService;
+    answer.organization_id = Some(organization);
+    let context = authoritative_contexts(authority, acting)
         .await?
         .into_iter()
         .find(|c| c.organization_id == organization)
@@ -535,8 +552,8 @@ pub async fn capabilities(
         return Ok(answer);
     }
     let (matrix, policy) = tokio::join!(
-        authority.role_matrix(organization, &acting),
-        authority.effective_policy(organization, &acting)
+        authority.role_matrix(organization, acting),
+        authority.effective_policy(organization, acting)
     );
     let matrix = matrix.map_err(authority_error)?;
     let policy = policy.map_err(authority_error)?;
@@ -562,6 +579,122 @@ pub async fn capabilities(
         messaging: policy.messaging_enabled,
         calling: policy.calling_enabled,
     };
+    Ok(answer)
+}
+
+/// An organization answer that grants nothing yet (filled by the evaluation).
+fn empty_answer(organization: Uuid) -> WorkspaceCapabilities {
+    WorkspaceCapabilities {
+        workspace_id: organization.to_string(),
+        kind: WorkspaceKind::Organization,
+        authority: WorkspaceAuthority::OrganizationsService,
+        organization_id: Some(organization),
+        role: None,
+        organization_status: None,
+        provisioning_state: None,
+        policy_revision: None,
+        features: WorkspaceFeatures {
+            meetings: false,
+            messaging: false,
+            calling: false,
+        },
+        capabilities: vec![],
+        personal_communications_capabilities: None,
+        evaluated_at: Utc::now(),
+    }
+}
+
+/// The organization feature an action belongs to (`features.*` of the capabilities read).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrganizationFeature {
+    Meetings,
+    Calling,
+}
+
+impl OrganizationFeature {
+    fn enabled(&self, features: &WorkspaceFeatures) -> bool {
+        match self {
+            Self::Meetings => features.meetings,
+            Self::Calling => features.calling,
+        }
+    }
+
+    fn turned_off(&self) -> &'static str {
+        match self {
+            Self::Meetings => "Meetings are turned off by your organization",
+            Self::Calling => "Calling is turned off by your organization",
+        }
+    }
+}
+
+/// The write-path decision over an answer of [`authoritative_organization_answer`]
+/// (pure): the organization must be ACTIVE, the feature on and — when given — the
+/// capability granted. Refusals carry stable codes:
+/// * `ORGANIZATION_SUSPENDED` (409) — the organization is not ACTIVE;
+/// * `ORGANIZATION_POLICY_RESTRICTED` (403) — the feature is off, or the role holds the
+///   capability but the organization policy removes it (`POLICY_RESTRICTED` in the read);
+/// * `PERMISSION_DENIED` (403) — the role does not hold the capability.
+pub fn decide(
+    answer: &WorkspaceCapabilities,
+    feature: OrganizationFeature,
+    capability: Option<&str>,
+) -> ApiResult<()> {
+    let suspended = || {
+        ApiError::domain(
+            ErrorCode::OrganizationSuspended,
+            "The organization is not active",
+        )
+    };
+    if answer.organization_status.as_deref() != Some("ACTIVE") {
+        return Err(suspended());
+    }
+    if !feature.enabled(&answer.features) {
+        return Err(ApiError::domain(
+            ErrorCode::OrganizationPolicyRestricted,
+            feature.turned_off(),
+        ));
+    }
+    let Some(capability) = capability else {
+        return Ok(());
+    };
+    match answer
+        .capabilities
+        .iter()
+        .find(|d| d.capability == capability)
+        .map(|d| d.reason)
+    {
+        Some(Reason::Allowed) => Ok(()),
+        Some(Reason::PolicyRestricted) => Err(ApiError::domain(
+            ErrorCode::OrganizationPolicyRestricted,
+            "Your organization's policy does not allow this action",
+        )),
+        Some(Reason::OrganizationSuspended) => Err(suspended()),
+        _ => Err(ApiError::domain(
+            ErrorCode::PermissionDenied,
+            "Your organization role does not allow this action",
+        )),
+    }
+}
+
+/// Enforces the organization decision for one write path in authoritative mode, using
+/// exactly the evaluation of the capabilities read. Organizations unreachable (or any
+/// incomplete answer) → `503 SERVICE_UNAVAILABLE`, never an allow; an organization the
+/// caller cannot see → `404 ORGANIZATION_NOT_FOUND`.
+pub async fn require_organization_capability(
+    authority: &OrganizationsAuthority,
+    acting: &ActingUser,
+    organization: Uuid,
+    feature: OrganizationFeature,
+    capability: Option<&str>,
+) -> ApiResult<WorkspaceCapabilities> {
+    let answer = authoritative_organization_answer(
+        authority,
+        acting,
+        organization,
+        empty_answer(organization),
+    )
+    .await?;
+    decide(&answer, feature, capability)?;
     Ok(answer)
 }
 
@@ -703,6 +836,111 @@ mod tests {
         assert_eq!(granted_of(&d), s(&["organization.read"]));
         // Unknown role → malformed answer.
         assert!(organization_decisions(&ctx(org, "SUPERUSER", true, &[]), &m).is_none());
+    }
+
+    fn answer_with(
+        status: &str,
+        features: (bool, bool),
+        decisions: Vec<WorkspaceCapability>,
+    ) -> WorkspaceCapabilities {
+        let mut a = empty_answer(Uuid::new_v4());
+        a.organization_status = Some(status.into());
+        a.features = WorkspaceFeatures {
+            meetings: features.0,
+            messaging: true,
+            calling: features.1,
+        };
+        a.capabilities = decisions;
+        a
+    }
+
+    fn code(r: ApiResult<()>) -> Option<ErrorCode> {
+        r.err().and_then(|e| e.code())
+    }
+
+    #[test]
+    fn write_paths_enforce_exactly_the_capabilities_read() {
+        let org = Uuid::new_v4();
+        let m = matrix(org);
+        // MANAGER under "managersMayInvite=false, hostCreation=ADMINS": the read reports
+        // meetings.organization.create POLICY_RESTRICTED, so creation is refused.
+        let restricted =
+            organization_decisions(&ctx(org, "MANAGER", true, &["organization.read"]), &m).unwrap();
+        let a = answer_with("ACTIVE", (true, true), restricted);
+        assert_eq!(
+            code(decide(
+                &a,
+                OrganizationFeature::Meetings,
+                Some("meetings.organization.create")
+            )),
+            Some(ErrorCode::OrganizationPolicyRestricted)
+        );
+        // Allowed in the read → allowed on the write path.
+        assert!(decide(&a, OrganizationFeature::Meetings, Some("organization.read")).is_ok());
+        // Not held by the role at all → PERMISSION_DENIED.
+        assert_eq!(
+            code(decide(
+                &a,
+                OrganizationFeature::Calling,
+                Some("calling.enterprise.manage")
+            )),
+            Some(ErrorCode::PermissionDenied)
+        );
+        // A capability the answer does not list is never granted.
+        assert_eq!(
+            code(decide(
+                &a,
+                OrganizationFeature::Meetings,
+                Some("unknown.cap")
+            )),
+            Some(ErrorCode::PermissionDenied)
+        );
+        // features.meetings = false refuses every meeting action, capability or not.
+        let off = answer_with(
+            "ACTIVE",
+            (false, true),
+            vec![decision("meetings.organization.create", Reason::Allowed)],
+        );
+        assert_eq!(
+            code(decide(&off, OrganizationFeature::Meetings, None)),
+            Some(ErrorCode::OrganizationPolicyRestricted)
+        );
+        assert_eq!(
+            code(decide(
+                &off,
+                OrganizationFeature::Meetings,
+                Some("meetings.organization.create")
+            )),
+            Some(ErrorCode::OrganizationPolicyRestricted)
+        );
+        assert!(decide(&off, OrganizationFeature::Calling, None).is_ok());
+        // Calling feature off refuses enterprise administration.
+        let calling_off = answer_with(
+            "ACTIVE",
+            (true, false),
+            vec![decision("calling.enterprise.manage", Reason::Allowed)],
+        );
+        assert_eq!(
+            code(decide(
+                &calling_off,
+                OrganizationFeature::Calling,
+                Some("calling.enterprise.manage")
+            )),
+            Some(ErrorCode::OrganizationPolicyRestricted)
+        );
+        // A suspended organization (or one that changed status between the reads).
+        for status in ["SUSPENDED", "ARCHIVED"] {
+            let s = answer_with(status, (true, true), suspended_decisions(&[]));
+            assert_eq!(
+                code(decide(&s, OrganizationFeature::Meetings, None)),
+                Some(ErrorCode::OrganizationSuspended)
+            );
+        }
+        let unknown = empty_answer(org);
+        assert_eq!(
+            code(decide(&unknown, OrganizationFeature::Meetings, None)),
+            Some(ErrorCode::OrganizationSuspended)
+        );
     }
 
     #[test]

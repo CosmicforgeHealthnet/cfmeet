@@ -2260,3 +2260,342 @@ async fn s8_authoritative_workspaces_fail_closed() {
     assert_eq!(granted_capabilities(&caps), matrix_of("OWNER"));
     assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
 }
+
+// ---------------------------------------------------------------------------------------
+// Blueprint Section 12 follow-up — Meeting write paths enforce the organization policy
+// (the same decision `GET /api/v2/me/workspaces/{id}/capabilities` reports).
+// ---------------------------------------------------------------------------------------
+
+async fn create_org_space(
+    app: &TestApp,
+    user: &User,
+    org: Uuid,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut body = body;
+    body["organizationId"] = json!(org);
+    app.post("/api/v2/meeting-spaces", Auth::Bearer(&user.token), body)
+        .await
+}
+
+async fn admit_one(
+    app: &TestApp,
+    host: &User,
+    conference: Uuid,
+    pid: &Value,
+) -> (StatusCode, Value) {
+    app.post(
+        &format!("/api/v2/conferences/{conference}/waiting-room/admit"),
+        Auth::Bearer(&host.token),
+        json!({ "participantIds": [pid] }),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn s12_organization_meeting_creation_follows_the_capabilities_read() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let member = app.user("member").await;
+    let guest = app.user("guest").await;
+    let org = fake.add_org(
+        "s12-create",
+        &[
+            (owner.id, "OWNER"),
+            (member.id, "MEMBER"),
+            (guest.id, "GUEST"),
+        ],
+    );
+    let body = json!({ "title": "org meeting", "accessPolicy": "ORGANIZATION_ONLY" });
+
+    // Allow: default policy — the read says ALLOWED and creation succeeds.
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&member.token)).await;
+    assert_eq!(reason_of(&caps, "meetings.organization.create"), "ALLOWED");
+    let (s, v) = create_org_space(&app, &member, org, body.clone()).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let space = uuid(&v["id"]);
+
+    // Deny (policy): hostCreation raised above MEMBER — the read reports
+    // POLICY_RESTRICTED and creation and duplication into the organization are refused.
+    fake.set_policy(
+        org,
+        json!({ "revision": 2,
+                "features": { "meetings": true, "messaging": true, "calling": true },
+                "restrict": { "MEMBER": ["meetings.organization.create"] } }),
+    );
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&member.token)).await;
+    assert_eq!(
+        reason_of(&caps, "meetings.organization.create"),
+        "POLICY_RESTRICTED"
+    );
+    let (s, v) = create_org_space(&app, &member, org, body.clone()).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/meeting-spaces/{space}/duplicate"),
+            Auth::Bearer(&member.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "duplicate into the organization: {v}"
+    );
+    // The OWNER's role is not restricted: allowed, exactly as the read says.
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(reason_of(&caps, "meetings.organization.create"), "ALLOWED");
+    let (s, v) = create_org_space(&app, &owner, org, body.clone()).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // Personal meetings are never subject to organization policy.
+    let personal = app
+        .create_space(&member, json!({ "title": "personal" }))
+        .await;
+    assert!(personal["id"].is_string());
+
+    // Deny (feature): features.meetings = false removes meetings for every role.
+    fake.set_policy(
+        org,
+        json!({ "revision": 3,
+                "features": { "meetings": false, "messaging": true, "calling": true },
+                "restrict": {} }),
+    );
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&owner.token)).await;
+    assert_eq!(caps["features"]["meetings"], false);
+    assert_eq!(
+        reason_of(&caps, "meetings.organization.create"),
+        "POLICY_RESTRICTED"
+    );
+    let (s, v) = create_org_space(&app, &owner, org, body.clone()).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+
+    // Not held by the role at all (GUEST): the directory does not count a GUEST as a
+    // meeting member, so the pre-existing membership check refuses first.
+    fake.set_policy(org, default_policy());
+    let (_, caps) = app.get(caps_uri(org), Auth::Bearer(&guest.token)).await;
+    assert_eq!(
+        reason_of(&caps, "meetings.organization.create"),
+        "CAPABILITY_NOT_GRANTED"
+    );
+    let (s, v) = create_org_space(&app, &guest, org, body.clone()).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{v}"
+    );
+
+    // Suspended organization: nothing is created.
+    let (s, v) = create_org_space(&app, &member, org, body.clone()).await;
+    assert_eq!(s, StatusCode::CREATED, "allowed again: {v}");
+    fake.set_org_status(org, "SUSPENDED");
+    let (s, v) = create_org_space(&app, &owner, org, body.clone()).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_SUSPENDED"),
+        "{v}"
+    );
+    assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn s12_organization_meeting_creation_fails_closed_when_the_policy_read_fails() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let org = fake.add_org("s12-closed", &[(owner.id, "OWNER")]);
+    let body = json!({ "title": "org meeting", "accessPolicy": "ORGANIZATION_ONLY" });
+    let roles = format!("/internal/v1/organizations/{org}/roles/capabilities");
+    let policy = format!("/internal/v1/organizations/{org}/policies/effective");
+    let users = format!("/internal/v1/users/{}/organizations", owner.id);
+    for (path, status, doc) in [
+        (&roles, 503, envelope("SERVICE_UNAVAILABLE")),
+        (&roles, 500, envelope("INTERNAL_ERROR")),
+        (&policy, 503, envelope("SERVICE_UNAVAILABLE")),
+        (
+            &policy,
+            200,
+            json!({ "organizationId": org, "lifecycleStatus": "ACTIVE", "revision": 1,
+                    "constraints": { "enabledFeatures": { "meetings": true } } }),
+        ),
+        (&users, 401, envelope("INTERNAL_AUTHENTICATION_FAILED")),
+    ] {
+        fake.script("GET", path, status, doc.clone());
+        let (s, v) = create_org_space(&app, &owner, org, body.clone()).await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            "{path} {status}: {v}"
+        );
+        fake.unscript("GET", path);
+    }
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_spaces WHERE organization_id = '{org}'"
+        ))
+        .await,
+        0,
+        "nothing was created while the decision was unavailable"
+    );
+    // Fully down: the directory already counts no membership (pre-existing behaviour).
+    fake.state.down.store(true, Ordering::SeqCst);
+    let (s, _) = create_org_space(&app, &owner, org, body.clone()).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    fake.state.down.store(false, Ordering::SeqCst);
+    let (s, v) = create_org_space(&app, &owner, org, body).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+}
+
+#[tokio::test]
+async fn s12_admission_and_admit_follow_the_organization_meetings_feature() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("owner").await;
+    let member = app.user("member").await;
+    let late = app.user("late").await;
+    let org = fake.add_org(
+        "s12-admit",
+        &[
+            (owner.id, "OWNER"),
+            (member.id, "MEMBER"),
+            (late.id, "MEMBER"),
+        ],
+    );
+
+    // ORGANIZATION_ONLY: membership grants entry only while meetings are on.
+    let (_, org_only) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "org", "accessPolicy": "ORGANIZATION_ONLY", "organizationId": org }),
+        )
+        .await;
+    let (s, v) = app
+        .join(org_only, Auth::Bearer(&member.token), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::OK, "allowed: {v}");
+    fake.set_policy(
+        org,
+        json!({ "revision": 5,
+                "features": { "meetings": false, "messaging": true, "calling": true },
+                "restrict": {} }),
+    );
+    let (s, v) = app
+        .join(org_only, Auth::Bearer(&late.token), json!({}))
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "MEETING_ACCESS_DENIED"),
+        "meetings turned off: the membership grants nothing: {v}"
+    );
+    // Policy read unavailable during a join that relies on membership → 503.
+    fake.set_policy(org, default_policy());
+    let policy = format!("/internal/v1/organizations/{org}/policies/effective");
+    fake.script("GET", &policy, 503, envelope("SERVICE_UNAVAILABLE"));
+    let (s, v) = app
+        .join(org_only, Auth::Bearer(&late.token), json!({}))
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+        "{v}"
+    );
+    fake.unscript("GET", &policy);
+    let (s, v) = app
+        .join(org_only, Auth::Bearer(&late.token), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::OK, "allowed again: {v}");
+
+    // Host admit into an organization's meeting.
+    let (_, waiting) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "lobby", "accessPolicy": "PUBLIC", "waitingRoomPolicy": "EVERYONE",
+                    "organizationId": org }),
+        )
+        .await;
+    let mut waiting_ids = vec![];
+    for name in ["guest-a", "guest-b", "guest-c"] {
+        let (s, v) = app
+            .join(waiting, Auth::None, json!({ "displayName": name }))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["participant"]["admissionState"], "WAITING", "{v}");
+        waiting_ids.push(v["participant"]["id"].clone());
+    }
+    // Allow.
+    let (s, v) = admit_one(&app, &owner, waiting, &waiting_ids[0]).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["changed"].as_array().unwrap().len(), 1);
+    // Deny: meetings turned off by the organization.
+    fake.set_policy(
+        org,
+        json!({ "revision": 6,
+                "features": { "meetings": false, "messaging": true, "calling": true },
+                "restrict": {} }),
+    );
+    let (s, v) = admit_one(&app, &owner, waiting, &waiting_ids[1]).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+    // Organizations down: 503, never an admit.
+    fake.set_policy(org, default_policy());
+    fake.state.down.store(true, Ordering::SeqCst);
+    let (s, v) = admit_one(&app, &owner, waiting, &waiting_ids[1]).await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+        "{v}"
+    );
+    fake.state.down.store(false, Ordering::SeqCst);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_participants WHERE conference_id = '{waiting}' \
+             AND admission_state = 'ADMITTED' AND user_id IS NULL"
+        ))
+        .await,
+        1,
+        "refused admits changed nothing"
+    );
+    let (s, v) = admit_one(&app, &owner, waiting, &waiting_ids[1]).await;
+    assert_eq!(s, StatusCode::OK, "allowed again: {v}");
+}
+
+#[tokio::test]
+async fn s12_legacy_mode_meeting_writes_are_unchanged() {
+    // No Organizations authority: the legacy directory decides exactly as before and no
+    // policy read is attempted.
+    let app = some!(app_with(None).await);
+    let admin = app.admin("platform").await;
+    let owner = app.user("owner").await;
+    let (s, v) = app
+        .post(
+            "/api/v2/admin/organizations",
+            Auth::Bearer(&admin.token),
+            json!({ "name": "s12 legacy", "slug": "s12-legacy", "ownerUserId": owner.id }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let org = uuid(&v["id"]);
+    let (s, v) = create_org_space(
+        &app,
+        &owner,
+        org,
+        json!({ "title": "legacy org meeting", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+}
