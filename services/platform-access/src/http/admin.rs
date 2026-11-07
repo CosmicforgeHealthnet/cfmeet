@@ -34,7 +34,10 @@ use crate::{
     identity::{
         applications::NewApplication,
         credentials::{CredentialFilter, IssueCredential, IssuedCredential, RotateCredential},
-        operator::OperatorContext,
+        operator::{
+            audit_trail, AuditQuery, AuditTargetKind, OperatorAction, OperatorContext,
+            AUDIT_PAGE_MAX,
+        },
         principals::NewPrincipal,
         service_accounts::NewServiceAccount,
         tenants::NewTenant,
@@ -44,6 +47,7 @@ use crate::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/admin/audit", get(list_audit))
         .route("/admin/tenants", post(create_tenant))
         .route("/admin/tenants/:tenant_id", get(get_tenant))
         .route("/admin/tenants/:tenant_id/status", post(set_tenant_status))
@@ -727,4 +731,105 @@ async fn tombstone_principal(
             .await
             .map_err(op_err)?,
     ))
+}
+
+/// `GET /admin/audit` query (Section 15, PLT-009): optional filters, keyset cursor.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AuditQueryParams {
+    #[serde(default)]
+    tenant_id: Option<Uuid>,
+    #[serde(default)]
+    target_kind: Option<String>,
+    #[serde(default)]
+    target_id: Option<Uuid>,
+    #[serde(default)]
+    actor: Option<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    correlation_id: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+    #[serde(default)]
+    limit: Option<u64>,
+}
+
+/// Opaque audit cursor: `<occurredAt micros>_<id>` of the last row of the previous page.
+fn audit_cursor(at: DateTime<Utc>, id: Uuid) -> String {
+    format!("{}_{}", at.timestamp_micros(), id.simple())
+}
+
+fn parse_audit_cursor(value: &str) -> Option<(DateTime<Utc>, Uuid)> {
+    let (micros, id) = value.split_once('_')?;
+    Some((
+        DateTime::<Utc>::from_timestamp_micros(micros.parse().ok()?)?,
+        Uuid::parse_str(id).ok()?,
+    ))
+}
+
+/// The operator audit trail, newest first. Operator-only: `platform-identity.administer`
+/// AND a named operator (`x-cf-operator`), like every mutation: audit evidence is never
+/// readable by a service without a named operator.
+async fn list_audit(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<AuditQueryParams>,
+) -> AccessResult<impl IntoResponse> {
+    operator(&caller, &headers)?;
+    let invalid = |m: &str| AccessError::Operator(ErrorCode::ValidationError, m.to_string());
+    let limit = q.limit.unwrap_or(50);
+    if !(1..=AUDIT_PAGE_MAX).contains(&limit) {
+        return Err(invalid("limit must be between 1 and 200"));
+    }
+    let query = AuditQuery {
+        tenant_id: q.tenant_id,
+        target_kind: q
+            .target_kind
+            .as_deref()
+            .map(|k| AuditTargetKind::parse(k).ok_or_else(|| invalid("unknown targetKind")))
+            .transpose()?,
+        target_id: q.target_id,
+        actor: q.actor,
+        action: q
+            .action
+            .as_deref()
+            .map(|a| OperatorAction::parse(a).ok_or_else(|| invalid("unknown action")))
+            .transpose()?,
+        correlation_id: q.correlation_id,
+        before: q
+            .cursor
+            .as_deref()
+            .map(|c| parse_audit_cursor(c).ok_or_else(|| invalid("malformed cursor")))
+            .transpose()?,
+        limit,
+    };
+    let page = audit_trail(s.platform.db(), &query).await.map_err(op_err)?;
+    Ok(Json(json!({
+        "items": page.items,
+        "nextCursor": page.next.map(|(at, id)| audit_cursor(at, id)),
+    })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_cursors_round_trip_and_refuse_garbage() {
+        let at = DateTime::<Utc>::from_timestamp_micros(1_790_000_000_123_456).unwrap();
+        let id = Uuid::new_v4();
+        assert_eq!(parse_audit_cursor(&audit_cursor(at, id)), Some((at, id)));
+        for bad in [
+            "",
+            "x",
+            "12_",
+            "_abc",
+            "12_not-a-uuid",
+            "nan_00000000000000000000000000000000",
+        ] {
+            assert!(parse_audit_cursor(bad).is_none(), "{bad}");
+        }
+    }
 }

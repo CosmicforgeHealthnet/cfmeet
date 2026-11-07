@@ -13,6 +13,7 @@ mod m20261016_000002_identity_change_feed;
 mod m20261016_000003_access_operations;
 mod m20261120_000004_credential_suspension_production_activation;
 mod m20261121_000005_first_party_organization_scopes;
+mod m20261122_000006_credential_usage_tenant_rename;
 
 /// Name of the table recording which Platform Access migrations have been applied.
 pub const MIGRATION_TABLE: &str = "platform_access_seaql_migrations";
@@ -28,6 +29,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_000003_access_operations::Migration),
             Box::new(m20261120_000004_credential_suspension_production_activation::Migration),
             Box::new(m20261121_000005_first_party_organization_scopes::Migration),
+            Box::new(m20261122_000006_credential_usage_tenant_rename::Migration),
         ]
     }
 

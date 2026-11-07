@@ -203,14 +203,14 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service (platform-identity.provision-first-party): idempotent create-or-return, read-back and tenant suspension / resumption."
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service (platform-identity.provision-first-party): idempotent create-or-return, read-back and tenant suspension / resumption. 1.7.0 (Blueprint Section 15): operator-only paginated read of the operator audit trail (GET /internal/v1/admin/audit, PLT-009), delegated EXTERNAL tenant rename (ORG-013) and creation-slug lookup for organization-creation reconciliation (ORG-014); credential views add lastAuthenticatedAt and expiringSoon (PLT-008)."
     },
     {
       "id": "cfmeet.numbering.common",
@@ -658,7 +658,7 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api-bundled",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "bundled/platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
