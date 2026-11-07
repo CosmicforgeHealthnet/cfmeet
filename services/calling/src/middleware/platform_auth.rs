@@ -283,11 +283,14 @@ async fn organization_context(
     state: &AppState,
     ctx: PlatformAuthContext,
     acting_principal: uuid::Uuid,
-) -> Result<PlatformAuthContext, Response> {
+) -> Result<PlatformAuthContext, Box<Response>> {
     if ctx.tenant_classification() != TenantClassification::FirstParty
         || !ctx.is_organization_tenant()
     {
-        return Err(reject(AuthFailureReason::NotOrganizationScope, None));
+        return Err(Box::new(reject(
+            AuthFailureReason::NotOrganizationScope,
+            None,
+        )));
     }
     match state
         .principals
@@ -303,12 +306,13 @@ async fn organization_context(
         Ok(_)
         | Err(PrincipalResolutionError::NotFound)
         | Err(PrincipalResolutionError::Inactive)
-        | Err(PrincipalResolutionError::InvalidReference) => {
-            Err(reject(AuthFailureReason::ActingPrincipalOutOfScope, None))
-        }
+        | Err(PrincipalResolutionError::InvalidReference) => Err(Box::new(reject(
+            AuthFailureReason::ActingPrincipalOutOfScope,
+            None,
+        ))),
         Err(PrincipalResolutionError::Unavailable { summary }) => {
             tracing::error!(%summary, "principal directory unavailable; organization request refused");
-            Err(CallingError::ServiceUnavailable.into_response())
+            Err(Box::new(CallingError::ServiceUnavailable.into_response()))
         }
     }
 }
@@ -346,7 +350,7 @@ pub async fn require_platform_credential(
                 };
                 match organization_context(&state, ctx, principal).await {
                     Ok(ctx) => Ok(ctx),
-                    Err(response) => return response,
+                    Err(response) => return *response,
                 }
             }
             (_, other) => other,

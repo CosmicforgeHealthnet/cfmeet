@@ -50,7 +50,12 @@ fn cases() -> Vec<Case> {
         Case {
             service: "calling",
             bin: "calling-migration",
-            part_vi: &["m20261201_000047_public_event_destinations"],
+            // + Blueprint Section 12 follow-up (enterprise audit acting principal): one
+            // nullable column on the append-only audit; its down only drops that column.
+            part_vi: &[
+                "m20261201_000047_public_event_destinations",
+                "m20261201_000048_enterprise_audit_acting_principal",
+            ],
             seed: Box::leak(
                 format!(
                     "INSERT INTO calling_outbox_events (id, event_id, source_event_id, aggregate_type, aggregate_id, \
@@ -72,6 +77,10 @@ fn cases() -> Vec<Case> {
                 (
                     "a published event stays published (never re-sent)",
                     "SELECT count(*) = 1 FROM calling_outbox_events WHERE status = 'PUBLISHED'",
+                ),
+                (
+                    "no existing audit row gains an acting principal",
+                    "SELECT count(*) = 0 FROM enterprise_admin_audit WHERE actor_principal_id IS NOT NULL",
                 ),
             ],
             part_vi_data: None,
