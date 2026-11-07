@@ -1,13 +1,14 @@
 //! Worker foundation: the Developer Platform's own background loop (no generic
 //! mega-worker). Each pass records the instance's heartbeat; Section 50+ jobs plug into
-//! [`run_once_with`] (Section 53: the central webhook delivery pass).
+//! [`run_once_with`] (Section 53: the central webhook delivery pass; Section 15: the
+//! Platform Access reconciliation of organization creations and renames).
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
-use crate::webhooks::WebhookService;
+use crate::{platform_access::PlatformAccessPort, webhooks::WebhookService};
 
 /// Records one heartbeat of `instance` (first beat inserts, later beats advance).
 pub async fn heartbeat_once<C: ConnectionTrait>(
@@ -49,7 +50,39 @@ pub async fn run_once_with(
     runtime_environment: &str,
     webhooks: Option<&WebhookService>,
 ) -> Result<(), DbErr> {
+    run_pass(db, instance, runtime_environment, webhooks, None).await
+}
+
+/// Section 15 (ORG-014 / ORG-013): settles organization creations and renames that did
+/// not complete against Platform Access. A failure is logged and retried next pass.
+pub async fn reconcile_platform(db: &DatabaseConnection, platform: &dyn PlatformAccessPort) {
+    match crate::control::organizations::reconcile_once(db, platform).await {
+        Ok(r) if r == Default::default() => {}
+        Ok(r) => tracing::info!(
+            compensated = r.compensated,
+            abandoned = r.abandoned,
+            completed = r.completed,
+            retried = r.retried,
+            names_synced = r.names_synced,
+            "platform reconciliation pass"
+        ),
+        Err(e) => tracing::warn!(error = ?e, "platform reconciliation pass failed"),
+    }
+}
+
+/// One full worker pass: heartbeat, sweeps, the Platform Access reconciliation when an
+/// authority is configured, and the webhook delivery pass when enabled.
+pub async fn run_pass(
+    db: &DatabaseConnection,
+    instance: &str,
+    runtime_environment: &str,
+    webhooks: Option<&WebhookService>,
+    platform: Option<&dyn PlatformAccessPort>,
+) -> Result<(), DbErr> {
     heartbeat_once(db, instance, runtime_environment, Utc::now()).await?;
+    if let Some(p) = platform {
+        reconcile_platform(db, p).await;
+    }
     let expired = crate::control::members::expire_due(db).await?;
     if expired > 0 {
         tracing::info!(expired, "pending invitations expired");
@@ -101,9 +134,38 @@ pub async fn run_with(
     webhooks: Option<WebhookService>,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
+    run_with_platform(
+        db,
+        instance,
+        runtime_environment,
+        interval,
+        webhooks,
+        None,
+        shutdown,
+    )
+    .await
+}
+
+/// [`run_with`] plus the Section 15 Platform Access reconciliation.
+pub async fn run_with_platform(
+    db: DatabaseConnection,
+    instance: String,
+    runtime_environment: String,
+    interval: Duration,
+    webhooks: Option<WebhookService>,
+    platform: Option<Arc<dyn PlatformAccessPort>>,
+    shutdown: impl std::future::Future<Output = ()>,
+) {
     tokio::pin!(shutdown);
     loop {
-        if let Err(e) = run_once_with(&db, &instance, &runtime_environment, webhooks.as_ref()).await
+        if let Err(e) = run_pass(
+            &db,
+            &instance,
+            &runtime_environment,
+            webhooks.as_ref(),
+            platform.as_deref(),
+        )
+        .await
         {
             tracing::warn!(summary = %crate::db::summarize_db_error(&e), "worker pass failed");
         }

@@ -19,6 +19,8 @@ pub struct AppState {
     pub quotas: QuotaSettings,
     /// `None`: no quota enforcement (tests of routing only).
     pub quota: Option<Arc<QuotaEngine>>,
+    /// Per-token requests per minute of end-user / device traffic (`0`: off).
+    pub token_rate_limit_per_minute: u64,
     pub upstream_timeout: Duration,
     pub max_body_bytes: usize,
     pub max_header_bytes: usize,
@@ -53,6 +55,7 @@ impl AppState {
             controls: RoutingControls::default(),
             quotas: QuotaSettings::default(),
             quota: None,
+            token_rate_limit_per_minute: 0,
             upstream_timeout: Duration::from_secs(10),
             max_body_bytes: 1_048_576,
             max_header_bytes: 16_384,
@@ -80,6 +83,12 @@ impl AppState {
 
     pub fn with_quota_engine(mut self, engine: Arc<QuotaEngine>) -> Self {
         self.quota = Some(engine);
+        self
+    }
+
+    /// PLT-012: the per-token ceiling of end-user / device traffic (`0`: off).
+    pub fn with_token_rate_limit(mut self, per_minute: u64) -> Self {
+        self.token_rate_limit_per_minute = per_minute;
         self
     }
 

@@ -411,6 +411,93 @@ trait Pipe: Sized {
 }
 impl<T> Pipe for T {}
 
+/// Section 15 (PLT-008): a successful authentication records the credential's last use —
+/// debounced, so a burst of requests writes once — and credential views expose it with
+/// the expiry warning. A failed authentication records nothing.
+#[tokio::test]
+async fn last_use_is_tracked_with_debounce_and_expiry_is_warned() {
+    use platform_access::identity::authentication::USAGE_DEBOUNCE_SECONDS;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("lastuse", "EXTERNAL", SCOPES).await;
+    let (view, secret) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
+    let id = uuid(&view["id"]);
+    assert!(view["lastAuthenticatedAt"].is_null());
+    assert_eq!(view["expiringSoon"], false);
+    async fn read_view(h: &Harness, id: uuid::Uuid) -> serde_json::Value {
+        h.admin_ok(
+            Method::GET,
+            &format!("/internal/v1/admin/credentials/{id}"),
+            None,
+        )
+        .await
+    }
+    async fn usage_rows(h: &Harness, id: uuid::Uuid) -> i64 {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        h.conn()
+            .query_one(Statement::from_string(
+                DbBackend::Postgres,
+                format!(
+                    "SELECT count(*) AS n FROM platform_credential_usage WHERE credential_id = '{id}'"
+                ),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "n")
+            .unwrap()
+    }
+    // A wrong secret is not a use.
+    let wrong = format!("{}x", &secret[..secret.len() - 1]);
+    assert_ne!(
+        h.authenticate(&wrong).await.body["outcome"],
+        "AUTHENTICATED"
+    );
+    assert_eq!(usage_rows(&h, id).await, 0);
+    let first = h.clock_now();
+    for _ in 0..5 {
+        assert_eq!(
+            h.authenticate(&secret).await.body["outcome"],
+            "AUTHENTICATED"
+        );
+    }
+    let v = read_view(&h, id).await;
+    let seen =
+        chrono::DateTime::parse_from_rfc3339(v["lastAuthenticatedAt"].as_str().unwrap()).unwrap();
+    assert_eq!(seen.timestamp(), first.timestamp());
+    // Inside the window nothing moves; after it, one more write.
+    h.clock
+        .advance(Duration::seconds(USAGE_DEBOUNCE_SECONDS - 1));
+    h.authenticate(&secret).await;
+    assert_eq!(
+        read_view(&h, id).await["lastAuthenticatedAt"],
+        v["lastAuthenticatedAt"]
+    );
+    h.clock.advance(Duration::seconds(2));
+    h.authenticate(&secret).await;
+    let later = read_view(&h, id).await;
+    assert_ne!(later["lastAuthenticatedAt"], v["lastAuthenticatedAt"]);
+    assert_eq!(usage_rows(&h, id).await, 1, "one row per credential");
+    // Close to expiry the view warns (default lifetime: 365 days).
+    h.clock.advance(Duration::days(360));
+    assert_eq!(read_view(&h, id).await["expiringSoon"], true);
+    // The delegation read carries the same fields.
+    let del = h
+        .admin_ok(
+            Method::GET,
+            &format!(
+                "/internal/v1/admin/service-accounts/{}/credentials",
+                c.sa("SANDBOX")
+            ),
+            None,
+        )
+        .await;
+    let listed = &del["credentials"][0];
+    assert_eq!(listed["expiringSoon"], true);
+    assert!(listed["lastAuthenticatedAt"].is_string());
+}
+
 trait ClockNow {
     fn clock_now(&self) -> chrono::DateTime<chrono::Utc>;
 }

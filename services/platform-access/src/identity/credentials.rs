@@ -118,6 +118,13 @@ pub struct CredentialView {
     pub supersession_valid_until: Option<DateTime<Utc>>,
     /// When the credential was suspended (Part VI §54; `None`: not suspended).
     pub suspended_at: Option<DateTime<Utc>>,
+    /// Section 15 (PLT-008): when the credential last authenticated (`None`: never, or
+    /// not since last-use tracking began). Debounced: may lag real use by up to
+    /// [`super::authentication::USAGE_DEBOUNCE_SECONDS`].
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+    /// Section 15 (PLT-008): the credential stops authenticating (expiry or end of its
+    /// rotation overlap) within [`EXPIRY_WARNING_DAYS`] days — rotate it now.
+    pub expiring_soon: bool,
     pub verifier_algorithm: String,
     pub verifier_key_version: i32,
     pub revision: i64,
@@ -720,6 +727,7 @@ impl PlatformService {
             .map(|e| (e.id, e.kind))
             .collect();
         let suspensions = suspensions_of(db, &ids).await?;
+        let last_use = last_use_of(db, &ids).await?;
         let mut scopes: HashMap<_, Vec<String>> = HashMap::new();
         for row in scopes_of(db, ids).await? {
             scopes.entry(row.credential_id).or_default().push(row.scope);
@@ -730,7 +738,22 @@ impl PlatformService {
                 let kind = *kinds
                     .get(&m.environment_id)
                     .ok_or(PlatformError::NotFound("environment"))?;
+                let effective_state = CredentialEffectiveState::evaluate(
+                    m.status,
+                    m.not_before,
+                    m.expires_at,
+                    m.supersession_valid_until,
+                    now,
+                )
+                .with_suspension(suspensions.contains_key(&m.id));
                 Ok(CredentialView {
+                    last_authenticated_at: last_use.get(&m.id).copied(),
+                    expiring_soon: expiring_soon(
+                        effective_state,
+                        m.expires_at,
+                        m.supersession_valid_until,
+                        now,
+                    ),
                     id: CredentialId::from_uuid(m.id),
                     masked: credential_format::masked(kind, &m.public_id, &m.last_four),
                     public_id: m.public_id,
@@ -742,14 +765,7 @@ impl PlatformService {
                     label: m.label,
                     scopes: scopes.remove(&m.id).unwrap_or_default(),
                     status: m.status,
-                    effective_state: CredentialEffectiveState::evaluate(
-                        m.status,
-                        m.not_before,
-                        m.expires_at,
-                        m.supersession_valid_until,
-                        now,
-                    )
-                    .with_suspension(suspensions.contains_key(&m.id)),
+                    effective_state,
                     suspended_at: suspensions.get(&m.id).copied(),
                     not_before: m.not_before,
                     expires_at: m.expires_at,
@@ -771,6 +787,55 @@ impl PlatformService {
             })
             .collect()
     }
+}
+
+/// `credential id -> last_authenticated_at` of the credentials among `ids` that have
+/// authenticated at least once (Section 15, PLT-008; debounced, see
+/// [`super::authentication::USAGE_DEBOUNCE_SECONDS`]).
+pub(crate) async fn last_use_of<C: ConnectionTrait>(
+    db: &C,
+    ids: &[uuid::Uuid],
+) -> PlatformResult<HashMap<uuid::Uuid, DateTime<Utc>>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = db
+        .query_all(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "SELECT credential_id, last_authenticated_at FROM platform_credential_usage \
+             WHERE credential_id = ANY($1)",
+            [ids.to_vec().into()],
+        ))
+        .await?;
+    let mut out = HashMap::new();
+    for r in rows {
+        out.insert(
+            r.try_get::<uuid::Uuid>("", "credential_id")?,
+            r.try_get::<DateTime<Utc>>("", "last_authenticated_at")?,
+        );
+    }
+    Ok(out)
+}
+
+/// How long before its working life ends a credential is flagged `expiringSoon`.
+pub const EXPIRY_WARNING_DAYS: i64 = 14;
+
+/// Whether a credential in `state` stops authenticating within the warning window: its
+/// expiry, or the end of its rotation overlap, is less than [`EXPIRY_WARNING_DAYS`] away.
+/// Only authenticating (or suspended, i.e. resumable) credentials warn; a revoked,
+/// expired or superseded credential is already out of service.
+pub fn expiring_soon(
+    state: CredentialEffectiveState,
+    expires_at: DateTime<Utc>,
+    supersession_valid_until: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> bool {
+    use CredentialEffectiveState as S;
+    if !matches!(state, S::Active | S::RotationOverlap | S::Suspended) {
+        return false;
+    }
+    let ends = supersession_valid_until.map_or(expires_at, |u| u.min(expires_at));
+    ends - now <= Duration::days(EXPIRY_WARNING_DAYS)
 }
 
 /// `credential id -> suspended_at` of the suspended credentials among `ids`.
@@ -819,6 +884,35 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc)
             + Duration::minutes(minutes)
+    }
+
+    #[test]
+    fn expiry_warnings_cover_expiry_and_overlap_end_of_working_credentials() {
+        use CredentialEffectiveState as S;
+        let day = 24 * 60;
+        let now = t(0);
+        // Far from expiry: no warning; inside the window: warning.
+        assert!(!expiring_soon(S::Active, t(30 * day), None, now));
+        assert!(expiring_soon(
+            S::Active,
+            t(EXPIRY_WARNING_DAYS * day),
+            None,
+            now
+        ));
+        assert!(expiring_soon(S::Active, t(day), None, now));
+        // A rotation overlap ending soon warns even when the expiry is far away.
+        assert!(expiring_soon(
+            S::RotationOverlap,
+            t(300 * day),
+            Some(t(60)),
+            now
+        ));
+        // A suspended credential can be resumed, so it still warns.
+        assert!(expiring_soon(S::Suspended, t(day), None, now));
+        // Out of service already: no warning.
+        for s in [S::Revoked, S::Expired, S::Superseded, S::NotYetValid] {
+            assert!(!expiring_soon(s, t(day), None, now), "{s:?}");
+        }
     }
 
     #[test]

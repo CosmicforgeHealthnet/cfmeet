@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 "quotaStoreConfigured": config.quotas.configured(),
                 "quotaStoreTimeoutMs": config.quotas.redis_timeout.as_millis() as u64,
+                "tokenRateLimitPerMinute": config.token_rate_limit_per_minute,
             })
         );
         return Ok(());
@@ -100,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         websockets = config.flags.websockets,
         routes = routes.len(),
         quotas = config.quotas.configured(),
+        token_rate_limit_per_minute = config.token_rate_limit_per_minute,
         "api gateway configuration loaded"
     );
     if !config.flags.public_routing {
@@ -136,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         .with_controls(config.controls.clone())
         .with_quotas(config.quotas.clone())
         .with_quota_engine(quota)
+        .with_token_rate_limit(config.token_rate_limit_per_minute)
         .with_upstream_timeout(config.upstream_timeout)
         .with_max_body_bytes(config.max_body_bytes)
         .with_header_limits(config.max_header_bytes, config.max_headers)

@@ -109,10 +109,10 @@ pub fn validate_envelope(
         .filter(|e| e.starts_with("evt_") && token(e, 64))
         .ok_or_else(invalid)?;
     if !text("event_type").is_some_and(envelope_type)
-        || !obj
+        || obj
             .get("schema_version")
             .and_then(Value::as_i64)
-            .is_some_and(|v| v >= 1)
+            .is_none_or(|v| v < 1)
         || !obj.get("payload").is_some_and(Value::is_object)
     {
         return Err(invalid());
