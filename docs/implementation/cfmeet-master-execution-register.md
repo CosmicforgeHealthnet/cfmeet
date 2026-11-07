@@ -27,9 +27,9 @@ Single register for the consolidated platform programme: one row per blueprint s
 | I | 7 Provisioning | 2 | PA delegation | scopes resolve | — | scope mapping, saga | organizations, platform-access, calling | — | — | — | — | NOT_STARTED |
 | I | 8 Workspace context | 0 | — | `/me/workspaces*` | — | — | organizations, meeting-service | — | — | — | — | NOT_STARTED |
 | II | 9 Personal onboarding | 3 | Hub 73 ops | phone verification (gated) | profile | phone binding | meeting-service, communications | — | — | — | SMS provider | NOT_STARTED |
-| II | 10 Meetings & calendar | 18 | v2 conferences/recurrence | agenda, ICS | reschedule/cancel | indexes | meeting-service | — | — | — | — | NOT_STARTED |
+| II | 10 Meetings & calendar | 18 (7 complete, 5 partial; rest frontend) | v2 conferences/recurrence/invitations | `GET /api/v2/me/conferences`, 2× `calendar.ics` | reschedule, space list (paginated), creates (Idempotency-Key), recurrence edits, summary views | `meetings_calendar_migrations` (idempotency keys, agenda indexes) | meeting-service | meeting-service 42353311875; certification 42356374877 | 3620317a | — | — | ENGINEERING_COMPLETE (partials listed) |
 | II | 11 Notifications | 2 (+2 external) | outboxes, Hub prefs | conditional | — | reminder jobs | meeting-service, Hub | — | — | — | push credentials | NOT_STARTED |
-| III | 12 Calling | 19 | `/v1/calls*`, `/v1/enterprise/*` | recordings list | lifecycle | — | calling | — | — | — | PSTN, numbers, SMS | NOT_STARTED |
+| III | 12 Calling | 19 (3 complete, 1 partial; externals gated) | `/v1/calls*`, `/v1/enterprise/*` | `GET /v1/enterprise/recordings` | auto-end, signaling revocation | none | calling | calling 42350889478; RTC 42350891700; enterprise 42350894085 | b4c9476a | — | PSTN, numbers, SMS (external); per-org scope after Section 7 | PARTIAL (lifecycle complete; per-organization enterprise scope pending Section 7 integration) |
 | III | 13 Messaging | 14 | messaging APIs | — | relay PATCH/query/cursor | — | messaging, meeting-service | — | — | — | E2EE review #13 | NOT_STARTED |
 | III | 14 Hub & revocation | 9 | Hub 73 ops | fan-out (internal) | context-aware reads | — | communications | — | — | — | — | NOT_STARTED |
 | IV | 15 Developer Platform & gateway | 10 | DP 126 ops, gateway 572 routes | 0 | scope fix | — | developer-platform, api-gateway | — | — | — | deploy approval | NOT_STARTED |
@@ -116,3 +116,11 @@ API delta (meeting-service): +5 operations (4 v2, 1 v1); before 219 → after 22
 - Section 5: create, detail, profile edit, members, invitations (hashed, email-bound), accept/decline/revoke, leave, ownership transfer, suspend/reactivate/archive, audit read, provisioning read — internal API plus 17 first-party relay routes.
 
 API delta: meeting-service v2 operations 157 → 174 (+17 relays, all EXCLUDED from the public gateway as `FIRST_PARTY_ORGANIZATIONS`, admin list OPERATOR_ADMIN); new Organizations internal API (see contract). Open: events have no delivery targets yet (Section 7); `organizations` backup catalog slot to be activated with drill fixtures before cutover; manager-facing member names (ORG-006).
+
+### Section 10 — Meetings, scheduling and calendar
+
+**Verdict:** ENGINEERING_COMPLETE for the backend scope (`3620317a`). Rules and client mapping: [meetings-calendar-section-10.md](../operations/meetings-calendar-section-10.md). New operations: agenda (`PUBLIC_CUSTOMER`), two ICS downloads (EXCLUDED `CALENDAR_FILE_DIRECT_INGRESS` — the gateway grammar has no file extensions). Meeting-service v2 operations 174 → 177; public gateway routes 572 → 574 together with Section 12. Remaining: MTG-006 reminders/notifications (Section 11), web display fixes MTG-004/FE-001 and forms (Section 17).
+
+### Section 12 — Calling lifecycle (first pass)
+
+**Verdict:** lifecycle ENGINEERING_COMPLETE (`b4c9476a`); the per-organization enterprise scope (CAL-007/ORG-012) waits for Section 7 provisioning. Auto-end rules (participation 60 s grace, idle 600 s, max 8 h; config-validated), reaper under row locks, no media-room resurrection, `GET /v1/enterprise/recordings` (Calling contract 1.15.0; operations 146 → 147), signaling sockets close (4401) on endpoint revocation. Client party rules: ADR 0009 amendment. Owner decisions left: CAL-018 decline-everywhere, CAL-019 attended transfer.
