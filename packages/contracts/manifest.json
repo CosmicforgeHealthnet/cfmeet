@@ -236,14 +236,14 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P). 1.13.0 x-cfmeet-required-scope (the API Gateway scope pre-check) on the 51 customer operations whose handler requires exactly one registry scope; GET /v1/numbers/catalog/countries/{countryCode} accepts numbers.search OR numbers.read and stays upstream-checked (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
@@ -522,14 +522,14 @@
     },
     {
       "id": "cfmeet.sms-gateway.http-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "sms-gateway/http/v1.openapi.json",
       "owner": "sms-gateway",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O)."
+      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O). 1.3.0 x-cfmeet-required-scope (the API Gateway scope pre-check): sms.read on message / thread reads, sms.send on sending and opt-outs (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.sms-gateway.internal-api",
@@ -566,14 +566,14 @@
     },
     {
       "id": "cfmeet.messaging.http-api",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "kind": "openapi",
       "path": "messaging/http/v1.openapi.json",
       "owner": "messaging",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head). 1.3.0 membership, messages, permalinks, read cursors, event replay, the MLS Delivery Service routes and blocks. 1.4.0 the realtime gateway (/v1/realtime WebSocket with single-use tickets, /v1/realtime/tickets with client tokens), client tokens and sessions, presence settings and push registrations. 1.5.0 attachment upload intents, finalization, metadata, download grants and proxied reads; legal holds. 1.6.0 MANAGED search, reports, moderation, exports, data deletion, audit. 1.7.0 beforeSequence history pagination, client-sessions/revoke-all. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.9.1: POST /v1/conversations/{id}/bans documents its actual 201 Created (was listed as 200; found by tests/authorization_matrix.rs). 1.10.0 device-to-device history transfer (/v1/messaging/history-transfers: request, list, get, sealed-history upload / download, complete, cancel; ADR 0052 AD-07) and witnessed tree heads. 1.11.0 POST /v1/conversations/{id}/attachments/{attachmentId}/thumbnail-grants (server thumbnails of MANAGED images; never PRIVATE_E2EE). 1.12.0 Part V backend closure: GET /v1/conversations/{id}/messages/{messageId}/revisions (policy-gated MANAGED revision history); PATCH message expectedEditCount; opt-in secure backups: POST /v1/messaging/backups, POST /v1/messaging/backups/{backupId}/finalize, GET /v1/messaging/backups/latest, POST /v1/messaging/backups/{backupId}/download-grants, DELETE /v1/messaging/backups/{backupId} (opaque client-encrypted objects; the server cannot decrypt). New kill switches (§134) refuse with 503 FEATURE_DISABLED KILL_SWITCH_ENGAGED; §105 device-direct REST: 53 member operations list clientToken as an alternative security requirement (the session's own principal and device only); every other operation keeps answering 401 CLIENT_TOKENS_NOT_ENABLED; GET /v1/conversations/{id}/members keyset pagination (limit, cursor)."
+      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head). 1.3.0 membership, messages, permalinks, read cursors, event replay, the MLS Delivery Service routes and blocks. 1.4.0 the realtime gateway (/v1/realtime WebSocket with single-use tickets, /v1/realtime/tickets with client tokens), client tokens and sessions, presence settings and push registrations. 1.5.0 attachment upload intents, finalization, metadata, download grants and proxied reads; legal holds. 1.6.0 MANAGED search, reports, moderation, exports, data deletion, audit. 1.7.0 beforeSequence history pagination, client-sessions/revoke-all. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.9.1: POST /v1/conversations/{id}/bans documents its actual 201 Created (was listed as 200; found by tests/authorization_matrix.rs). 1.10.0 device-to-device history transfer (/v1/messaging/history-transfers: request, list, get, sealed-history upload / download, complete, cancel; ADR 0052 AD-07) and witnessed tree heads. 1.11.0 POST /v1/conversations/{id}/attachments/{attachmentId}/thumbnail-grants (server thumbnails of MANAGED images; never PRIVATE_E2EE). 1.12.0 Part V backend closure: GET /v1/conversations/{id}/messages/{messageId}/revisions (policy-gated MANAGED revision history); PATCH message expectedEditCount; opt-in secure backups: POST /v1/messaging/backups, POST /v1/messaging/backups/{backupId}/finalize, GET /v1/messaging/backups/latest, POST /v1/messaging/backups/{backupId}/download-grants, DELETE /v1/messaging/backups/{backupId} (opaque client-encrypted objects; the server cannot decrypt). New kill switches (§134) refuse with 503 FEATURE_DISABLED KILL_SWITCH_ENGAGED; §105 device-direct REST: 53 member operations list clientToken as an alternative security requirement (the session's own principal and device only); every other operation keeps answering 401 CLIENT_TOKENS_NOT_ENABLED; GET /v1/conversations/{id}/members keyset pagination (limit, cursor). 1.15.0 x-cfmeet-required-scope (the API Gateway scope pre-check) on the 90 credential operations whose handler requires exactly one registry scope; GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.messaging.internal-api",
@@ -622,7 +622,7 @@
     },
     {
       "id": "cfmeet.messaging.http-api-bundled",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "kind": "openapi",
       "path": "bundled/messaging/http/v1.openapi.json",
       "owner": "messaging",
@@ -646,7 +646,7 @@
     },
     {
       "id": "cfmeet.numbering.internal-api-bundled",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "bundled/numbering/internal/v1.openapi.json",
       "owner": "numbering",
@@ -706,7 +706,7 @@
     },
     {
       "id": "cfmeet.sms-gateway.http-api-bundled",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/sms-gateway/http/v1.openapi.json",
       "owner": "sms-gateway",
@@ -866,7 +866,7 @@
     },
     {
       "id": "cfmeet.messaging.public-api",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "kind": "openapi",
       "path": "bundled/public/messaging/v1.openapi.json",
       "owner": "messaging",
@@ -878,7 +878,7 @@
     },
     {
       "id": "cfmeet.numbering.public-api",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "bundled/public/numbering/v1.openapi.json",
       "owner": "numbering",
@@ -890,7 +890,7 @@
     },
     {
       "id": "cfmeet.sms-gateway.public-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/public/sms/v1.openapi.json",
       "owner": "sms-gateway",

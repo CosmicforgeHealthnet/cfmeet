@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Numbering API",
-    "version": "1.12.0",
-    "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. 1.12.0 lifecycle stewardship (Part IV P–X): suspension / restoration, release / quarantine / reassignment, audited ownership history, usage, risk and appeals, portability (flagged), kill switches, drift reconciliation, and the relay-number import / lease / resolution API (Part P)."
+    "version": "1.13.0",
+    "description": "HTTP surface of services/numbering: GET /health, /ready and /openapi.json (public, no data); the customer API under /v1 (credential verified by Platform Access on every request; normalized 401, 429 when Platform Access throttles or a quota is exhausted, 503 when it is unreachable — fail closed): assignment / reservation reads, the catalog, KYC and eligibility (F), provider-neutral inventory search and reservations (H); provider callbacks (G); and the service-authenticated /internal/v1 API (cfmeet.platform.internal-http; permission from Numbering's own trust bundle). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 64 KiB. 1.12.0 lifecycle stewardship (Part IV P–X): suspension / restoration, release / quarantine / reassignment, audited ownership history, usage, risk and appeals, portability (flagged), kill switches, drift reconciliation, and the relay-number import / lease / resolution API (Part P). 1.13.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 51 customer operations whose handler requires exactly one registry scope; GET /v1/numbers/catalog/countries/{countryCode} accepts numbers.search OR numbers.read and stays upstream-checked (Section 15, PLT-011)."
   },
   "components": {
     "securitySchemes": {
@@ -8122,6 +8122,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller scope's DCN assignments, newest first (keyset pages). Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8206,6 +8207,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "Assign a PROVISIONED acquisition or a HELD reservation to its legal owner (201, RESERVED). The owner comes from trusted context (organizational classes: the authenticated organization; PERSONAL / PROFESSIONAL: a principal Platform Access resolves ACTIVE in the caller's environment — PRINCIPAL_NOT_FOUND / PRINCIPAL_NOT_ACTIVE / PRINCIPAL_UNVERIFIED otherwise). The eligibility decision must be of the requested class and, for an individual class, about the owner (ELIGIBILITY_SUBJECT_MISMATCH), and is RE-EVALUATED. Targets are bounded by the class (TARGET_NOT_PERMITTED). One transaction records the key, the assignment (REQUESTED → PENDING_ELIGIBILITY → ELIGIBLE → RESERVED), the hold take-over, the routing profile and the optional pool membership. Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8292,6 +8294,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "One DCN assignment of the caller's scope. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8347,6 +8350,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The append-only history of one assignment of the caller's scope. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8402,6 +8406,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "One reservation of the caller's scope, with its hold basis, conversion and provider release state. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8570,6 +8575,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The resolved capabilities of the caller's own assigned number. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -8971,6 +8977,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "The KYC requirements in force (fail closed: KYC_REQUIREMENTS_UNKNOWN). Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9056,6 +9063,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Open a KYC case (DRAFT) against the requirements in force; their snapshot is preserved on the case. Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9135,6 +9143,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "A KYC case with its missing requirements and evidence metadata. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9199,6 +9208,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "The immutable decision history and appeals of a case. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9263,6 +9273,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Attach protected evidence (a DRAFT case moves to EVIDENCE_REQUIRED). Refused (EVIDENCE_STORAGE_UNAVAILABLE) while no protected store is configured. Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9350,6 +9361,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Submit a case for verification (schedules one verification; an unknown verifier outcome is polled, never re-submitted). Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9427,6 +9439,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Appeal a rejection or revocation (back to UNDER_REVIEW for a human reviewer). Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -9514,6 +9527,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "Evaluate and record eligibility (never reserves or provisions). Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [],
         "responses": {
@@ -9579,6 +9593,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "A recorded eligibility decision of the caller's scope. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -10112,6 +10127,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "The supported countries of the caller's inventory class. Requires scope `numbers.search`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "200": {
@@ -10151,6 +10167,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "Number types / classes of a supported country with their capability metadata (generic catalog entries; provider applicability is internal). Requires scope `numbers.search`.",
         "parameters": [
           {
@@ -10206,6 +10223,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "Provider-neutral inventory search of the caller's inventory class (SANDBOX / TEST: synthetic test inventory only; PRODUCTION: real inventory only, a real provider consulted only when live telecom is allowed). Results are observations with freshness, never reservations; reserved, assigned, quarantined or uncertain numbers never appear. The first page of a query may refresh the providers (at most once per query and interval). Bounded: a country is required, pages hold at most 50 results, and each application environment has a per-minute search quota (429 RATE_LIMITED with Retry-After). Requires scope `numbers.search`.",
         "parameters": [
           {
@@ -10330,6 +10348,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller's reservations, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -10405,6 +10424,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Reserve a number (202: PENDING until the provider hold is confirmed; poll GET /v1/numbers/reservations/{reservationId}). In order: the number is in the caller's inventory class, allocatable with a fresh offer, every requested capability supported; the eligibility basis is a recorded ELIGIBLE decision of the caller's scope for this number's country / type / capabilities (PRODUCTION always), or a pre-eligibility hold where policy permits (SANDBOX / TEST); one transaction then records the scoped idempotency key, the PENDING reservation and the durable RESERVE provider command. Concurrent claims of one number: exactly one wins (others PRECONDITION_FAILED / NOT_ALLOCATABLE, never an oracle on another scope). A provider timeout after possible execution is reconciled from read-back, never retried blindly. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -10491,6 +10511,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Cancel a HELD reservation of the caller's scope. A provider hold is never assumed released: the reservation is CANCELLED with providerReleaseState PENDING and a RELEASE_HOLD command gives the hold back (the number returns to inventory only on the provider's evidence or a read-back). A reservation whose hold is still being requested is RESERVATION_BUSY (409); one whose outcome is uncertain is RECONCILIATION_REQUIRED. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -10575,6 +10596,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller's acquisitions, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -10641,6 +10663,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Provision a reservation that holds the number (202: PROVISIONING until the provider's acquisition is proven; poll GET). In order: the reservation is the caller's and still holds the number (HELD and unexpired, or taken over by an assignment of the scope); eligibility is RE-EVALUATED (KYC, risk, limits, capabilities, the serving provider's requirements) — a pre-eligibility hold never provisions; every capability is supported; the provider hold is read back (HOLD_LOST otherwise). One transaction then records the scoped idempotency key, the acquisition, the number's PROVISIONING and the durable PROVISION command. A provider timeout after possible execution is reconciled from read-back, never resent; a refusal FAILS the acquisition (retryable). PROVISIONED is not an active customer number. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -10727,6 +10750,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "An acquisition of the caller's scope: provisioning status, served capabilities, per-family route configuration and consumer readiness. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -10782,6 +10806,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Configure the provider voice / SMS routes of these capabilities' families on the current binding (durable CONFIGURE_* commands; 202). A configuration is CONFIGURED only on the provider's acknowledgement; a response for a superseded configuration or a changed binding never applies. A family is READY only once its consumer (Telephony / SMS Gateway) acknowledged the revision. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11008,6 +11033,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "RESERVED → ACTIVATING → ACTIVE: eligibility re-evaluated (and the owning principal still ACTIVE), the number PROVISIONED and EVERY routed family READY — provider route configured on the current binding AND acknowledged by its consumer (ROUTING_NOT_READY otherwise). Never ACTIVE because a number exists. An ACTIVE assignment is returned as is. Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11069,6 +11095,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The pinned routing revision, the number's routing revision and per-family readiness. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11122,6 +11149,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "A new routing revision (same class, same owner; targets bounded by the class). Advances the number's routing revision: routing grants bound to the previous revision stop verifying. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11196,6 +11224,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Employee offboarding of an EMPLOYEE_DIRECT number (NOT_AN_EMPLOYEE_NUMBER otherwise): unrouted or moved to a replacement — never the departing employee. Ownership is unchanged (organizational). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11270,6 +11299,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "An internal transfer within the same legal owner (see TransferAssignmentRequest). A different legal owner — an organization's number to a person, a person's number to the employer or to another person — is CROSS_OWNER_TRANSFER_UNSUPPORTED and changes nothing (release / re-acquisition are Workstream Q). Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11354,6 +11384,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller scope's organizational pools. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "200": {
@@ -11397,6 +11428,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Create an organizational pool (names unique among active pools: POOL_EXISTS). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "201": {
@@ -11461,6 +11493,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A pool with its current members (usage ASSIGNED while routed, AVAILABLE while unrouted). Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11516,6 +11549,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Add an organization-owned assignment of the scope (POOL_MEMBER_NOT_ORGANIZATIONAL otherwise; an assignment is in at most one pool: POOL_MEMBER_EXISTS). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -11590,6 +11624,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "End a current membership (kept as history). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -12105,6 +12140,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream P: local-first suspension of the caller's ACTIVE number — new caller-identity / SMS-sender grants and inbound resolutions are refused from that commit on, outstanding grants are revoked, the provider routes are disabled through the durable executor; ownership is retained; `number.suspended` is published. Idempotent. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -12179,6 +12215,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream P: restoration after the owner, KYC / eligibility basis, standing, risk, provider binding, capability truth and route readiness re-check (a failed check is recorded and refused with its rule); RESTORING while the provider RESTORE runs, RESTORED (and `number.restored`) only once it is confirmed. Operator / risk / provider suspensions are lifted by operators only (OPERATOR_RESTORE_REQUIRED). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -12243,6 +12280,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The open (else latest) suspension of the caller's assignment. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12298,6 +12336,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream Q: an auditable release (never a delete) in the mandatory order — grants and SMS submissions stopped, voice and SMS routing removed, organizational resources detached, removal evidence confirmed, provider release (PROVIDER_RELINQUISH), unknown outcomes reconciled, quarantine. 202 with the release; a future `effectiveAt` schedules it. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -12385,6 +12424,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The quarantine that followed the release of the caller's assignment. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12440,6 +12480,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A release request of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12495,6 +12536,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "Workstream Q: reassignment of a REASSIGNABLE number to the caller (see ReassignmentRequest); the new owner's eligibility, a provider read-back, fresh routes. Requires scope `numbers.assign`.",
         "parameters": [
           {
@@ -12574,6 +12616,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream S: the caller's usage per number and kind in [from, to) — quantities only (provider costs are internal evidence, never prices). Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12639,6 +12682,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream T: an explainable risk decision of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12694,6 +12738,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream T: an appeal (appended, PENDING until an operator decides). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -12768,6 +12813,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream U: the caller's port requests. Requires scope `numbers.read`.",
         "parameters": [],
         "responses": {
@@ -12809,6 +12855,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream U (NUMBERING_PORTING_ENABLED, else PORTING_DISABLED): a port-in / port-out request with its eligibility check (ownership evidence, KYC, gateway support). Port-out never touches routing before authoritative completion. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -12888,6 +12935,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A port request of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -12943,6 +12991,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Adds ownership evidence to a DOCUMENTS_REQUIRED request and re-checks it. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -13017,6 +13066,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Submits an eligible request once (an uncertain submission is UNKNOWN_PROVIDER_STATE, resolved by status queries, never resubmitted). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -13081,6 +13131,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Cancels a request that was not submitted. Requires scope `numbers.manage`.",
         "parameters": [
           {
