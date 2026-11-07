@@ -714,7 +714,11 @@ async fn the_relay_reaches_every_contract_operation_with_its_documented_query() 
             walked += 1;
         }
     }
-    assert!(walked >= 70, "walked {walked} relayed operations");
+    assert_eq!(
+        walked,
+        backend::services::unified_messaging::relay::ROUTES.len(),
+        "every allowlisted operation is a contract operation reachable through the router"
+    );
 
     // The replay cursor: the canonical `after` and the compatibility spelling both reach
     // Messaging as `after`.
