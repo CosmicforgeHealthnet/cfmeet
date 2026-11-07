@@ -186,7 +186,12 @@ fn cases() -> Vec<Case> {
         Case {
             service: "platform-access",
             bin: "platform-access-migration",
-            part_vi: &["m20261120_000004_credential_suspension_production_activation"],
+            // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058): both are newer than
+            // the deployed schema and are upgraded / rolled back together.
+            part_vi: &[
+                "m20261120_000004_credential_suspension_production_activation",
+                "m20261121_000005_first_party_organization_scopes",
+            ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
                    INSERT INTO platform_applications (id, tenant_id, slug, display_name) VALUES \
@@ -229,15 +234,26 @@ fn cases() -> Vec<Case> {
                     "SELECT count(*) = 0 FROM platform_production_activations",
                 ),
                 (
+                    "no organization scope is created by the upgrade",
+                    "SELECT count(*) = 0 FROM platform_organization_scopes",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
                 ),
             ],
+            // Data of the newest migration first refuses its own down (so nothing is rolled
+            // back), and the Part VI audit row would refuse 000004's.
             part_vi_data: Some(
                 "INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
                    (gen_random_uuid(), 'operator@cfmeet', 'corr-upgrade-sus', 'CREDENTIAL_SUSPENDED', 'CREDENTIAL', \
-                    '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001')",
+                    '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001'); \
+                 INSERT INTO platform_organization_scopes (organization_ref, capability, tenant_id, application_id, \
+                   environment_id, requested_by, created_at) VALUES \
+                   ('7e000000-0000-4000-8000-0000000000aa', 'primary', '7e000000-0000-4000-8000-000000000001', \
+                    '7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000003', \
+                    'cfmeet.organizations', now())",
             ),
         },
     ]

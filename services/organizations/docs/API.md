@@ -16,6 +16,14 @@ The API is the frozen internal contract
 | `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade) | admin listing / create / lifecycle |
 | `organization.migrate` (sensitive) | operator console, Meeting Service | import, reconciliation |
 
+Outbound (Section 7, only when provisioning is enabled): `platform-identity.provision-first-party`
+(receiver `cfmeet.platform-access`, grantable to `cfmeet.organizations` only) for
+`PUT` / `GET` `/internal/v1/organization-scopes/{organizationId}/primary` and `POST …/status`.
+
+Sections 6–7 routes (contract §8): teams and team members, `GET/PATCH …/policies`,
+`GET …/policies/effective`, `GET …/roles/capabilities`, `POST /internal/v1/organizations/scopes/resolve`
+and `POST /internal/v1/admin/organizations/{id}/provisioning/retry`.
+
 The registry in `packages/service-auth/src/permissions.rs` refuses any trust bundle that
 grants these elsewhere.
 
@@ -25,5 +33,7 @@ grants these elsewhere.
 * Unknown body fields are refused; no user id, role or tenant is ever taken from a body.
 * `Idempotency-Key` on create, admin create, invite and accept (24 h replay window).
 * `expectedVersion` on organization PATCH (organization version), member PATCH
-  (membership version) and ownership transfer (organization version).
+  (membership version), ownership transfer (organization version), team PATCH / archive
+  (team version) and team-member PATCH (team-membership version); `expectedRevision` on
+  policy PATCH (compare-and-swap).
 * Bodies: 64 KiB (import: 32 MiB).

@@ -12,6 +12,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261106_000001_organizations_foundation;
+mod m20261107_000002_teams_policies_provisioning;
 
 /// Name of the table recording which Organizations migrations have been applied.
 pub const MIGRATION_TABLE: &str = "organizations_seaql_migrations";
@@ -21,9 +22,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            m20261106_000001_organizations_foundation::Migration,
-        )]
+        vec![
+            Box::new(m20261106_000001_organizations_foundation::Migration),
+            Box::new(m20261107_000002_teams_policies_provisioning::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

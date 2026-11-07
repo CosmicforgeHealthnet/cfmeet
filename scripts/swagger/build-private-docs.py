@@ -24,6 +24,15 @@ SPECS = (
     ("SMS Gateway", "sms-gateway", "bundled/sms-gateway/http/v1.openapi.json"),
     ("SMS Gateway (internal)", "sms-gateway-internal", "bundled/sms-gateway/internal/v1.openapi.json"),
     ("Telephony (internal)", "telephony", "bundled/telephony/internal/v1.openapi.json"),
+    ("Organizations (internal)", "organizations", "bundled/organizations/internal/v1.openapi.json"),
+    ("Communications Hub", "communications", "bundled/communications/http/v1.openapi.json"),
+    ("Communications Hub (internal)", "communications-internal", "bundled/communications/internal/v1.openapi.json"),
+    ("Calling (communications internal)", "calling-communications-internal", "bundled/calling/communications-internal/v1.openapi.json"),
+    ("Meetings (communications internal)", "meeting-service-communications-internal", "bundled/meeting-service/communications-internal/v1.openapi.json"),
+    ("Messaging (communications internal)", "messaging-communications-internal", "bundled/messaging/communications-internal/v1.openapi.json"),
+    ("Developer Platform", "developer-platform", "bundled/platform-developer/http/v1.openapi.json"),
+    ("Developer Platform (internal and operator)", "developer-platform-internal", "bundled/platform-developer/internal/v1.openapi.json"),
+    ("API Gateway", "api-gateway", "bundled/platform-developer/gateway/http/v1.openapi.json"),
 )
 
 CSS_SRI = "sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn"

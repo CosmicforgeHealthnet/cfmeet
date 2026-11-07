@@ -10,6 +10,7 @@ pub mod delegation;
 pub mod error;
 pub mod internal;
 pub mod middleware;
+pub mod organization_scopes;
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -47,6 +48,7 @@ pub fn app(state: AppState) -> Router {
             internal::routes()
                 .merge(admin::routes())
                 .merge(delegation::routes())
+                .merge(organization_scopes::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

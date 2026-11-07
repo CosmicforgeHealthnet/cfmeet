@@ -17,9 +17,9 @@ use uuid::Uuid;
 use super::{authorize, middleware::Caller, page_limit, parse, respond};
 use crate::{
     db,
-    domain::{effective_capabilities, Capability, LifecycleStatus, Role},
+    domain::{effective_capabilities_with_policy, Capability, LifecycleStatus, Role},
     error::{ApiError, ApiResult, ErrorCode},
-    idempotency,
+    idempotency, provisioning,
     state::AppState,
     store::{self, Event, MembershipRow, OpContext, OrgRow, MEMBERSHIP_COLUMNS, ORG_COLUMNS},
     validation::{self, ProfileInput, ProfileValues},
@@ -452,6 +452,9 @@ async fn apply_transition(
     )
     .await?
     .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    // The technical scope follows in the same transaction (fail closed locally; the
+    // Platform Access tenant status is applied by the provisioning worker with retries).
+    provisioning::on_lifecycle(txn, ctx, now, org.id, status).await?;
     let (event_type, payload, action) = match status {
         LifecycleStatus::Suspended => (
             "organization.suspended",
@@ -582,6 +585,7 @@ struct UserOrgRow {
     org_status: String,
     org_provisioning: String,
     org_version: i64,
+    policy_document: Option<Value>,
     id: Uuid,
     organization_id: Uuid,
     user_id: Uuid,
@@ -609,16 +613,19 @@ pub async fn user_organizations(
     let rows: Vec<UserOrgRow> = db::all(
         &state.db,
         "SELECT o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.lifecycle_status AS org_status, o.provisioning_state AS org_provisioning, o.version AS org_version, \
+                p.document AS policy_document, \
                 m.id, m.organization_id, m.user_id, m.role, m.status, m.joined_via, m.created_by, m.created_at, m.updated_at, m.removed_at, m.version \
          FROM organization_memberships m JOIN organizations o ON o.id = m.organization_id \
+         LEFT JOIN organization_policies p ON p.organization_id = o.id \
          WHERE m.user_id = $1 AND m.status <> 'REMOVED' AND o.lifecycle_status IN ('ACTIVE', 'SUSPENDED') \
          ORDER BY o.name, o.id",
         vec![user_id.into()],
     )
     .await?;
-    let items: Vec<Value> = rows
-        .into_iter()
-        .map(|r| {
+    let mut items: Vec<Value> = Vec::with_capacity(rows.len());
+    for r in rows {
+        let policy = store::parse_policy(r.policy_document.as_ref())?;
+        items.push({
             let m = MembershipRow {
                 id: r.id,
                 organization_id: r.organization_id,
@@ -639,24 +646,14 @@ pub async fn user_organizations(
                     "lifecycleStatus": r.org_status, "provisioningState": r.org_provisioning, "version": r.org_version,
                 },
                 "membership": m.to_json(),
-                "capabilities": effective_capabilities(m.role(), m.status(), org_status),
+                "capabilities": effective_capabilities_with_policy(m.role(), m.status(), org_status, &policy),
             })
-        })
-        .collect();
+        });
+    }
     Ok(respond(
         StatusCode::OK,
         json!({ "userId": user_id, "items": items }),
     ))
-}
-
-#[derive(Debug, FromQueryResult)]
-struct WorkflowRow {
-    workflow_id: Uuid,
-    state: String,
-    step: Option<String>,
-    attempts: i32,
-    last_error_class: Option<String>,
-    updated_at: DateTime<Utc>,
 }
 
 /// `GET /internal/v1/organizations/{id}/provisioning` — truthful provisioning state.
@@ -676,25 +673,46 @@ pub async fn provisioning(
             .await?
             .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?,
     };
-    let workflow: Option<WorkflowRow> = db::one(
-        &state.db,
-        "SELECT workflow_id, state, step, attempts, last_error_class, updated_at FROM organization_provisioning WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1",
-        vec![id.into()],
+    let doc = provisioning::provisioning_json(&state.db, &org, state.provisioning_enabled).await?;
+    Ok(respond(StatusCode::OK, doc))
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/provisioning/retry` — operator retry of a
+/// FAILED (or cancelled) provisioning workflow; idempotent (READY / in-flight workflows
+/// are left as they are). An ARCHIVED organization is never re-provisioned.
+pub async fn provisioning_retry(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let txn = state.db.begin().await?;
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let now = db::now(&txn).await?;
+    let ctx = caller.as_operator();
+    let changed = provisioning::request_retry(&txn, &ctx, now, id).await?;
+    store::audit(
+        &txn,
+        &ctx,
+        now,
+        Some(id),
+        "provisioning.retry_requested",
+        "organization",
+        Some(id),
+        json!({ "changed": changed, "fromState": org.provisioning_state }),
     )
     .await?;
-    Ok(respond(
-        StatusCode::OK,
-        json!({
-            "organizationId": org.id,
-            "provisioningState": org.provisioning_state,
-            "workflowId": workflow.as_ref().map(|w| w.workflow_id),
-            "workflowState": workflow.as_ref().map(|w| w.state.clone()),
-            "step": workflow.as_ref().and_then(|w| w.step.clone()),
-            "attempts": workflow.as_ref().map(|w| w.attempts).unwrap_or(0),
-            "lastErrorClass": workflow.as_ref().and_then(|w| w.last_error_class.clone()),
-            "updatedAt": store::rfc3339(workflow.as_ref().map(|w| w.updated_at).unwrap_or(org.updated_at)),
-        }),
-    ))
+    let org = store::org(&txn, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    let doc = provisioning::provisioning_json(&txn, &org, state.provisioning_enabled).await?;
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, doc))
 }
 
 // ---------------------------------------------------------------------------------------

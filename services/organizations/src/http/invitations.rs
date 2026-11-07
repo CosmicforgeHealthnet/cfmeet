@@ -172,6 +172,10 @@ pub async fn create(
     if !can_invite(access.membership.role(), role) {
         return Err(ApiError::new(ErrorCode::PermissionDenied));
     }
+    // Section 6: external guests only when the organization policy allows them.
+    if role == Role::Guest && !store::policy(&txn, id).await?.guests.invitations_allowed {
+        return Err(ApiError::new(ErrorCode::PolicyRestricted));
+    }
     let now = db::now(&txn).await?;
     let ctx = caller.as_user();
     let existing: Option<InvitationRow> = db::one(
@@ -409,6 +413,16 @@ pub async fn accept(
         LifecycleStatus::Active => {}
         LifecycleStatus::Suspended => return Err(ApiError::new(ErrorCode::OrganizationSuspended)),
         LifecycleStatus::Archived => return Err(ApiError::new(ErrorCode::OrganizationArchived)),
+    }
+    // A pending GUEST invitation is not honoured once the policy disallows guests (it
+    // stays pending; revoking or re-allowing is the organization's decision).
+    if inv.role == Role::Guest.as_str()
+        && !store::policy(&txn, org.id)
+            .await?
+            .guests
+            .invitations_allowed
+    {
+        return Err(ApiError::new(ErrorCode::PolicyRestricted));
     }
     // An existing (non-removed) membership is kept unchanged: an invitation never changes
     // an existing role.

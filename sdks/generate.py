@@ -20,6 +20,9 @@ documents (packages/contracts/bundled/public/**) and the gateway route manifest
   * TypeScript models (generation.json `typescript.models`): a namespace per public domain
     with a type per component schema and the typed parameters / response of every REST
     operation.
+  * Dart models (generation.json `dart.models`): a library per public domain
+    (`package:cfmeet_platform_sdk/models/<domain>.dart`, imported with a prefix) with a
+    typed view class per object schema and a typedef per other schema.
 
 Rules enforced (exit 1 on violation):
 
@@ -522,6 +525,354 @@ def ts_models(ops: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------------------
+# Dart models (generation.json `dart.models`): one library per public domain (Dart has no
+# namespaces, and schema names repeat across domains), imported with a prefix:
+#
+#     import 'package:cfmeet_platform_sdk/models/meetings.dart' as meetings;
+#     final conference = meetings.Conference.fromJson(response.json! as Map<String, Object?>);
+#
+# Every object schema becomes a read-only view over the decoded JSON map: typed getters
+# (required, non-null properties are non-nullable), `toJson()` returning the original map
+# (unknown fields are preserved, so a newer server never breaks an older SDK) and a
+# `create(...)` factory with typed named parameters for request bodies. Enums and other
+# non-object schemas become typedefs of their Dart type; unions and inline objects stay
+# `Object?` / `Map<String, Object?>` (Dart has no union types).
+
+DART_RESERVED = {
+    "abstract", "as", "assert", "async", "await", "base", "break", "case", "catch", "class",
+    "const", "continue", "covariant", "default", "deferred", "do", "dynamic", "else", "enum",
+    "export", "extends", "extension", "external", "factory", "false", "final", "finally", "for",
+    "Function", "get", "hide", "if", "implements", "import", "in", "interface", "is", "late",
+    "library", "mixin", "new", "null", "of", "on", "operator", "part", "required", "rethrow",
+    "return", "sealed", "set", "show", "static", "super", "switch", "sync", "this", "throw",
+    "true", "try", "type", "typedef", "var", "void", "when", "while", "with", "yield",
+    # members every model has
+    "json", "toJson", "create", "fromJson", "hashCode", "runtimeType", "toString", "noSuchMethod",
+    # core types a getter must not shadow inside the class
+    "int", "double", "num", "bool",
+}
+DART_CORE_TYPES = {
+    "Object", "String", "int", "double", "num", "bool", "List", "Map", "Set", "Iterable", "Type",
+    "Function", "Error", "Exception", "Duration", "DateTime", "Uri", "Record", "Pattern",
+    "Match", "Symbol", "Null", "Never", "Future", "Stream", "Comparable", "Enum", "Sink",
+    "MapEntry", "BigInt", "Invocation", "StackTrace", "Runes", "RegExp", "Expando", "Iterator",
+}
+
+
+def dart_q(s: str) -> str:
+    return "'" + s.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$").replace("\n", " ") + "'"
+
+
+def dart_doc(text, indent: str) -> list[str]:
+    if not isinstance(text, str) or not text.strip() or PRODUCT_RE.search(text):
+        return []
+    para = " ".join(text.strip().split("\n\n")[0].split())
+    if len(para) > 400:
+        para = para[:399].rsplit(" ", 1)[0] + " …"
+    # `[` would be read as a doc reference; `<` as HTML.
+    para = para.replace("[", "(").replace("]", ")").replace("<", "‹").replace(">", "›")
+    return [f"{indent}/// {para}"]
+
+
+def dart_member(name: str) -> str:
+    out = camel(name)
+    return out + "$" if out in DART_RESERVED else out
+
+
+class DartModels:
+    """Dart type mapping of one public domain document."""
+
+    PREFIX = "#/components/schemas/"
+
+    def __init__(self, doc: dict):
+        self.doc = doc
+        self.schemas = doc.get("components", {}).get("schemas", {})
+        names = ts_model_names(list(self.schemas))
+        self.names = {n: (v + "Model" if v in DART_CORE_TYPES else v) for n, v in names.items()}
+        if len(set(self.names.values())) != len(self.names):
+            raise ValueError("Dart model names are not unique")
+        self._fields: dict[str, list | None] = {}
+        self._models: set[str] | None = None
+
+    def component(self, s):
+        if isinstance(s, dict) and isinstance(s.get("$ref"), str) and s["$ref"].startswith(self.PREFIX):
+            name = s["$ref"][len(self.PREFIX):]
+            if name in self.schemas:
+                return name
+        return None
+
+    def fields(self, name: str):
+        """[(json name, schema, required)] when the component is an object model, else None."""
+        if name in self._fields:
+            return self._fields[name]
+        self._fields[name] = None  # cycle guard
+        out = self._object_fields(self.schemas[name], 0)
+        self._fields[name] = out
+        return out
+
+    def _object_fields(self, s, depth: int):
+        if not isinstance(s, dict) or depth > 16:
+            return None
+        ref = self.component(s)
+        if ref is not None and len(s) == 1:
+            return self.fields(ref)
+        if any(k in s for k in ("oneOf", "anyOf", "enum", "const")):
+            return None
+        t = s.get("type")
+        if t not in (None, "object") or ("properties" not in s and "allOf" not in s):
+            return None
+        props: dict[str, tuple] = {}
+        required = {r for r in s.get("required", []) if isinstance(r, str)}
+        for member in s.get("allOf", []):
+            sub = self._object_fields(resolve(self.doc, member) if self.component(member) is None else member, depth + 1)
+            if sub is None:
+                if isinstance(member, dict) and set(member) <= TS_CONSTRAINT_KEYS | {"properties"}:
+                    required |= {r for r in member.get("required", []) if isinstance(r, str)}
+                    for k, v in member.get("properties", {}).items():
+                        props.setdefault(k, (v, False))
+                    continue
+                return None
+            for k, v, req in sub:
+                props[k] = (v, req or props.get(k, (None, False))[1])
+        for k, v in s.get("properties", {}).items():
+            props[k] = (v, props.get(k, (None, False))[1])
+        if not props:
+            return None
+        return [(k, v, req or k in required) for k, (v, req) in props.items()]
+
+    def nullable(self, s) -> bool:
+        if not isinstance(s, dict):
+            return s is True or s is None
+        if s.get("nullable") is True:
+            return True
+        t = s.get("type")
+        if isinstance(t, list) and "null" in t:
+            return True
+        for kw in ("oneOf", "anyOf"):
+            if any(isinstance(m, dict) and m.get("type") == "null" for m in s.get(kw, [])):
+                return True
+        if "enum" in s and None in s["enum"]:
+            return True
+        ref = self.component(s)
+        if ref is not None:
+            return self.nullable(self.schemas[ref])
+        return False
+
+    def type(self, s, depth: int = 0) -> str:
+        """Non-nullable Dart type of a schema (nullability is applied by the caller)."""
+        if depth > 24 or not isinstance(s, dict):
+            return "Object"
+        ref = self.component(s)
+        if ref is not None:
+            return self.names[ref]
+        if "$ref" in s:
+            return self.type(resolve(self.doc, s), depth + 1)
+        for kw in ("oneOf", "anyOf"):
+            if kw in s:
+                # `X | null` is X (nullability is decided by nullable()); real unions stay Object.
+                members = [x for x in s[kw] if not (isinstance(x, dict) and x.get("type") == "null")]
+                return self.type(members[0], depth + 1) if len(members) == 1 else "Object"
+        if "const" in s or "enum" in s:
+            values = [v for v in ([s["const"]] if "const" in s else s["enum"]) if v is not None]
+            kinds = {type(v) for v in values}
+            if kinds == {str}:
+                return "String"
+            if kinds <= {int}:
+                return "int"
+            if kinds <= {int, float}:
+                return "num"
+            if kinds == {bool}:
+                return "bool"
+            return "Object"
+        if "allOf" in s:
+            members = [m for m in s["allOf"] if not (isinstance(m, dict) and set(m) <= TS_CONSTRAINT_KEYS)]
+            if len(members) == 1 and "properties" not in s:
+                return self.type(members[0], depth + 1)
+            return "Map<String, Object?>"
+        t = s.get("type")
+        if isinstance(t, list):
+            kinds = [x for x in t if x != "null"]
+            t = kinds[0] if len(kinds) == 1 else None
+            if t is None:
+                return "Object"
+        if t is None:
+            if "properties" in s or "additionalProperties" in s:
+                t = "object"
+            elif "items" in s:
+                t = "array"
+            else:
+                return "Object"
+        if t == "string":
+            return "String"
+        if t == "integer":
+            return "int"
+        if t == "number":
+            return "num"
+        if t == "boolean":
+            return "bool"
+        if t == "array":
+            items = s.get("items")
+            return f"List<{self.full(items, depth + 1)}>" if isinstance(items, dict) else "List<Object?>"
+        if t == "object":
+            ap = s.get("additionalProperties")
+            if not s.get("properties") and isinstance(ap, dict):
+                return f"Map<String, {self.full(ap, depth + 1)}>"
+            return "Map<String, Object?>"
+        return "Object"
+
+    def full(self, s, depth: int = 0) -> str:
+        t = self.type(s, depth)
+        return t + "?" if t == "Object" or self.nullable(s) else t
+
+    def is_model(self, t: str) -> bool:
+        if self._models is None:
+            self._models = {self.names[n] for n in self.schemas if self.fields(n) is not None}
+        return t in self._models
+
+    def decode(self, t: str, v: str) -> str:
+        """Expression converting the JSON value `v` (an `Object?`) to Dart type `t`."""
+        if t.endswith("?"):
+            inner = t[:-1]
+            inner = self.alias_target(inner) or inner
+            if inner in ("String", "bool", "num"):
+                return f"{v} as {inner}?"
+            if inner == "int":
+                return f"({v} as num?)?.toInt()"
+            dec = self.decode(inner, v)
+            return v if dec == f"{v}!" else f"{v} == null ? null : {dec}"
+        if t == "Object":
+            return f"{v}!"
+        if t in ("String", "bool"):
+            return f"{v}! as {t}"
+        if t == "int":
+            return f"({v}! as num).toInt()"
+        if t == "num":
+            return f"{v}! as num"
+        if t.startswith("List<"):
+            inner = t[5:-1]
+            return f"({v}! as List<Object?>).map((e) => {self.decode(inner, 'e')}).toList()"
+        if t.startswith("Map<String, "):
+            inner = t[len("Map<String, "):-1]
+            if inner == "Object?":
+                return f"{v}! as Map<String, Object?>"
+            return f"({v}! as Map<String, Object?>).map((k, e) => MapEntry(k, {self.decode(inner, 'e')}))"
+        if self.is_model(t):
+            return f"{t}.fromJson({v}! as Map<String, Object?>)"
+        alias = self.alias_target(t)
+        return self.decode(alias, v) if alias else f"{v}! as {t}"
+
+    def encode(self, t: str, v: str) -> str:
+        """Expression converting Dart value `v` of type `t` to its JSON form."""
+        if t.endswith("?"):
+            # `x?.toJson()` / `x?.map(...)`: the value is a parameter, so `?.` is exact.
+            enc = self.encode(t[:-1], v)
+            return enc if enc == v else enc.replace(v + ".", v + "?.", 1)
+        if t.startswith("List<"):
+            inner = t[5:-1]
+            enc = self.encode(inner, "e")
+            return v if enc == "e" else f"{v}.map((e) => {enc}).toList()"
+        if t.startswith("Map<String, "):
+            inner = t[len("Map<String, "):-1]
+            enc = self.encode(inner, "e")
+            return v if enc == "e" else f"{v}.map((k, e) => MapEntry(k, {enc}))"
+        if self.is_model(t):
+            return f"{v}.toJson()"
+        alias = self.alias_target(t)
+        return self.encode(alias, v) if alias else v
+
+    def alias_target(self, t: str):
+        """The non-nullable Dart type behind a typedef'd component, so decoding converts
+        lists / maps element by element instead of casting to a generic type."""
+        for n, name in self.names.items():
+            if name == t and self.fields(n) is None:
+                target = self.type(self.schemas[n])
+                return None if target == t else target
+        return None
+
+
+def dart_models(domain: str, doc: dict) -> str:
+    m = DartModels(doc)
+    head = HEADER.replace("packages/contracts/manifest.json", "the public API documents (packages/contracts/bundled/public)")
+    lines = [f"// {head}", f"// Models of the public `{domain}` API; see lib/models/{domain.replace('-', '_')}.dart.", "",
+             "// ignore_for_file: lines_longer_than_80_chars, constant_identifier_names, non_constant_identifier_names",
+             ""]
+    for name in sorted(m.schemas, key=lambda n: m.names[n]):
+        schema = m.schemas[name]
+        cls = m.names[name]
+        doc = dart_doc(schema.get("description") if isinstance(schema, dict) else None, "")
+        lines += doc
+        fields = m.fields(name)
+        if fields is None:
+            target = m.type(schema)
+            if target == cls:
+                target = "Object"
+            if isinstance(schema, dict) and isinstance(schema.get("enum"), list) and target == "String":
+                values = ", ".join(str(v) for v in schema["enum"] if v is not None)
+                if values and not PRODUCT_RE.search(values):
+                    if doc:
+                        lines.append("///")
+                    lines += dart_doc(f"One of: {values}.", "")
+            lines.append(f"typedef {cls} = {target};")
+            lines.append("")
+            continue
+        lines.append(f"class {cls} {{")
+        lines.append(f"  /// Wraps a decoded JSON object (unknown fields are kept).")
+        lines.append(f"  const {cls}.fromJson(this.json);")
+        lines.append("")
+        members: dict[str, int] = {}
+        params, entries, getters = [], [], []
+        for prop, sub, required in sorted(fields, key=lambda f: f[0]):
+            base = dart_member(prop)
+            members[base] = members.get(base, 0) + 1
+            member = base if members[base] == 1 else f"{base}{members[base]}"
+            t = m.type(sub)
+            nullable = (not required) or m.nullable(sub) or t == "Object"
+            if t == "Object":
+                full = "Object?"
+            else:
+                full = t + "?" if nullable else t
+            doc = dart_doc(sub.get("description") if isinstance(sub, dict) else None, "  ")
+            getters += doc
+            getters.append(f"  {full} get {member} => {m.decode(full, f'json[{dart_q(prop)}]')};")
+            getters.append("")
+            if required:
+                params.append(f"required {full} {member}")
+                entries.append(f"      {dart_q(prop)}: {m.encode(full, member)},")
+            else:
+                params.append(f"{full} {member}")
+                enc = m.encode(t if t != "Object" else "Object", member)
+                entries.append(f"      if ({member} != null) {dart_q(prop)}: {enc},")
+        lines.append("  /// Builds the JSON object from typed values (absent optional values are omitted).")
+        lines.append(f"  factory {cls}.create({{{', '.join(params)}}}) =>")
+        lines.append(f"      {cls}.fromJson(<String, Object?>{{")
+        lines += [e.replace("      ", "        ", 1) for e in entries]
+        lines.append("      });")
+        lines.append("")
+        lines.append("  /// The JSON object, including fields this SDK version does not know.")
+        lines.append("  final Map<String, Object?> json;")
+        lines.append("")
+        lines += getters
+        lines.append("  Map<String, Object?> toJson() => json;")
+        lines.append("}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def dart_model_library(domain: str, file: str) -> str:
+    return "\n".join([
+        f"// {HEADER}",
+        f"/// Typed models of the public `{domain}` API, generated from its published contract.",
+        "///",
+        "/// Import with a prefix (schema names repeat across domains):",
+        f"/// `import 'package:cfmeet_platform_sdk/models/{file}.dart' as {camel(domain)};`",
+        "library;",
+        "",
+        f"export '../src/generated/models/{file}.dart';",
+        "",
+    ])
+
+
 SDK_DISCOVERY = ROOT / "infra/api-gateway/sdk-discovery.json"
 
 
@@ -559,7 +910,12 @@ def sdk_discovery(config, cat, ops) -> str:
 
 
 def main(argv: list[str]) -> int:
-    check = "--check" in argv
+    # Only "--check" (verify, write nothing) or no argument (regenerate) is accepted;
+    # --help or a typo must never fall through to writing files.
+    if argv not in ([], ["--check"]):
+        print(f"usage: {Path(__file__).name} [--check]\n  no argument: regenerate and write\n  --check: fail if any output is stale (writes nothing)", file=sys.stderr)
+        return 0 if argv in (["-h"], ["--help"]) else 2
+    check = argv == ["--check"]
     config = load(HERE / "generation.json")
     manifest = load(ROOT / "packages/contracts/manifest.json")
     cat, errors = catalogue(config, manifest)
@@ -579,7 +935,25 @@ def main(argv: list[str]) -> int:
     }
     if config["typescript"].get("models"):
         outputs[HERE / config["typescript"]["models"]] = ts_models(ops)
+    if config["dart"].get("models"):
+        models_dir = HERE / config["dart"]["models"]
+        for f in sorted(PUBLIC_DOCS.glob("*/v1.openapi.json")):
+            domain = f.parent.name
+            if domain == "aggregate":
+                continue
+            file = domain.replace("-", "_")  # Dart file names are lower_case_with_underscores
+            outputs[models_dir / f"{file}.dart"] = dart_models(domain, load(f))
+            outputs[HERE / "dart/lib/models" / f"{file}.dart"] = dart_model_library(domain, file)
     outputs[SDK_DISCOVERY] = sdk_discovery(config, cat, ops)
+    # A domain that leaves the public API must not leave a stale model library behind.
+    if config["dart"].get("models"):
+        for folder in (HERE / config["dart"]["models"], HERE / "dart/lib/models"):
+            for f in sorted(folder.glob("*.dart")) if folder.is_dir() else []:
+                if f not in outputs:
+                    if check:
+                        errors.append(f"{f.relative_to(ROOT)}: not generated any more; run python3 sdks/generate.py")
+                    else:
+                        f.unlink()
     for path, text in outputs.items():
         if check:
             if not path.is_file() or path.read_text(encoding="utf-8") != text:

@@ -29841,6 +29841,10 @@
     },
     "/v1/developer-platform/context": {
       "get": {
+        "tags": [
+          "gateway"
+        ],
+        "summary": "Get the developer platform context",
         "operationId": "getDeveloperPlatformContext",
         "security": [
           {
@@ -29885,9 +29889,6 @@
         "x-cfmeet-route-id": "gateway.getDeveloperPlatformContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "gateway"
         ]
       }
     },
@@ -48148,7 +48149,6 @@
             ]
           }
         ],
-        "x-cfmeet-required-scope": "each requested privacy.contacts.* scope",
         "requestBody": {
           "required": true,
           "content": {

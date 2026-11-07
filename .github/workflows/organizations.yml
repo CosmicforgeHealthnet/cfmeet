@@ -111,6 +111,12 @@ jobs:
         run: cargo test --locked --test authorization
       - name: Migration import — shared checksum vector, re-import, conflicts, orphans, CLI
         run: cargo test --locked --test import
+      - name: Teams — managers own teams only, ACTIVE members, hierarchy, history, audit / outbox (Section 6)
+        run: cargo test --locked --test teams
+      - name: Policies — role / resource matrix, CAS, restrictive-only policies (Section 6)
+        run: cargo test --locked --test policies
+      - name: Provisioning saga — fake Platform Access, every certified failure mode (Section 7)
+        run: cargo test --locked --test provisioning
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
