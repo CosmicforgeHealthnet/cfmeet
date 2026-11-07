@@ -25,12 +25,14 @@ v2 operations: 174 → 177. Every existing request and response stays valid: new
 fields and query parameters are optional, `nextCursor` on the space list appears only when
 paginating.
 
-Gateway classification: the three new operations are `PUBLIC_CUSTOMER` in
-`infra/api-gateway/public-routes.json`, like the existing meeting reads they extend
-(`GET /api/v2/meeting-spaces`, `/meeting-spaces/{id}/conferences`, `/conferences/{id}`,
-`/me/organizations`). They support the gateway's machine callers: an environment's machine
-caller gets its own environment's meetings in the agenda and may export them. The gateway
-relays `Cache-Control`, `Content-Disposition` and `Idempotent-Replayed`.
+Gateway classification (`infra/api-gateway/public-routes.json`): the agenda is
+`PUBLIC_CUSTOMER`, like the meeting reads it extends (`GET /api/v2/meeting-spaces`,
+`/meeting-spaces/{id}/conferences`, `/conferences/{id}`, `/me/organizations`); it supports the
+gateway's machine callers (an environment's machine caller gets its own environment's meetings).
+The two `calendar.ics` downloads are `EXCLUDED` with the new reason
+`CALENDAR_FILE_DIRECT_INGRESS`: the gateway's route grammar rejects file-extension segments
+(`ForbiddenPattern`), so they stay on the Meeting Service ingress for signed-in app users; the
+JSON agenda is the routed customer API. The gateway relays `Idempotent-Replayed`.
 
 ## Rules chosen
 

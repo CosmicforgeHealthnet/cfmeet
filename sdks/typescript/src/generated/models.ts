@@ -5850,11 +5850,6 @@ export namespace Meetings {
       params: { path: { id: string } };
       response: AttendanceReport;
     };
-    /** GET /api/v2/conferences/{id}/calendar.ics; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
-    v2ConferenceCalendar: {
-      params: { path: { id: string } };
-      response: ArrayBuffer;
-    };
     /** GET /api/v2/conferences/{id}/quality; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
     v2ConferenceQuality: {
       params: { path: { id: string } };
@@ -6110,11 +6105,6 @@ export namespace Meetings {
     v2MediaCredential: {
       params: { path: { id: string }; body: MediaCredentialRequest };
       response: MediaCredentialResponse;
-    };
-    /** GET /api/v2/meeting-spaces/{id}/calendar.ics; auth MEETING_SESSION; retry SAFE */
-    v2MeetingSpaceCalendar: {
-      params: { path: { id: string } };
-      response: ArrayBuffer;
     };
     /** POST /api/v2/conferences/{id}/breakouts/move; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2MoveParticipant: {
