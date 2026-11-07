@@ -128,6 +128,10 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     // policy and the effective organization constraints, read with the acting user.
     ("GET", "/internal/v1/organizations/{}/roles/capabilities"),
     ("GET", "/internal/v1/organizations/{}/policies/effective"),
+    // Blueprint Section 12 follow-up (per-organization Enterprise Calling): the verified
+    // technical scope and the organization's Calling service binding, read with the
+    // acting user (membership required).
+    ("POST", "/internal/v1/organizations/scopes/resolve"),
     ("GET", "/internal/v1/users/{}/organizations"),
     ("GET", "/internal/v1/admin/organizations"),
     ("POST", "/internal/v1/admin/organizations"),
@@ -661,6 +665,48 @@ impl EffectiveOrganizationPolicy {
     }
 }
 
+/// The organization's Calling service binding (ids only — Platform Access re-verifies the
+/// credential live on every forwarded request).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallingServiceBinding {
+    pub service_account_id: Uuid,
+    pub credential_id: Uuid,
+}
+
+/// `POST /internal/v1/organizations/scopes/resolve`: the VERIFIED technical scope of an
+/// organization (only answered when the organization is ACTIVE and provisioning READY).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedOrganizationScope {
+    pub organization_id: Uuid,
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub mapping_version: i64,
+    /// `None` until an operator binds the organization's Calling credential.
+    pub calling: Option<CallingServiceBinding>,
+}
+
+impl ResolvedOrganizationScope {
+    /// A missing id, or a present but malformed binding, refuses the whole answer.
+    pub fn from_json(v: &Value) -> Option<Self> {
+        let calling = match &v["serviceBindings"]["calling"] {
+            Value::Null => None,
+            b => Some(CallingServiceBinding {
+                service_account_id: uuid_field(b, "serviceAccountId")?,
+                credential_id: uuid_field(b, "credentialId")?,
+            }),
+        };
+        Some(Self {
+            organization_id: uuid_field(v, "organizationId")?,
+            tenant_id: uuid_field(v, "tenantId")?,
+            application_id: uuid_field(v, "applicationId")?,
+            environment_id: uuid_field(v, "environmentId")?,
+            mapping_version: v["mappingVersion"].as_i64().unwrap_or(0),
+            calling,
+        })
+    }
+}
+
 /// A JSON array of strings (`None` for anything else).
 fn string_list(v: &Value) -> Option<Vec<String>> {
     v.as_array()?
@@ -1025,6 +1071,27 @@ impl OrganizationsAuthority {
             .filter(|p| p.organization_id == organization)
             .ok_or(AuthorityError::Unavailable(Unavailable(
                 "malformed effective policy",
+            )))
+    }
+
+    /// `POST /internal/v1/organizations/scopes/resolve` for the acting user (Organizations
+    /// requires an ACTIVE membership; `409 PROVISIONING_PENDING` until the scope is READY).
+    pub async fn resolve_scope(
+        &self,
+        organization: Uuid,
+        actor: &ActingUser,
+    ) -> Result<ResolvedOrganizationScope, AuthorityError> {
+        let body = self
+            .read(
+                &Call::new(Method::POST, "/internal/v1/organizations/scopes/resolve")
+                    .actor(actor)
+                    .body(json!({ "organizationId": organization, "capability": "primary" })),
+            )
+            .await?;
+        ResolvedOrganizationScope::from_json(&body)
+            .filter(|s| s.organization_id == organization)
+            .ok_or(AuthorityError::Unavailable(Unavailable(
+                "malformed scope resolution",
             )))
     }
 

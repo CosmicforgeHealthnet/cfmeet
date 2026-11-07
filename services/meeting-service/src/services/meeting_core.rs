@@ -162,6 +162,10 @@ pub struct DomainCore {
     /// Blueprint Section 4: the Organizations Service integration (`None` = legacy mode).
     pub organization_authority:
         Option<crate::services::organizations_authority::SharedOrganizationsAuthority>,
+    /// Blueprint Section 12 follow-up: per-organization Enterprise Calling relay
+    /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`, the default).
+    pub organization_calling:
+        Option<crate::services::organization_calling::SharedOrganizationCalling>,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
     pub appointments:

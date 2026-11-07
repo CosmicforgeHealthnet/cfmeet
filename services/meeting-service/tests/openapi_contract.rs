@@ -126,6 +126,12 @@ fn every_v2_route_is_documented() {
         // Blueprint Section 8 — workspace context (per request; no switch endpoint)
         ("get", "/api/v2/me/workspaces"),
         ("get", "/api/v2/me/workspaces/{workspaceId}/capabilities"),
+        // Blueprint Section 12 follow-up — per-organization Enterprise Calling relay
+        ("get", "/api/v2/organizations/{id}/calling/{path}"),
+        ("post", "/api/v2/organizations/{id}/calling/{path}"),
+        ("put", "/api/v2/organizations/{id}/calling/{path}"),
+        ("patch", "/api/v2/organizations/{id}/calling/{path}"),
+        ("delete", "/api/v2/organizations/{id}/calling/{path}"),
         // Blueprint Section 4 — first-party organizations (Organizations Service relay)
         ("post", "/api/v2/organizations"),
         ("get", "/api/v2/organizations/{id}"),

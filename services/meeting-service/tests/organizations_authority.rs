@@ -37,6 +37,7 @@ use axum::{
 };
 use backend::services::{
     ops_metrics::OPS_METRICS,
+    organization_calling::OrganizationCalling,
     organizations_authority::{
         AuthorityMode, AuthorityStats, OrganizationsAuthority, OrganizationsClient,
         SharedOrganizationsAuthority,
@@ -2598,4 +2599,648 @@ async fn s12_legacy_mode_meeting_writes_are_unchanged() {
     )
     .await;
     assert_eq!(s, StatusCode::CREATED, "{v}");
+}
+
+// ---------------------------------------------------------------------------------------
+// Blueprint Section 12 follow-up — per-organization Enterprise Calling relay
+// (CAL-007 / ORG-012 / CAL-009). Fake Calling + Platform Access peers verify Meeting
+// Service's token with receiver-authoritative trust bundles and record the signed
+// delegated context.
+// ---------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct PeerRecord {
+    method: String,
+    path: String,
+    query: Option<String>,
+    authorization: bool,
+    idempotency_key: Option<String>,
+    tenant: Uuid,
+    application: Uuid,
+    environment: Uuid,
+    service_account: Uuid,
+    credential: Option<Uuid>,
+    principal: Option<(Uuid, String)>,
+    body: Value,
+}
+
+struct PeerState {
+    calling: ServiceTokenVerifier,
+    platform_access: ServiceTokenVerifier,
+    records: Mutex<Vec<PeerRecord>>,
+    rejected: Mutex<u32>,
+    principal: Uuid,
+    /// Scripted Calling answer (status, body) for every customer path.
+    calling_answer: Mutex<Option<(u16, Value)>>,
+    /// Scripted Platform Access answer for principal ensure.
+    ensure_answer: Mutex<Option<(u16, Value)>>,
+}
+
+struct Peers {
+    addr: SocketAddr,
+    state: Arc<PeerState>,
+}
+
+fn peer_verifier(jwk: &PublicJwk, receiver: &str, permission: &str) -> ServiceTokenVerifier {
+    let bundle = json!({ "bundle_version": 1, "receiver": receiver, "runtime_environment": "test",
+        "trusted_issuers": [{ "issuer": "cfmeet.meeting-service", "audience": receiver,
+            "runtime_environment": "test", "keys": [jwk], "permissions": [permission] }]});
+    let policy = TrustPolicy::from_json(
+        &bundle.to_string(),
+        &ServiceId::parse(receiver).unwrap(),
+        RuntimeEnvironment::Test,
+    )
+    .expect("the permission registry accepts the bundle");
+    ServiceTokenVerifier::new(policy, Arc::new(SystemClock))
+}
+
+async fn peer_handler(
+    State(state): State<Arc<PeerState>>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let path = uri.path().to_string();
+    let to_platform_access = path.starts_with("/internal/v1/principals/");
+    let (verifier, permission) = if to_platform_access {
+        (
+            &state.platform_access,
+            InternalPermission::PlatformPrincipalEnsure,
+        )
+    } else {
+        (
+            &state.calling,
+            InternalPermission::CallingRequestActForOrganization,
+        )
+    };
+    let Ok(ctx) = verifier.verify_headers(&headers) else {
+        *state.rejected.lock().unwrap() += 1;
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(envelope("AUTHENTICATION_FAILED")),
+        )
+            .into_response();
+    };
+    let Some(delegated) = ctx.delegated_platform_context().cloned() else {
+        *state.rejected.lock().unwrap() += 1;
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(envelope("AUTHENTICATION_FAILED")),
+        )
+            .into_response();
+    };
+    assert!(ctx.require_permission(permission).is_ok());
+    let header = |n: &str| {
+        headers
+            .get(n)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    state.records.lock().unwrap().push(PeerRecord {
+        method: method.to_string(),
+        path: path.clone(),
+        query: uri.query().map(str::to_string),
+        authorization: headers.contains_key("authorization"),
+        idempotency_key: header("idempotency-key"),
+        tenant: delegated.tenant_id(),
+        application: delegated.application_id(),
+        environment: delegated.application_environment_id(),
+        service_account: delegated.initiating_service_account_id(),
+        credential: delegated.initiating_credential_id(),
+        principal: delegated.initiating_principal().map(|p| {
+            (
+                p.principal_id,
+                serde_json::to_value(p.principal_kind)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        }),
+        body: body.clone(),
+    });
+    if to_platform_access {
+        if let Some((status, doc)) = state.ensure_answer.lock().unwrap().clone() {
+            return (StatusCode::from_u16(status).unwrap(), Json(doc)).into_response();
+        }
+        return Json(
+            json!({ "principal": { "id": state.principal, "kind": "NATIVE_CF_USER" },
+                            "created": true }),
+        )
+        .into_response();
+    }
+    if let Some((status, doc)) = state.calling_answer.lock().unwrap().clone() {
+        return (StatusCode::from_u16(status).unwrap(), Json(doc)).into_response();
+    }
+    match method.as_str() {
+        "POST" => (
+            StatusCode::CREATED,
+            Json(json!({ "id": Uuid::new_v4(), "echo": body })),
+        )
+            .into_response(),
+        "DELETE" => StatusCode::NO_CONTENT.into_response(),
+        _ => Json(json!({ "data": [], "path": path })).into_response(),
+    }
+}
+
+impl Peers {
+    async fn start(jwk: PublicJwk) -> Self {
+        let state = Arc::new(PeerState {
+            calling: peer_verifier(
+                &jwk,
+                "cfmeet.calling",
+                "calling-request.act-for-organization",
+            ),
+            platform_access: peer_verifier(
+                &jwk,
+                "cfmeet.platform-access",
+                "platform-principal.ensure",
+            ),
+            records: Mutex::new(vec![]),
+            rejected: Mutex::new(0),
+            principal: Uuid::new_v4(),
+            calling_answer: Mutex::new(None),
+            ensure_answer: Mutex::new(None),
+        });
+        let router = Router::new()
+            .fallback(peer_handler)
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        Self { addr, state }
+    }
+
+    fn url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    fn records(&self) -> Vec<PeerRecord> {
+        self.state.records.lock().unwrap().clone()
+    }
+
+    fn calling_records(&self) -> Vec<PeerRecord> {
+        self.records()
+            .into_iter()
+            .filter(|r| !r.path.starts_with("/internal/"))
+            .collect()
+    }
+}
+
+struct CallingWorld {
+    app: TestApp,
+    fake: Fake,
+    peers: Peers,
+    org: Uuid,
+    owner: User,
+    member: User,
+    triple: (Uuid, Uuid, Uuid),
+    binding: (Uuid, Uuid),
+}
+
+impl CallingWorld {
+    fn scope_doc(&self, bound: bool) -> Value {
+        json!({ "organizationId": self.org, "capability": "primary", "tenantId": self.triple.0,
+                "applicationId": self.triple.1, "environmentId": self.triple.2,
+                "mappingVersion": 1, "verifiedAt": now(),
+                "serviceBindings": { "calling": if bound {
+                    json!({ "serviceAccountId": self.binding.0, "credentialId": self.binding.1, "version": 1 })
+                } else { Value::Null } } })
+    }
+
+    fn bind(&self, bound: bool) {
+        self.fake.script(
+            "POST",
+            "/internal/v1/organizations/scopes/resolve",
+            200,
+            self.scope_doc(bound),
+        );
+    }
+
+    async fn call(
+        &self,
+        method: Method,
+        user: &User,
+        rest: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.app
+            .call(
+                method,
+                &format!("/api/v2/organizations/{}/calling/{rest}", self.org),
+                Auth::Bearer(&user.token),
+                body,
+            )
+            .await
+    }
+}
+
+async fn calling_world(enabled: bool) -> Option<CallingWorld> {
+    let (signer, fake) = organizations().await;
+    let peers = Peers::start(signer.public_jwk()).await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let relay = enabled.then(|| {
+        Arc::new(
+            OrganizationCalling::new(
+                signer.clone(),
+                &peers.url(),
+                &peers.url(),
+                Duration::from_secs(3),
+            )
+            .unwrap(),
+        )
+    });
+    let app = TestApp::with(TestOptions {
+        organizations_authority: Some(live),
+        organization_calling: relay,
+        ..TestOptions::default()
+    })
+    .await?;
+    let owner = app.user("enterprise-owner").await;
+    let member = app.user("enterprise-member").await;
+    let org = fake.add_org("s12-calling", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let world = CallingWorld {
+        app,
+        fake,
+        peers,
+        org,
+        owner,
+        member,
+        triple: (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()),
+        binding: (Uuid::new_v4(), Uuid::new_v4()),
+    };
+    world.bind(true);
+    Some(world)
+}
+
+#[tokio::test]
+async fn s12_organization_calling_uses_the_organization_scope_and_the_acting_member() {
+    let w = some!(calling_world(true).await);
+    let id = Uuid::new_v4();
+
+    // Allow: every method reaches Calling in the ORGANIZATION's scope, with its own
+    // credential (id only) and the acting member's principal — never a customer credential.
+    let (s, v) = w
+        .call(
+            Method::GET,
+            &w.owner,
+            "v1/enterprise/extensions?limit=5",
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .app
+        .call_with_headers(
+            Method::POST,
+            &format!(
+                "/api/v2/organizations/{}/calling/v1/enterprise/queues",
+                w.org
+            ),
+            &[
+                ("authorization", &format!("Bearer {}", w.owner.token)),
+                ("content-type", "application/json"),
+                ("idempotency-key", "queue-create-1"),
+            ],
+            json!({ "name": "Front desk" }).to_string(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["echo"]["name"], "Front desk");
+    let (s, v) = w
+        .call(
+            Method::PUT,
+            &w.owner,
+            &format!("v1/enterprise/ring-groups/{id}/members"),
+            Some(json!({ "members": [] })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .call(
+            Method::PATCH,
+            &w.owner,
+            &format!("v1/enterprise/policies/{id}"),
+            Some(json!({ "expectedVersion": 1 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = w
+        .call(Method::DELETE, &w.owner, &format!("v1/webhooks/{id}"), None)
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+
+    let calls = w.peers.calling_records();
+    assert_eq!(
+        calls.iter().map(|r| r.method.as_str()).collect::<Vec<_>>(),
+        ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    );
+    for r in &calls {
+        assert!(!r.authorization, "no customer credential is ever sent");
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(r.credential, Some(w.binding.1));
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+    }
+    assert_eq!(calls[0].path, "/v1/enterprise/extensions");
+    assert_eq!(calls[0].query.as_deref(), Some("limit=5"));
+    assert_eq!(calls[1].idempotency_key.as_deref(), Some("queue-create-1"));
+    assert_eq!(calls[1].body["name"], "Front desk");
+    // The member's principal is ensured once in the organization's environment (no
+    // credential in that call) and cached; it is not the personal-scope principal.
+    let ensures: Vec<PeerRecord> = w
+        .peers
+        .records()
+        .into_iter()
+        .filter(|r| r.path == "/internal/v1/principals/ensure")
+        .collect();
+    assert_eq!(ensures.len(), 1);
+    assert_eq!(
+        (ensures[0].tenant, ensures[0].environment),
+        (w.triple.0, w.triple.2)
+    );
+    assert_eq!(ensures[0].credential, None);
+    assert_eq!(
+        ensures[0].body["externalReference"],
+        format!("cfmeet-user:{}", w.owner.id)
+    );
+    assert_eq!(
+        w.app
+            .scalar(&format!(
+                "SELECT count(*) FROM communication_principal_links WHERE subject_id = '{}' \
+                 AND environment_id = '{}'",
+                w.owner.id, w.triple.2
+            ))
+            .await,
+        1
+    );
+    // Organizations was asked with the verified acting user only.
+    let resolve = w
+        .fake
+        .last("POST", "/internal/v1/organizations/scopes/resolve");
+    assert_eq!(resolve.acting_user, Some(w.owner.id.to_string()));
+    assert_eq!(resolve.body["organizationId"], json!(w.org));
+    // Calling's own refusals are relayed with their envelope.
+    *w.peers.state.calling_answer.lock().unwrap() = Some((
+        404,
+        json!({ "error": { "code": "NOT_FOUND", "message": "x" } }),
+    ));
+    let (s, v) = w
+        .call(
+            Method::GET,
+            &w.owner,
+            &format!("v1/enterprise/extensions/{id}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("NOT_FOUND"))
+    );
+    assert_eq!(*w.peers.state.rejected.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn s12_organization_calling_admin_rights_come_from_organizations() {
+    let w = some!(calling_world(true).await);
+    let forwarded = |w: &CallingWorld| w.peers.calling_records().len();
+
+    // Deny: a MEMBER does not hold calling.enterprise.manage (the read agrees).
+    let (_, caps) = w
+        .app
+        .get(caps_uri(w.org), Auth::Bearer(&w.member.token))
+        .await;
+    assert_eq!(
+        reason_of(&caps, "calling.enterprise.manage"),
+        "CAPABILITY_NOT_GRANTED"
+    );
+    let (s, v) = w
+        .call(Method::GET, &w.member, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{v}"
+    );
+    // Deny: the organization turned Calling off — even for its OWNER.
+    w.fake.set_policy(
+        w.org,
+        json!({ "revision": 2, "features": { "meetings": true, "messaging": true, "calling": false },
+                "restrict": {} }),
+    );
+    let (_, caps) = w
+        .app
+        .get(caps_uri(w.org), Auth::Bearer(&w.owner.token))
+        .await;
+    assert_eq!(
+        reason_of(&caps, "calling.enterprise.manage"),
+        "POLICY_RESTRICTED"
+    );
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+    w.fake.set_policy(w.org, default_policy());
+    // Not an organization administration route: never forwarded.
+    for rest in [
+        "v1/calls",
+        "v1/calling/endpoints",
+        "v1/privacy-relay/contexts",
+        "v1/enterprise/../calls",
+    ] {
+        let (s, v) = w.call(Method::GET, &w.owner, rest, None).await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::NOT_FOUND, "ENDPOINT_NOT_FOUND"),
+            "{rest}: {v}"
+        );
+    }
+    // A foreign / unknown / malformed organization: the same non-enumerating answer.
+    let outsider = w.app.user("outsider").await;
+    let (s, v) = w
+        .call(Method::GET, &outsider, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::NOT_FOUND, "ORGANIZATION_NOT_FOUND"),
+        "{v}"
+    );
+    let (s, v) = w
+        .app
+        .get(
+            "/api/v2/organizations/not-a-uuid/calling/v1/enterprise/extensions",
+            Auth::Bearer(&w.owner.token),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::NOT_FOUND, "ORGANIZATION_NOT_FOUND"),
+        "{v}"
+    );
+    // Not set up yet: no Calling binding, or the scope is still provisioning.
+    w.bind(false);
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    w.fake.script(
+        "POST",
+        "/internal/v1/organizations/scopes/resolve",
+        409,
+        envelope("PROVISIONING_PENDING"),
+    );
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "PROVISIONING_PENDING"),
+        "{v}"
+    );
+    // Bad bodies are refused before anything is forwarded.
+    w.bind(true);
+    let (s, v) = w
+        .app
+        .post_raw(
+            &format!(
+                "/api/v2/organizations/{}/calling/v1/enterprise/queues",
+                w.org
+            ),
+            Auth::Bearer(&w.owner.token),
+            "[1,2]",
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
+        "{v}"
+    );
+    assert_eq!(forwarded(&w), 0, "nothing denied ever reached Calling");
+    // Unauthenticated.
+    let (s, v) = w
+        .app
+        .get(
+            format!(
+                "/api/v2/organizations/{}/calling/v1/enterprise/extensions",
+                w.org
+            ),
+            Auth::None,
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
+    );
+}
+
+#[tokio::test]
+async fn s12_organization_calling_fails_closed() {
+    let w = some!(calling_world(true).await);
+    let unavailable = |s: StatusCode, v: &Value, what: &str| {
+        assert_eq!(
+            (s, code(v)),
+            (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            "{what}: {v}"
+        );
+    };
+    // Organizations down: 503, never forwarded.
+    w.fake.state.down.store(true, Ordering::SeqCst);
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    unavailable(s, &v, "organizations down");
+    w.fake.state.down.store(false, Ordering::SeqCst);
+    assert!(w.peers.calling_records().is_empty());
+    // Scope resolution unavailable.
+    w.fake.script(
+        "POST",
+        "/internal/v1/organizations/scopes/resolve",
+        503,
+        envelope("SERVICE_UNAVAILABLE"),
+    );
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    unavailable(s, &v, "scope resolution unavailable");
+    w.bind(true);
+    // Platform Access unavailable / refusing the organization principal.
+    *w.peers.state.ensure_answer.lock().unwrap() = Some((503, envelope("SERVICE_UNAVAILABLE")));
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    unavailable(s, &v, "platform access unavailable");
+    *w.peers.state.ensure_answer.lock().unwrap() =
+        Some((409, envelope("DELEGATED_CONTEXT_INVALID")));
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    *w.peers.state.ensure_answer.lock().unwrap() = None;
+    // Calling refuses the forward (flag off, trust bundle, revoked credential) or fails.
+    for (status, doc) in [
+        (401, envelope("AUTHENTICATION_FAILED")),
+        (500, envelope("INTERNAL_ERROR")),
+        (503, envelope("SERVICE_UNAVAILABLE")),
+    ] {
+        *w.peers.state.calling_answer.lock().unwrap() = Some((status, doc));
+        let (s, v) = w
+            .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+            .await;
+        unavailable(s, &v, &format!("calling {status}"));
+    }
+    *w.peers.state.calling_answer.lock().unwrap() = None;
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "recovers: {v}");
+}
+
+#[tokio::test]
+async fn s12_organization_calling_is_disabled_by_default() {
+    // ORGANIZATION_CALLING_SCOPE=shared (no relay): the shared-credential path stays in
+    // use and the relay answers 409 without contacting anyone.
+    let w = some!(calling_world(false).await);
+    let (s, v) = w
+        .call(Method::GET, &w.owner, "v1/enterprise/extensions", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    assert!(w.peers.records().is_empty());
+    // Legacy organizations mode: also disabled.
+    let app = some!(app_with(None).await);
+    let user = app.user("legacy").await;
+    let (s, v) = app
+        .get(
+            format!(
+                "/api/v2/organizations/{}/calling/v1/enterprise/extensions",
+                Uuid::new_v4()
+            ),
+            Auth::Bearer(&user.token),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
 }

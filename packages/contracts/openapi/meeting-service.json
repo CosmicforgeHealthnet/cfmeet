@@ -14375,6 +14375,513 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/calling/{path}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization Enterprise Calling read (allowlisted path, e.g. `v1/enterprise/extensions`).",
+        "description": "Reads the organization's own Enterprise Calling configuration (extensions, ring groups,\nqueues, IVR flows, business hours, policies, voicemail, recordings, audit, webhooks,\nusage and limits) in the organization's provisioned Calling scope — never the shared\nCF Meet scope. The caller must hold `calling.enterprise.manage` in the organization and\nthe organization must not have turned Calling off (the decision\n`GET /api/v2/me/workspaces/{id}/capabilities` reports). The path must match the\nallowlist exactly with lowercase canonical UUIDs; anything else is ENDPOINT_NOT_FOUND\nand is not forwarded. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
+        "operationId": "v2_organization_calling_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Calling Enterprise administration path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calling contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_CALLING_DISABLED / PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization Enterprise Calling create / action (allowlisted path).",
+        "description": "Creates an Enterprise Calling resource (extension, queue, IVR version, webhook…) or runs\nan action (recording media access, business-hours evaluation, delivery replay) in the\norganization's provisioned Calling scope, acting for the caller: Calling's enterprise\naudit records the caller's own principal. Requires `calling.enterprise.manage` in the\norganization and Calling not turned off by its policy. The JSON object body (at most\n1 MiB) and an `Idempotency-Key` are forwarded. Calling's status and JSON body are\nreturned. Disabled by default (`409 ORGANIZATION_CALLING_DISABLED`).",
+        "operationId": "v2_organization_calling_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Calling Enterprise administration path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Calling contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_CALLING_DISABLED / PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization Enterprise Calling replace (allowlisted path, e.g. members or schedules).",
+        "description": "Replaces a set in the organization's Enterprise Calling configuration (department,\nring-group or queue members, business-hours schedule, IVR activation, voicemail read\nstate) in the organization's provisioned Calling scope, acting for the caller. Requires\n`calling.enterprise.manage` and Calling not turned off by the organization. The JSON\nobject body (at most 1 MiB) is forwarded; Calling's status and JSON body are returned.\nDisabled by default (`409 ORGANIZATION_CALLING_DISABLED`).",
+        "operationId": "v2_organization_calling_put",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Calling Enterprise administration path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Calling contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_CALLING_DISABLED / PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization Enterprise Calling removal (allowlisted path).",
+        "description": "Disables or deletes an Enterprise Calling resource (a recording or voicemail message, a\nforwarding rule, a webhook…) in the organization's provisioned Calling scope, acting for\nthe caller; Calling's enterprise audit records the caller's own principal. Requires\n`calling.enterprise.manage` and Calling not turned off by the organization. No body is\nsent. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
+        "operationId": "v2_organization_calling_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Calling Enterprise administration path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calling contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_CALLING_DISABLED / PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization Enterprise Calling partial update (allowlisted path).",
+        "description": "Updates an Enterprise Calling resource (policy, department, extension, ring group,\nqueue, IVR flow, forwarding rule, mailbox, recording policy, webhook) in the\norganization's provisioned Calling scope, acting for the caller; Calling enforces\noptimistic concurrency. Requires `calling.enterprise.manage` and Calling not turned off\nby the organization. Calling's status and JSON body are returned. Disabled by default\n(`409 ORGANIZATION_CALLING_DISABLED`).",
+        "operationId": "v2_organization_calling_patch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Calling Enterprise administration path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Calling contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_CALLING_DISABLED / PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/invitations": {
       "get": {
         "tags": [
@@ -18704,6 +19211,8 @@
           "IDEMPOTENCY_CONFLICT",
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
+          "ORGANIZATION_POLICY_RESTRICTED",
+          "ORGANIZATION_CALLING_DISABLED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]

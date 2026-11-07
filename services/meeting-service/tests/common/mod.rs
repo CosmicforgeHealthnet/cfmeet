@@ -433,6 +433,10 @@ pub struct TestOptions {
     /// `authoritative`); `None` = legacy mode. Ignored when `organizations` is non-empty.
     pub organizations_authority:
         Option<backend::services::organizations_authority::SharedOrganizationsAuthority>,
+    /// Blueprint Section 12 follow-up: the per-organization Enterprise Calling relay
+    /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`).
+    pub organization_calling:
+        Option<backend::services::organization_calling::SharedOrganizationCalling>,
 }
 
 impl Default for TestOptions {
@@ -457,6 +461,7 @@ impl Default for TestOptions {
             unified_messaging: None,
             platform: None,
             organizations_authority: None,
+            organization_calling: None,
         }
     }
 }
@@ -735,6 +740,7 @@ impl TestApp {
             telemetry: opts.telemetry.clone().unwrap_or_else(|| sink.clone()),
             organizations,
             organization_authority: opts.organizations_authority.clone(),
+            organization_calling: opts.organization_calling.clone(),
             rtc: provider,
             adapters,
             appointments: opts.appointments.unwrap_or_else(|| {

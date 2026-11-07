@@ -559,6 +559,20 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/organizations/:id/archive",
             post(organizations::archive_business_organization),
         )
+        // Blueprint Section 12 follow-up: per-organization Enterprise Calling relay
+        // (ORGANIZATION_CALLING_SCOPE=organization; 409 ORGANIZATION_CALLING_DISABLED
+        // otherwise).
+        .route(
+            "/organizations/:id/calling/*path",
+            get(crate::handlers::v2::organization_calling::calling_get)
+                .post(crate::handlers::v2::organization_calling::calling_post)
+                .put(crate::handlers::v2::organization_calling::calling_put)
+                .patch(crate::handlers::v2::organization_calling::calling_patch)
+                .delete(crate::handlers::v2::organization_calling::calling_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::services::organization_calling::MAX_BODY_BYTES,
+                )),
+        )
         .route(
             "/organizations/:id/audit-events",
             get(organizations::list_organization_audit_events),
