@@ -2,8 +2,8 @@
 # shellcheck source-path=SCRIPTDIR
 # Logical backup of ONE service-owned PostgreSQL database. Every CF Meet service database
 # is listed in catalog.conf (meeting-service, communications, developer-platform,
-# platform-access, calling, messaging, numbering, privacy-relay, telephony, sms-gateway; a
-# reserved slot for organizations). Each service is backed up on its own; there is no
+# platform-access, calling, messaging, numbering, privacy-relay, telephony, sms-gateway,
+# organizations). Each service is backed up on its own; there is no
 # shared platform dump.
 #
 #   backup.sh --service <name> <connection> --out <file.dump>

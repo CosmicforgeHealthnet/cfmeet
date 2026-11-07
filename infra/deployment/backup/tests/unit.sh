@@ -59,8 +59,8 @@ cfb_load_service meeting-service
 [ "${CFB_OPTIONAL[*]}" = "account_communications_migrations account_communications_facade_migrations account_security_migrations" ] &&
   pass "meeting-service records both additive histories" || fail "meeting-service optional histories"
 [ "${CFB_IDENTITY[*]}" = "users meetings" ] && pass "meeting-service identity tables" || fail "meeting-service identity tables"
-cfb_load_service organizations && [ "$CFB_STATUS" = reserved ] && pass "organizations slot is reserved" || fail "organizations slot"
-expect_exit 2 "backup.sh refuses the reserved organizations slot" env CFMEET_PG_WRAPPER=false bash "$tool_dir/backup.sh" --service organizations --out "$work/x.dump"
+cfb_load_service organizations && [ "$CFB_STATUS" = active ] && [ "${CFB_REQUIRED[*]}" = "organizations_seaql_migrations" ] &&
+  pass "organizations is active and requires its own history" || fail "organizations catalog entry"
 expect_exit 2 "backup.sh refuses an unknown service" env CFMEET_PG_WRAPPER=false bash "$tool_dir/backup.sh" --service nope --out "$work/x.dump"
 
 echo "== database URL handling"
