@@ -20,6 +20,7 @@ on:
       - "packages/contracts/openapi/**"
       - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
@@ -29,6 +30,7 @@ on:
       - "packages/contracts/openapi/**"
       - "packages/contracts/bundled/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
@@ -168,6 +170,8 @@ jobs:
       - name: Migration smoke (up / reset / up)
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
         run: |
           psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_smoke"
           export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cfmeet_migration_smoke

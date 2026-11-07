@@ -16,6 +16,8 @@ WORKDIR /app/services/meeting-service
 COPY services/meeting-service/ ./
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/service-auth/ /app/packages/service-auth/
+# SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
+COPY packages/migration-guard/ /app/packages/migration-guard/
 COPY packages/communications-policy /app/packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts/ /app/packages/usage-facts/

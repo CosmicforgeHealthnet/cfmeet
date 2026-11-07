@@ -137,7 +137,7 @@ Order matters; each step is reversible on its own.
 * Set `CALLING_ORGANIZATION_FORWARDING_ENABLED=false`; Calling refuses forwards.
 * Clearing a binding (`DELETE …/service-bindings/calling`) disables one organization.
 * Suspending the organization suspends its tenant (Section 7), so every forward fails authentication.
-* Schema rollback (only if required): `organizations-migration down 1` and Calling `down 1`. Both are additive-only drops.
+* Schema rollback (only if required): `CF_MIGRATION_ALLOW_DESTRUCTIVE=down organizations-migration down -n 1` and `CF_MIGRATION_ALLOW_DESTRUCTIVE=down calling-migration down -n 1`. Both are additive-only drops. The override is required by the SEC-015 guard.
 
 ## 7. Still open
 

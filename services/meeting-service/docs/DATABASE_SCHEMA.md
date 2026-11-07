@@ -429,13 +429,13 @@ cargo run -- status
 ### Rollback Last Migration
 
 ```bash
-cargo run -- down
+APP_ENV=development cargo run -- down
 ```
 
 ### Reset Database (Drop all tables and reapply)
 
 ```bash
-cargo run -- fresh
+APP_ENV=development cargo run -- fresh
 ```
 
 ---

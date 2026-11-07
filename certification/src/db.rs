@@ -118,12 +118,15 @@ pub fn migrate(bin: &Path, url: &str) -> anyhow::Result<()> {
 /// Runs `<migration> <args…>` against `url` and returns its output (stdout, then stderr) (the
 /// migration CLI of every service: `status`, `up [-n N]`, `down [-n N]`). `Err` carries
 /// both output streams when the command fails (a guarded down refuses this way).
+/// `APP_ENV=test`: certification databases are disposable, so the SEC-015 destructive
+/// subcommand guard lets `down` reach the migrations' own data guards.
 pub fn migration(bin: &Path, url: &str, args: &[&str]) -> anyhow::Result<String> {
     let out = std::process::Command::new(bin)
         .args(args)
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("DATABASE_URL", url)
+        .env("APP_ENV", "test")
         .output()
         .with_context(|| format!("running {}", bin.display()))?;
     let text = format!(

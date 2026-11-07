@@ -14,6 +14,8 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+# SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
+COPY packages/migration-guard packages/migration-guard
 COPY services/platform-access services/platform-access
 WORKDIR /src/services/platform-access
 RUN cargo build --release --locked -p platform-access-migration --bin platform-access-migration \

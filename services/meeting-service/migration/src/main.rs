@@ -2,6 +2,9 @@ use sea_orm_migration::prelude::*;
 
 #[async_std::main]
 async fn main() {
+    // SEC-015: refuse down / fresh / refresh / reset outside a non-production APP_ENV
+    // unless CF_MIGRATION_ALLOW_DESTRUCTIVE names the subcommand. Runs before any .env load.
+    cf_migration_guard::enforce_from_env();
     // Load .env from backend root directory (parent of migration folder)
     // This ensures migration uses the same .env as the main application
     dotenvy::from_filename("../.env").ok();

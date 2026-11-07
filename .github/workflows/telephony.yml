@@ -23,6 +23,8 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
@@ -36,6 +38,8 @@ on:
       - "services/calling/**"
       - "services/privacy-relay/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
@@ -218,9 +222,14 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --locked
 
+      - name: Destructive migration guard (SEC-015)
+        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/telephony-migration
+
       - name: Migration smoke (up / reset / up)
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/telephony_migration_smoke
         run: |
           set -euo pipefail
