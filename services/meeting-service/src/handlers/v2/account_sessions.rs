@@ -148,6 +148,11 @@ pub async fn revoke_my_session(
             .session(session_id),
     )
     .await?;
+    // Blueprint Section 13: the session's MANAGED-realtime session devices end with it.
+    if let Some(um) = state.meeting.core.unified.as_ref() {
+        um.revoke_session_devices_for(user.user_id, session_id)
+            .await;
+    }
     Ok(Json(AccountSessionRevokeResponse {
         revoked_count: u64::from(revoked),
     }))
