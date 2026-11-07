@@ -2165,14 +2165,15 @@ async fn unknown_participant_quarantine(cert: &Cert) {
     // It never became a participant or a session.
     let view = cert.a.call_view(call).await;
     assert_eq!(view["participants"].as_array().unwrap().len(), 2);
-    let quarantined = common::scalar_i64(
-        cert.a.h().conn(),
-        &format!(
-            "SELECT count(*) FROM call_media_provider_events WHERE call_id = '{call}' AND outcome = 'QUARANTINED'"
-        ),
-    )
+    // The quarantine row is written when LiveKit's webhook for the leaked join arrives,
+    // which can land after the client call returns: wait for it.
+    let quarantined_sql = format!(
+        "SELECT count(*) FROM call_media_provider_events WHERE call_id = '{call}' AND outcome = 'QUARANTINED'"
+    );
+    eventually(15, "unknown identity quarantined", || async {
+        common::scalar_i64(cert.a.h().conn(), &quarantined_sql).await >= 1
+    })
     .await;
-    assert!(quarantined >= 1);
     let (_, version) = cert.a.state(call).await;
     cert.a.command(call, "cancel", version).await;
     let (_, version) = cert.a.state(call).await;
