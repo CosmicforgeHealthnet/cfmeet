@@ -21,8 +21,16 @@ Request pipeline (`src/http/ingress.rs`):
    `DelegatedPlatformContext` for exactly one upstream audience, under the route deadline.
    The domain service keeps final resource authorization; its status and JSON are relayed.
 
-The gateway owns **no database** and no communications data. Redis is configured only
-(`API_GATEWAY_REDIS_URL`) for future shared quotas. Flags default off:
+The gateway owns **no database** and no communications data. It enforces platform
+request quotas on platform-credential traffic, with limits from the Developer Platform.
+With `API_GATEWAY_REDIS_URL` set, the counters are shared across instances in Redis;
+otherwise each instance counts on its own. Setting
+`API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` adds a per-token ceiling on end-user and
+device traffic (meeting sessions, participant tokens, developer sessions, client tokens,
+signaling credentials, realtime tickets). A request over the ceiling gets
+`429 RATE_LIMITED` with `x-cf-quota-level: GATEWAY_TOKEN`. The ceiling is off by default.
+Anonymous requests carry no token and are rate-limited by the services and the nginx
+edge. Flags default off:
 `API_GATEWAY_PUBLIC_ROUTING_ENABLED`, `API_GATEWAY_WEBSOCKETS_ENABLED`.
 
 ```bash

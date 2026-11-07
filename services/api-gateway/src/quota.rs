@@ -19,6 +19,11 @@
 //! * Redis outage: the gateway degrades to per-instance counters (never unlimited) and
 //!   reports `quotas: degraded` in readiness.
 //!
+//! * Section 15 (PLT-012): the same store also holds the optional per-token ceiling of
+//!   end-user / device traffic ([`QuotaEngine::check_token`],
+//!   `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE`, off by default): one minute window per
+//!   (authentication mode, token digest), never accounted as platform usage.
+//!
 //! Business / domain quotas (concurrent calls, spend, numbers, SMS, attachments) stay in
 //! the owning services.
 
@@ -335,6 +340,34 @@ end
 return {1, m, d, 0, cm}
 "#;
 
+/// One atomic check-and-increment of a per-token minute window (Section 15, PLT-012):
+/// `{1, n}` counted, `{0, n}` refused at `ARGV[1]`.
+const TOKEN_SCRIPT: &str = r#"
+local n = tonumber(redis.call('GET', KEYS[1]) or '0')
+if n >= tonumber(ARGV[1]) then return {0, n} end
+n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+return {1, n}
+"#;
+
+/// The outcome of the per-token ceiling of end-user traffic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenDecision {
+    Allowed { remaining_minute: u64 },
+    Exceeded { retry_after_seconds: u64 },
+}
+
+/// The opaque bucket of an end-user token: the first 128 bits of its SHA-256, so the
+/// token itself is never a counter key, a log field or a Redis value.
+pub fn token_bucket(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// `(environment, UTC day, accepted count)`.
 type UsageEntry = (Uuid, String, u64);
 
@@ -352,6 +385,7 @@ pub struct QuotaEngine {
     store: Option<redis::Client>,
     store_timeout: Duration,
     script: redis::Script,
+    token_script: redis::Script,
     prefix: String,
     authority: Arc<dyn QuotaAuthority>,
     cache: Mutex<HashMap<Uuid, CachedLimits>>,
@@ -377,6 +411,7 @@ impl QuotaEngine {
             store: None,
             store_timeout: Duration::from_millis(250),
             script: redis::Script::new(SCRIPT),
+            token_script: redis::Script::new(TOKEN_SCRIPT),
             prefix,
             authority,
             cache: Mutex::new(HashMap::new()),
@@ -777,6 +812,77 @@ impl QuotaEngine {
         (true, m + 1, 0, cm)
     }
 
+    /// Section 15 (PLT-012): checks and (when allowed) counts one request of the
+    /// end-user / device token whose bucket is `bucket` ([`token_bucket`]) in `class`
+    /// (the authentication mode), against `per_minute`. Same store, timeouts and
+    /// degradation as the platform quotas (shared Redis window, per-instance counters
+    /// while it is unreachable — never unlimited); NOT platform usage, so nothing is
+    /// accounted to the Developer Platform.
+    pub async fn check_token(&self, class: &str, bucket: &str, per_minute: u64) -> TokenDecision {
+        let now = Utc::now();
+        let minute = now.timestamp() / 60;
+        let reset = (60 - (now.timestamp() % 60)).max(1) as u64;
+        let connection = self.redis.lock().unwrap().clone();
+        if connection.is_none() && self.store.is_some() {
+            self.degraded
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        let shared = match connection {
+            Some(mut conn) => {
+                let mut invocation = self.token_script.prepare_invoke();
+                invocation
+                    .key(format!("{}trpm:{class}:{bucket}:{minute}", self.prefix))
+                    .arg(per_minute)
+                    .arg(120);
+                let call = invocation.invoke_async::<Vec<i64>>(&mut conn);
+                match tokio::time::timeout(self.store_timeout, call).await {
+                    Ok(Ok(v)) if v.len() == 2 => {
+                        self.degraded
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
+                        Some((v[0] == 1, v[1].max(0) as u64))
+                    }
+                    _ => {
+                        if !self
+                            .degraded
+                            .swap(true, std::sync::atomic::Ordering::Relaxed)
+                        {
+                            tracing::warn!(
+                                "quota store unreachable: per-instance quota counters in use"
+                            );
+                        }
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        let (allowed, used) = shared.unwrap_or_else(|| {
+            let mut local = self.local.lock().unwrap();
+            let key = format!("t:{class}:{bucket}:{minute}");
+            let n = *local.get(&key).unwrap_or(&0);
+            if n >= per_minute {
+                return (false, n);
+            }
+            local.insert(key, n + 1);
+            if local.len() > 100_000 {
+                let day = now.format("%Y-%m-%d").to_string();
+                local.retain(|k, _| {
+                    k.ends_with(&format!(":{minute}")) || k.ends_with(&format!(":{day}"))
+                });
+            }
+            (true, n + 1)
+        });
+        if allowed {
+            TokenDecision::Allowed {
+                remaining_minute: per_minute.saturating_sub(used),
+            }
+        } else {
+            TokenDecision::Exceeded {
+                retry_after_seconds: reset,
+            }
+        }
+    }
+
     /// Counts one finally classified public operation of a credential request
     /// (normalized API_OPERATION usage), flushed with the request counters.
     pub fn record_operation(&self, environment: Uuid, domain: &str, operation: &str, status: u16) {
@@ -936,6 +1042,69 @@ mod tests {
         ));
         assert_eq!(q.mode(), "local");
         assert_eq!(q.flush().await, 2);
+    }
+
+    /// PLT-012: the per-token ceiling counts each token bucket on its own, per class,
+    /// and never feeds platform usage accounting.
+    #[tokio::test]
+    async fn token_ceiling_counts_each_token_separately_and_is_not_platform_usage() {
+        let q = QuotaEngine::new(None, "t:".into(), Arc::new(Fixed(None)));
+        let a = token_bucket("session-token-a");
+        let b = token_bucket("session-token-b");
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
+        assert!(!a.contains("session"));
+        assert_eq!(
+            q.check_token("MEETING_SESSION", &a, 2).await,
+            TokenDecision::Allowed {
+                remaining_minute: 1
+            }
+        );
+        assert!(matches!(
+            q.check_token("MEETING_SESSION", &a, 2).await,
+            TokenDecision::Allowed { .. }
+        ));
+        match q.check_token("MEETING_SESSION", &a, 2).await {
+            TokenDecision::Exceeded {
+                retry_after_seconds,
+            } => assert!((1..=60).contains(&retry_after_seconds)),
+            other => panic!("{other:?}"),
+        }
+        // Another token, and the same token in another class, have their own windows.
+        assert!(matches!(
+            q.check_token("MEETING_SESSION", &b, 2).await,
+            TokenDecision::Allowed { .. }
+        ));
+        assert!(matches!(
+            q.check_token("CLIENT_TOKEN", &a, 2).await,
+            TokenDecision::Allowed { .. }
+        ));
+        assert_eq!(q.flush().await, 0, "end-user traffic is not platform usage");
+    }
+
+    #[tokio::test]
+    async fn token_ceiling_is_shared_across_instances_through_redis() {
+        let Ok(url) = std::env::var("TEST_REDIS_URL") else {
+            return;
+        };
+        let client = redis::Client::open(url).unwrap();
+        let conn = redis::aio::ConnectionManager::new(client).await.unwrap();
+        let prefix = format!("cfgw-test:{}:", Uuid::new_v4());
+        let a = QuotaEngine::new(Some(conn.clone()), prefix.clone(), Arc::new(Fixed(None)));
+        let b = QuotaEngine::new(Some(conn), prefix, Arc::new(Fixed(None)));
+        let bucket = token_bucket(&Uuid::new_v4().to_string());
+        let mut allowed = 0;
+        for i in 0..6 {
+            let q = if i % 2 == 0 { &a } else { &b };
+            if matches!(
+                q.check_token("PARTICIPANT_TOKEN", &bucket, 4).await,
+                TokenDecision::Allowed { .. }
+            ) {
+                allowed += 1;
+            }
+        }
+        assert_eq!(allowed, 4);
+        assert_eq!(a.mode(), "shared");
     }
 
     /// §20.4: an unreachable store and a partitioned (silent) store both degrade to
