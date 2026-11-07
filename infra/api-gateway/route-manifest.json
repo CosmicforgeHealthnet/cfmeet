@@ -7675,8 +7675,7 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": [],
-      "requiredScope": "each requested privacy.contacts.* scope"
+      "forwardHeaders": []
     },
     {
       "id": "privacy-relay.listContexts",

@@ -5,9 +5,27 @@
     "version": "1.1.0",
     "description": "Customer ingress of services/api-gateway (Part VI §51): probes, public documentation and discovery, and the generated public route catalogue (infra/api-gateway/route-manifest.json, documented per domain in cfmeet.*.public-api and in aggregate in cfmeet.api-gateway.public-api). Default deny; internal, provider-callback, operator, Platform Access and Telephony surfaces are never routable. The foundation diagnostic route GET /v1/developer-platform/context is kept."
   },
+  "tags": [
+    {
+      "name": "Probes",
+      "description": "Liveness and readiness of the API Gateway."
+    },
+    {
+      "name": "Developer context",
+      "description": "The authenticated customer's forwarded Developer Platform context."
+    },
+    {
+      "name": "Documentation and discovery",
+      "description": "Public OpenAPI documents, the read-only API reference and the API catalogue."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": [
+          "Probes"
+        ],
+        "summary": "Liveness probe",
         "operationId": "health",
         "security": [],
         "description": "Liveness.",
@@ -27,6 +45,10 @@
     },
     "/ready": {
       "get": {
+        "tags": [
+          "Probes"
+        ],
+        "summary": "Readiness probe",
         "operationId": "ready",
         "security": [],
         "description": "Readiness: route catalogue loaded (counts only).",
@@ -46,6 +68,10 @@
     },
     "/v1/developer-platform/context": {
       "get": {
+        "tags": [
+          "Developer context"
+        ],
+        "summary": "Get the developer platform context",
         "operationId": "getDeveloperPlatformContext",
         "security": [
           {
@@ -90,6 +116,10 @@
     },
     "/openapi.json": {
       "get": {
+        "tags": [
+          "Documentation and discovery"
+        ],
+        "summary": "Get the aggregate public OpenAPI",
         "operationId": "getPublicOpenApi",
         "security": [],
         "description": "The aggregate customer-facing OpenAPI (public operations only, references resolved).",
@@ -112,6 +142,10 @@
     },
     "/openapi/{file}": {
       "get": {
+        "tags": [
+          "Documentation and discovery"
+        ],
+        "summary": "Get a per-domain public OpenAPI",
         "operationId": "getPublicDomainOpenApi",
         "security": [],
         "description": "The per-domain customer-facing OpenAPI (`{domain}.json`: meetings, calling, privacy-relay, messaging, numbering, sms, developer-platform).",
@@ -145,6 +179,10 @@
     },
     "/docs": {
       "get": {
+        "tags": [
+          "Documentation and discovery"
+        ],
+        "summary": "Public API reference",
         "operationId": "getApiReference",
         "security": [],
         "description": "Read-only public API reference (Swagger UI over the public documents only; pinned, integrity-checked assets).",
@@ -167,6 +205,10 @@
     },
     "/discovery": {
       "get": {
+        "tags": [
+          "Documentation and discovery"
+        ],
+        "summary": "API catalogue and service discovery",
         "operationId": "getDiscovery",
         "security": [],
         "description": "API catalogue and service discovery: families, source contract and version, routable operations, WebSocket channels and enablement.",

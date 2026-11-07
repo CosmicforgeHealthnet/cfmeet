@@ -5,9 +5,59 @@
     "version": "1.8.0",
     "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits."
   },
+  "tags": [
+    {
+      "name": "Probes",
+      "description": "Liveness, readiness and this document."
+    },
+    {
+      "name": "Gateway support",
+      "description": "Service-authenticated calls from the API Gateway: forwarded request context, effective entitlements and durable request accounting."
+    },
+    {
+      "name": "Platform events",
+      "description": "Section 53 event ingestion from producing services (deduplicated per producer and source event id)."
+    },
+    {
+      "name": "Usage ingestion",
+      "description": "Section 55 usage facts, stream watermarks and shadow reconciliation sent by producing services."
+    },
+    {
+      "name": "Forwarded webhooks",
+      "description": "Calling's public machine webhook API, served here once the API Gateway re-points those routes."
+    },
+    {
+      "name": "Forwarded usage and limits",
+      "description": "Calling's published GET /v1/usage and GET /v1/limits, served here after the §19.4 ownership migration."
+    },
+    {
+      "name": "Operator: organizations",
+      "description": "Operator administration of developer organizations (developer-platform.administer): registration, state, cost centre, support and incidents."
+    },
+    {
+      "name": "Operator: commercial",
+      "description": "Operator plan publication, plan assignment, entitlement overrides and first-party scope grants."
+    },
+    {
+      "name": "Operator: production access",
+      "description": "Operator review of production-access requests."
+    },
+    {
+      "name": "Operator: usage",
+      "description": "Operator usage overview, rollup rebuilds, backfill, reconciliation, stream resets, cost-centre usage and ingestion health."
+    },
+    {
+      "name": "Operator: webhook migration",
+      "description": "Section 53 webhook migration from Calling: status, inventory, import, reconcile, shadow report, cutover check, takeover and rollback."
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
+        "tags": [
+          "Probes"
+        ],
+        "summary": "Liveness probe",
         "operationId": "health",
         "security": [],
         "description": "Liveness.",
@@ -27,6 +77,10 @@
     },
     "/ready": {
       "get": {
+        "tags": [
+          "Probes"
+        ],
+        "summary": "Readiness probe",
         "operationId": "ready",
         "security": [],
         "description": "Readiness: own database reachable and every migration applied.",
@@ -56,6 +110,10 @@
     },
     "/openapi.json": {
       "get": {
+        "tags": [
+          "Probes"
+        ],
+        "summary": "This OpenAPI document",
         "operationId": "openapi",
         "security": [],
         "description": "This document.",
@@ -75,6 +133,10 @@
     },
     "/internal/v1/gateway/context": {
       "get": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "Resolve the forwarded customer context",
         "operationId": "getGatewayContext",
         "security": [
           {
@@ -110,6 +172,10 @@
     },
     "/internal/v1/entitlements/environments/{environmentId}": {
       "get": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "Get effective entitlements of an environment",
         "operationId": "getEffectiveEntitlements",
         "security": [
           {
@@ -196,6 +262,10 @@
     },
     "/internal/v1/operator/organizations": {
       "post": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Register a first-party organization",
         "operationId": "operatorRegisterFirstPartyOrganization",
         "security": [
           {
@@ -262,6 +332,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}": {
       "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Get an organization overview",
         "operationId": "operatorGetOrganization",
         "security": [
           {
@@ -316,6 +390,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/state": {
       "post": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Change an organization's state",
         "operationId": "operatorSetOrganizationState",
         "security": [
           {
@@ -390,6 +468,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/plan-assignments": {
       "post": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Assign a plan version",
         "operationId": "operatorAssignPlan",
         "security": [
           {
@@ -464,6 +546,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/cost-center": {
       "put": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Set an organization's cost centre",
         "operationId": "operatorSetCostCenter",
         "security": [
           {
@@ -538,6 +624,10 @@
     },
     "/internal/v1/operator/commercial-plans": {
       "post": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Publish a commercial plan version",
         "operationId": "operatorPublishPlan",
         "security": [
           {
@@ -604,6 +694,10 @@
     },
     "/internal/v1/operator/commercial-plans/{planId}/retire": {
       "post": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Retire a commercial plan version",
         "operationId": "operatorRetirePlan",
         "security": [
           {
@@ -668,6 +762,10 @@
     },
     "/internal/v1/usage/api-requests": {
       "post": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "Record accepted API requests",
         "operationId": "recordApiRequestUsage",
         "security": [
           {
@@ -817,6 +915,10 @@
     },
     "/internal/v1/usage/api-requests/{environmentId}/{day}": {
       "get": {
+        "tags": [
+          "Gateway support"
+        ],
+        "summary": "Get the daily accepted-request total",
         "operationId": "getDailyApiRequestUsage",
         "security": [
           {
@@ -892,6 +994,10 @@
     },
     "/internal/v1/platform/events": {
       "post": {
+        "tags": [
+          "Platform events"
+        ],
+        "summary": "Publish a platform event",
         "operationId": "publishPlatformEvent",
         "security": [
           {
@@ -940,6 +1046,9 @@
     },
     "/v1/webhooks": {
       "post": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedCreateWebhook",
         "summary": "Create a webhook subscription",
         "description": "Requires webhooks.manage. Every subscribed event type also requires its own read scope (call.* calls.read, voicemail.* enterprise.voicemail.read, recording.* / artifact.* enterprise.recording.read, relay.* privacy.sessions.read, usage.* / limit.* usage.read, sms.* sms.read, conversation.* / message.* messages.read, number.* numbers.read, credential.* credentials.manage, production_access.* production_access.request; meeting.* / participant.* need webhooks.manage only). The endpoint must be a public https URL (re-checked at delivery and connection time; redirects never followed). The signing secret is returned ONCE. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -985,6 +1094,9 @@
         "x-cfmeet-required-scope": "webhooks.manage"
       },
       "get": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedListWebhooks",
         "summary": "List webhook subscriptions",
         "description": "Requires webhooks.read. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1044,6 +1156,9 @@
     },
     "/v1/webhooks/{webhook_id}": {
       "get": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedGetWebhook",
         "summary": "Get a webhook subscription",
         "description": "Requires webhooks.read. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1090,6 +1205,9 @@
         "x-cfmeet-required-scope": "webhooks.read"
       },
       "patch": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedUpdateWebhook",
         "summary": "Update a webhook subscription",
         "description": "Requires webhooks.manage (and the read scope of every event type). expectedVersion is required; a stale one is 409 VERSION_CONFLICT. Re-enabling resets the endpoint health. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1152,6 +1270,9 @@
         "x-cfmeet-required-scope": "webhooks.manage"
       },
       "delete": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedDeleteWebhook",
         "summary": "Delete a webhook subscription",
         "description": "Requires webhooks.manage. Soft delete: open deliveries are CANCELLED; history is kept. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1216,6 +1337,9 @@
     },
     "/v1/webhooks/{webhook_id}/rotate-secret": {
       "post": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedRotateWebhookSecret",
         "summary": "Rotate a webhook signing secret",
         "description": "Requires webhooks.manage. Deliveries from now on are signed with the new secret, returned ONCE. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1280,6 +1404,9 @@
     },
     "/v1/webhooks/{webhook_id}/deliveries": {
       "get": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedListWebhookDeliveries",
         "summary": "List deliveries of a webhook subscription",
         "description": "Requires webhooks.read. Delivery history including dead-lettered (FAILED) deliveries; status class and bounded failure category only (never a response body). Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1360,6 +1487,9 @@
     },
     "/v1/webhook-deliveries/{delivery_id}/replay": {
       "post": {
+        "tags": [
+          "Forwarded webhooks"
+        ],
         "operationId": "forwardedReplayWebhookDelivery",
         "summary": "Replay a webhook delivery",
         "description": "Requires webhooks.manage. Creates a NEW delivery (new CF-Webhook-Id) of the same event (same CF-Webhook-Event-Id) to the same active subscription — dead-lettered deliveries included; the domain action is never re-executed. Machine credentials only (the console uses /v1/environments/{environmentId}/webhooks); scope (tenant, application, environment) is the credential's confirmed chain: another environment's subscription is 404. Gateway-forwarded: the API Gateway's service token (developer-request.forward) with the signed delegated context naming the authenticated credential; the public contract of this path is Calling's (cfmeet.calling.http-api, cfmeet.platform.webhooks) and the gateway re-points it here when API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED. Behind DEVELOPER_PLATFORM_GATEWAY_API_ENABLED and DEVELOPER_PLATFORM_WEBHOOKS_ENABLED (off: 404).",
@@ -1408,6 +1538,10 @@
     },
     "/internal/v1/operator/webhook-migration/status": {
       "get": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Get webhook migration status",
         "operationId": "operatorWebhookMigrationStatus",
         "security": [
           {
@@ -1474,6 +1608,10 @@
     },
     "/internal/v1/operator/webhook-migration/inventory": {
       "get": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Get the webhook migration inventory",
         "operationId": "operatorWebhookMigrationInventory",
         "security": [
           {
@@ -1548,6 +1686,10 @@
     },
     "/internal/v1/operator/webhook-migration/import": {
       "post": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Import webhooks from Calling",
         "operationId": "operatorWebhookMigrationImport",
         "security": [
           {
@@ -1636,6 +1778,10 @@
     },
     "/internal/v1/operator/webhook-migration/reconcile": {
       "get": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Reconcile migrated webhooks",
         "operationId": "operatorWebhookMigrationReconcile",
         "security": [
           {
@@ -1702,6 +1848,10 @@
     },
     "/internal/v1/operator/webhook-migration/shadow-report": {
       "get": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Get the shadow delivery report",
         "operationId": "operatorWebhookMigrationShadowReport",
         "security": [
           {
@@ -1775,6 +1925,10 @@
     },
     "/internal/v1/operator/webhook-migration/cutover-check": {
       "get": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Check webhook cutover readiness",
         "operationId": "operatorWebhookMigrationCutoverCheck",
         "security": [
           {
@@ -1835,6 +1989,10 @@
     },
     "/internal/v1/operator/webhook-migration/rotation-acknowledgements": {
       "post": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Acknowledge signing secret rotations",
         "operationId": "operatorWebhookMigrationAcknowledgeRotations",
         "security": [
           {
@@ -1916,6 +2074,10 @@
     },
     "/internal/v1/operator/webhook-migration/takeover": {
       "post": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Take over webhook delivery from Calling",
         "operationId": "operatorWebhookMigrationTakeover",
         "security": [
           {
@@ -1974,6 +2136,10 @@
     },
     "/internal/v1/operator/webhook-migration/rollback-export": {
       "post": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Export state for a webhook rollback",
         "operationId": "operatorWebhookMigrationRollbackExport",
         "security": [
           {
@@ -2036,6 +2202,10 @@
     },
     "/internal/v1/operator/webhook-migration/rollback": {
       "post": {
+        "tags": [
+          "Operator: webhook migration"
+        ],
+        "summary": "Roll webhook delivery back to Calling",
         "operationId": "operatorWebhookMigrationRollback",
         "security": [
           {
@@ -2118,6 +2288,10 @@
     },
     "/internal/v1/usage/facts": {
       "post": {
+        "tags": [
+          "Usage ingestion"
+        ],
+        "summary": "Ingest usage facts",
         "operationId": "ingestUsageFacts",
         "security": [
           {
@@ -2167,6 +2341,10 @@
     },
     "/internal/v1/usage/streams/{stream}": {
       "get": {
+        "tags": [
+          "Usage ingestion"
+        ],
+        "summary": "Get a usage stream watermark",
         "operationId": "getUsageStream",
         "security": [
           {
@@ -2216,6 +2394,10 @@
     },
     "/internal/v1/usage/reconciliations": {
       "post": {
+        "tags": [
+          "Usage ingestion"
+        ],
+        "summary": "Submit a usage reconciliation",
         "operationId": "reconcileUsage",
         "security": [
           {
@@ -2265,6 +2447,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/entitlement-overrides": {
       "post": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Set an entitlement override",
         "operationId": "operatorSetEntitlementOverride",
         "security": [
           {
@@ -2332,6 +2518,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/entitlement-overrides/{overrideId}": {
       "delete": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Revoke an entitlement override",
         "operationId": "operatorRevokeEntitlementOverride",
         "security": [
           {
@@ -2397,6 +2587,10 @@
     },
     "/internal/v1/operator/projects/{projectId}/scope-grants": {
       "post": {
+        "tags": [
+          "Operator: commercial"
+        ],
+        "summary": "Grant a scope to a project",
         "operationId": "operatorGrantProjectScope",
         "security": [
           {
@@ -2464,6 +2658,10 @@
     },
     "/internal/v1/operator/production-access-requests": {
       "get": {
+        "tags": [
+          "Operator: production access"
+        ],
+        "summary": "List production-access requests",
         "operationId": "operatorListProductionAccessRequests",
         "security": [
           {
@@ -2512,6 +2710,10 @@
     },
     "/internal/v1/operator/production-access-requests/{requestId}": {
       "get": {
+        "tags": [
+          "Operator: production access"
+        ],
+        "summary": "Get a production-access request",
         "operationId": "operatorGetProductionAccessRequest",
         "security": [
           {
@@ -2560,6 +2762,10 @@
     },
     "/internal/v1/operator/production-access-requests/{requestId}/{command}": {
       "post": {
+        "tags": [
+          "Operator: production access"
+        ],
+        "summary": "Review, approve or reject a production-access request",
         "operationId": "operatorDecideProductionAccessRequest",
         "security": [
           {
@@ -2649,6 +2855,10 @@
     },
     "/internal/v1/operator/usage": {
       "get": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Get the usage ingestion overview",
         "operationId": "operatorUsageOverview",
         "security": [
           {
@@ -2688,6 +2898,10 @@
     },
     "/internal/v1/operator/usage/rollups/rebuild": {
       "post": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Rebuild daily usage rollups",
         "operationId": "operatorRebuildUsageRollups",
         "security": [
           {
@@ -2765,6 +2979,10 @@
     },
     "/internal/v1/operator/usage/backfill/api-operations": {
       "post": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Backfill historical API operation counters",
         "operationId": "operatorBackfillApiOperations",
         "security": [
           {
@@ -2834,6 +3052,10 @@
     },
     "/internal/v1/operator/usage/reconcile/api-operations": {
       "post": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Reconcile legacy API operation counters",
         "operationId": "operatorReconcileApiOperations",
         "security": [
           {
@@ -2903,6 +3125,10 @@
     },
     "/internal/v1/operator/usage/streams/{producer}/{stream}/reset": {
       "post": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Reset a producer stream watermark",
         "operationId": "operatorResetUsageStream",
         "security": [
           {
@@ -2968,6 +3194,10 @@
     },
     "/internal/v1/operator/cost-centers/{costCenter}/usage": {
       "get": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Get usage of a cost centre",
         "operationId": "operatorCostCenterUsage",
         "security": [
           {
@@ -3035,6 +3265,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/support-profile": {
       "put": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Set an organization's support profile",
         "operationId": "operatorSetSupportProfile",
         "security": [
           {
@@ -3102,6 +3336,10 @@
     },
     "/internal/v1/operator/organizations/{organizationId}/incidents": {
       "post": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Record a platform incident for an organization",
         "operationId": "operatorRecordIncident",
         "security": [
           {
@@ -3169,6 +3407,10 @@
     },
     "/v1/usage": {
       "get": {
+        "tags": [
+          "Forwarded usage and limits"
+        ],
+        "summary": "List usage",
         "operationId": "forwardedListUsage",
         "security": [
           {
@@ -3280,6 +3522,10 @@
     },
     "/v1/limits": {
       "get": {
+        "tags": [
+          "Forwarded usage and limits"
+        ],
+        "summary": "Get limits",
         "operationId": "forwardedGetLimits",
         "security": [
           {
@@ -3330,6 +3576,10 @@
     },
     "/internal/v1/operator/ingestion/health": {
       "get": {
+        "tags": [
+          "Operator: usage"
+        ],
+        "summary": "Get ingestion health",
         "operationId": "operatorIngestionHealth",
         "security": [
           {

@@ -12,12 +12,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "packages" / "contracts"
 SOURCES = (
-    "communications/http/v1.openapi.json",
+    "calling/communications-internal/v1.openapi.json",
     "calling/http/v1.openapi.json",
+    "communications/http/v1.openapi.json",
+    "communications/internal/v1.openapi.json",
+    "meeting-service/communications-internal/v1.openapi.json",
+    "messaging/communications-internal/v1.openapi.json",
     "messaging/http/v1.openapi.json",
     "messaging/internal/v1.openapi.json",
     "numbering/internal/v1.openapi.json",
+    "organizations/internal/v1.openapi.json",
     "platform-access/internal/v1.openapi.json",
+    "platform-developer/gateway/http/v1.openapi.json",
+    "platform-developer/http/v1.openapi.json",
+    "platform-developer/internal/v1.openapi.json",
     "platform/internal-http/v1.openapi.json",
     "privacy-relay/http/v1.openapi.json",
     "privacy-relay/internal/v1.openapi.json",

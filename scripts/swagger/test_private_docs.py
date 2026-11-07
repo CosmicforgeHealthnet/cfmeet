@@ -25,8 +25,8 @@ def main() -> None:
                 f"{proc.stderr.strip()} {proc.stdout.strip()}"
             )
         config = json.loads((out / "swagger-config.json").read_text())
-        assert len(config["urls"]) == 12, config["urls"]
-        assert len({doc["name"] for doc in config["urls"]}) == 12
+        assert len(config["urls"]) == 21, config["urls"]
+        assert len({doc["name"] for doc in config["urls"]}) == 21
         for doc in config["urls"]:
             file = out / doc["url"].removeprefix("./")
             spec = json.loads(file.read_text())
@@ -40,6 +40,9 @@ def main() -> None:
         assert "Messaging (internal)" in {doc["name"] for doc in config["urls"]}
         assert "Platform Access (internal)" in {doc["name"] for doc in config["urls"]}
         assert "Telephony (internal)" in {doc["name"] for doc in config["urls"]}
+        # PLT-007: the operator API, the gateway and the Communications contracts are catalogued.
+        for name in ("Developer Platform (internal and operator)", "API Gateway", "Communications Hub", "Organizations (internal)"):
+            assert name in {doc["name"] for doc in config["urls"]}, name
         # The builder must reject accidental publication within the checkout.
         forbidden = ROOT / "apps" / "web" / "public" / "private-api-docs"
         result = subprocess.run(

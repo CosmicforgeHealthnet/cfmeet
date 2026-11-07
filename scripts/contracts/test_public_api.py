@@ -21,6 +21,14 @@ class RouteChecks(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)), "route ids are unique")
         self.assertTrue(all(not r["pattern"].startswith("/internal") for r in manifest["routes"]))
 
+    def test_a_gate_scope_must_be_a_platform_access_registry_scope(self):
+        registry = public_api.registered_scopes()
+        self.assertIn("privacy.contacts.write", registry)
+        public_api.check_required_scope("privacy-relay.ok", "privacy.contacts.write", registry)
+        for bad in ("each requested privacy.contacts.* scope", "privacy.contacts.*", "", None, ["calls.write"]):
+            with self.assertRaises(public_api.CatalogueError, msg=repr(bad)):
+                public_api.check_required_scope("privacy-relay.bad", bad, registry)
+
     def test_a_deprecated_route_needs_a_live_public_replacement(self):
         ok = [route("calling.oldUsage", deprecated=True, replacedBy="developer-platform.usage"),
               route("developer-platform.usage")]
