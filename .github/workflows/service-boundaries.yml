@@ -56,6 +56,15 @@ jobs:
           python3 -m unittest scripts/migrations/test_check_migration_order.py -v
           python3 scripts/migrations/check_migration_order.py
 
+      # INV-002: per contract, the operations no automated test references (path-literal
+      # heuristic, incl. the Messaging delegated mirror). Fails when a contract's untested
+      # count rises above the frozen baseline; lives here (no path filter) because a new
+      # route or a deleted test in services/** must trigger it.
+      - name: operation test coverage (mutation tests + gate)
+        run: |
+          python3 -m unittest scripts/contracts/test_operation_test_coverage.py -v
+          python3 scripts/contracts/operation_test_coverage.py --list
+
       - name: no phase-03 path
         run: |
           set -euo pipefail

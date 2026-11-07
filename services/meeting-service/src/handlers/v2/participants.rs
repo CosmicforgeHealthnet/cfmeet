@@ -197,7 +197,7 @@ pub async fn change_role(
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/participants/{participantId}/remove", tag = "Participants (v2)", operation_id = "v2_remove",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
-    request_body = RemoveParticipantRequest,
+    request_body = Option<RemoveParticipantRequest>,
     responses((status = 200, description = "Removed", body = ModerationResponse), (status = 404, description = "PARTICIPANT_NOT_FOUND", body = ErrorEnvelope)),
     security(("bearer_auth" = []), ("participant_token" = []))
 )]
@@ -229,7 +229,7 @@ pub async fn remove(
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/participants/{participantId}/ban", tag = "Participants (v2)", operation_id = "v2_ban",
     params(("id" = Uuid, Path, description = "Conference id"), ("participantId" = Uuid, Path, description = "Participant id")),
-    request_body = BanParticipantRequest,
+    request_body = Option<BanParticipantRequest>,
     responses((status = 200, description = "Banned", body = ModerationResponse), (status = 404, description = "PARTICIPANT_NOT_FOUND", body = ErrorEnvelope)),
     security(("bearer_auth" = []), ("participant_token" = []))
 )]

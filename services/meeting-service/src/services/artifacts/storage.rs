@@ -6,9 +6,12 @@
 //! with the vendor. Access is always: authorize first, then mint a short-lived,
 //! read-only, single-object signed URL that is never stored.
 //!
-//! [`S3ArtifactStorage`] speaks the S3 REST API with AWS Signature V4 (header-signed
-//! admin calls, query-signed client reads). [`MemoryArtifactStorage`] is an in-process
-//! backend for tests and local development only.
+//! [`S3ArtifactStorage`] speaks the S3 REST API through the shared
+//! `cf-object-storage` crate (AWS Signature V4: header-signed admin calls, query-signed
+//! reads) — one signer for the whole platform (Blueprint v1.0 Section 16, SEC-019).
+//! Client reads are capped at the shared 900 s; only the server-to-provider transcription
+//! source may last up to [`MAX_PROVIDER_READ`]. [`MemoryArtifactStorage`] is an
+//! in-process backend for tests and local development only.
 
 use std::{
     collections::HashMap,
@@ -98,6 +101,11 @@ pub trait ArtifactStorage: Send + Sync {
         ttl: Duration,
         download_name: Option<&str>,
     ) -> StorageResult<SignedUrl>;
+    /// Read-only URL for a processing provider to fetch one object (server to provider,
+    /// never a client); may last up to [`MAX_PROVIDER_READ`].
+    fn provider_read_url(&self, key: &str, ttl: Duration) -> StorageResult<SignedUrl> {
+        self.signed_read_url(key, ttl, None)
+    }
 }
 
 /// Storage used when none is configured: every operation is unavailable.
@@ -135,284 +143,102 @@ impl ArtifactStorage for UnconfiguredStorage {
 }
 
 // ---------------------------------------------------------------------------
-// S3 (Signature V4)
+// S3 — the shared `cf-object-storage` signer (SEC-019)
 // ---------------------------------------------------------------------------
 
-type HmacSha256 = Hmac<Sha256>;
+/// Longest provider fetch URL (server-to-provider source for post-meeting
+/// transcription). Client reads are capped by the shared library at
+/// [`cf_object_storage::MAX_SIGNED_READ`] (900 s).
+pub const MAX_PROVIDER_READ: Duration = Duration::from_secs(3600);
 
-fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("hmac accepts any key length");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    hex::encode(Sha256::digest(data))
-}
-
-/// RFC 3986 encoding as SigV4 requires (`/` kept when `keep_slash`).
-pub fn uri_encode(input: &str, keep_slash: bool) -> String {
-    let mut out = String::with_capacity(input.len());
-    for b in input.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b'/' if keep_slash => out.push('/'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-#[derive(Debug, Clone)]
-struct Endpoint {
-    scheme: String,
-    /// host[:port] as sent in the Host header.
-    host: String,
-}
-
-impl Endpoint {
-    fn parse(raw: &str) -> Result<Self, String> {
-        let url = url::Url::parse(raw).map_err(|e| format!("invalid storage endpoint: {e}"))?;
-        let host = url
-            .host_str()
-            .ok_or_else(|| "storage endpoint has no host".to_string())?;
-        let host = match url.port() {
-            Some(p) => format!("{host}:{p}"),
-            None => host.to_string(),
-        };
-        Ok(Self {
-            scheme: url.scheme().to_string(),
-            host,
-        })
+fn shared_error(e: cf_object_storage::StorageError) -> StorageError {
+    use cf_object_storage::StorageError as S;
+    match e {
+        S::Unavailable => StorageError::Unavailable("object storage unavailable".into()),
+        S::Rejected(code) => StorageError::Rejected(format!("HTTP {code}")),
+        S::Integrity => StorageError::Rejected("object integrity check failed".into()),
+        S::NotConfigured => StorageError::NotConfigured,
     }
 }
 
+/// `Content-Disposition` for a download name (restricted to `[A-Za-z0-9._-]`, ≤ 100).
+pub fn attachment_disposition(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .take(100)
+        .collect();
+    format!("attachment; filename=\"{safe}\"")
+}
+
+/// Meeting artefacts on S3-compatible storage. Blueprint v1.0 Section 16 (SEC-019): every
+/// signature (header-signed writes / heads / deletes / reads and query-signed URLs) comes
+/// from the shared [`cf_object_storage::S3ObjectStore`], the same implementation Calling,
+/// Messaging and Numbering use; this type only adds the artefact key prefix, MD5 + SHA-256
+/// streaming digests and the meeting error vocabulary.
 pub struct S3ArtifactStorage {
     config: ObjectStorageConfig,
-    endpoint: Endpoint,
-    public_endpoint: Endpoint,
-    client: reqwest::Client,
-}
-
-struct Signed {
-    url: String,
-    headers: Vec<(String, String)>,
+    store: cf_object_storage::S3ObjectStore,
 }
 
 impl S3ArtifactStorage {
     pub fn new(config: ObjectStorageConfig) -> Result<Self, String> {
-        let endpoint = Endpoint::parse(
-            config
-                .endpoint
-                .as_deref()
-                .ok_or_else(|| "ARTIFACT_STORAGE_ENDPOINT is not set".to_string())?,
-        )?;
-        let public_endpoint = match config.public_endpoint.as_deref() {
-            Some(p) => Endpoint::parse(p)?,
-            None => endpoint.clone(),
-        };
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
-        Ok(Self {
-            config,
+        let endpoint = config
+            .endpoint
+            .clone()
+            .ok_or_else(|| "ARTIFACT_STORAGE_ENDPOINT is not set".to_string())?;
+        let store = cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
             endpoint,
-            public_endpoint,
-            client,
-        })
+            public_endpoint: config.public_endpoint.clone(),
+            region: config.region.clone(),
+            bucket: config.bucket.clone(),
+            access_key: config.access_key.clone(),
+            secret_key: config.secret_key.clone(),
+            path_style: config.path_style,
+            server_side_encryption: None,
+        })?;
+        Ok(Self { config, store })
     }
 
-    fn host_and_path(&self, ep: &Endpoint, key: &str) -> (String, String) {
-        let key = uri_encode(key, true);
-        if self.config.path_style {
-            (
-                ep.host.clone(),
-                format!("/{}/{}", uri_encode(&self.config.bucket, false), key),
-            )
-        } else {
-            (
-                format!("{}.{}", self.config.bucket, ep.host),
-                format!("/{key}"),
-            )
-        }
+    /// Create the bucket if it does not exist (certification / local setup).
+    pub async fn ensure_bucket(&self) -> StorageResult<()> {
+        self.store.ensure_bucket().await.map_err(shared_error)
     }
 
-    fn scope(&self, date: &str) -> String {
-        format!("{date}/{}/s3/aws4_request", self.config.region)
-    }
-
-    fn signing_key(&self, date: &str) -> Vec<u8> {
-        let k_date = hmac(
-            format!("AWS4{}", self.config.secret_key).as_bytes(),
-            date.as_bytes(),
-        );
-        let k_region = hmac(&k_date, self.config.region.as_bytes());
-        let k_service = hmac(&k_region, b"s3");
-        hmac(&k_service, b"aws4_request")
-    }
-
-    /// Header-signed admin request.
-    fn sign(&self, method: &str, key: &str, payload_hash: &str, now: DateTime<Utc>) -> Signed {
-        let (host, path) = self.host_and_path(&self.endpoint, key);
-        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-        let date = now.format("%Y%m%d").to_string();
-        let canonical_headers =
-            format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
-        let signed_headers = "host;x-amz-content-sha256;x-amz-date";
-        let canonical =
-            format!("{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
-        let to_sign = format!(
-            "AWS4-HMAC-SHA256\n{amz_date}\n{}\n{}",
-            self.scope(&date),
-            sha256_hex(canonical.as_bytes())
-        );
-        let signature = hex::encode(hmac(&self.signing_key(&date), to_sign.as_bytes()));
-        let authorization = format!(
-            "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={signed_headers}, Signature={signature}",
-            self.config.access_key,
-            self.scope(&date)
-        );
-        Signed {
-            url: format!("{}://{host}{path}", self.endpoint.scheme),
-            headers: vec![
-                ("x-amz-content-sha256".into(), payload_hash.into()),
-                ("x-amz-date".into(), amz_date),
-                ("authorization".into(), authorization),
-            ],
-        }
-    }
-
-    /// Query-signed (presigned) GET for one object.
-    pub fn presign_get(
+    /// Signed read at a given instant (pure; the shared signer caps `ttl` at 900 s).
+    pub fn signed_read_url_at(
         &self,
         key: &str,
         ttl: Duration,
         download_name: Option<&str>,
         now: DateTime<Utc>,
-    ) -> String {
-        let (host, path) = self.host_and_path(&self.public_endpoint, key);
-        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-        let date = now.format("%Y%m%d").to_string();
-        let credential = format!("{}/{}", self.config.access_key, self.scope(&date));
-        let mut params: Vec<(String, String)> = vec![
-            ("X-Amz-Algorithm".into(), "AWS4-HMAC-SHA256".into()),
-            ("X-Amz-Credential".into(), credential),
-            ("X-Amz-Date".into(), amz_date.clone()),
-            ("X-Amz-Expires".into(), ttl.as_secs().to_string()),
-            ("X-Amz-SignedHeaders".into(), "host".into()),
-        ];
-        if let Some(name) = download_name {
-            let safe: String = name
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-                .take(100)
-                .collect();
-            params.push((
-                "response-content-disposition".into(),
-                format!("attachment; filename=\"{safe}\""),
-            ));
+    ) -> StorageResult<SignedUrl> {
+        use cf_object_storage::ObjectStore;
+        let signed = match download_name {
+            Some(name) => self.store.signed_read_as(
+                key,
+                ttl,
+                now,
+                &cf_object_storage::ResponseOverrides {
+                    content_type: None,
+                    content_disposition: Some(attachment_disposition(name)),
+                },
+            ),
+            None => self.store.signed_read(key, ttl, now),
         }
-        params.sort();
-        let query = params
-            .iter()
-            .map(|(k, v)| format!("{}={}", uri_encode(k, false), uri_encode(v, false)))
-            .collect::<Vec<_>>()
-            .join("&");
-        let canonical = format!("GET\n{path}\n{query}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD");
-        let to_sign = format!(
-            "AWS4-HMAC-SHA256\n{amz_date}\n{}\n{}",
-            self.scope(&date),
-            sha256_hex(canonical.as_bytes())
-        );
-        let signature = hex::encode(hmac(&self.signing_key(&date), to_sign.as_bytes()));
-        format!(
-            "{}://{host}{path}?{query}&X-Amz-Signature={signature}",
-            self.public_endpoint.scheme
-        )
-    }
-
-    fn request(
-        &self,
-        method: reqwest::Method,
-        key: &str,
-        payload_hash: &str,
-    ) -> reqwest::RequestBuilder {
-        let signed = self.sign(method.as_str(), key, payload_hash, Utc::now());
-        let mut rb = self.client.request(method, &signed.url);
-        for (k, v) in signed.headers {
-            rb = rb.header(k, v);
-        }
-        rb
-    }
-
-    /// Create the bucket if it does not exist (certification / local setup).
-    pub async fn ensure_bucket(&self) -> StorageResult<()> {
-        let (host, path) = if self.config.path_style {
-            (
-                self.endpoint.host.clone(),
-                format!("/{}", uri_encode(&self.config.bucket, false)),
-            )
-        } else {
-            (
-                format!("{}.{}", self.config.bucket, self.endpoint.host),
-                "/".to_string(),
-            )
-        };
-        let now = Utc::now();
-        let payload = sha256_hex(b"");
-        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-        let date = now.format("%Y%m%d").to_string();
-        let canonical = format!(
-            "PUT\n{path}\n\nhost:{host}\nx-amz-content-sha256:{payload}\nx-amz-date:{amz_date}\n\nhost;x-amz-content-sha256;x-amz-date\n{payload}"
-        );
-        let to_sign = format!(
-            "AWS4-HMAC-SHA256\n{amz_date}\n{}\n{}",
-            self.scope(&date),
-            sha256_hex(canonical.as_bytes())
-        );
-        let signature = hex::encode(hmac(&self.signing_key(&date), to_sign.as_bytes()));
-        let auth = format!(
-            "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature={signature}",
-            self.config.access_key,
-            self.scope(&date)
-        );
-        let res = self
-            .client
-            .put(format!("{}://{host}{path}", self.endpoint.scheme))
-            .header("x-amz-content-sha256", payload)
-            .header("x-amz-date", amz_date)
-            .header("authorization", auth)
-            .send()
-            .await
-            .map_err(|e| StorageError::Unavailable(e.to_string()))?;
-        match res.status().as_u16() {
-            200 | 409 => Ok(()),
-            s => Err(StorageError::Rejected(format!("create bucket: HTTP {s}"))),
-        }
+        .map_err(shared_error)?;
+        Ok(SignedUrl {
+            url: signed.url,
+            expires_at: signed.expires_at,
+        })
     }
 }
 
-fn unavailable(e: reqwest::Error) -> StorageError {
-    StorageError::Unavailable(e.to_string())
-}
-
-fn meta_from(headers: &reqwest::header::HeaderMap) -> ObjectMeta {
-    let get = |k: &str| {
-        headers
-            .get(k)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string)
-    };
+fn meta_of(m: cf_object_storage::ObjectMeta) -> ObjectMeta {
     ObjectMeta {
-        size: get("content-length")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
-        content_type: get("content-type"),
-        etag: get("etag").map(|e| e.trim_matches('"').to_string()),
+        size: m.size,
+        content_type: m.content_type,
+        etag: m.etag,
     }
 }
 
@@ -441,65 +267,44 @@ impl ArtifactStorage for S3ArtifactStorage {
         bytes: Vec<u8>,
         content_type: &str,
     ) -> StorageResult<ObjectMeta> {
-        let hash = sha256_hex(&bytes);
-        let size = bytes.len() as u64;
-        let res = self
-            .request(reqwest::Method::PUT, key, &hash)
-            .header("content-type", content_type)
-            .body(bytes)
-            .send()
+        use cf_object_storage::ObjectStore;
+        let stored = self
+            .store
+            .put(key, bytes, content_type)
             .await
-            .map_err(unavailable)?;
-        if !res.status().is_success() {
-            return Err(match res.status().as_u16() {
-                500..=599 => StorageError::Unavailable(format!("HTTP {}", res.status())),
-                s => StorageError::Rejected(format!("HTTP {s}")),
-            });
-        }
-        let mut meta = meta_from(res.headers());
-        meta.size = size;
-        meta.content_type = Some(content_type.to_string());
-        Ok(meta)
+            .map_err(shared_error)?;
+        Ok(ObjectMeta {
+            size: stored.size,
+            content_type: Some(stored.content_type),
+            etag: stored.etag,
+        })
     }
 
     async fn head(&self, key: &str) -> StorageResult<Option<ObjectMeta>> {
-        let res = self
-            .request(reqwest::Method::HEAD, key, &sha256_hex(b""))
-            .send()
+        use cf_object_storage::ObjectStore;
+        Ok(self
+            .store
+            .head(key)
             .await
-            .map_err(unavailable)?;
-        match res.status().as_u16() {
-            200 => Ok(Some(meta_from(res.headers()))),
-            404 => Ok(None),
-            s @ 500..=599 => Err(StorageError::Unavailable(format!("HTTP {s}"))),
-            s => Err(StorageError::Rejected(format!("HTTP {s}"))),
-        }
+            .map_err(shared_error)?
+            .map(meta_of))
     }
 
     async fn digest(&self, key: &str, max_bytes: u64) -> StorageResult<Option<ObjectDigest>> {
-        let mut res = self
-            .request(reqwest::Method::GET, key, &sha256_hex(b""))
-            .send()
-            .await
-            .map_err(unavailable)?;
-        match res.status().as_u16() {
-            200 => {}
-            404 => return Ok(None),
-            s @ 500..=599 => return Err(StorageError::Unavailable(format!("HTTP {s}"))),
-            s => return Err(StorageError::Rejected(format!("HTTP {s}"))),
-        }
         let mut sha = Sha256::new();
         let mut md5 = Md5::new();
-        let mut size = 0u64;
-        while let Some(chunk) = res.chunk().await.map_err(unavailable)? {
-            size += chunk.len() as u64;
-            if size > max_bytes {
-                return Err(StorageError::TooLarge);
-            }
-            sha.update(&chunk);
-            md5.update(&chunk);
-        }
-        Ok(Some(ObjectDigest {
+        let visited = self
+            .store
+            .get_streaming(key, max_bytes, |chunk| {
+                sha.update(chunk);
+                md5.update(chunk);
+            })
+            .await
+            .map_err(|e| match e {
+                cf_object_storage::StorageError::Integrity => StorageError::TooLarge,
+                other => shared_error(other),
+            })?;
+        Ok(visited.map(|size| ObjectDigest {
             sha256: hex::encode(sha.finalize()),
             md5: hex::encode(md5.finalize()),
             size,
@@ -507,16 +312,8 @@ impl ArtifactStorage for S3ArtifactStorage {
     }
 
     async fn delete(&self, key: &str) -> StorageResult<()> {
-        let res = self
-            .request(reqwest::Method::DELETE, key, &sha256_hex(b""))
-            .send()
-            .await
-            .map_err(unavailable)?;
-        match res.status().as_u16() {
-            200 | 204 | 404 => Ok(()),
-            s @ 500..=599 => Err(StorageError::Unavailable(format!("HTTP {s}"))),
-            s => Err(StorageError::Rejected(format!("HTTP {s}"))),
-        }
+        use cf_object_storage::ObjectStore;
+        self.store.delete(key).await.map_err(shared_error)
     }
 
     fn signed_read_url(
@@ -525,9 +322,17 @@ impl ArtifactStorage for S3ArtifactStorage {
         ttl: Duration,
         download_name: Option<&str>,
     ) -> StorageResult<SignedUrl> {
+        self.signed_read_url_at(key, ttl, download_name, Utc::now())
+    }
+
+    fn provider_read_url(&self, key: &str, ttl: Duration) -> StorageResult<SignedUrl> {
+        if !cf_object_storage::valid_key(key) {
+            return Err(StorageError::Rejected("HTTP 400".into()));
+        }
+        let ttl = ttl.min(MAX_PROVIDER_READ).max(Duration::from_secs(1));
         let now = Utc::now();
         Ok(SignedUrl {
-            url: self.presign_get(key, ttl, download_name, now),
+            url: self.store.presign_get(key, ttl, now),
             expires_at: now + chrono::Duration::seconds(ttl.as_secs() as i64),
         })
     }
@@ -536,6 +341,13 @@ impl ArtifactStorage for S3ArtifactStorage {
 // ---------------------------------------------------------------------------
 // In-process storage (tests / local development only)
 // ---------------------------------------------------------------------------
+
+/// HMAC-SHA256 for the memory store's fake signatures (not an S3 signer).
+fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("hmac accepts any key length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
+}
 
 #[derive(Default)]
 pub struct MemoryArtifactStorage {
@@ -720,49 +532,93 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn sigv4_presign_matches_aws_reference_vector() {
-        // AWS documentation example ("Example: A presigned URL"), path-style disabled:
-        // GET https://examplebucket.s3.amazonaws.com/test.txt, 86400 s, 20130524T000000Z.
-        let s = S3ArtifactStorage::new(ObjectStorageConfig {
-            endpoint: Some("https://s3.amazonaws.com".into()),
+    fn shared() -> cf_object_storage::S3ObjectStore {
+        cf_object_storage::S3ObjectStore::new(cf_object_storage::S3Config {
+            endpoint: "https://examplebucket.s3.amazonaws.com".into(),
             public_endpoint: None,
             region: "us-east-1".into(),
             bucket: "examplebucket".into(),
             access_key: "AKIAIOSFODNN7EXAMPLE".into(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             path_style: false,
-            prefix: String::new(),
+            server_side_encryption: None,
         })
-        .unwrap();
-        let now = DateTime::parse_from_rfc3339("2013-05-24T00:00:00Z")
+        .unwrap()
+    }
+
+    /// SEC-019: the artefact adapter has no signer of its own; its URLs are exactly the
+    /// shared library's (the AWS reference vector is tested there).
+    #[test]
+    fn signed_reads_come_from_the_shared_signer() {
+        use cf_object_storage::ObjectStore;
+        let now = DateTime::parse_from_rfc3339("2026-11-07T10:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let url = s.presign_get("test.txt", Duration::from_secs(86400), None, now);
-        assert!(url.ends_with(
-            "X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"
-        ));
-        assert!(url.starts_with("https://examplebucket.s3.amazonaws.com/test.txt?"));
-    }
-
-    #[test]
-    fn presigned_url_is_scoped_and_carries_no_secret() {
-        let s = storage();
-        let url = s.presign_get(
-            "recordings/a/b.mp4",
-            Duration::from_secs(300),
-            Some("b.mp4"),
-            Utc::now(),
+        let ttl = Duration::from_secs(300);
+        let ours = storage()
+            .signed_read_url_at("recordings/a/b.mp4", ttl, Some("b.mp4"), now)
+            .unwrap();
+        let theirs = shared()
+            .signed_read_as(
+                "recordings/a/b.mp4",
+                ttl,
+                now,
+                &cf_object_storage::ResponseOverrides {
+                    content_type: None,
+                    content_disposition: Some("attachment; filename=\"b.mp4\"".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(ours.url, theirs.url);
+        assert_eq!(ours.expires_at, theirs.expires_at);
+        let plain = storage()
+            .signed_read_url_at("recordings/a/b.mp4", ttl, None, now)
+            .unwrap();
+        assert_eq!(
+            plain.url,
+            shared()
+                .signed_read("recordings/a/b.mp4", ttl, now)
+                .unwrap()
+                .url
         );
-        assert!(url.contains("/recordings/a/b.mp4?"));
-        assert!(url.contains("X-Amz-Expires=300"));
-        assert!(!url.contains("wJalrXUtnFEMI"));
+        assert!(ours.url.contains("/recordings/a/b.mp4?"));
+        assert!(ours.url.contains("X-Amz-Expires=300"));
+        assert!(ours.url.contains("response-content-disposition="));
+        assert!(!ours.url.contains("wJalrXUtnFEMI"));
     }
 
     #[test]
-    fn uri_encoding_follows_rfc3986() {
-        assert_eq!(uri_encode("a b/c+d", true), "a%20b/c%2Bd");
-        assert_eq!(uri_encode("a/b", false), "a%2Fb");
+    fn client_reads_are_capped_and_provider_reads_bounded() {
+        let now = Utc::now();
+        let s = storage();
+        let read = s
+            .signed_read_url_at("recordings/a/b.mp4", Duration::from_secs(3600), None, now)
+            .unwrap();
+        assert!(read.url.contains("X-Amz-Expires=900"), "{}", read.url);
+        assert_eq!(read.expires_at, now + chrono::Duration::seconds(900));
+        let provider = s
+            .provider_read_url("recordings/a/b.mp4", Duration::from_secs(3600))
+            .unwrap();
+        assert!(provider.url.contains("X-Amz-Expires=3600"));
+        let capped = s
+            .provider_read_url("recordings/a/b.mp4", Duration::from_secs(7200))
+            .unwrap();
+        assert!(capped.url.contains("X-Amz-Expires=3600"));
+    }
+
+    #[test]
+    fn unsafe_keys_and_names_are_refused_or_sanitized() {
+        let s = storage();
+        assert!(s
+            .signed_read_url_at("../etc/passwd", Duration::from_secs(60), None, Utc::now())
+            .is_err());
+        assert!(s
+            .provider_read_url("/abs/key", Duration::from_secs(60))
+            .is_err());
+        assert_eq!(
+            attachment_disposition("a\"b; x=y.mp4"),
+            "attachment; filename=\"abxy.mp4\""
+        );
     }
 
     #[tokio::test]

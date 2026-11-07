@@ -331,7 +331,7 @@ pub async fn reschedule_conference(
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/join", tag = "Conferences (v2)", operation_id = "v2_join_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
-    request_body = JoinConferenceRequest,
+    request_body = Option<JoinConferenceRequest>,
     responses(
         (status = 200, description = "Joined or waiting", body = JoinConferenceResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED / MEETING_PASSCODE_REQUIRED / MEETING_PASSCODE_INVALID", body = ErrorEnvelope),
@@ -398,7 +398,7 @@ pub async fn join_conference(
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/leave", tag = "Conferences (v2)", operation_id = "v2_leave_conference",
     params(("id" = Uuid, Path, description = "Conference id")),
-    request_body = LeaveConferenceRequest,
+    request_body = Option<LeaveConferenceRequest>,
     responses((status = 200, description = "Left", body = LeaveConferenceResponse), (status = 404, description = "PARTICIPANT_NOT_FOUND", body = ErrorEnvelope)),
     security(("bearer_auth" = []), ("participant_token" = []))
 )]

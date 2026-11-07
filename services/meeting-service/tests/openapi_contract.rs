@@ -751,3 +751,54 @@ fn j_e2e_10_no_secret_or_internal_surface_in_public_contract() {
         assert!(!text.contains(needle), "contract text contains {needle}");
     }
 }
+
+/// Blueprint Section 16 (MTG-020, TS part): every v2 operation whose handler takes
+/// `V2OptionalJson` accepts an empty body, so its `requestBody.required` is false (the TS
+/// SDK then marks the body optional). A new `V2OptionalJson` handler must be annotated
+/// with `request_body = Option<T>` and added here.
+#[test]
+fn optional_json_bodies_are_not_required() {
+    const OPTIONAL: [&str; 8] = [
+        "v2_join_conference",
+        "v2_leave_conference",
+        "v2_create_invitation",
+        "v2_remove",
+        "v2_ban",
+        "v2_archive_meeting_space",
+        "v2_duplicate_meeting_space",
+        "v2_create_instant_meeting",
+    ];
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/handlers/v2");
+    let uses: usize = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap_or_default())
+        .map(|src| src.matches("V2OptionalJson(req): V2OptionalJson<").count())
+        .sum();
+    assert_eq!(
+        uses,
+        OPTIONAL.len(),
+        "a V2OptionalJson handler was added or removed: update OPTIONAL and its annotation"
+    );
+    let doc = generated();
+    let mut seen = 0;
+    for item in doc["paths"].as_object().unwrap().values() {
+        for op in item.as_object().unwrap().values() {
+            let Some(id) = op.get("operationId").and_then(Value::as_str) else {
+                continue;
+            };
+            if OPTIONAL.contains(&id) {
+                seen += 1;
+                assert_eq!(
+                    op["requestBody"]["required"],
+                    Value::Bool(false),
+                    "{id}: an optional body must not be required"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        seen,
+        OPTIONAL.len(),
+        "every optional-body operation is published"
+    );
+}

@@ -5877,7 +5877,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/meeting-spaces/{id}/archive — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2ArchiveMeetingSpace: {
-      params: { path: { id: string }; body: VersionedRequest };
+      params: { path: { id: string }; body?: VersionedRequest };
       response: MeetingSpaceResponse;
     };
     /** POST /api/v2/conferences/{id}/polls/{pollId}/archive; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
@@ -5912,7 +5912,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/conferences/{id}/participants/{participantId}/ban; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2Ban: {
-      params: { path: { id: string; participantId: string }; body: BanParticipantRequest };
+      params: { path: { id: string; participantId: string }; body?: BanParticipantRequest };
       response: ModerationResponse;
     };
     /** POST /api/v2/conferences/{id}/breakouts/{breakoutId}/announcement; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
@@ -5987,12 +5987,12 @@ export namespace Meetings {
     };
     /** POST /api/v2/instant-meetings — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateInstantMeeting: {
-      params: { body: InstantMeetingRequest };
+      params: { body?: InstantMeetingRequest };
       response: InstantMeetingResponse;
     };
     /** POST /api/v2/meeting-spaces/{id}/invitations — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2CreateInvitation: {
-      params: { path: { id: string }; body: CreateInvitationRequest };
+      params: { path: { id: string }; body?: CreateInvitationRequest };
       response: CreateInvitationResponse;
     };
     /** POST /api/v2/meeting-spaces — scope meetings.write; auth MEETING_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
@@ -6027,7 +6027,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/meeting-spaces/{id}/duplicate; auth MEETING_SESSION; retry NO_RETRY */
     v2DuplicateMeetingSpace: {
-      params: { path: { id: string }; body: DuplicateMeetingSpaceRequest };
+      params: { path: { id: string }; body?: DuplicateMeetingSpaceRequest };
       response: MeetingSpaceResponse;
     };
     /** POST /api/v2/conferences/{id}/end — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
@@ -6112,7 +6112,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/conferences/{id}/join; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2JoinConference: {
-      params: { path: { id: string }; body: JoinConferenceRequest };
+      params: { path: { id: string }; body?: JoinConferenceRequest };
       response: JoinConferenceResponse;
     };
     /** DELETE /api/v2/conferences/{id}/backstage; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry IDEMPOTENT */
@@ -6127,7 +6127,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/conferences/{id}/leave; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2LeaveConference: {
-      params: { path: { id: string }; body: LeaveConferenceRequest };
+      params: { path: { id: string }; body?: LeaveConferenceRequest };
       response: LeaveConferenceResponse;
     };
     /** GET /api/v2/conferences/{id}/artifacts; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
@@ -6315,7 +6315,7 @@ export namespace Meetings {
     };
     /** POST /api/v2/conferences/{id}/participants/{participantId}/remove — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Remove: {
-      params: { path: { id: string; participantId: string }; body: RemoveParticipantRequest };
+      params: { path: { id: string; participantId: string }; body?: RemoveParticipantRequest };
       response: ModerationResponse;
     };
     /** DELETE /api/v2/conferences/{id}/spotlights/{participantId}; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry IDEMPOTENT */

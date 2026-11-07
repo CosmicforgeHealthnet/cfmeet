@@ -65,6 +65,8 @@ url = "2"
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
 # Part VI §55: unified usage facts (participant minutes, recordings, artefact storage).
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
+# Blueprint Section 16 (SEC-019): the one shared S3 SigV4 signer (artefact storage).
+cf-object-storage = { path = "../../packages/object-storage" }
 
 [[bin]]
 name = "test_email"

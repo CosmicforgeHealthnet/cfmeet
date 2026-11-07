@@ -223,7 +223,7 @@ pub async fn update_meeting_space(
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/archive", tag = "Meeting Spaces (v2)", operation_id = "v2_archive_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
-    request_body(content = VersionedRequest, description = "Optional expected version"),
+    request_body(content = Option<VersionedRequest>, description = "Optional expected version"),
     responses(
         (status = 200, description = "Archived", body = MeetingSpaceResponse),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
@@ -255,7 +255,7 @@ pub async fn archive_meeting_space(
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/duplicate", tag = "Meeting Spaces (v2)", operation_id = "v2_duplicate_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
-    request_body = DuplicateMeetingSpaceRequest,
+    request_body = Option<DuplicateMeetingSpaceRequest>,
     responses(
         (status = 201, description = "Duplicated", body = MeetingSpaceResponse),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
@@ -310,7 +310,7 @@ pub async fn transfer_owner(
 /// right away on a best-effort basis.
 #[utoipa::path(
     post, path = "/api/v2/instant-meetings", tag = "Meeting Spaces (v2)", operation_id = "v2_create_instant_meeting",
-    request_body = InstantMeetingRequest,
+    request_body = Option<InstantMeetingRequest>,
     responses(
         (status = 201, description = "Created", body = InstantMeetingResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),

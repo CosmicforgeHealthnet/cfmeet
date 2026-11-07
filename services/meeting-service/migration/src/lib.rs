@@ -71,6 +71,129 @@ impl MigratorTrait for Migrator {
     }
 }
 
+/// The migrations of history `M` not yet applied — READ-ONLY (DATA-011 target rule,
+/// `docs/architecture/migration-conventions.md`).
+///
+/// Readiness is "applied ⊇ migrations known to this binary, and no unknown versions":
+/// the result lists what this binary needs but the database lacks, and a version applied
+/// to the database but unknown to this binary is an error (fail closed), the same rule as
+/// the `pending_migrations` helpers of calling, messaging and developer-platform. A
+/// missing history table means everything is pending. It only `SELECT`s, so the
+/// least-privilege runtime role can call it (`get_pending_migrations` would issue DDL).
+pub async fn pending_migrations<M, C>(
+    db: &C,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    M: MigratorTrait,
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    let known: Vec<String> = M::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    pending_in(db, &M::migration_table_name().to_string(), known).await
+}
+
+/// [`pending_migrations`] over an explicit history table and known list.
+pub async fn pending_in<C>(
+    db: &C,
+    table: &str,
+    known: Vec<String>,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::{DbBackend, DbErr, Statement, Value};
+    if !table
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
+        return Err(DbErr::Custom(format!(
+            "invalid migration history table {table:?}"
+        )));
+    }
+    let present = db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.' || $1) IS NOT NULL AS present",
+            [Value::from(table.to_owned())],
+        ))
+        .await?
+        .ok_or_else(|| DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SELECT version FROM {table}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+    let unknown: Vec<&String> = applied.iter().filter(|v| !known.contains(v)).collect();
+    if !unknown.is_empty() {
+        return Err(DbErr::Custom(format!(
+            "migration history {table} has versions unknown to this binary: {}",
+            unknown
+                .iter()
+                .map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
+}
+
+/// Every migration history of this binary, base first, as `(history table, pending)`.
+/// Errors when any history carries a version unknown to this binary.
+pub async fn migration_readiness<C>(
+    db: &C,
+) -> Result<Vec<(String, Vec<String>)>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    Ok(vec![
+        (
+            Migrator::migration_table_name().to_string(),
+            pending_migrations::<Migrator, _>(db).await?,
+        ),
+        (
+            CommunicationsMigrator::migration_table_name().to_string(),
+            pending_migrations::<CommunicationsMigrator, _>(db).await?,
+        ),
+        (
+            CommunicationsFacadeMigrator::migration_table_name().to_string(),
+            pending_migrations::<CommunicationsFacadeMigrator, _>(db).await?,
+        ),
+        (
+            AccountSecurityMigrator::migration_table_name().to_string(),
+            pending_migrations::<AccountSecurityMigrator, _>(db).await?,
+        ),
+        (
+            MeetingsCalendarMigrator::migration_table_name().to_string(),
+            pending_migrations::<MeetingsCalendarMigrator, _>(db).await?,
+        ),
+        (
+            ProfileNotificationsMigrator::migration_table_name().to_string(),
+            pending_migrations::<ProfileNotificationsMigrator, _>(db).await?,
+        ),
+        (
+            AccountHardeningMigrator::migration_table_name().to_string(),
+            pending_migrations::<AccountHardeningMigrator, _>(db).await?,
+        ),
+    ])
+}
+
+/// The base history (`seaql_migrations`) satisfies the target rule.
+pub async fn base_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<Migrator, _>(db).await?.is_empty())
+}
+
 /// Additive personal-communications integration history. The base migration history
 /// stays compatible with the retained pre-Hub application image on rollback.
 pub struct CommunicationsMigrator;
@@ -106,66 +229,20 @@ impl MigratorTrait for CommunicationsFacadeMigrator {
 pub async fn communications_facade_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.account_communications_facade_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
+    // separate history this equals the former exact-set check.
+    Ok(pending_migrations::<CommunicationsFacadeMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM account_communications_facade_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = CommunicationsFacadeMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }
 pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.account_communications_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
+    // separate history this equals the former exact-set check.
+    Ok(pending_migrations::<CommunicationsMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM account_communications_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = CommunicationsMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }
 
 /// Blueprint v1.0 Section 2 account security (revocation epoch independent of the
@@ -186,34 +263,11 @@ impl MigratorTrait for AccountSecurityMigrator {
 pub async fn account_security_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.account_security_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
+    // separate history this equals the former exact-set check.
+    Ok(pending_migrations::<AccountSecurityMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM account_security_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = AccountSecurityMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }
 
 /// Blueprint v1.0 Section 10 meetings calendar (idempotency records, agenda indexes). A
@@ -234,34 +288,11 @@ impl MigratorTrait for MeetingsCalendarMigrator {
 pub async fn meetings_calendar_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.meetings_calendar_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
+    // separate history this equals the former exact-set check.
+    Ok(pending_migrations::<MeetingsCalendarMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM meetings_calendar_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = MeetingsCalendarMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }
 
 /// Blueprint v1.0 Sections 9 and 11: the personal account profile (nullable `users`
@@ -285,34 +316,11 @@ impl MigratorTrait for ProfileNotificationsMigrator {
 pub async fn profile_notifications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.profile_notifications_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
+    // separate history this equals the former exact-set check.
+    Ok(pending_migrations::<ProfileNotificationsMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM profile_notifications_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = ProfileNotificationsMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }
 
 /// Blueprint v1.0 Sections 2–3 hardening: hashed legacy API keys and webhook secrets
@@ -329,36 +337,12 @@ impl MigratorTrait for AccountHardeningMigrator {
     }
 }
 
-/// Exactly the known account-hardening history has been applied.
+/// The account-hardening history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
 pub async fn account_hardening_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
-    use sea_orm_migration::sea_orm::{DbBackend, Statement};
-    let exists = db
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT to_regclass('public.account_hardening_migrations') IS NOT NULL AS present"
-                .to_owned(),
-        ))
+    Ok(pending_migrations::<AccountHardeningMigrator, _>(db)
         .await?
-        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
-        .try_get::<bool>("", "present")?;
-    if !exists {
-        return Ok(false);
-    }
-    let rows = db
-        .query_all(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT version FROM account_hardening_migrations".to_owned(),
-        ))
-        .await?;
-    let known: std::collections::BTreeSet<_> = AccountHardeningMigrator::migrations()
-        .iter()
-        .map(|m| m.name().to_owned())
-        .collect();
-    let actual: std::collections::BTreeSet<_> = rows
-        .iter()
-        .map(|r| r.try_get::<String>("", "version"))
-        .collect::<Result<_, _>>()?;
-    Ok(known == actual)
+        .is_empty())
 }

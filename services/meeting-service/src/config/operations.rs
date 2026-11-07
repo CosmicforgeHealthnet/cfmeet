@@ -59,7 +59,8 @@ pub enum RecordingEncoding {
 #[derive(Debug, Clone)]
 pub struct ArtifactConfig {
     pub storage: ObjectStorageConfig,
-    /// Signed read URL lifetime (bounded).
+    /// Signed read URL lifetime (`ARTIFACT_SIGNED_URL_TTL_SECS`, default 300, clamped to
+    /// 30–900: the shared object-storage signer never issues a client read above 900 s).
     pub signed_url_ttl_secs: u64,
     /// Seconds a REQUESTED recording may wait for provider start evidence.
     pub recording_start_timeout_secs: i64,
@@ -102,7 +103,7 @@ impl ArtifactConfig {
         Self {
             storage: ObjectStorageConfig::from_env(),
             signed_url_ttl_secs: env_num("ARTIFACT_SIGNED_URL_TTL_SECS", d.signed_url_ttl_secs)
-                .clamp(30, 3600),
+                .clamp(30, 900),
             recording_start_timeout_secs: env_num(
                 "RECORDING_START_TIMEOUT_SECS",
                 d.recording_start_timeout_secs,
@@ -281,6 +282,6 @@ mod tests {
     #[test]
     fn storage_is_unconfigured_by_default() {
         assert!(!ObjectStorageConfig::default().is_configured());
-        assert!(ArtifactConfig::default().signed_url_ttl_secs <= 3600);
+        assert!(ArtifactConfig::default().signed_url_ttl_secs <= 900);
     }
 }

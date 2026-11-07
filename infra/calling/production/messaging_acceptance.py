@@ -51,7 +51,7 @@ class MessagingJourney(Journey):
         swagger = self.request('meeting-service', '/api-docs/messaging.json')
         operations = [operation for item in swagger['paths'].values() for method, operation in item.items()
                       if method in ('get', 'post', 'put', 'patch', 'delete', 'options', 'head')]
-        assert len(operations) == 80
+        assert len(operations) == 96  # public Messaging bundle since Section 16 (PLT-006)
         assert sum('x-cfmeet-native-path' in operation for operation in operations) == 71
         assert swagger['info']['version'] == '1.16.0'
         assert not any(path.startswith('/internal/') for path in swagger['paths'])

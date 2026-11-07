@@ -1,8 +1,11 @@
 //! API Key DTOs
 //!
 //! Data Transfer Objects for API key management endpoints.
+//!
+//! Timestamps are stored as naive UTC (legacy `TIMESTAMP` columns, DATA-001) and
+//! serialized as RFC 3339 UTC with a `Z` suffix, so clients never read them as local time.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -20,9 +23,9 @@ pub struct CreateApiKeyResponse {
     pub api_key: String,
     pub usage_limit: i32,
     pub used_count: i32,
-    pub expires_at: NaiveDateTime,
+    pub expires_at: DateTime<Utc>,
     pub status: String,
-    pub created_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
 }
 
 /// Response for API key info (masked key)
@@ -33,10 +36,10 @@ pub struct ApiKeyResponse {
     pub api_key_masked: String,
     pub usage_limit: i32,
     pub used_count: i32,
-    pub expires_at: NaiveDateTime,
+    pub expires_at: DateTime<Utc>,
     pub status: String,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Response for listing API keys
