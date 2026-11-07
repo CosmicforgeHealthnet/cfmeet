@@ -27,12 +27,20 @@ OUT = CONTRACTS / "bundled"
 BASE = "https://schemas.cfmeet.com/"
 # Every OpenAPI document that is (or may be) rendered by a Swagger UI.
 SOURCES = [
-    "communications/http/v1.openapi.json",
+    "calling/communications-internal/v1.openapi.json",
     "calling/http/v1.openapi.json",
+    "communications/http/v1.openapi.json",
+    "communications/internal/v1.openapi.json",
+    "meeting-service/communications-internal/v1.openapi.json",
+    "messaging/communications-internal/v1.openapi.json",
     "messaging/http/v1.openapi.json",
     "messaging/internal/v1.openapi.json",
     "numbering/internal/v1.openapi.json",
+    "organizations/internal/v1.openapi.json",
     "platform-access/internal/v1.openapi.json",
+    "platform-developer/gateway/http/v1.openapi.json",
+    "platform-developer/http/v1.openapi.json",
+    "platform-developer/internal/v1.openapi.json",
     "platform/internal-http/v1.openapi.json",
     "privacy-relay/http/v1.openapi.json",
     "privacy-relay/internal/v1.openapi.json",
@@ -175,7 +183,12 @@ def render(doc) -> str:
 
 
 def main(argv):
-    check = "--check" in argv
+    # Only "--check" (verify, write nothing) or no argument (regenerate) is accepted;
+    # --help or a typo must never fall through to writing files.
+    if argv not in ([], ["--check"]):
+        print(f"usage: {Path(__file__).name} [--check]\n  no argument: regenerate and write\n  --check: fail if any output is stale (writes nothing)", file=sys.stderr)
+        return 0 if argv in (["-h"], ["--help"]) else 2
+    check = argv == ["--check"]
     bundler = Bundler()
     stale = []
     for source in SOURCES:

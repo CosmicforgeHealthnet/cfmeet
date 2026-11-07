@@ -16,6 +16,10 @@
   "paths": {
     "/v1/developer-platform/context": {
       "get": {
+        "tags": [
+          "Developer context"
+        ],
+        "summary": "Get the developer platform context",
         "operationId": "getDeveloperPlatformContext",
         "security": [
           {

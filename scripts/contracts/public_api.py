@@ -491,7 +491,12 @@ def outputs():
 
 
 def main(argv):
-    check = "--check" in argv
+    # Only "--check" (verify, write nothing) or no argument (regenerate) is accepted;
+    # --help or a typo must never fall through to writing files.
+    if argv not in ([], ["--check"]):
+        print(f"usage: {Path(__file__).name} [--check]\n  no argument: regenerate and write\n  --check: fail if any output is stale (writes nothing)", file=sys.stderr)
+        return 0 if argv in (["-h"], ["--help"]) else 2
+    check = argv == ["--check"]
     try:
         out = outputs()
     except (CatalogueError, bundle_openapi.BundleError) as e:

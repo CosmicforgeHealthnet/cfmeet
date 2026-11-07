@@ -559,7 +559,12 @@ def sdk_discovery(config, cat, ops) -> str:
 
 
 def main(argv: list[str]) -> int:
-    check = "--check" in argv
+    # Only "--check" (verify, write nothing) or no argument (regenerate) is accepted;
+    # --help or a typo must never fall through to writing files.
+    if argv not in ([], ["--check"]):
+        print(f"usage: {Path(__file__).name} [--check]\n  no argument: regenerate and write\n  --check: fail if any output is stale (writes nothing)", file=sys.stderr)
+        return 0 if argv in (["-h"], ["--help"]) else 2
+    check = argv == ["--check"]
     config = load(HERE / "generation.json")
     manifest = load(ROOT / "packages/contracts/manifest.json")
     cat, errors = catalogue(config, manifest)
