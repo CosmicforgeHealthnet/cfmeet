@@ -79,7 +79,12 @@ fn cases() -> Vec<Case> {
         Case {
             service: "messaging",
             bin: "messaging-migration",
-            part_vi: &["m20261201_000029_public_event_destinations"],
+            // + Blueprint Section 13 (session devices, inbox summary): additive columns,
+            // new tables; its down only drops what it added.
+            part_vi: &[
+                "m20261201_000029_public_event_destinations",
+                "m20261202_000030_session_devices_inbox",
+            ],
             seed: "INSERT INTO messaging_webhook_relay (event_id, environment_id, status, attempts, next_attempt_at, \
                      created_at, relayed_at) VALUES \
                    (gen_random_uuid(), gen_random_uuid(), 'RELAYED', 1, now(), now() - interval '2 days', now() - interval '2 days'), \
