@@ -5748,6 +5748,83 @@ export namespace Meetings {
     retroactiveDeletion: boolean;
     withdrawalMode: WithdrawalMode;
   };
+  /** One workspace context of the caller. */
+  export type Workspace = {
+    capabilities: WorkspaceCapabilitySummary;
+    /** `Personal`, or the organization name. */
+    displayName: string;
+    /** `personal`, or the organization id. */
+    id: string;
+    kind: WorkspaceKind;
+    /** ORGANIZATION only. */
+    organizationId?: string | null;
+    /** ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only. */
+    organizationStatus?: string | null;
+    /** NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service; null for PERSONAL and when the legacy directory answers (no provisioning there). */
+    provisioningState?: string | null;
+    /** The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows OWNER, ADMIN and MEMBER). ORGANIZATION only. */
+    role?: string | null;
+    /** ORGANIZATION only. */
+    slug?: string | null;
+  };
+  /** Which store answered: the meeting-service organization directory (`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service (authoritative). */
+  export type WorkspaceAuthority = "LEGACY_DIRECTORY" | "ORGANIZATIONS_SERVICE";
+  /** `GET /api/v2/me/workspaces/{workspaceId}/capabilities`. */
+  export type WorkspaceCapabilities = {
+    authority: WorkspaceAuthority;
+    /** Every capability of the vocabulary with its decision. */
+    capabilities: Array<WorkspaceCapability>;
+    /** When the answer was computed (it is never cached server-side). */
+    evaluatedAt: string;
+    features: WorkspaceFeatures;
+    kind: WorkspaceKind;
+    organizationId?: string | null;
+    organizationStatus?: string | null;
+    /** PERSONAL only: the Communications Hub read that owns personal communications capabilities (`/api/v2/communications/me/capabilities`). */
+    personalCommunicationsCapabilities?: string | null;
+    /** Organization policy revision the answer was computed with (Organizations Service). */
+    policyRevision?: number | null;
+    provisioningState?: string | null;
+    role?: string | null;
+    /** `personal`, or the organization id. */
+    workspaceId: string;
+  };
+  /** One capability decision. */
+  export type WorkspaceCapability = {
+    /** Capability name, e.g. `meetings.organization.create`. */
+    capability: string;
+    granted: boolean;
+    reason: WorkspaceCapabilityReason;
+  };
+  /** Why a capability is (not) granted in a workspace. */
+  export type WorkspaceCapabilityReason = "ALLOWED" | "CAPABILITY_NOT_GRANTED" | "POLICY_RESTRICTED" | "ORGANIZATION_SUSPENDED" | "FEATURE_DISABLED";
+  /** A small summary of what the caller can do in a workspace. */
+  export type WorkspaceCapabilitySummary = {
+    /** Organization administration: profile, member management or policies. */
+    canAdminister: boolean;
+    /** Meetings can be created in this context. */
+    canCreateMeetings: boolean;
+    /** Members can be invited (`organization.members.invite`). */
+    canInviteMembers: boolean;
+    /** Every capability granted now (default deny). */
+    granted: Array<string>;
+  };
+  /** Features the workspace context does not disable. Owner services still apply their own policy (stricter wins) and re-verify every request. */
+  export type WorkspaceFeatures = {
+    calling: boolean;
+    meetings: boolean;
+    messaging: boolean;
+  };
+  /** Kind of workspace context. */
+  export type WorkspaceKind = "PERSONAL" | "ORGANIZATION";
+  /** `GET /api/v2/me/workspaces`. */
+  export type WorkspacePage = {
+    authority: WorkspaceAuthority;
+    /** PERSONAL first, then organizations ordered by id. */
+    items: Array<Workspace>;
+    /** Pass back as `cursor` for the next page; null on the last page. */
+    nextCursor?: string | null;
+  };
 
   /** Typed parameters and response of every REST operation of this domain. */
   export interface Operations {
@@ -6132,6 +6209,17 @@ export namespace Meetings {
     v2MyOrganizations: {
       params: {};
       response: Array<MyOrganizationResponse>;
+    };
+    /** GET /api/v2/me/workspaces/{workspaceId}/capabilities; auth MEETING_SESSION; retry SAFE */
+    v2MyWorkspaceCapabilities: {
+      params: { path: { workspaceId: string } };
+      response: WorkspaceCapabilities;
+    };
+    /** GET /api/v2/me/workspaces; auth MEETING_SESSION; retry SAFE */
+    v2MyWorkspaces: {
+      params: { query?: { cursor?: string | null; limit?: number | null } };
+      response: WorkspacePage;
+      item: NonNullable<(WorkspacePage)["items"]>[number];
     };
     /** POST /api/v2/conferences/{id}/breakouts/{breakoutId}/open; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2OpenBreakout: {

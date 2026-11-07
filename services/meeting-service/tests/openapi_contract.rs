@@ -121,6 +121,9 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/organizations/{id}/members"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
+        // Blueprint Section 8 — workspace context (per request; no switch endpoint)
+        ("get", "/api/v2/me/workspaces"),
+        ("get", "/api/v2/me/workspaces/{workspaceId}/capabilities"),
         // Blueprint Section 4 — first-party organizations (Organizations Service relay)
         ("post", "/api/v2/organizations"),
         ("get", "/api/v2/organizations/{id}"),

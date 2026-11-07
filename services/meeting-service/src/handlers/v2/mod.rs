@@ -22,6 +22,7 @@ pub mod spaces;
 pub mod specialized;
 pub mod unified_messaging;
 pub mod views;
+pub mod workspaces;
 
 use axum::{
     async_trait,

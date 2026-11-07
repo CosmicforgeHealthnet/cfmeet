@@ -124,6 +124,10 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ("POST", "/internal/v1/organizations/{}/archive"),
     ("GET", "/internal/v1/organizations/{}/audit-events"),
     ("GET", "/internal/v1/organizations/{}/provisioning"),
+    // Blueprint Section 8 (workspace capabilities): the role matrix under the current
+    // policy and the effective organization constraints, read with the acting user.
+    ("GET", "/internal/v1/organizations/{}/roles/capabilities"),
+    ("GET", "/internal/v1/organizations/{}/policies/effective"),
     ("GET", "/internal/v1/users/{}/organizations"),
     ("GET", "/internal/v1/admin/organizations"),
     ("POST", "/internal/v1/admin/organizations"),
@@ -549,6 +553,10 @@ pub struct UserOrganization {
     pub lifecycle_status: String,
     pub role: String,
     pub membership_status: String,
+    /// The organization's provisioning state (`None` when the answer omits it).
+    pub provisioning_state: Option<String>,
+    /// The membership's effective capabilities under the organization policy and status.
+    pub capabilities: Vec<String>,
 }
 
 impl UserOrganization {
@@ -562,6 +570,9 @@ impl UserOrganization {
             lifecycle_status: org["lifecycleStatus"].as_str()?.to_string(),
             role: membership["role"].as_str()?.to_string(),
             membership_status: membership["status"].as_str()?.to_string(),
+            provisioning_state: org["provisioningState"].as_str().map(str::to_string),
+            // Missing → none (default deny; never widened by an incomplete answer).
+            capabilities: string_list(&v["capabilities"]).unwrap_or_default(),
         })
     }
 
@@ -570,6 +581,92 @@ impl UserOrganization {
             && self.lifecycle_status == "ACTIVE"
             && self.role != "GUEST"
     }
+}
+
+/// One role of `GET /internal/v1/organizations/{id}/roles/capabilities`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoleCapabilities {
+    pub role: String,
+    /// What the role matrix grants (before policy and status).
+    pub capabilities: Vec<String>,
+    /// What the role holds now under the organization's policy and status.
+    pub effective_capabilities: Vec<String>,
+}
+
+/// The role / capability matrix of one organization under its current policy and status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrganizationRoleMatrix {
+    pub organization_id: Uuid,
+    pub lifecycle_status: String,
+    pub policy_revision: i64,
+    /// The whole capability vocabulary (default deny).
+    pub capabilities: Vec<String>,
+    pub roles: Vec<RoleCapabilities>,
+}
+
+impl OrganizationRoleMatrix {
+    pub fn from_json(v: &Value) -> Option<Self> {
+        let roles = v["roles"]
+            .as_array()?
+            .iter()
+            .map(|r| {
+                Some(RoleCapabilities {
+                    role: r["role"].as_str()?.to_string(),
+                    capabilities: string_list(&r["capabilities"])?,
+                    effective_capabilities: string_list(&r["effectiveCapabilities"])?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            organization_id: uuid_field(v, "organizationId")?,
+            lifecycle_status: v["lifecycleStatus"].as_str()?.to_string(),
+            policy_revision: v["policyRevision"].as_i64().unwrap_or(0),
+            capabilities: string_list(&v["capabilities"])?,
+            roles,
+        })
+    }
+
+    pub fn role(&self, role: &str) -> Option<&RoleCapabilities> {
+        self.roles.iter().find(|r| r.role == role)
+    }
+}
+
+/// The organization-level constraints of `GET …/policies/effective` that the workspace
+/// context needs (owner services combine them with their own policy: stricter wins).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveOrganizationPolicy {
+    pub organization_id: Uuid,
+    pub lifecycle_status: String,
+    pub provisioning_state: Option<String>,
+    pub revision: i64,
+    pub meetings_enabled: bool,
+    pub messaging_enabled: bool,
+    pub calling_enabled: bool,
+}
+
+impl EffectiveOrganizationPolicy {
+    /// A feature flag that is missing or not a boolean refuses the whole answer: a
+    /// malformed policy never enables anything.
+    pub fn from_json(v: &Value) -> Option<Self> {
+        let features = &v["constraints"]["enabledFeatures"];
+        Some(Self {
+            organization_id: uuid_field(v, "organizationId")?,
+            lifecycle_status: v["lifecycleStatus"].as_str()?.to_string(),
+            provisioning_state: v["provisioningState"].as_str().map(str::to_string),
+            revision: v["revision"].as_i64().unwrap_or(0),
+            meetings_enabled: features["meetings"].as_bool()?,
+            messaging_enabled: features["messaging"].as_bool()?,
+            calling_enabled: features["calling"].as_bool()?,
+        })
+    }
+}
+
+/// A JSON array of strings (`None` for anything else).
+fn string_list(v: &Value) -> Option<Vec<String>> {
+    v.as_array()?
+        .iter()
+        .map(|c| c.as_str().map(str::to_string))
+        .collect()
 }
 
 fn uuid_field(v: &Value, key: &str) -> Option<Uuid> {
@@ -884,6 +981,51 @@ impl OrganizationsAuthority {
                 )))
             })
             .collect()
+    }
+
+    /// `GET /internal/v1/organizations/{id}/roles/capabilities` for the acting user
+    /// (Organizations requires `organization.read`; non-members get 404).
+    pub async fn role_matrix(
+        &self,
+        organization: Uuid,
+        actor: &ActingUser,
+    ) -> Result<OrganizationRoleMatrix, AuthorityError> {
+        let body = self
+            .read(
+                &Call::new(
+                    Method::GET,
+                    format!("/internal/v1/organizations/{organization}/roles/capabilities"),
+                )
+                .actor(actor),
+            )
+            .await?;
+        OrganizationRoleMatrix::from_json(&body)
+            .filter(|m| m.organization_id == organization)
+            .ok_or(AuthorityError::Unavailable(Unavailable(
+                "malformed role matrix",
+            )))
+    }
+
+    /// `GET /internal/v1/organizations/{id}/policies/effective` for the acting user.
+    pub async fn effective_policy(
+        &self,
+        organization: Uuid,
+        actor: &ActingUser,
+    ) -> Result<EffectiveOrganizationPolicy, AuthorityError> {
+        let body = self
+            .read(
+                &Call::new(
+                    Method::GET,
+                    format!("/internal/v1/organizations/{organization}/policies/effective"),
+                )
+                .actor(actor),
+            )
+            .await?;
+        EffectiveOrganizationPolicy::from_json(&body)
+            .filter(|p| p.organization_id == organization)
+            .ok_or(AuthorityError::Unavailable(Unavailable(
+                "malformed effective policy",
+            )))
     }
 
     /// Upserts the local read-only projection row from an authoritative snapshot (the
@@ -1414,6 +1556,14 @@ mod tests {
                 "/internal/v1/organizations/memberships/resolve".to_string(),
             ),
             (Method::GET, "/internal/v1/admin/organizations".to_string()),
+            (
+                Method::GET,
+                format!("/internal/v1/organizations/{id}/roles/capabilities"),
+            ),
+            (
+                Method::GET,
+                format!("/internal/v1/organizations/{id}/policies/effective"),
+            ),
         ] {
             assert!(is_allowlisted(&m, &p), "{m} {p}");
         }
@@ -1428,6 +1578,15 @@ mod tests {
                 "/internal/v1/organizations/authorization/evaluate".to_string(),
             ),
             (Method::DELETE, format!("/internal/v1/organizations/{id}")),
+            // Policy reads / writes stay outside the relay (only the effective read).
+            (
+                Method::GET,
+                format!("/internal/v1/organizations/{id}/policies"),
+            ),
+            (
+                Method::PATCH,
+                format!("/internal/v1/organizations/{id}/policies"),
+            ),
             (
                 Method::GET,
                 "/internal/v1/organizations/not-a-uuid".to_string(),

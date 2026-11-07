@@ -76,6 +76,20 @@ Internal (signed, `services/organizations`), all NEW: `GET /internal/v1/organiza
 
 No new customer endpoints. Existing `/v1/organizations*`, projects, environments, credentials, webhooks and usage are activated as they are. `DEPRECATE` candidates (after measured migration only): 23 v1 meeting write operations, 8 legacy developer API-key/webhook routes, 10 Calling webhook/usage/limits copies after the Part VI cut-over.
 
+## 5a. Section 8 — workspace context (built)
+
+Both §2 workspace rows are implemented in meeting-service (`services/workspaces.rs`, `handlers/v2/workspaces.rs`); details, mode differences and the web/mobile client mapping in [`docs/operations/workspaces-section-8.md`](../operations/workspaces-section-8.md).
+
+| Method | Path | Built as |
+|---|---|---|
+| GET | `/api/v2/me/workspaces?cursor&limit` | `v2_my_workspaces` — `personal` first, then the caller's ACTIVE memberships (ACTIVE or SUSPENDED organizations, by id); role, status, provisioning state, capability summary; `{items, nextCursor, authority}` |
+| GET | `/api/v2/me/workspaces/{workspaceId}/capabilities` | `v2_my_workspace_capabilities` — features + every capability with `granted` / `reason` (`ALLOWED`, `CAPABILITY_NOT_GRANTED`, `POLICY_RESTRICTED`, `ORGANIZATION_SUSPENDED`, `FEATURE_DISABLED`) |
+
+* Computed per request: authoritative mode reads Organizations (`GET /internal/v1/users/{id}/organizations`, `…/roles/capabilities`, `…/policies/effective`, the last two newly allowlisted in the existing signed relay client); legacy / shadow mode reads the meeting-service directory with the `/me/organizations` rule and reports `FEATURE_DISABLED` for what only Organizations implements. Organizations unavailable or malformed → `503 SERVICE_UNAVAILABLE`, never a wider answer.
+* Unknown, unauthorized and malformed ids → the same `404 ORGANIZATION_NOT_FOUND`. No switch endpoint, no stored active organization, no context token (ADR 0056 §5).
+* Personal communications capabilities are not duplicated: the personal answer links `GET /api/v2/communications/me/capabilities`. `GET /api/v2/organizations/{orgId}/roles/capabilities` stays CONDITIONAL (the workspace capability read serves the caller's own view).
+* Gateway: both `PUBLIC_CUSTOMER` (as `GET /api/v2/me/organizations`). Meeting-service v2 operations 177 → 179.
+
 ## 6. Running total (proposal only)
 
 Counted against the 1,066 baseline: about 31 NEW public first-party operations for organizations/workspaces, 5 NEW account operations, 3 NEW meeting operations, 4 NEW phone operations (provider-gated), 1 NEW calling operation, about 6 NEW internal Organizations operations, plus CONDITIONAL items. These numbers are not an API count: the real before/added/modified/deprecated/after figures are recomputed from the routers at the end of each section (blueprint Appendix B).
