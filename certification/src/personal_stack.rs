@@ -340,6 +340,12 @@ impl PersonalStack {
             ),
             ("CALLING_NEW_CALLS_ENABLED".into(), "true".into()),
             ("CALLING_APP_CALLING_ENABLED".into(), "true".into()),
+            // Hub-launched calls (CL-1) act under the personal scope's own API credential,
+            // re-verified with Platform Access (non-secret id). Section 14 journey.
+            (
+                "CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID".into(),
+                self.customer.credential_id.to_string(),
+            ),
             ("CALLING_MEDIA_PROVIDER".into(), "livekit".into()),
             (
                 "CALLING_LIVEKIT_API_URL".into(),

@@ -225,10 +225,25 @@ impl Store {
         version: i64,
         payload: Json,
     ) -> Result<()> {
+        self.scoped_event(db, p.scope(), event_type, aggregate_id, version, payload)
+            .await
+    }
+    /// The same durable fan-out to Calling and Messaging for a scope without a Hub
+    /// profile (Section 14, ACC-010: account revocations of principals that never
+    /// opened the Hub). The payload carries only references and epochs.
+    pub async fn scoped_event<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: Scope,
+        event_type: &str,
+        aggregate_id: Uuid,
+        version: i64,
+        payload: Json,
+    ) -> Result<()> {
         let event = Uuid::new_v4();
         for destination in ["CALLING", "MESSAGING"] {
             let mut v = vec![event.into()];
-            v.extend(scoped(p.scope()));
+            v.extend(scoped(scope));
             v.extend([
                 destination.into(),
                 aggregate_id.into(),

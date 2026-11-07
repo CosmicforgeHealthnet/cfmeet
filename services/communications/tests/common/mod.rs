@@ -207,6 +207,9 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
             )
         }
         "/internal/v1/communications/endpoints/revoke" => {
+            if world.calling_down {
+                return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+            }
             let id = uuid_at(body, "endpointId");
             match world.endpoints.get_mut(&id).filter(|e| e.0 == principal) {
                 None => Some(reject(StatusCode::NOT_FOUND, "NOT_FOUND")),
@@ -606,6 +609,7 @@ impl Harness {
             display_name: "Same chosen name".into(),
             avatar_reference: None,
             authenticated_at: Some(chrono::Utc::now().timestamp()),
+            account_session_ref: None,
         }
     }
     pub fn delegated(&self, a: &VerifiedAccount) -> DelegatedPlatformContext {

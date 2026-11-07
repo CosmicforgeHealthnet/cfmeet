@@ -27,12 +27,40 @@ pub struct AccountEvent {
     pub kind: AccountEventKind,
     pub state: Activation,
     pub occurred_at: DateTime<Utc>,
+    /// ACCOUNT_SESSION_ENDED only: the ended Account session (opaque reference).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_session_ref: Option<String>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AccountEventKind {
     StatusChanged,
     SessionRevoked,
+    /// Section 14 (ACC-008): one Account session ended (single sign-out, session revoke).
+    /// Ends the Hub devices that session linked; the account epoch is unchanged.
+    AccountSessionEnded,
+}
+impl AccountEvent {
+    /// Credentials issued before `occurredAt` must stop working everywhere.
+    pub fn revokes_credentials(&self) -> bool {
+        self.kind == AccountEventKind::SessionRevoked
+            || (self.kind == AccountEventKind::StatusChanged
+                && matches!(self.state, Activation::Suspended | Activation::Deactivated))
+    }
+    /// Shape rules beyond the schema: a session reference only (and always) with
+    /// ACCOUNT_SESSION_ENDED.
+    pub fn well_formed(&self) -> bool {
+        self.source_version >= 1
+            && self.account_reference.len() <= 80
+            && self.occurred_at <= Utc::now() + chrono::Duration::seconds(30)
+            && match (self.kind, self.account_session_ref.as_deref()) {
+                (AccountEventKind::AccountSessionEnded, Some(r)) => {
+                    cf_communications_policy::valid_account_session_ref(r)
+                }
+                (AccountEventKind::AccountSessionEnded, None) => false,
+                (_, r) => r.is_none(),
+            }
+    }
 }
 
 async fn inbox(
@@ -60,36 +88,46 @@ pub async fn account_event(
 ) -> Result<Json<Value>> {
     let scope = auth::delegated(&ctx)?;
     auth::validate_scope(&s, &scope).await?;
-    if event.source_version < 1
-        || event.account_reference.len() > 80
-        || event.occurred_at > Utc::now() + chrono::Duration::seconds(30)
-    {
+    if !event.well_formed() {
         return Err(Error::Validation);
     }
+    let digest_body = serde_json::to_value(&event).map_err(|_| Error::Validation)?;
+    let source = ctx.authenticated_service().as_str().to_owned();
+    let mut values = store::scoped(Scope::of(&scope));
+    values.push(event.account_reference.clone().into());
+    const LOOKUP: &str = "SELECT to_jsonb(p) doc FROM communication_profiles p WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND account_reference=$4";
+    let existing: Option<Profile> = one(&s.store.db, LOOKUP, values.clone()).await?;
+    if event.kind == AccountEventKind::AccountSessionEnded {
+        return session_ended(&s, &scope, &source, &event, &digest_body, existing).await;
+    }
+    // ACC-010: an account that never opened the Hub has no profile, but it may still
+    // hold Messaging and Calling credentials (the web bridge, the BFF). Account owns the
+    // principal mapping, so ask it before the transaction (Account is the caller and
+    // retries this event until it is answered).
+    let unprofiled_principal = if existing.is_none() && event.revokes_credentials() {
+        let status = auth::account_status(&s, &scope, &event.account_reference).await?;
+        match status["principalId"].as_str() {
+            Some(p) => Some(Uuid::parse_str(p).map_err(|_| Error::Unavailable)?),
+            None => None,
+        }
+    } else {
+        None
+    };
     let txn = s.store.begin().await?;
-    if !inbox(
-        &s,
-        &txn,
-        ctx.authenticated_service().as_str(),
-        event.event_id,
-        &serde_json::to_value(&event).map_err(|_| Error::Validation)?,
-    )
-    .await?
-    {
+    if !inbox(&s, &txn, &source, event.event_id, &digest_body).await? {
         txn.commit().await?;
         return Ok(Json(json!({"applied":false,"duplicate":true})));
     }
-    let mut values = store::scoped(Scope::of(&scope));
-    values.push(event.account_reference.clone().into());
-    let profile:Option<Profile>=one(&txn,"SELECT to_jsonb(p) doc FROM communication_profiles p WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND account_reference=$4 FOR UPDATE",values).await?;
+    let profile: Option<Profile> = one(&txn, &format!("{LOOKUP} FOR UPDATE"), values).await?;
     let mut applied = false;
+    let mut fan_out = "NONE";
     if let Some(p) = profile {
         if p.account_version < event.source_version {
             let next = if p.activation_state == Activation::Deactivated {
                 "DEACTIVATED"
             } else {
                 match event.kind {
-                    AccountEventKind::SessionRevoked => {
+                    AccountEventKind::SessionRevoked | AccountEventKind::AccountSessionEnded => {
                         if p.activation_state == Activation::Suspended {
                             "SUSPENDED"
                         } else {
@@ -103,8 +141,7 @@ pub async fn account_event(
                     },
                 }
             };
-            let revoke_credentials = event.kind == AccountEventKind::SessionRevoked
-                || matches!(event.state, Activation::Suspended | Activation::Deactivated);
+            let revoke_credentials = event.revokes_credentials();
             execute(&txn,"UPDATE communication_profiles SET activation_state=$2,account_version=$3,credentials_not_before=CASE WHEN $4 THEN GREATEST(COALESCE(credentials_not_before,$5),$5) ELSE credentials_not_before END,suspended_at=CASE WHEN $2='SUSPENDED' THEN $5 ELSE suspended_at END,deactivated_at=CASE WHEN $2='DEACTIVATED' THEN $5 ELSE deactivated_at END,version=version+1,updated_at=now() WHERE id=$1",vec![p.id.into(),next.into(),event.source_version.into(),revoke_credentials.into(),event.occurred_at.into()]).await?;
             s.store
                 .audit_system(
@@ -117,10 +154,84 @@ pub async fn account_event(
                 .await?;
             s.store.event(&txn,&p,"communications.account.changed",p.id,p.version+1,json!({"principalId":p.principal_id,"state":next,"credentialsNotBefore":if revoke_credentials {Some(event.occurred_at.timestamp())} else {None}})).await?;
             applied = true;
+            fan_out = "PROFILE";
+        }
+    } else if let Some(principal) = unprofiled_principal {
+        // No Hub profile: the same durable, deduplicated revocation to Calling and
+        // Messaging, keyed by the principal. Owners keep the greatest epoch, so replays
+        // and reordering are harmless. Nothing else about the account is recorded here;
+        // a profile created later takes Account's epoch at activation.
+        let state = match event.state {
+            Activation::Suspended => "SUSPENDED",
+            Activation::Deactivated => "DEACTIVATED",
+            _ => "ACCOUNT_CREATED",
+        };
+        s.store
+            .scoped_event(
+                &txn,
+                Scope::of(&scope),
+                "communications.account.changed",
+                principal,
+                event.source_version,
+                json!({"principalId":principal,"state":state,"credentialsNotBefore":event.occurred_at.timestamp(),"profile":false}),
+            )
+            .await?;
+        s.store
+            .audit_system(
+                &txn,
+                Scope::of(&scope),
+                "ACCOUNT_REVOCATION_FANNED_OUT",
+                Some(principal),
+                json!({"kind":event.kind,"state":state,"sourceVersion":event.source_version,"profile":false}),
+            )
+            .await?;
+        applied = true;
+        fan_out = "PRINCIPAL";
+    }
+    txn.commit().await?;
+    Ok(Json(
+        json!({"applied":applied,"duplicate":false,"fanOut":fan_out}),
+    ))
+}
+
+/// ACCOUNT_SESSION_ENDED: revoke the Hub devices the ended session linked. Owner calls
+/// are idempotent and happen before the deduplication record is written, so a failure
+/// answers 503 and Account's durable outbox retries the same event.
+async fn session_ended(
+    s: &State,
+    scope: &DelegatedPlatformContext,
+    source: &str,
+    event: &AccountEvent,
+    digest_body: &Value,
+    profile: Option<Profile>,
+) -> Result<Json<Value>> {
+    let session = event
+        .account_session_ref
+        .as_deref()
+        .ok_or(Error::Validation)?;
+    let ended = match &profile {
+        Some(p) => s.end_session_devices(scope, p, session).await?,
+        None => 0,
+    };
+    let txn = s.store.begin().await?;
+    let fresh = inbox(s, &txn, source, event.event_id, digest_body).await?;
+    if fresh {
+        if let Some(p) = &profile {
+            s.store
+                .audit_system(
+                    &txn,
+                    p.scope(),
+                    "ACCOUNT_SESSION_ENDED",
+                    Some(p.id),
+                    json!({"devicesRevoked":ended}),
+                )
+                .await?;
         }
     }
     txn.commit().await?;
-    Ok(Json(json!({"applied":applied,"duplicate":false})))
+    Ok(Json(
+        json!({"applied":fresh && ended>0,"duplicate":!fresh,"devicesRevoked":ended}),
+    ))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,6 +243,12 @@ pub struct BlockEvent {
     pub source_version: i64,
     pub blocked: bool,
 }
+/// DEPRECATED (Blueprint v1.0 Section 14, MSG-016 / DATA-006). No service produces
+/// block events: Calling and Messaging stay the authorities for their own block rules and
+/// every policy decision reads them live (`State::domain_blocks`). The route is kept,
+/// unchanged, for contract compatibility and is removed with the next major version of
+/// `cfmeet.communications.communications-internal`; rows it wrote are never read for a
+/// decision (`GET /blocks` lists only the Hub's own COMMUNICATIONS blocks).
 pub async fn block_event(
     HttpState(s): HttpState<State>,
     Extension(ctx): Extension<InternalServiceContext>,

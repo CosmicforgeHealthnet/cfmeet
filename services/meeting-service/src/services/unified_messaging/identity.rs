@@ -231,13 +231,10 @@ impl UnifiedMessaging {
     /// Section 13, ADR 0049 amendment A1): a domain-separated SHA-256 of the FIRST_PARTY
     /// environment and the session id. Messaging can match it, never reverse it.
     pub fn account_session_ref(&self, account_session_id: Uuid) -> String {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(b"cfmeet-account-session:v1|");
-        h.update(self.environment_id().as_bytes());
-        h.update(b"|");
-        h.update(account_session_id.as_bytes());
-        hex::encode(h.finalize())
+        crate::services::account_security::session_reference(
+            self.environment_id(),
+            account_session_id,
+        )
     }
 
     /// Issues (or renews, with `sessionDeviceId`) a MANAGED-realtime session-device token

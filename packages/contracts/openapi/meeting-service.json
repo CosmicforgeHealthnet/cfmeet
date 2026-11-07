@@ -10852,7 +10852,7 @@
           "Account sessions (v2)"
         ],
         "summary": "Sign out one session",
-        "description": "Ends one of the signed-in user's sessions (for example a lost device): its access and refresh\ntokens stop working immediately on every CF Meet service that checks account sessions.\nUnknown or foreign session ids get the same 404.",
+        "description": "Ends one of the signed-in user's sessions (for example a lost device): its access and refresh\ntokens stop working immediately on every CF Meet service that checks account sessions, and\neverything that sign-in holds ends with it: its MANAGED-realtime session devices and the\nCommunications devices it linked (Messaging device, push registration, Calling endpoint).\nUnknown or foreign session ids get the same 404.",
         "operationId": "v2_revoke_my_session",
         "parameters": [
           {

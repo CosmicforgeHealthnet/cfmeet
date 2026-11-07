@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -1350,6 +1350,36 @@
           },
           "securityReady": {
             "type": "boolean"
+          },
+          "managed": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.2.0: MANAGED personal messaging, independent of E2EE readiness. available: sending enabled and a DIRECT or GROUP context allows MANAGED; realtime SESSION_DEVICE when session devices are enabled (MESSAGING_SESSION_DEVICES_ENABLED) and client tokens can be signed, otherwise POLLING. available / securityReady / reason keep their PRIVATE_E2EE meaning.",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "MANAGED_NOT_ALLOWED"
+                ]
+              },
+              "realtime": {
+                "type": "string",
+                "enum": [
+                  "SESSION_DEVICE",
+                  "POLLING"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason",
+              "realtime"
+            ]
           }
         },
         "required": [

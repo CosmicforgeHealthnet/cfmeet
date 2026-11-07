@@ -138,7 +138,7 @@ The recipient's Hub preference `meetingInvitations` governs every meeting email
 `POST /internal/v1/communications/notification-preferences/resolve` (permission
 `communications-preferences.read`, grantable only to the Meeting Service, also checked by
 caller identity in the handler; account references in, opted-out references out, ≤100 per
-call; Communications contract 1.2.0 → 1.3.0). Without Communications configured no
+call; Communications internal contract 1.3.0 (Section 14) → 1.4.0). Without Communications configured no
 preference exists. When Communications is configured but unreachable a job is retried with
 backoff (never sent against an unknown preference) and an invitation email reports
 `FAILED`. Organization invitations are transactional (explicitly requested by an

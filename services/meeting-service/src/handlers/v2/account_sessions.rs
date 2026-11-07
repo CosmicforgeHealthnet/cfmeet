@@ -106,7 +106,9 @@ pub async fn list_my_sessions(
 /// Sign out one session
 ///
 /// Ends one of the signed-in user's sessions (for example a lost device): its access and refresh
-/// tokens stop working immediately on every CF Meet service that checks account sessions.
+/// tokens stop working immediately on every CF Meet service that checks account sessions, and
+/// everything that sign-in holds ends with it: its MANAGED-realtime session devices and the
+/// Communications devices it linked (Messaging device, push registration, Calling endpoint).
 /// Unknown or foreign session ids get the same 404.
 #[utoipa::path(
     post, path = "/api/v2/me/sessions/{sessionId}/revoke", tag = "Account sessions (v2)", operation_id = "v2_revoke_my_session",
@@ -148,11 +150,9 @@ pub async fn revoke_my_session(
             .session(session_id),
     )
     .await?;
-    // Blueprint Section 13: the session's MANAGED-realtime session devices end with it.
-    if let Some(um) = state.meeting.core.unified.as_ref() {
-        um.revoke_session_devices_for(user.user_id, session_id)
-            .await;
-    }
+    // Blueprint Sections 13-14: the session's MANAGED-realtime session devices and the
+    // Hub devices it linked end with it (ADR 0057 amendment A1).
+    crate::services::communications::session_ended(&state, user.user_id, session_id).await?;
     Ok(Json(AccountSessionRevokeResponse {
         revoked_count: u64::from(revoked),
     }))

@@ -150,6 +150,13 @@ pub async fn deactivate_account(
 
     // Save changes
     user_active.update(&state.db).await?;
+    // Section 14 (ACC-010): Messaging, Calling, the Hub and Platform Access follow.
+    crate::services::communications::credentials_ended(
+        &state,
+        auth_context.user_id,
+        "ACCOUNT_DISABLED",
+    )
+    .await;
 
     Ok(Json(MessageResponse {
         message: "Account deactivated successfully".to_string(),

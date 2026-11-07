@@ -357,7 +357,7 @@ class Capabilities {
   const Capabilities.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Capabilities.create({required ActivationState activationState, required Map<String, Object?> contacts, required Map<String, Object?> meetings, required BackendCapability messaging, required BackendCapability personalCalling, required PhoneVerification phoneVerification, required int schemaVersion}) =>
+  factory Capabilities.create({required ActivationState activationState, required Map<String, Object?> contacts, required Map<String, Object?> meetings, required MessagingCapability messaging, required BackendCapability personalCalling, required PhoneVerification phoneVerification, required int schemaVersion}) =>
       Capabilities.fromJson(<String, Object?>{
         'activationState': activationState,
         'contacts': contacts,
@@ -377,7 +377,7 @@ class Capabilities {
 
   Map<String, Object?> get meetings => json['meetings']! as Map<String, Object?>;
 
-  BackendCapability get messaging => BackendCapability.fromJson(json['messaging']! as Map<String, Object?>);
+  MessagingCapability get messaging => MessagingCapability.fromJson(json['messaging']! as Map<String, Object?>);
 
   BackendCapability get personalCalling => BackendCapability.fromJson(json['personalCalling']! as Map<String, Object?>);
 
@@ -1095,8 +1095,9 @@ class Device {
   const Device.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Device.create({int? acknowledgedSyncPosition, String? callEndpointId, String? chatDeviceId, String? createdAt, required String deviceId, String? label, required String platform, Map<String, Object?>? push, String? revocationReason, String? revokedAt, required String state, int? version}) =>
+  factory Device.create({Map<String, Object?>? accountSession, int? acknowledgedSyncPosition, String? callEndpointId, String? chatDeviceId, String? createdAt, required String deviceId, String? label, required String platform, Map<String, Object?>? push, String? revocationReason, String? revokedAt, required String state, int? version}) =>
       Device.fromJson(<String, Object?>{
+        if (accountSession != null) 'accountSession': accountSession,
         if (acknowledgedSyncPosition != null) 'acknowledgedSyncPosition': acknowledgedSyncPosition,
         if (callEndpointId != null) 'callEndpointId': callEndpointId,
         if (chatDeviceId != null) 'chatDeviceId': chatDeviceId,
@@ -1114,6 +1115,9 @@ class Device {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// 1.2.0: whether the device is bound to the CF Meet sign-in (account session) that linked it. Signing that session out (POST /api/v2/me/sessions/{sessionId}/revoke, logout) revokes the device; revoking the device signs that session out. The session reference itself is never shown.
+  Map<String, Object?>? get accountSession => json['accountSession'] == null ? null : json['accountSession']! as Map<String, Object?>;
+
   int? get acknowledgedSyncPosition => (json['acknowledgedSyncPosition'] as num?)?.toInt();
 
   String? get callEndpointId => json['callEndpointId'] as String?;
@@ -1130,6 +1134,7 @@ class Device {
 
   Map<String, Object?>? get push => json['push'] == null ? null : json['push']! as Map<String, Object?>;
 
+  /// USER_REQUESTED, COMPROMISED, OPERATOR, OWNER_SERVICE or ACCOUNT_SESSION_ENDED (1.2.0: the sign-in that linked the device ended).
   String? get revocationReason => json['revocationReason'] as String?;
 
   String? get revokedAt => json['revokedAt'] as String?;
@@ -1210,6 +1215,7 @@ class DeviceResult {
 
   Device get device => Device.fromJson(json['device']! as Map<String, Object?>);
 
+  /// Revocation effects: messagingDevice, callingEndpoint and accountSession (ENDED: the bound sign-in was signed out; NOT_BOUND; UNCHANGED: no Account relay ended it).
   Map<String, Object?>? get effects => json['effects'] == null ? null : json['effects']! as Map<String, Object?>;
 
   bool? get linked => json['linked'] as bool?;
@@ -1743,6 +1749,37 @@ class MeetingShare {
   String get clientRequestId => json['clientRequestId']! as String;
 
   String get meetingCode => json['meetingCode']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never …
+class MessagingCapability {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const MessagingCapability.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory MessagingCapability.create({required bool available, required Map<String, Object?> managed, required Map<String, Object?> privateE2ee, required String reason, required bool securityReady}) =>
+      MessagingCapability.fromJson(<String, Object?>{
+        'available': available,
+        'managed': managed,
+        'privateE2ee': privateE2ee,
+        'reason': reason,
+        'securityReady': securityReady,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get available => json['available']! as bool;
+
+  Map<String, Object?> get managed => json['managed']! as Map<String, Object?>;
+
+  Map<String, Object?> get privateE2ee => json['privateE2ee']! as Map<String, Object?>;
+
+  String get reason => json['reason']! as String;
+
+  bool get securityReady => json['securityReady']! as bool;
 
   Map<String, Object?> toJson() => json;
 }
