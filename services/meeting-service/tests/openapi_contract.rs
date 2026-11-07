@@ -117,6 +117,27 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/organizations/{id}/members"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
+        // Blueprint Section 4 — first-party organizations (Organizations Service relay)
+        ("post", "/api/v2/organizations"),
+        ("get", "/api/v2/organizations/{id}"),
+        ("patch", "/api/v2/organizations/{id}"),
+        ("patch", "/api/v2/organizations/{id}/members/{userId}"),
+        ("post", "/api/v2/organizations/{id}/members/me/leave"),
+        ("post", "/api/v2/organizations/{id}/ownership-transfer"),
+        ("post", "/api/v2/organizations/{id}/invitations"),
+        ("get", "/api/v2/organizations/{id}/invitations"),
+        (
+            "post",
+            "/api/v2/organizations/{id}/invitations/{invitationId}/revoke",
+        ),
+        ("post", "/api/v2/organization-invitations/accept"),
+        ("post", "/api/v2/organization-invitations/decline"),
+        ("post", "/api/v2/organizations/{id}/suspend"),
+        ("post", "/api/v2/organizations/{id}/reactivate"),
+        ("post", "/api/v2/organizations/{id}/archive"),
+        ("get", "/api/v2/organizations/{id}/audit-events"),
+        ("get", "/api/v2/organizations/{id}/provisioning"),
+        ("get", "/api/v2/admin/organizations"),
         // Part E — provider media control & realtime
         (
             "post",

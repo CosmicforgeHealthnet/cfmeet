@@ -26,6 +26,7 @@ pub mod membership;
 pub mod ops_metrics;
 pub mod organization_export;
 pub mod organizations;
+pub mod organizations_authority;
 pub mod outbox;
 pub mod platform;
 pub mod profiles;

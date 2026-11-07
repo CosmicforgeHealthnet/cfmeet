@@ -25,8 +25,9 @@ COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 # Build for release
 # Build the migration binary from the migration package
 RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin account-communications-migration
-# Build the backend binary from the root package
-RUN cargo build --release --jobs 1 -p backend --bin backend
+# Build the backend binary (and the read-only organization export used by the Blueprint
+# Section 4 cutover runbook) from the root package
+RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
 
 # Runtime Stage
 FROM debian:bookworm-slim
@@ -44,6 +45,7 @@ COPY --from=builder /app/services/meeting-service/target/release/migration ./mig
 COPY --from=builder /app/services/meeting-service/target/release/account-security-migration ./account-security-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
+COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
 
 # Expose the application port
 EXPOSE 8080

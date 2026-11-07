@@ -159,6 +159,9 @@ pub struct DomainCore {
     pub flags: FeatureFlags,
     pub config: MeetingV2Config,
     pub organizations: SharedOrganizationDirectory,
+    /// Blueprint Section 4: the Organizations Service integration (`None` = legacy mode).
+    pub organization_authority:
+        Option<crate::services::organizations_authority::SharedOrganizationsAuthority>,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
     pub appointments:

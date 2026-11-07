@@ -242,6 +242,34 @@ pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult
     Ok(Json(um.me(user).await?))
 }
 
+/// The caller's colleague scope (Blueprint Section 4: read from Organizations once it is
+/// authoritative; an unreadable organization contributes nobody).
+async fn colleague_scope(
+    state: &AppState,
+    actor: &ActorContext,
+) -> crate::services::unified_messaging::relay::ColleagueScope {
+    use crate::services::unified_messaging::relay::ColleagueScope;
+    match (
+        state
+            .meeting
+            .core
+            .organization_authority
+            .as_ref()
+            .filter(|a| a.is_authoritative()),
+        actor.registered(),
+    ) {
+        (Some(authority), Some(user)) => ColleagueScope::Users(
+            crate::services::organizations_authority::authoritative_colleagues(
+                authority,
+                user,
+                &actor.verified_organizations,
+            )
+            .await,
+        ),
+        _ => ColleagueScope::Organizations(actor.verified_organizations.clone()),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DirectoryQuery {
     pub q: Option<String>,
@@ -269,7 +297,7 @@ pub async fn directory(
     let um = integration(&state)?;
     let user = verified_user(&actor)?;
     Ok(Json(
-        um.directory(user, &actor.verified_organizations, q.q.as_deref())
+        um.directory(user, &colleague_scope(&state, &actor).await, q.q.as_deref())
             .await?,
     ))
 }
@@ -301,7 +329,7 @@ pub async fn resolve(
     let um = integration(&state)?;
     let user = verified_user(&actor)?;
     Ok(Json(
-        um.resolve_colleagues(user, &actor.verified_organizations, &body.user_ids)
+        um.resolve_colleagues(user, &colleague_scope(&state, &actor).await, &body.user_ids)
             .await?,
     ))
 }
@@ -332,8 +360,12 @@ pub async fn principal_names(
     let um = integration(&state)?;
     let user = verified_user(&actor)?;
     Ok(Json(
-        um.name_principals(user, &actor.verified_organizations, &body.principal_ids)
-            .await?,
+        um.name_principals(
+            user,
+            &colleague_scope(&state, &actor).await,
+            &body.principal_ids,
+        )
+        .await?,
     ))
 }
 

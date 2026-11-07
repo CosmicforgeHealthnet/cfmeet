@@ -8034,7 +8034,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
-        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token. Once the Organizations\nService is authoritative the list comes from it (active, non-GUEST memberships of active\norganizations) and each item also carries `organizationRole`.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -8052,6 +8052,16 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12338,6 +12348,17 @@
           "CHAT_UNAVAILABLE",
           "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
+          "ORGANIZATION_NOT_FOUND",
+          "MEMBERSHIP_REQUIRED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_ARCHIVED",
+          "LAST_OWNER",
+          "VERSION_CONFLICT",
+          "SLUG_TAKEN",
+          "INVITE_EXPIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROVISIONING_PENDING",
+          "INVITATION_REQUIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -13721,6 +13742,13 @@
         "properties": {
           "organization": {
             "$ref": "#/components/schemas/OrganizationResponse"
+          },
+          "organizationRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Once the Organizations Service is authoritative: the caller's full role (OWNER,\nADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER."
           },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"

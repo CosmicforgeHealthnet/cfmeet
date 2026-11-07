@@ -20,7 +20,7 @@ use crate::{
         meeting_core::{AccessAdapterRegistry, AttemptLimiter, Core, DomainCore},
         meeting_space::MeetingSpaceService,
         membership::MembershipService,
-        organizations::{DbOrganizationDirectory, OrganizationService},
+        organizations::OrganizationService,
         recurrence::RecurrenceService,
         rtc_control::RtcControl,
         rtc_provider::{LiveKitProvider, RtcProvider},
@@ -34,6 +34,11 @@ pub struct MeetingDomainDeps {
     pub flags: FeatureFlags,
     pub config: MeetingV2Config,
     pub organizations: SharedOrganizationDirectory,
+    /// Blueprint Section 4: Organizations Service integration (`None` = legacy mode). The
+    /// directory above must be the one built for the same mode
+    /// ([`crate::services::organizations_authority::directory_for`]).
+    pub organization_authority:
+        Option<crate::services::organizations_authority::SharedOrganizationsAuthority>,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
     /// HEALTHCARE_APPOINTMENT authority (denies everything until configured).
@@ -48,10 +53,18 @@ pub struct MeetingDomainDeps {
 
 impl MeetingDomainDeps {
     pub fn from_env(db: &DatabaseConnection, livekit: &LiveKitConfig) -> Self {
+        // Fail closed: `shadow` / `authoritative` without a working client stops startup.
+        let organization_authority =
+            crate::services::organizations_authority::OrganizationsAuthority::from_env()
+                .unwrap_or_else(|e| panic!("Organizations authority configuration error: {e}"));
         Self {
             flags: FeatureFlags::from_env(),
             config: MeetingV2Config::from_env(),
-            organizations: Arc::new(DbOrganizationDirectory::new(db.clone())),
+            organizations: crate::services::organizations_authority::directory_for(
+                db,
+                organization_authority.as_ref(),
+            ),
+            organization_authority,
             rtc: Arc::new(LiveKitProvider::new(livekit)),
             adapters: AccessAdapterRegistry::default(),
             appointments: match HttpAppointmentAuthorizationAdapter::from_env() {
@@ -171,6 +184,7 @@ impl MeetingDomain {
             flags: deps.flags,
             config: deps.config,
             organizations: deps.organizations,
+            organization_authority: deps.organization_authority,
             rtc: deps.rtc,
             adapters: deps.adapters,
             appointments: deps.appointments,

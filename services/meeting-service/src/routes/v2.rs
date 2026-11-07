@@ -487,22 +487,78 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/admin/chat-migration/parity-runs",
             post(crate::handlers::v2::unified_messaging::migration_parity),
         )
-        // Organizations
+        // Organizations (legacy directory; facades + first-party routes over the
+        // Organizations Service once it is authoritative — Blueprint Section 4)
         .route(
             "/admin/organizations",
-            post(organizations::create_organization),
+            post(organizations::create_organization).get(organizations::admin_list_organizations),
         )
         .route(
             "/admin/organizations/:id",
             patch(organizations::update_organization),
         )
         .route(
+            "/organizations",
+            post(organizations::create_business_organization),
+        )
+        .route(
+            "/organizations/:id",
+            get(organizations::get_business_organization)
+                .patch(organizations::update_business_organization),
+        )
+        .route(
             "/organizations/:id/members",
             get(organizations::list_organization_members),
         )
         .route(
+            "/organizations/:id/members/me/leave",
+            post(organizations::leave_organization),
+        )
+        .route(
             "/organizations/:id/members/:user_id",
-            put(organizations::upsert_organization_member),
+            put(organizations::upsert_organization_member)
+                .patch(organizations::update_organization_membership),
+        )
+        .route(
+            "/organizations/:id/ownership-transfer",
+            post(organizations::transfer_organization_ownership),
+        )
+        .route(
+            "/organizations/:id/invitations",
+            get(organizations::list_organization_invitations)
+                .post(organizations::create_organization_invitation),
+        )
+        .route(
+            "/organizations/:id/invitations/:invitation_id/revoke",
+            post(organizations::revoke_organization_invitation),
+        )
+        .route(
+            "/organizations/:id/suspend",
+            post(organizations::suspend_business_organization),
+        )
+        .route(
+            "/organizations/:id/reactivate",
+            post(organizations::reactivate_business_organization),
+        )
+        .route(
+            "/organizations/:id/archive",
+            post(organizations::archive_business_organization),
+        )
+        .route(
+            "/organizations/:id/audit-events",
+            get(organizations::list_organization_audit_events),
+        )
+        .route(
+            "/organizations/:id/provisioning",
+            get(organizations::get_organization_provisioning),
+        )
+        .route(
+            "/organization-invitations/accept",
+            post(organizations::accept_organization_invitation),
+        )
+        .route(
+            "/organization-invitations/decline",
+            post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
         // Blueprint Section 2: account sessions and the security audit

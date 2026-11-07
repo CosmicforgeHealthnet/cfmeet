@@ -8,7 +8,8 @@
     "NOT_AN_API_OPERATION": "Service landing response.",
     "MEDIA_PLANE_DIRECT": "Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway.",
     "CONTACT_VAULT_PRIVATE": "Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway.",
-    "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family."
+    "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family.",
+    "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations)."
   },
   "operations": [
     {
@@ -2473,6 +2474,118 @@
       "path": "/api/v2/organizations/{id}/members/{userId}",
       "class": "EXCLUDED",
       "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/organizations/{id}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/organizations/{id}/members/{userId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/members/me/leave",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/ownership-transfer",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/invitations",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/invitations",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/invitations/{invitationId}/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/accept",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/decline",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/suspend",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/reactivate",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/archive",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/audit-events",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/provisioning",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
     },
     {
       "domain": "meetings",
