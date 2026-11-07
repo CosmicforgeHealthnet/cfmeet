@@ -63,8 +63,9 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
             assert_no_secrets(&app, &format!("{method} {path}"), &v);
         }
     }
-    // 153 + 4 Blueprint Section 2 account-session/audit operations.
-    assert_eq!(probed, 157, "all v2 operations probed");
+    // 153 + 4 Blueprint Section 2 account-session/audit operations + 17 Blueprint
+    // Section 4 first-party organization operations.
+    assert_eq!(probed, 174, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

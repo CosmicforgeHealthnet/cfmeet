@@ -137,6 +137,20 @@ async fn main() -> anyhow::Result<()> {
         panic!("Account security migration is required (account-security-migration up)");
     }
 
+    // Blueprint Section 4: which store answers organization questions (the client
+    // configuration was validated when the meeting domain was built; misconfiguration
+    // stopped startup there).
+    tracing::info!(
+        "Organizations authority mode: {}",
+        state
+            .meeting
+            .core
+            .organization_authority
+            .as_ref()
+            .map(|a| a.mode().as_str())
+            .unwrap_or("legacy")
+    );
+
     state.communications = backend::services::communications::Bridge::from_env()
         .unwrap_or_else(|e| panic!("Communications configuration error: {e}"));
     if state.communications.is_some() {

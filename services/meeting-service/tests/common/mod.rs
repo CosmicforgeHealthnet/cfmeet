@@ -46,7 +46,6 @@ use backend::{
         },
         meeting_domain::MeetingDomainDeps,
         meeting_permissions::MediaPermissions,
-        organizations::DbOrganizationDirectory,
         rtc_provider::{
             JoinCredentialRequest, JoinCredentials, LiveKitProvider, RoomInfo, RoomSpec, RtcError,
             RtcParticipant, RtcParticipantRef, RtcProvider, RtcResult, RtcRoomRef, TrackKind,
@@ -427,6 +426,10 @@ pub struct TestOptions {
     pub unified_messaging: Option<backend::services::unified_messaging::SharedGateway>,
     /// Part VI §51: the platform credential receiver (gateway-forwarded machine callers).
     pub platform: Option<backend::services::platform::PlatformReceiver>,
+    /// Blueprint Section 4: the Organizations Service integration (`shadow` /
+    /// `authoritative`); `None` = legacy mode. Ignored when `organizations` is non-empty.
+    pub organizations_authority:
+        Option<backend::services::organizations_authority::SharedOrganizationsAuthority>,
 }
 
 impl Default for TestOptions {
@@ -450,6 +453,7 @@ impl Default for TestOptions {
             reuse_storage: None,
             unified_messaging: None,
             platform: None,
+            organizations_authority: None,
         }
     }
 }
@@ -675,7 +679,10 @@ impl TestApp {
             Arc::new(AllowListAdapter(opts.custom_allow.clone())),
         );
         let organizations: SharedOrganizationDirectory = if opts.organizations.is_empty() {
-            Arc::new(DbOrganizationDirectory::new(db.conn.clone()))
+            backend::services::organizations_authority::directory_for(
+                &db.conn,
+                opts.organizations_authority.as_ref(),
+            )
         } else {
             Arc::new(StaticOrganizationDirectory {
                 memberships: opts.organizations,
@@ -724,6 +731,7 @@ impl TestApp {
             artifacts: artifact_backends,
             telemetry: opts.telemetry.clone().unwrap_or_else(|| sink.clone()),
             organizations,
+            organization_authority: opts.organizations_authority.clone(),
             rtc: provider,
             adapters,
             appointments: opts.appointments.unwrap_or_else(|| {

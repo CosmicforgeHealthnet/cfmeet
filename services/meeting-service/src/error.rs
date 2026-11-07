@@ -110,8 +110,32 @@ pub enum ErrorCode {
     ChatUnavailable,
     /// The chat migration transition is not allowed now (gate, parity or final state).
     ChatMigrationRefused,
-    /// A required dependency (PostgreSQL) is unreachable; retry later. No state changed.
+    /// A required dependency (PostgreSQL, the Organizations Service) is unreachable; retry
+    /// later. No state changed.
     ServiceUnavailable,
+    // Blueprint Section 4: first-party organizations (relayed from the Organizations Service)
+    /// The organization does not exist or the caller may not see it (non-enumerating).
+    OrganizationNotFound,
+    /// The caller's membership is not active.
+    MembershipRequired,
+    /// The organization is suspended.
+    OrganizationSuspended,
+    /// The organization is archived.
+    OrganizationArchived,
+    /// The change would leave the organization without an OWNER.
+    LastOwner,
+    /// `expectedVersion` is stale; re-read and retry.
+    VersionConflict,
+    /// The organization slug is already in use.
+    SlugTaken,
+    /// The organization invitation has expired.
+    InviteExpired,
+    /// The `Idempotency-Key` was already used with a different request body.
+    IdempotencyConflict,
+    /// The organization's technical provisioning has not finished.
+    ProvisioningPending,
+    /// New members join an organization only by accepting an invitation.
+    InvitationRequired,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -206,6 +230,17 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => "CHAT_UNAVAILABLE",
             ErrorCode::ChatMigrationRefused => "CHAT_MIGRATION_REFUSED",
             ErrorCode::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+            ErrorCode::OrganizationNotFound => "ORGANIZATION_NOT_FOUND",
+            ErrorCode::MembershipRequired => "MEMBERSHIP_REQUIRED",
+            ErrorCode::OrganizationSuspended => "ORGANIZATION_SUSPENDED",
+            ErrorCode::OrganizationArchived => "ORGANIZATION_ARCHIVED",
+            ErrorCode::LastOwner => "LAST_OWNER",
+            ErrorCode::VersionConflict => "VERSION_CONFLICT",
+            ErrorCode::SlugTaken => "SLUG_TAKEN",
+            ErrorCode::InviteExpired => "INVITE_EXPIRED",
+            ErrorCode::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            ErrorCode::ProvisioningPending => "PROVISIONING_PENDING",
+            ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -298,6 +333,17 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::ChatMigrationRefused => StatusCode::CONFLICT,
             ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::OrganizationNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::MembershipRequired => StatusCode::FORBIDDEN,
+            ErrorCode::OrganizationSuspended
+            | ErrorCode::OrganizationArchived
+            | ErrorCode::LastOwner
+            | ErrorCode::VersionConflict
+            | ErrorCode::SlugTaken
+            | ErrorCode::IdempotencyConflict
+            | ErrorCode::ProvisioningPending
+            | ErrorCode::InvitationRequired => StatusCode::CONFLICT,
+            ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

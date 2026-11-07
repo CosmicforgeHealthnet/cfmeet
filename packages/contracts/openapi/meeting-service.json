@@ -2785,12 +2785,101 @@
       }
     },
     "/api/v2/admin/organizations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List all business organizations (platform administrators).",
+        "description": "Returns every first-party organization in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1–200, default 50), optionally filtered by `status` (ACTIVE, SUSPENDED or\nARCHIVED). Requires a platform administrator bearer token. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_admin_list_organizations",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "ACTIVE, SUSPENDED or ARCHIVED",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organizations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "Organizations (v2)"
         ],
         "summary": "Create an organization (platform administrators).",
-        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token.",
+        "description": "Creates an ACTIVE organization with a unique `slug` (lowercase letters, digits and `-`) and a\nname of 1–200 characters, optionally making `ownerUserId` its first OWNER. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator create (creation source PLATFORM_ADMIN, the administrator recorded as creator)\nand the response keeps this shape.",
         "operationId": "v2_create_organization",
         "requestBody": {
           "content": {
@@ -2813,8 +2902,38 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2837,7 +2956,7 @@
           "Organizations (v2)"
         ],
         "summary": "Suspend or reactivate an organization (platform administrators).",
-        "description": "Sets the organization's status to ACTIVE or SUSPENDED. While an organization is suspended, its\nown OWNERs and ADMINs can no longer list or manage its members. Requires a platform\nadministrator bearer token.",
+        "description": "Sets the organization's status to ACTIVE or SUSPENDED. While an organization is suspended, its\nown OWNERs and ADMINs can no longer list or manage its members. Requires a platform\nadministrator bearer token. Once the Organizations Service is authoritative this is relayed to\nits operator lifecycle change and the response keeps this shape.",
         "operationId": "v2_update_organization",
         "parameters": [
           {
@@ -2874,6 +2993,26 @@
           },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / ORGANIZATION_NOT_FOUND (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -10262,7 +10401,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
-        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token. Once the Organizations\nService is authoritative the list comes from it (active, non-GUEST memberships of active\norganizations) and each item also carries `organizationRole`.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -10280,6 +10419,16 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12978,13 +13127,876 @@
         ]
       }
     },
+    "/api/v2/organization-invitations/accept": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Accept an organization invitation.",
+        "description": "Joins the organization with the invitation's role. The signed-in account must have a verified\nemail equal to the invited address (the account's verified email is sent by the server, never\ntaken from the request). An expired invitation answers INVITE_EXPIRED; an unknown, used or\nrevoked token answers INVITATION_INVALID. Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "operationId": "v2_accept_organization_invitation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationInvitationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Membership created by the invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (verified email does not match)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITATION_INVALID / INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organization-invitations/decline": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Decline an organization invitation.",
+        "description": "Declines a PENDING invitation addressed to the signed-in user so it can no longer be accepted.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_decline_organization_invitation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationInvitationTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Declined invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITATION_INVALID / INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create a business organization (the caller becomes OWNER).",
+        "description": "Creates a first-party business organization in the Organizations Service with the signed-in\nuser as its OWNER (creation source SELF_SERVICE; at most 5 per user per 24 hours). This is the\nCF Meet business organization, not a developer-platform API workspace. Send an\n`Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "operationId": "v2_create_business_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBusinessOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Get a business organization.",
+        "description": "Returns the organization with its profile, member count and the caller's own membership\n(`viewer`: role, status and capabilities). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_get_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Update a business organization's name, slug or profile.",
+        "description": "Changes the name, slug and profile fields given (an omitted profile field is unchanged and\n`null` clears it). `expectedVersion` must be the organization's current `version`, otherwise\nVERSION_CONFLICT. Requires the `organization.profile.write` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBusinessOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / SLUG_TAKEN / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/archive": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Archive a business organization (OWNER).",
+        "description": "Archives an organization its OWNERs suspended; archiving is final for members (only OWNERs can\nstill read it) and existing organization meetings lose organization access. Requires the\n`organization.lifecycle.manage` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_archive_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Archived organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/audit-events": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "An organization's audit history.",
+        "description": "Returns the organization's audit events, newest first (`before` = the `seq` of the oldest\nevent already seen; `limit` 1–200, default 50): who changed what, when, and through which\nservice. Requires the `organization.audit.read` capability (OWNER, ADMIN). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_list_organization_audit_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return events older than this sequence number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items: audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/invitations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List an organization's invitations.",
+        "description": "Returns the organization's invitations (masked invitee email, never a token), optionally\nfiltered by `status`. Requires the `organization.members.invite` capability. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_list_organization_invitations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items: invitations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Invite someone to an organization by email.",
+        "description": "Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_create_organization_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Invitation with its one-time token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/invitations/{invitationId}/revoke": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Revoke an organization invitation.",
+        "description": "Revokes a PENDING invitation so its token can no longer be accepted (idempotent: revoking a\nrevoked invitation succeeds). Requires the `organization.members.invite` capability. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_revoke_organization_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/members": {
       "get": {
         "tags": [
           "Organizations (v2)"
         ],
         "summary": "List members (platform admins, organization OWNER/ADMIN).",
-        "description": "Returns every membership of the organization, whatever its status, oldest first. Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization.",
+        "description": "Returns every membership of the organization, whatever its status, oldest first. Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list) and each item also carries\n`organizationRole` and `version`.",
         "operationId": "v2_list_organization_members",
         "parameters": [
           {
@@ -13021,6 +14033,106 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / ORGANIZATION_NOT_FOUND (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/members/me/leave": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Leave an organization.",
+        "description": "Ends the signed-in user's own membership. The last OWNER cannot leave (LAST_OWNER): transfer\nownership first. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_leave_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The ended membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LAST_OWNER",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -13036,7 +14148,7 @@
           "Organizations (v2)"
         ],
         "summary": "Add or change a membership (platform admins, organization OWNER/ADMIN within limits).",
-        "description": "Creates or updates the user's role and status in the organization; status REMOVED ends an\nexisting membership. Platform administrators and OWNERs may set any role, while ADMINs may only\nmanage MEMBER memberships. Except for platform administrators, callers cannot change their own\nmembership.",
+        "description": "Creates or updates the user's role and status in the organization; status REMOVED ends an\nexisting membership. Platform administrators and OWNERs may set any role, while ADMINs may only\nmanage MEMBER memberships. Except for platform administrators, callers cannot change their own\nmembership. Once the Organizations Service is authoritative, an existing member's change is\nrelayed to it (its role rules apply) and a user who is not yet a member gets\n`409 INVITATION_REQUIRED`: new members join by invitation.",
         "operationId": "v2_upsert_organization_member",
         "parameters": [
           {
@@ -13083,6 +14195,459 @@
           },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "INVITATION_REQUIRED / LAST_OWNER (authoritative mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Change a member's role or status.",
+        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the membership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_organization_membership",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "Membership id (the `id` of a member list item)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBusinessMembershipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / LAST_OWNER",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/ownership-transfer": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Transfer organization ownership.",
+        "description": "Atomically makes the membership `toMembershipId` an OWNER and the calling OWNER an ADMIN.\n`expectedVersion` must be the organization's current `version`. Requires the\n`organization.ownership.transfer` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_transfer_organization_ownership",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationOwnershipTransferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Transfer result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/provisioning": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "An organization's technical provisioning state.",
+        "description": "Returns the truthful provisioning state of the organization's technical scope (NOT_REQUIRED,\nPENDING, IN_PROGRESS, READY or FAILED), the current step and, on failure, the failure class.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_get_organization_provisioning",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provisioning state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/reactivate": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Reactivate a business organization (OWNER).",
+        "description": "Reactivates an organization its OWNERs suspended (a suspension imposed by an operator can only\nbe lifted by an operator). Requires the `organization.lifecycle.manage` capability (OWNER).\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_reactivate_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reactivated organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/suspend": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Suspend a business organization (OWNER).",
+        "description": "Suspends an ACTIVE organization: no member keeps any capability except that OWNERs can still\nread it, so organization meetings, invitations and colleague lists stop. Requires the\n`organization.lifecycle.manage` capability (OWNER). Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_suspend_business_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Suspended organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganization"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -14437,6 +16002,173 @@
           }
         }
       },
+      "BusinessOrganization": {
+        "type": "object",
+        "description": "A first-party business organization (the Organizations Service resource).",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "lifecycleStatus",
+          "provisioningState",
+          "creationSource",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the organization was created on CF Meet (never an incorporation date)."
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "creationSource": {
+            "type": "string",
+            "description": "SELF_SERVICE, PLATFORM_ADMIN or IMPORTED."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycleStatus": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or ARCHIVED."
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "provisioningState": {
+            "type": "string",
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "viewer": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationViewer"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "BusinessOrganizationMembership": {
+        "type": "object",
+        "description": "One membership of a first-party organization.",
+        "required": [
+          "id",
+          "organizationId",
+          "userId",
+          "role",
+          "status",
+          "joinedVia",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "joinedVia": {
+            "type": "string",
+            "description": "CREATOR, INVITATION, IMPORTED, OPERATOR or OWNERSHIP_TRANSFER."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "removedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or REMOVED."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "BusinessOrganizationPage": {
+        "type": "object",
+        "description": "A page of organizations (platform administrators).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessOrganization"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last page.",
+            "nullable": true
+          }
+        }
+      },
       "ChangePasswordRequest": {
         "type": "object",
         "required": [
@@ -15399,6 +17131,32 @@
         },
         "additionalProperties": false
       },
+      "CreateBusinessOrganizationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations`.",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "1–200 characters."
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "description": "3–63 lowercase letters, digits and `-`, starting and ending with a letter or digit."
+          }
+        }
+      },
       "CreateConferenceRequest": {
         "type": "object",
         "properties": {
@@ -15639,6 +17397,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateOrganizationInvitationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/invitations`.",
+        "required": [
+          "email",
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The invitee's email address; only an account with this verified email can accept."
+          },
+          "role": {
+            "type": "string",
+            "description": "ADMIN, MANAGER, MEMBER or GUEST."
+          }
+        }
       },
       "CreateOrganizationRequest": {
         "type": "object",
@@ -16051,6 +17827,17 @@
           "CHAT_UNAVAILABLE",
           "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
+          "ORGANIZATION_NOT_FOUND",
+          "MEMBERSHIP_REQUIRED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_ARCHIVED",
+          "LAST_OWNER",
+          "VERSION_CONFLICT",
+          "SLUG_TAKEN",
+          "INVITE_EXPIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROVISIONING_PENDING",
+          "INVITATION_REQUIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -17733,6 +19520,11 @@
           "organization": {
             "$ref": "#/components/schemas/OrganizationResponse"
           },
+          "organizationRole": {
+            "type": "string",
+            "description": "Once the Organizations Service is authoritative: the caller's full role (OWNER,\nADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER.",
+            "nullable": true
+          },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"
           }
@@ -17746,6 +19538,114 @@
           "ETHERNET",
           "UNKNOWN"
         ]
+      },
+      "OrganizationInvitation": {
+        "type": "object",
+        "description": "An organization invitation. The raw `token` is returned once, at creation only.",
+        "required": [
+          "id",
+          "organizationId",
+          "role",
+          "status",
+          "inviteeEmailHint",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "inviteeEmailHint": {
+            "type": "string",
+            "description": "Masked invitee email, e.g. `a***@example.com`."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED."
+          },
+          "token": {
+            "type": "string",
+            "description": "One-time invitation token (creation response only; never in URLs or logs).",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationInvitationTokenRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organization-invitations/accept` and `/decline`.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The invitation token received by the invitee."
+          }
+        }
+      },
+      "OrganizationLegalRegistration": {
+        "type": "object",
+        "description": "Optional legal registration of an organization (self-declared until an operator\nverifies it; never the CF Meet creation time).",
+        "properties": {
+          "incorporatedOn": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`.",
+            "nullable": true
+          },
+          "registeredName": {
+            "type": "string",
+            "description": "Up to 200 characters.",
+            "nullable": true
+          },
+          "registrationNumber": {
+            "type": "string",
+            "description": "Up to 100 characters.",
+            "nullable": true
+          },
+          "verification": {
+            "type": "string",
+            "description": "`SELF_DECLARED` or `VERIFIED` (read-only; set by an operator).",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationLifecycleRequest": {
+        "type": "object",
+        "description": "Suspend, reactivate or archive an organization.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Optional organization `version` the change is based on.",
+            "nullable": true
+          }
+        }
       },
       "OrganizationMemberResponse": {
         "type": "object",
@@ -17771,6 +19671,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "organizationRole": {
+            "type": "string",
+            "description": "Once the Organizations Service is authoritative: the member's full role (OWNER,\nADMIN, MANAGER, MEMBER or GUEST); `role` then shows MANAGER and GUEST as MEMBER.",
+            "nullable": true
+          },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"
           },
@@ -17784,6 +19689,12 @@
           "userId": {
             "type": "string",
             "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Once the Organizations Service is authoritative: the membership version, used as\n`expectedVersion` by `PATCH /api/v2/organizations/{id}/members/{userId}`.",
+            "nullable": true
           }
         }
       },
@@ -17794,6 +19705,80 @@
           "SUSPENDED",
           "REMOVED"
         ]
+      },
+      "OrganizationOwnershipTransferRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/ownership-transfer`.",
+        "required": [
+          "toMembershipId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The organization `version` the transfer is based on."
+          },
+          "toMembershipId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The membership that becomes OWNER."
+          }
+        }
+      },
+      "OrganizationProfile": {
+        "type": "object",
+        "description": "Organization profile. On update, an omitted field is unchanged and `null` clears it.",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "Up to 120 characters.",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 country code.",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Up to 2000 characters.",
+            "nullable": true
+          },
+          "industry": {
+            "type": "string",
+            "description": "Up to 60 characters.",
+            "nullable": true
+          },
+          "legalRegistration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationLegalRegistration"
+              }
+            ],
+            "nullable": true
+          },
+          "logoRef": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "operatingAddress": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "organizationType": {
+            "type": "string",
+            "description": "Up to 60 characters.",
+            "nullable": true
+          },
+          "publicContactEmail": {
+            "type": "string",
+            "description": "Up to 254 characters.",
+            "nullable": true
+          }
+        }
       },
       "OrganizationResponse": {
         "type": "object",
@@ -17838,6 +19823,37 @@
           "ACTIVE",
           "SUSPENDED"
         ]
+      },
+      "OrganizationViewer": {
+        "type": "object",
+        "description": "The caller's own membership, as seen on an organization.",
+        "required": [
+          "membershipId",
+          "role",
+          "status",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Capabilities the caller holds in this organization (default deny)."
+          },
+          "membershipId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE or SUSPENDED."
+          }
+        }
       },
       "OwnerTransferRequest": {
         "type": "object",
@@ -21082,6 +23098,60 @@
           }
         }
       },
+      "UpdateBusinessMembershipRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}/members/{userId}`.",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The membership `version` the change is based on."
+          },
+          "role": {
+            "type": "string",
+            "description": "OWNER, ADMIN, MANAGER, MEMBER or GUEST.",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE, SUSPENDED or REMOVED.",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateBusinessOrganizationRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}`.",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The organization `version` the change is based on (optimistic concurrency)."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "profile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationProfile"
+              }
+            ],
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "UpdateMeRequest": {
         "type": "object",
         "description": "Request for PATCH /api/v1/users/me",
@@ -21772,7 +23842,7 @@
     },
     {
       "name": "Organizations (v2)",
-      "description": "Authoritative CF organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it."
+      "description": "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."
     },
     {
       "name": "Compatibility (v2)",

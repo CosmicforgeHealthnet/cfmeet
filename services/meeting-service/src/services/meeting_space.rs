@@ -309,6 +309,17 @@ impl MeetingSpaceService {
                     "You are not a verified member of that organization",
                 ));
             }
+            // Blueprint Section 4 (authoritative): the organization may exist only in the
+            // Organizations Service; upsert the local read-only projection row the
+            // `meeting_spaces.organization_id` foreign key needs.
+            if let Some(authority) = self
+                .core
+                .organization_authority
+                .as_ref()
+                .filter(|a| a.is_authoritative())
+            {
+                authority.ensure_projection(&self.core.db, org).await?;
+            }
         }
         Ok(())
     }

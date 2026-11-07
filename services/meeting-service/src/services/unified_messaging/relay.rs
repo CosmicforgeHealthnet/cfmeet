@@ -23,6 +23,27 @@ use uuid::Uuid;
 use super::{all, chat_error, Acting, Peer, PrincipalKind, UnifiedMessaging};
 use crate::error::{ApiError, ApiResult, ErrorCode};
 
+/// Who counts as the caller's colleague.
+///
+/// * `Organizations` (legacy / shadow): ACTIVE members, in the local membership table, of
+///   the caller's verified organizations.
+/// * `Users` (Organizations authoritative): the ACTIVE, non-GUEST members Organizations
+///   listed for the caller's verified organizations (the local membership table is no
+///   longer maintained after cutover, so it is never read).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColleagueScope {
+    Organizations(Vec<Uuid>),
+    Users(Vec<Uuid>),
+}
+
+impl ColleagueScope {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Organizations(v) | Self::Users(v) => v.is_empty(),
+        }
+    }
+}
+
 /// One path segment of a relayed route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Seg {
@@ -672,10 +693,10 @@ impl UnifiedMessaging {
     pub async fn directory(
         &self,
         user_id: Uuid,
-        organizations: &[Uuid],
+        scope: &ColleagueScope,
         search: Option<&str>,
     ) -> ApiResult<Value> {
-        if organizations.is_empty() {
+        if scope.is_empty() {
             return Ok(json!({ "people": [] }));
         }
         let pattern = search.map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| {
@@ -689,23 +710,45 @@ impl UnifiedMessaging {
                 .collect();
             format!("%{escaped}%")
         });
-        let rows = all(
-            &self.db,
-            "SELECT DISTINCT u.id, u.username, l.principal_id FROM organization_memberships m \
-               JOIN users u ON u.id = m.user_id \
-               LEFT JOIN communication_principal_links l ON l.subject_kind = 'USER' AND l.subject_id = u.id \
-                 AND l.environment_id = $3 \
-              WHERE m.organization_id = ANY($1) AND m.status = 'ACTIVE' AND u.id <> $2 \
-                AND ($4::text IS NULL OR u.username ILIKE $4) \
-              ORDER BY u.username LIMIT 200",
-            vec![
-                organizations.to_vec().into(),
-                user_id.into(),
-                self.environment_id().into(),
-                pattern.into(),
-            ],
-        )
-        .await?;
+        let rows = match scope {
+            ColleagueScope::Organizations(organizations) => {
+                all(
+                    &self.db,
+                    "SELECT DISTINCT u.id, u.username, l.principal_id FROM organization_memberships m \
+                       JOIN users u ON u.id = m.user_id \
+                       LEFT JOIN communication_principal_links l ON l.subject_kind = 'USER' AND l.subject_id = u.id \
+                         AND l.environment_id = $3 \
+                      WHERE m.organization_id = ANY($1) AND m.status = 'ACTIVE' AND u.id <> $2 \
+                        AND ($4::text IS NULL OR u.username ILIKE $4) \
+                      ORDER BY u.username LIMIT 200",
+                    vec![
+                        organizations.to_vec().into(),
+                        user_id.into(),
+                        self.environment_id().into(),
+                        pattern.into(),
+                    ],
+                )
+                .await?
+            }
+            ColleagueScope::Users(people) => {
+                all(
+                    &self.db,
+                    "SELECT u.id, u.username, l.principal_id FROM users u \
+                       LEFT JOIN communication_principal_links l ON l.subject_kind = 'USER' AND l.subject_id = u.id \
+                         AND l.environment_id = $3 \
+                      WHERE u.id = ANY($1) AND u.id <> $2 \
+                        AND ($4::text IS NULL OR u.username ILIKE $4) \
+                      ORDER BY u.username LIMIT 200",
+                    vec![
+                        people.to_vec().into(),
+                        user_id.into(),
+                        self.environment_id().into(),
+                        pattern.into(),
+                    ],
+                )
+                .await?
+            }
+        };
         let people: Vec<Value> = rows
             .iter()
             .map(|r| -> ApiResult<Value> {
@@ -724,7 +767,7 @@ impl UnifiedMessaging {
     pub async fn resolve_colleagues(
         &self,
         user_id: Uuid,
-        organizations: &[Uuid],
+        scope: &ColleagueScope,
         user_ids: &[Uuid],
     ) -> ApiResult<Value> {
         if user_ids.is_empty() || user_ids.len() > 100 {
@@ -733,10 +776,9 @@ impl UnifiedMessaging {
                 "Between 1 and 100 people",
             ));
         }
-        let allowed: Vec<Uuid> = if organizations.is_empty() {
-            vec![]
-        } else {
-            all(
+        let allowed: Vec<Uuid> = match scope {
+            _ if scope.is_empty() => vec![],
+            ColleagueScope::Organizations(organizations) => all(
                 &self.db,
                 "SELECT DISTINCT m.user_id FROM organization_memberships m \
                  WHERE m.organization_id = ANY($1) AND m.status = 'ACTIVE' AND m.user_id = ANY($2)",
@@ -745,7 +787,12 @@ impl UnifiedMessaging {
             .await?
             .iter()
             .map(|r| r.try_get_by_index::<Uuid>(0))
-            .collect::<Result<_, _>>()?
+            .collect::<Result<_, _>>()?,
+            ColleagueScope::Users(people) => user_ids
+                .iter()
+                .filter(|u| people.contains(u))
+                .copied()
+                .collect(),
         };
         let mut out = Vec::new();
         for u in user_ids {
@@ -764,7 +811,7 @@ impl UnifiedMessaging {
     pub async fn name_principals(
         &self,
         user_id: Uuid,
-        organizations: &[Uuid],
+        scope: &ColleagueScope,
         principal_ids: &[Uuid],
     ) -> ApiResult<Value> {
         if principal_ids.len() > 256 {
@@ -773,21 +820,41 @@ impl UnifiedMessaging {
                 "At most 256 principals",
             ));
         }
-        let rows = all(
-            &self.db,
-            "SELECT DISTINCT l.principal_id, u.username FROM communication_principal_links l \
-               JOIN users u ON u.id = l.subject_id \
-              WHERE l.subject_kind = 'USER' AND l.environment_id = $1 AND l.principal_id = ANY($2) \
-                AND (u.id = $3 OR EXISTS (SELECT 1 FROM organization_memberships m \
-                     WHERE m.user_id = u.id AND m.status = 'ACTIVE' AND m.organization_id = ANY($4)))",
-            vec![
-                self.environment_id().into(),
-                principal_ids.to_vec().into(),
-                user_id.into(),
-                organizations.to_vec().into(),
-            ],
-        )
-        .await?;
+        let rows = match scope {
+            ColleagueScope::Organizations(organizations) => {
+                all(
+                    &self.db,
+                    "SELECT DISTINCT l.principal_id, u.username FROM communication_principal_links l \
+                       JOIN users u ON u.id = l.subject_id \
+                      WHERE l.subject_kind = 'USER' AND l.environment_id = $1 AND l.principal_id = ANY($2) \
+                        AND (u.id = $3 OR EXISTS (SELECT 1 FROM organization_memberships m \
+                             WHERE m.user_id = u.id AND m.status = 'ACTIVE' AND m.organization_id = ANY($4)))",
+                    vec![
+                        self.environment_id().into(),
+                        principal_ids.to_vec().into(),
+                        user_id.into(),
+                        organizations.to_vec().into(),
+                    ],
+                )
+                .await?
+            }
+            ColleagueScope::Users(people) => {
+                all(
+                    &self.db,
+                    "SELECT DISTINCT l.principal_id, u.username FROM communication_principal_links l \
+                       JOIN users u ON u.id = l.subject_id \
+                      WHERE l.subject_kind = 'USER' AND l.environment_id = $1 AND l.principal_id = ANY($2) \
+                        AND (u.id = $3 OR u.id = ANY($4))",
+                    vec![
+                        self.environment_id().into(),
+                        principal_ids.to_vec().into(),
+                        user_id.into(),
+                        people.to_vec().into(),
+                    ],
+                )
+                .await?
+            }
+        };
         let names: Vec<Value> = rows
             .iter()
             .map(|r| -> ApiResult<Value> {
