@@ -8,7 +8,7 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | Binary | Purpose |
 |---|---|
 | `organizations` | API (`ORGANIZATIONS_BIND_ADDRESS`, default `127.0.0.1:8101`) plus the in-process maintenance loop; `--check-config` validates configuration and the trust bundle and exits |
-| `organizations-migration` | `up` / `down` / `status` / `reset` of the own schema (`organizations_seaql_migrations`), run as the migrator role |
+| `organizations-migration` | `up` / `down` / `status` / `reset` of the own schema (`organizations_seaql_migrations`), run as the migrator role; `down` / `reset` need `CF_MIGRATION_ALLOW_DESTRUCTIVE=<subcommand>` outside a non-production `APP_ENV` (SEC-015) |
 | `organizations-import` | `organizations-import <export.json>` imports a Meeting Service export; `--reconciliation` prints the reconciliation |
 
 ## Configuration
@@ -101,7 +101,7 @@ All three need `organization.administer`; changes are audited (`scope.service_bi
 Rotation = create the new credential in Platform Access, `PUT` the new `credentialId` with the
 current `expectedVersion`, then revoke the old credential. A wrong id cannot widen access:
 Platform Access refuses a credential outside the organization's triple. Rollback of the
-release that adds this: `organizations-migration down 1` drops
+release that adds this: `CF_MIGRATION_ALLOW_DESTRUCTIVE=down organizations-migration down -n 1` drops
 `organization_scope_service_bindings` (bindings are lost; organization calling forwarding is
 off without them).
 

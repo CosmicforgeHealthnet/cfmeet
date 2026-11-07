@@ -35,7 +35,8 @@ Messaging migration `m20261202_000030_session_devices_inbox` (main history; run
 migration): `messaging_session_devices`, `messaging_client_sessions.device_kind` (the
 E2EE-device foreign key is kept through a generated column), `messaging_conversations.title`
 / `avatar_ref` (CHECK: MANAGED only), `messaging_message_mentions`. Rolling the image back
-requires `messaging-migration down 1` first (it deletes session-device sessions only).
+requires `CF_MIGRATION_ALLOW_DESTRUCTIVE=down messaging-migration down -n 1` first (it deletes
+session-device sessions only; the override is required by the SEC-015 guard).
 Meeting has no migration in this section.
 
 ## Client flow (MANAGED realtime without an E2EE device)

@@ -9,6 +9,8 @@ on:
       - "services/meeting-service/**"
       - "packages/communications-policy/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "certification/Cargo.toml"
       - "certification/Cargo.lock"
       - "certification/src/personal_stack.rs"
@@ -55,8 +57,15 @@ jobs:
           cargo fmt --manifest-path services/communications/Cargo.toml --all -- --check
           cargo clippy --manifest-path services/communications/Cargo.toml --all-targets --locked -- -D warnings
           cargo test --manifest-path services/communications/Cargo.toml --all-targets --locked
+          # SEC-015: the Hub migration runner refuses destructive subcommands outside a
+          # non-production APP_ENV unless CF_MIGRATION_ALLOW_DESTRUCTIVE names the subcommand.
+          cargo build --manifest-path services/communications/Cargo.toml -p communications-migration --locked
+          bash scripts/migrations/assert_destructive_guard.sh services/communications/target/debug/communications-migration
           cargo test --manifest-path packages/communications-policy/Cargo.toml --locked
           cargo test --manifest-path packages/service-auth/Cargo.toml --locked
+          cargo fmt --manifest-path packages/migration-guard/Cargo.toml --all -- --check
+          cargo clippy --manifest-path packages/migration-guard/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path packages/migration-guard/Cargo.toml --locked
   consumers:
     strategy:
       fail-fast: false

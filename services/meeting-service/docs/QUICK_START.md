@@ -87,13 +87,13 @@ cd migration
 cargo run -- up
 
 # Rollback last migration
-cargo run -- down
+APP_ENV=development cargo run -- down
 
 # Check migration status
 cargo run -- status
 
 # Reset database (drop all + reapply)
-cargo run -- fresh
+APP_ENV=development cargo run -- fresh
 ```
 
 ### Migration Order
@@ -321,7 +321,7 @@ cargo build --release
 cd migration
 cargo run -- status
 # If needed, reset (CAUTION: destroys data)
-cargo run -- fresh
+APP_ENV=development cargo run -- fresh
 ```
 
 **Problem**: "could not connect to database"

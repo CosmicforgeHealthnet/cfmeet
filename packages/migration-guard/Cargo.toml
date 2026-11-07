@@ -1,0 +1,16 @@
+[package]
+name = "cf-migration-guard"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CF Meet SEC-015: refuses destructive sea-orm migration CLI subcommands (down, fresh, refresh, reset) outside a non-production APP_ENV unless the matching CF_MIGRATION_ALLOW_DESTRUCTIVE override is set"
+
+# Stand-alone workspace: consumed by every service migration crate as a path dependency.
+# Standard library only; it never depends on any deployable service.
+[workspace]
+
+[lib]
+name = "cf_migration_guard"
+path = "src/lib.rs"
+
+[dependencies]

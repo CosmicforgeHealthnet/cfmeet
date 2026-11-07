@@ -360,6 +360,7 @@ name = "calling-migration"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cf-migration-guard",
  "dotenvy",
  "sea-orm-migration",
  "tokio",
@@ -385,6 +386,10 @@ dependencies = [
  "thiserror 2.0.21",
  "uuid",
 ]
+
+[[package]]
+name = "cf-migration-guard"
+version = "0.1.0"
 
 [[package]]
 name = "cf-object-storage"

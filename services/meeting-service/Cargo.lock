@@ -709,6 +709,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-migration-guard"
+version = "0.1.0"
+
+[[package]]
 name = "cf-service-auth"
 version = "0.1.0"
 dependencies = [
@@ -3122,6 +3126,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "async-trait",
+ "cf-migration-guard",
  "dotenvy",
  "sea-orm-migration",
 ]

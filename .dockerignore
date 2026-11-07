@@ -12,6 +12,8 @@
 !packages/communications-policy/**
 !packages/service-auth/
 !packages/service-auth/**
+!packages/migration-guard/
+!packages/migration-guard/**
 !packages/usage-facts/
 !packages/usage-facts/**
 !packages/messaging-crypto/

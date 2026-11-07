@@ -1,5 +1,6 @@
 *
 !packages/service-auth
+!packages/migration-guard
 !packages/communications-policy
 !services/communications
 **/target
