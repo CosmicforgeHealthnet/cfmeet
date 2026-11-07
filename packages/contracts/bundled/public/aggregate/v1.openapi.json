@@ -48134,7 +48134,6 @@
             ]
           }
         ],
-        "x-cfmeet-required-scope": "each requested privacy.contacts.* scope",
         "requestBody": {
           "required": true,
           "content": {

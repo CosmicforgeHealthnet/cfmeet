@@ -9594,7 +9594,7 @@ export namespace PrivacyRelay {
       params: { path: { context_id: string }; body: LifecycleCommandRequest; idempotencyKey?: string };
       response: ContextMutationResult;
     };
-    /** POST /v1/privacy-relay/contact-access-grants — scope each requested privacy.contacts.* scope; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    /** POST /v1/privacy-relay/contact-access-grants; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createContactAccessGrant: {
       params: { body: ContactAccessGrantRequest };
       response: ContactAccessGrantResult;

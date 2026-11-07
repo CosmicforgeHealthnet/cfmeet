@@ -170,6 +170,25 @@ def check_replacements(routes):
             raise CatalogueError(f"{r['id']}: replaces itself")
 
 
+# The Platform Access scope registry is the only source of valid scope names
+# (services/platform-access/src/identity/scopes.rs). A gateway gate scope outside
+# it can never be held by a credential, so the route would always answer 403 (PLT-001).
+SCOPE_REGISTRY = ROOT / "services/platform-access/src/identity/scopes.rs"
+
+
+def registered_scopes() -> set[str]:
+    text = SCOPE_REGISTRY.read_text(encoding="utf-8")
+    return set(re.findall(r'pub const [A-Z0-9_]+: &str = "([a-z0-9_.-]+)";', text))
+
+
+def check_required_scope(route_id: str, scope, registry: set[str]) -> None:
+    if not isinstance(scope, str) or scope not in registry:
+        raise CatalogueError(
+            f"{route_id}: x-cfmeet-required-scope {scope!r} is not a Platform Access registry scope; "
+            "use a registered scope or omit the extension and let the upstream check the request"
+        )
+
+
 def build():
     allow = json.loads(ALLOW_LIST.read_text(encoding="utf-8"))
     entries = {}
@@ -187,6 +206,9 @@ def build():
     routes = []
     keys = set()
     route_ids = set()
+    registry = registered_scopes()
+    if len(registry) < 10:
+        raise CatalogueError(f"scope registry {SCOPE_REGISTRY.relative_to(ROOT)} parsed to {len(registry)} scopes")
     for domain, service, rel, cid, method, path, op, doc in operations():
         key = (domain, method, path)
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,99}", op.get("operationId") or ""):
@@ -232,7 +254,8 @@ def build():
             "forwardHeaders": EXTRA_FORWARDED.get(domain, []),
         }
         scope = op.get("x-cfmeet-required-scope")
-        if scope:
+        if scope is not None:
+            check_required_scope(route_id, scope, registry)
             route["requiredScope"] = scope
         if "timeoutMs" in entry:
             route["timeoutMs"] = entry["timeoutMs"]
