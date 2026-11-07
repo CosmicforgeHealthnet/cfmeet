@@ -1970,6 +1970,12 @@ export namespace Calling {
       response: RecordingPolicyList;
       item: NonNullable<(RecordingPolicyList)["recordingPolicies"]>[number];
     };
+    /** GET /v1/enterprise/recordings — scope enterprise.recording.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    listRecordings: {
+      params: { query?: { principalId?: Uuid; callId?: Uuid; participantPrincipalId?: Uuid; state?: RecordingState; startedFrom?: string; startedBefore?: string; limit?: number; cursor?: string } };
+      response: CallRecordingList;
+      item: NonNullable<(CallRecordingList)["recordings"]>[number];
+    };
     /** GET /v1/enterprise/ring-groups — scope enterprise.config.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     listRingGroups: {
       params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED" } };

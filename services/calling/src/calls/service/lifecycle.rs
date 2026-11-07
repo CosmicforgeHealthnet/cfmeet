@@ -528,9 +528,25 @@ impl CallService {
         expected_version: i64,
         action: CallAction,
     ) -> CallResult<AppliedTransition> {
+        self.transition_with_details_in(txn, cmd, row, expected_version, action, Vec::new())
+            .await
+    }
+
+    /// [`transition_in`](Self::transition_in) whose CALL_STATE_CHANGED event also carries
+    /// `extra` safe details (e.g. the `end_trigger` of an automatic end).
+    pub(crate) async fn transition_with_details_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        row: &calls::Model,
+        expected_version: i64,
+        action: CallAction,
+        extra: Vec<(&'static str, SafeValue)>,
+    ) -> CallResult<AppliedTransition> {
         let current: Call = row.clone().into();
         let plan = plan_transition(&current, expected_version, &action, self.now())?;
         let mut details = self.verify_evidence(txn, row, &action, &plan).await?;
+        details.extend(extra);
 
         let mut update = <calls::ActiveModel as ActiveModelTrait>::default();
         update.current_state = Set(plan.to);

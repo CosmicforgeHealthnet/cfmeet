@@ -1046,7 +1046,25 @@ async fn exercise_app_calling(a: &common::app::AppWorld) {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // Dave was the last other party: the Call ended automatically (CAL-001).
+    assert_eq!(a.state(call).await.0, CallState::Ended);
     // A transfer cut short by END is cancelled; the media resource is terminated.
+    let r = a
+        .create_call("VOICE", &alice, &alice_d, &[&bob], "events-3")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: uuid::Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let invitation = a.invitation_for(call, bob_1.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.accept(call, invitation, &bob_1, version).await.status,
+        StatusCode::OK
+    );
+    a.connect(call, a.session_on(call, alice_d.endpoint).await.unwrap())
+        .await;
+    a.connect(call, a.session_on(call, bob_1.endpoint).await.unwrap())
+        .await;
+    assert_eq!(a.state(call).await.0, CallState::Connected);
     let alice_participant = a.participant_of(call, alice.id().as_uuid()).await;
     let (_, version) = a.state(call).await;
     let r = a

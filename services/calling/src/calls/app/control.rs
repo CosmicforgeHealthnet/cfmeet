@@ -192,33 +192,7 @@ impl AppCallService {
             .transition_in(&txn, cmd, &call, expected_version, CallAction::RequestEnd)
             .await?
             .call;
-        let cancelled = self
-            .calls
-            .finish_live_invitations_in(
-                &txn,
-                cmd,
-                &call,
-                None,
-                None,
-                InvitationStatus::Cancelled,
-                InvitationTerminalReason::CallTerminated,
-            )
-            .await?;
-        if let Some(transfer) = self.calls.active_transfer(&txn, &call).await? {
-            self.calls
-                .cancel_transfer_in(&txn, cmd, &call, transfer, TransferFailureReason::CallEnded)
-                .await?;
-        }
-        for attempt in call_attempts::Entity::find()
-            .filter(call_attempts::Column::CallId.eq(call.id))
-            .filter(call_attempts::Column::Outcome.eq(AttemptOutcome::Pending))
-            .all(&txn)
-            .await?
-        {
-            self.calls
-                .finish_attempt_in(&txn, cmd, &call, attempt, AttemptOutcome::Abandoned, None)
-                .await?;
-        }
+        let cancelled = self.end_effects_in(&txn, cmd, &call).await?;
         let body = control_body(&call, CommandOperation::End);
         if let Some(key) = key {
             self.calls
@@ -233,28 +207,7 @@ impl AppCallService {
                 )
                 .await?;
         }
-        let mut pending = PendingSignals::default();
-        let correlation = cmd.correlation_id().as_str().to_string();
-        for invitation in &cancelled {
-            self.invitation_signal(
-                &txn,
-                &mut pending,
-                SignalType::RingCancelled,
-                &call,
-                invitation,
-                &correlation,
-            )
-            .await?;
-        }
-        self.call_signal(
-            &txn,
-            &mut pending,
-            SignalType::Ended,
-            &call,
-            &correlation,
-            Map::new(),
-        )
-        .await?;
+        let pending = self.end_signals_in(&txn, cmd, &call, &cancelled).await?;
         txn.commit().await?;
         self.publish(pending).await;
         if let Err(error) = self.finish_ending(call.id).await {
@@ -264,6 +217,79 @@ impl AppCallService {
             body,
             replayed: false,
         })
+    }
+
+    /// What END stops once the Call is ENDING (same transaction): live offers are
+    /// cancelled, an in-flight transfer is cancelled and pending attempts are abandoned.
+    /// Returns the cancelled offers (for their RING_CANCELLED signals).
+    pub(crate) async fn end_effects_in(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+    ) -> CallResult<Vec<crate::models::call_invitations::Model>> {
+        let cancelled = self
+            .calls
+            .finish_live_invitations_in(
+                txn,
+                cmd,
+                call,
+                None,
+                None,
+                InvitationStatus::Cancelled,
+                InvitationTerminalReason::CallTerminated,
+            )
+            .await?;
+        if let Some(transfer) = self.calls.active_transfer(txn, call).await? {
+            self.calls
+                .cancel_transfer_in(txn, cmd, call, transfer, TransferFailureReason::CallEnded)
+                .await?;
+        }
+        for attempt in call_attempts::Entity::find()
+            .filter(call_attempts::Column::CallId.eq(call.id))
+            .filter(call_attempts::Column::Outcome.eq(AttemptOutcome::Pending))
+            .all(txn)
+            .await?
+        {
+            self.calls
+                .finish_attempt_in(txn, cmd, call, attempt, AttemptOutcome::Abandoned, None)
+                .await?;
+        }
+        Ok(cancelled)
+    }
+
+    /// The signals of an END: RING_CANCELLED to each cancelled offer, ENDED to every
+    /// endpoint of the Call (published after commit).
+    pub(crate) async fn end_signals_in(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        cancelled: &[crate::models::call_invitations::Model],
+    ) -> CallResult<PendingSignals> {
+        let mut pending = PendingSignals::default();
+        let correlation = cmd.correlation_id().as_str().to_string();
+        for invitation in cancelled {
+            self.invitation_signal(
+                txn,
+                &mut pending,
+                SignalType::RingCancelled,
+                call,
+                invitation,
+                &correlation,
+            )
+            .await?;
+        }
+        self.call_signal(
+            txn,
+            &mut pending,
+            SignalType::Ended,
+            call,
+            &correlation,
+            Map::new(),
+        )
+        .await?;
+        Ok(pending)
     }
 
     /// Provider cleanup of an ENDING Call and, with its evidence, ENDING → ENDED with
@@ -810,6 +836,8 @@ impl AppCallService {
     /// Removes one session (§35): DB first (ENDED, media access REVOKED, removal final,
     /// enforcement pending), then the provider strips and disconnects the connection.
     /// A provider failure never restores access in the database; reconciliation retries.
+    /// A CONNECTED / HELD Call left with fewer than two live parties then ends
+    /// automatically (CAL-001: "leave" of a one-to-one Call hangs it up for both).
     pub async fn remove_session(
         &self,
         cmd: &CallCommandContext,
@@ -872,6 +900,9 @@ impl AppCallService {
         }
         txn.commit().await?;
         self.enforce_removals(&call, vec![removed]).await;
+        // CAL-001: the last session of a party gone — a Call left with fewer than two
+        // parties ends now (same path as END, system command).
+        self.evaluate_participation(call.id).await;
         Ok(CommandOutcome {
             body,
             replayed: false,

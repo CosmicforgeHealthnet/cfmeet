@@ -367,6 +367,10 @@ async fn menu_routes_a_valid_key_after_an_invalid_one() {
     assert_eq!(ivr["prompts"], json!(["WELCOME", "MENU"]));
     assert_eq!(ivr["options"], json!(["1", "2", "0"]));
     assert_eq!(e.a.state(call).await.0, CallState::Ringing);
+    // CAL-001: one human plus the IVR while the Call still rings — the abandoned-call
+    // reaper never ends it.
+    assert_eq!(e.h().state.app.reap_abandoned_calls(100).await.unwrap(), 0);
+    assert_eq!(e.a.state(call).await.0, CallState::Ringing);
     // Invalid key: retry.
     let (status, body) = press(&e, call, &caller.phone, "9").await;
     assert_eq!(status, StatusCode::OK, "{body}");

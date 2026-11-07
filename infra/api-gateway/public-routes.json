@@ -571,6 +571,12 @@
     },
     {
       "domain": "calling",
+      "method": "GET",
+      "path": "/v1/enterprise/recordings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
       "method": "DELETE",
       "path": "/v1/enterprise/recordings/{recording_id}",
       "class": "PUBLIC_CUSTOMER"

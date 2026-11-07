@@ -386,7 +386,7 @@ impl AppCallService {
         Ok(())
     }
 
-    /// Runs both sweeps forever on this instance (spawned by the composition root).
+    /// Runs the sweeps forever on this instance (spawned by the composition root).
     pub async fn run_workers(self, expiry_every: StdDuration, reconcile_every: StdDuration) {
         let expiry = {
             let app = self.clone();
@@ -400,6 +400,26 @@ impl AppCallService {
                     }
                     if let Err(error) = app.expire_stalled_setups(100).await {
                         tracing::warn!(%error, "setup deadline sweep failed");
+                    }
+                }
+            })
+        };
+        // CAL-001: the reaper of abandoned / idle / overlong Calls, one bounded sweep per
+        // reconcile interval (re-decided per Call under its lock, SKIP LOCKED).
+        let reaper = {
+            let app = self.clone();
+            let every = self
+                .config
+                .reconcile_interval
+                .to_std()
+                .unwrap_or(StdDuration::from_secs(15));
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(every);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    if let Err(error) = app.reap_abandoned_calls(100).await {
+                        tracing::warn!(%error, "abandoned call sweep failed");
                     }
                 }
             })
@@ -422,6 +442,6 @@ impl AppCallService {
                 }
             }
         });
-        let _ = tokio::join!(expiry, reconcile);
+        let _ = tokio::join!(expiry, reaper, reconcile);
     }
 }

@@ -234,8 +234,9 @@ async fn hold_and_resume_are_enforced_at_the_provider() {
         a.command(call, "resume", version).await.status,
         StatusCode::CONFLICT
     );
-    // Held again, the callee's session is removed: resume cannot re-grant it, and with a
-    // single remaining party there is no media path to resume to.
+    // Held again, the callee's session is removed: resume cannot re-grant it — and a HELD
+    // one-to-one Call left with a single party ends by itself (CAL-001), so there is
+    // nothing to resume.
     assert_eq!(
         a.command(call, "hold", version).await.status,
         StatusCode::OK
@@ -249,13 +250,48 @@ async fn hold_and_resume_are_enforced_at_the_provider() {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(a.state(call).await.0, CallState::Ended);
+    assert!(!a.media().room_exists(&room));
+    let (_, version) = a.state(call).await;
     let r = a.command(call, "resume", version).await;
-    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.text);
-    assert_eq!(r.json["error"]["code"], "CALL_EVIDENCE_REQUIRED");
-    let remaining = a.media().participants(&room);
-    assert_eq!(remaining.len(), 1);
-    assert!(!remaining[0].permissions.can_publish_audio, "still held");
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+
+    // In a group Call the same removal leaves two parties: resume still re-derives
+    // permissions and never re-grants the removed session.
+    let (call, _caller, callee, _third) = a.connected_group_call("VIDEO").await;
+    let room = AppWorld::room(call);
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.command(call, "hold", version).await.status,
+        StatusCode::OK
+    );
+    let session = a.session_on(call, callee.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(a.state(call).await.0, CallState::Held);
+    let remaining = a.media().participants(&room);
+    assert_eq!(remaining.len(), 2);
+    assert!(
+        remaining.iter().all(|p| !p.permissions.can_publish_audio),
+        "still held"
+    );
+    let (_, version) = a.state(call).await;
+    let r = a.command(call, "resume", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    for p in a.media().participants(&room) {
+        assert_eq!(p.permissions, video);
+    }
+    assert_eq!(
+        a.media_credential(call, session).await.status,
+        StatusCode::CONFLICT,
+        "the removed session stays revoked"
+    );
 }
 
 #[tokio::test]
