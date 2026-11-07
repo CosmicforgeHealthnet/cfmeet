@@ -610,7 +610,7 @@
     },
     {
       "id": "cfmeet.calling.http-api-bundled",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "kind": "openapi",
       "path": "bundled/calling/http/v1.openapi.json",
       "owner": "calling",
@@ -842,7 +842,7 @@
     },
     {
       "id": "cfmeet.calling.public-api",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "kind": "openapi",
       "path": "bundled/public/calling/v1.openapi.json",
       "owner": "calling",
