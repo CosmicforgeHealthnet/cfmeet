@@ -29,6 +29,7 @@ mod m20261101_000001_platform_environment_meetings;
 mod m20261103_000001_communications_account_authority;
 mod m20261105_000001_communications_meeting_facade;
 mod m20261106_000001_account_security;
+mod m20261107_000001_meetings_calendar;
 
 pub mod phase2_backfill;
 
@@ -202,6 +203,54 @@ pub async fn account_security_ready<C: sea_orm_migration::sea_orm::ConnectionTra
         ))
         .await?;
     let known: std::collections::BTreeSet<_> = AccountSecurityMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
+/// Blueprint v1.0 Section 10 meetings calendar (idempotency records, agenda indexes). A
+/// SEPARATE additive history so the previously deployed image still starts after it is
+/// applied (rollback safety).
+pub struct MeetingsCalendarMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MeetingsCalendarMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261107_000001_meetings_calendar::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meetings_calendar_migrations").into_iden()
+    }
+}
+
+/// Exactly the known meetings-calendar history has been applied.
+pub async fn meetings_calendar_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.meetings_calendar_migrations') IS NOT NULL AS present"
+                .to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM meetings_calendar_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = MeetingsCalendarMigrator::migrations()
         .iter()
         .map(|m| m.name().to_owned())
         .collect();

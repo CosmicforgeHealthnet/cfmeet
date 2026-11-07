@@ -137,6 +137,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Account security migration is required (account-security-migration up)");
     }
 
+    // Blueprint Section 10: idempotency records and agenda indexes live in their own
+    // additive history (`meetings-calendar-migration up`).
+    if !migration::meetings_calendar_ready(&state.db)
+        .await
+        .expect("Meetings calendar migration readiness")
+    {
+        panic!("Meetings calendar migration is required (meetings-calendar-migration up)");
+    }
+
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
     // stopped startup there).

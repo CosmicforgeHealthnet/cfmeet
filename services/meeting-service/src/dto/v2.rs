@@ -272,6 +272,21 @@ pub struct ConferenceSummary {
 #[serde(rename_all = "camelCase")]
 pub struct MeetingSpaceListResponse {
     pub items: Vec<MeetingSpaceResponse>,
+    /// Present only on paginated requests (`limit` or `cursor` sent) when another page
+    /// exists: pass it back as `cursor`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// `GET /api/v2/meeting-spaces` paging (both optional; omitting both keeps the legacy
+/// complete list).
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListMeetingSpacesQuery {
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50 when `cursor` is sent without `limit`).
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -388,8 +403,13 @@ pub struct CreateConferenceRequest {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RescheduleConferenceRequest {
+    /// New start; more than 5 minutes in the past is rejected.
     pub scheduled_start_at: DateTime<Utc>,
+    /// New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays
+    /// start-only). At most 24 hours after the start.
     pub scheduled_end_at: Option<DateTime<Utc>>,
+    /// Optional optimistic-concurrency guard: the conference `version` last read.
+    pub version: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -447,6 +467,124 @@ pub struct ConferenceResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ConferenceListResponse {
     pub items: Vec<ConferenceResponse>,
+}
+
+// ---------------------------------------------------------------------------
+// Agenda / first-party calendar (Blueprint Section 10)
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v2/me/conferences` query.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgendaQuery {
+    /// Inclusive lower bound on the scheduled start (RFC 3339). Default: now.
+    pub from: Option<DateTime<Utc>>,
+    /// Exclusive upper bound (RFC 3339). Default: `from` + 31 days; at most 366 days after `from`.
+    pub to: Option<DateTime<Utc>>,
+    /// Comma-separated conference statuses, e.g. `CREATED,LIVE`.
+    pub status: Option<String>,
+    /// Comma-separated relations of the caller (`AgendaRelation`), e.g. `OWNER,INVITEE`.
+    pub role: Option<String>,
+    /// Restrict to one organization's meetings (the caller must be a verified member).
+    pub organization_id: Option<Uuid>,
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u32>,
+}
+
+/// Why an occurrence is on the caller's agenda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgendaRelation {
+    /// The caller (or the calling environment) owns the meeting space.
+    Owner,
+    /// Active member of the meeting space.
+    Member,
+    /// Holder of an active invitation bound to the caller's verified email.
+    Invitee,
+    /// Registered for the webinar.
+    Registrant,
+    /// Took part in (or is waiting for) this conference.
+    Participant,
+    /// Organization meeting visible to a verified member of `organizationId`.
+    Organization,
+}
+
+impl AgendaRelation {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "OWNER" => Self::Owner,
+            "MEMBER" => Self::Member,
+            "INVITEE" => Self::Invitee,
+            "REGISTRANT" => Self::Registrant,
+            "PARTICIPANT" => Self::Participant,
+            "ORGANIZATION" => Self::Organization,
+            _ => return None,
+        })
+    }
+}
+
+/// Meeting-space fields an agenda entry may show.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaSpace {
+    /// Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub meeting_code: String,
+    pub meeting_type: MeetingType,
+    pub status: SpaceStatus,
+    /// IANA timezone of the meeting: show times in this zone and in the viewer's zone.
+    pub timezone: String,
+    pub access_policy: AccessPolicy,
+    pub requires_passcode: bool,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<Uuid>,
+}
+
+/// One occurrence on the caller's agenda.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaItem {
+    /// The conference id; null for a recurring occurrence beyond the materialization
+    /// horizon (it becomes a conference later, under the same `occurrenceKey`).
+    pub conference_id: Option<Uuid>,
+    /// Stable occurrence identity within the meeting space (unchanged by materialization).
+    pub occurrence_key: String,
+    pub meeting_space_id: Uuid,
+    /// False for an occurrence computed from the recurrence rule (not yet materialized).
+    pub materialized: bool,
+    pub view: ResourceView,
+    pub status: ConferenceStatus,
+    pub kind: ConferenceKind,
+    pub scheduled_start_at: DateTime<Utc>,
+    pub scheduled_end_at: Option<DateTime<Utc>>,
+    pub is_exception: bool,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_start_at: Option<DateTime<Utc>>,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+    /// The caller's persistent role in the space, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewer_role: Option<Role>,
+    pub relations: Vec<AgendaRelation>,
+    pub meeting_space: AgendaSpace,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaResponse {
+    /// Ordered by scheduled start, then meeting space, then occurrence key.
+    pub items: Vec<AgendaItem>,
+    /// Pass back as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<String>,
 }
 
 /// Provider enforcement state for operations whose media effect is Part E.

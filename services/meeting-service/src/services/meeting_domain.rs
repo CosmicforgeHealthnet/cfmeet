@@ -134,6 +134,8 @@ pub struct MeetingDomain {
     pub members: MembershipService,
     pub invitations: InvitationService,
     pub compat: CompatService,
+    /// Blueprint Section 10: agenda and ICS export (reads of the v2 scheduling store).
+    pub calendar: crate::services::calendar::CalendarService,
     pub organizations: OrganizationService,
     /// Part E RTC control plane (provider lifecycle, commands, mute).
     pub rtc: RtcControl,
@@ -204,6 +206,7 @@ impl MeetingDomain {
             members: MembershipService::new(core.clone()),
             invitations: InvitationService::new(core.clone()),
             compat: CompatService::new(core.clone()),
+            calendar: crate::services::calendar::CalendarService::new(core.clone()),
             organizations: OrganizationService::new(core.clone()),
             rtc: RtcControl::new(core.clone()),
             rtc_webhooks: RtcWebhookService::new(core.clone()),

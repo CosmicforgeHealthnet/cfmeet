@@ -9,6 +9,7 @@
     "MEDIA_PLANE_DIRECT": "Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway.",
     "CONTACT_VAULT_PRIVATE": "Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway.",
     "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family.",
+    "CALENDAR_FILE_DIRECT_INGRESS": "RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API.",
     "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations)."
   },
   "operations": [
@@ -1582,6 +1583,13 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/conferences/{id}/calendar.ics",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FILE_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/conferences/{id}/artifacts",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -2189,6 +2197,12 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/me/conferences",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/me/sessions",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
@@ -2248,6 +2262,13 @@
       "method": "POST",
       "path": "/api/v2/meeting-spaces/{id}/conferences",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/meeting-spaces/{id}/calendar.ics",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FILE_DIRECT_INGRESS"
     },
     {
       "domain": "meetings",

@@ -57,6 +57,10 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/invitations/{token}/resolve"),
         ("post", "/api/v2/meeting-spaces/{id}/conferences"),
         ("get", "/api/v2/meeting-spaces/{id}/conferences"),
+        // Blueprint Section 10 — first-party calendar
+        ("get", "/api/v2/me/conferences"),
+        ("get", "/api/v2/conferences/{id}/calendar.ics"),
+        ("get", "/api/v2/meeting-spaces/{id}/calendar.ics"),
         ("post", "/api/v2/instant-meetings"),
         ("get", "/api/v2/resolve/{identifier}"),
         ("get", "/api/v2/conferences/{id}"),
@@ -570,6 +574,11 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
             for (status, r) in responses {
                 if let Some(content) = r.get("content").and_then(Value::as_object) {
                     let types: Vec<_> = content.keys().collect();
+                    // Blueprint Section 10: RFC 5545 exports are the only non-JSON success.
+                    if path.ends_with("/calendar.ics") && status == "200" {
+                        assert_eq!(types, ["text/calendar"], "{method} {path} {status}");
+                        continue;
+                    }
                     assert_eq!(types, ["application/json"], "{method} {path} {status}");
                 }
             }

@@ -345,6 +345,9 @@ async fn i07_migrations_idempotent() {
     migration::AccountSecurityMigrator::up(&db.conn, None)
         .await
         .unwrap();
+    migration::MeetingsCalendarMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let pending = Migrator::get_pending_migrations(&db.conn).await.unwrap();
     assert!(pending.is_empty());
     let applied = Migrator::get_applied_migrations(&db.conn).await.unwrap();
