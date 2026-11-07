@@ -75,6 +75,10 @@ counters!(
     enhanced_audit_records,
     // Parts J–L: migration / compatibility observation
     legacy_writes_rejected,
+    // Blueprint Section 16 (MTG-017 / DATA-008): legacy v1 create mode.
+    legacy_creates_mirrored,
+    legacy_creates_refused,
+    legacy_mirror_failures,
     shadow_reads,
     shadow_mismatches,
     shadow_failures,

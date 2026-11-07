@@ -1,6 +1,17 @@
-//! Webhook Handlers
+//! Legacy meeting webhook handlers — DEPRECATED, never delivered.
 //!
-//! HTTP handlers for webhook management.
+//! Blueprint v1.0 Section 16 (PLT-003 / DATA-007). These routes store registrations,
+//! but no code reads the `webhooks` table to deliver anything, and none will be added:
+//! meeting events for integrators go through the Developer Platform webhook pipeline
+//! (`/v1/environments/{environmentId}/webhooks`, signed delivery, SSRF policy, replay).
+//! Personal accounts have no Developer Platform environment, so delivering these rows
+//! through that pipeline would need a second, invented ownership model.
+//!
+//! Until the routes are removed (D-9: measured zero consumers), every answer says so:
+//! `delivery: NOT_DELIVERED` on each item, a `notice` on each wrapper, and the
+//! `middleware::deprecation::legacy_webhooks` layer (`Deprecation`, `Sunset`,
+//! `Link rel="deprecation"`) on every response, errors included. See
+//! `docs/api/legacy-meeting-webhooks-deprecation.md`.
 
 use axum::{
     extract::{Path, State},
@@ -23,6 +34,14 @@ use crate::{
     state::AppState,
     utils::now_utc,
 };
+
+/// Item marker: legacy meeting webhooks are never delivered.
+pub const DELIVERY_NOT_DELIVERED: &str = "NOT_DELIVERED";
+
+/// Wrapper notice on every legacy webhook response.
+pub const DEPRECATION_NOTICE: &str = "Deprecated: legacy meeting webhooks are stored but never \
+     delivered; no event will be sent to this endpoint. Use Developer Platform webhooks \
+     (/v1/environments/{environmentId}/webhooks) for signed meeting event delivery.";
 
 /// Generate a secure random webhook secret
 fn generate_webhook_secret() -> String {
@@ -85,19 +104,22 @@ fn format_datetime(dt: chrono::NaiveDateTime) -> String {
     format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S"))
 }
 
-/// Create a new webhook
+/// Register a legacy meeting webhook (deprecated: never delivered)
 ///
-/// Registers a webhook for one event type (`meeting_start`, `meeting_end`, `participant_join` or
-/// `participant_leave`), owned by the authenticated user and active from creation. Create one
-/// webhook per event type you need. The response includes a generated secret, which is returned
-/// only here and never by the list or update endpoints.
+/// DEPRECATED (Blueprint v1.0 Section 16, PLT-003). Stores a registration for one event type
+/// (`meeting_start`, `meeting_end`, `participant_join` or `participant_leave`), owned by the
+/// authenticated user. **No event is ever delivered to the endpoint**: the response says so
+/// (`delivery: NOT_DELIVERED`, `notice`) and carries `Deprecation`, `Sunset` and
+/// `Link rel="deprecation"` headers. Use Developer Platform webhooks
+/// (`/v1/environments/{environmentId}/webhooks`) for signed meeting event delivery. The
+/// generated secret is returned only here.
 #[utoipa::path(
     post,
     path = "/api/v1/webhooks",
     tag = "Webhooks",
     request_body = CreateWebhookRequest,
     responses(
-        (status = 201, description = "Webhook created successfully", body = CreateWebhookApiResponse),
+        (status = 201, description = "Registration stored; nothing will be delivered (deprecated)", body = CreateWebhookApiResponse),
         (status = 400, description = "Validation error"),
         (status = 401, description = "Unauthorized")
     ),
@@ -105,6 +127,7 @@ fn format_datetime(dt: chrono::NaiveDateTime) -> String {
         ("bearer_auth" = [])
     )
 )]
+#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
 pub async fn create_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,
@@ -138,6 +161,7 @@ pub async fn create_webhook(
         endpoint_url: webhook.endpoint_url,
         secret,
         status: format_status(&webhook.status),
+        delivery: DELIVERY_NOT_DELIVERED.to_string(),
         created_at: format_datetime(webhook.created_at),
         updated_at: format_datetime(webhook.updated_at),
     };
@@ -146,26 +170,31 @@ pub async fn create_webhook(
         StatusCode::CREATED,
         Json(CreateWebhookApiResponse {
             success: true,
+            notice: DEPRECATION_NOTICE.to_string(),
             data: response,
         }),
     ))
 }
 
-/// List all webhooks for the authenticated user
+/// List legacy meeting webhooks (deprecated: never delivered)
 ///
-/// Returns all webhooks owned by the authenticated user, active and inactive, newest first. Secrets
-/// are not included. Not paginated.
+/// DEPRECATED (PLT-003). Returns the authenticated user's stored registrations, active and
+/// inactive, newest first, each marked `delivery: NOT_DELIVERED`. Secrets are not included. Not
+/// paginated. Nothing registered here is ever delivered; use Developer Platform webhooks.
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks",
     tag = "Webhooks",
     responses(
-        (status = 200, description = "List of webhooks", body = WebhookListResponse),
+        (status = 200, description = "Stored registrations (none is delivered)", body = WebhookListResponse),
         (status = 401, description = "Unauthorized")
     ),
     security(
         ("bearer_auth" = [])
     )
+)]
+#[deprecated(
+    note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)"
 )]
 pub async fn list_webhooks(
     State(state): State<AppState>,
@@ -185,6 +214,7 @@ pub async fn list_webhooks(
             event_type: format_event_type(&w.event_type),
             endpoint_url: w.endpoint_url,
             status: format_status(&w.status),
+            delivery: DELIVERY_NOT_DELIVERED.to_string(),
             created_at: format_datetime(w.created_at),
             updated_at: format_datetime(w.updated_at),
         })
@@ -192,16 +222,17 @@ pub async fn list_webhooks(
 
     Ok(Json(WebhookListResponse {
         success: true,
+        notice: DEPRECATION_NOTICE.to_string(),
         data,
     }))
 }
 
-/// Update a webhook
+/// Update a legacy meeting webhook (deprecated: never delivered)
 ///
-/// Changes the endpoint URL and/or status (`active` or `inactive`) of a webhook owned by the
-/// authenticated user; omitted fields are left unchanged. The event type cannot be changed, so
-/// create a new webhook instead. Returns 404 if the webhook does not exist or belongs to another
-/// user.
+/// DEPRECATED (PLT-003). Changes the endpoint URL and/or status (`active` or `inactive`) of a
+/// stored registration owned by the authenticated user; omitted fields are left unchanged. Even
+/// `active` registrations are never delivered (`delivery: NOT_DELIVERED`). Returns 404 if the
+/// webhook does not exist or belongs to another user.
 #[utoipa::path(
     patch,
     path = "/api/v1/webhooks/{id}",
@@ -220,6 +251,7 @@ pub async fn list_webhooks(
         ("bearer_auth" = [])
     )
 )]
+#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
 pub async fn update_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,
@@ -255,21 +287,23 @@ pub async fn update_webhook(
         event_type: format_event_type(&webhook.event_type),
         endpoint_url: webhook.endpoint_url,
         status: format_status(&webhook.status),
+        delivery: DELIVERY_NOT_DELIVERED.to_string(),
         created_at: format_datetime(webhook.created_at),
         updated_at: format_datetime(webhook.updated_at),
     };
 
     Ok(Json(WebhookApiResponse {
         success: true,
+        notice: DEPRECATION_NOTICE.to_string(),
         data: response,
     }))
 }
 
-/// Delete a webhook
+/// Delete a legacy meeting webhook (deprecated)
 ///
-/// Permanently deletes a webhook owned by the authenticated user. Returns 404 if the webhook does
-/// not exist or belongs to another user. To disable a webhook without deleting it, set its status
-/// to `inactive` with `PATCH /api/v1/webhooks/{id}`.
+/// DEPRECATED (PLT-003). Permanently deletes a stored registration owned by the authenticated
+/// user (nothing was ever delivered to it). Returns 404 if the webhook does not exist or belongs
+/// to another user.
 #[utoipa::path(
     delete,
     path = "/api/v1/webhooks/{id}",
@@ -286,6 +320,7 @@ pub async fn update_webhook(
         ("bearer_auth" = [])
     )
 )]
+#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
 pub async fn delete_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,

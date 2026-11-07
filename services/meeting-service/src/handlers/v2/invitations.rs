@@ -25,7 +25,7 @@ use crate::{
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/invitations", tag = "Invitations (v2)", operation_id = "v2_create_invitation",
     params(("id" = Uuid, Path, description = "Meeting space id")),
-    request_body = CreateInvitationRequest,
+    request_body = Option<CreateInvitationRequest>,
     responses(
         (status = 201, description = "Created", body = CreateInvitationResponse),
         (status = 400, description = "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)", body = ErrorEnvelope),

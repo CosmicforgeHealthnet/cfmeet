@@ -425,6 +425,7 @@ dependencies = [
  "bcrypt",
  "cf-communications-policy",
  "cf-messaging-crypto",
+ "cf-object-storage",
  "cf-service-auth",
  "cf-usage-facts",
  "chrono",
@@ -706,6 +707,20 @@ dependencies = [
  "tls_codec",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "cf-object-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "reqwest",
+ "sha2 0.10.9",
+ "thiserror 2.0.17",
+ "url",
 ]
 
 [[package]]

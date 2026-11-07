@@ -42,6 +42,11 @@ use crate::{
 /// Creates a meeting that starts immediately and lasts 1 hour.
 /// The authenticated user becomes the host and is automatically joined.
 /// Returns join token for immediate connection.
+///
+/// DEPRECATED (Blueprint v1.0 Section 16, MTG-017): use `POST /api/v2/instant-meetings`.
+/// Responses carry `Deprecation` / `Sunset`. By default the new meeting is mirrored into v2
+/// at once (it stays legacy-managed and is joined through the legacy join routes); with
+/// `FEATURE_LEGACY_MEETING_CREATE_MODE=refuse` this answers `410 LEGACY_WRITE_DISABLED`.
 #[utoipa::path(
     post,
     path = "/api/v1/meetings/instant",
@@ -56,6 +61,7 @@ use crate::{
         ("bearer_auth" = [])
     )
 )]
+#[deprecated(note = "legacy v1 meeting creation; use the /api/v2 meeting API (MTG-017)")]
 pub async fn create_instant_meeting(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -150,6 +156,8 @@ pub async fn create_instant_meeting(
         }))),
     };
     join_log.insert(&state.db).await?;
+    // Section 16 (MTG-017): mirror into v2 now (default mode; best effort, never fails the write).
+    state.meeting.compat.mirror_legacy_write(meeting_id).await;
 
     // Generate LiveKit join token
     let join_token = state.legacy_rtc.issue_legacy_join_credential(
@@ -286,6 +294,12 @@ pub async fn list_meetings(
 ///
 /// The authenticated user becomes the host. Meeting starts as "scheduled".
 /// No RTC resources are allocated at this point.
+///
+/// DEPRECATED (Blueprint v1.0 Section 16, MTG-017): use `POST /api/v2/meeting-spaces` then
+/// `POST /api/v2/meeting-spaces/{id}/conferences`. Responses carry `Deprecation` / `Sunset`.
+/// By default the new meeting is mirrored into v2 at once (it stays legacy-managed and is
+/// joined through the legacy join routes); with `FEATURE_LEGACY_MEETING_CREATE_MODE=refuse`
+/// this answers `410 LEGACY_WRITE_DISABLED`.
 #[utoipa::path(
     post,
     path = "/api/v1/meetings",
@@ -300,6 +314,7 @@ pub async fn list_meetings(
         ("bearer_auth" = [])
     )
 )]
+#[deprecated(note = "legacy v1 meeting creation; use the /api/v2 meeting API (MTG-017)")]
 pub async fn create_meeting(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -371,6 +386,8 @@ pub async fn create_meeting(
     };
 
     let meeting = meeting.insert(&state.db).await?;
+    // Section 16 (MTG-017): mirror into v2 now (default mode; best effort, never fails the write).
+    state.meeting.compat.mirror_legacy_write(meeting.id).await;
 
     let response = MeetingResponse {
         id: meeting.id,
@@ -600,6 +617,8 @@ pub async fn update_meeting(
     meeting.updated_at = Set(now);
 
     let meeting = meeting.update(&state.db).await?;
+    // Section 16 (MTG-017): refresh the v2 mirror (default mode; best effort).
+    state.meeting.compat.mirror_legacy_write(meeting.id).await;
 
     let response = MeetingResponse {
         id: meeting.id,
@@ -1157,6 +1176,8 @@ pub async fn end_meeting(
         }))),
     };
     session_log.insert(&state.db).await?;
+    // Section 16 (MTG-017): refresh the v2 mirror (default mode; best effort).
+    state.meeting.compat.mirror_legacy_write(id).await;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -1318,6 +1339,11 @@ pub struct ApiJoinMeetingRequest {
 ///
 /// Third-party integrations can use this endpoint with Api-Key authentication
 /// to create meetings on behalf of the key owner.
+///
+/// DEPRECATED (Sections 15–16, PLT-004 / MTG-017): use a Platform Access credential with
+/// `meetings.write` through the API Gateway and the v2 meeting-space operations
+/// (`docs/api/legacy-api-keys-deprecation.md`). Same create policy and headers as
+/// `POST /api/v1/meetings`.
 #[utoipa::path(
     post,
     path = "/api/v1/api/meetings",
@@ -1333,6 +1359,7 @@ pub struct ApiJoinMeetingRequest {
         ("api_key_auth" = [])
     )
 )]
+#[deprecated(note = "legacy v1 meeting creation; use the /api/v2 meeting API (MTG-017)")]
 pub async fn api_create_meeting(
     State(state): State<AppState>,
     Extension(api_claims): Extension<ApiKeyClaims>,
@@ -1403,6 +1430,8 @@ pub async fn api_create_meeting(
     };
 
     let meeting = meeting.insert(&state.db).await?;
+    // Section 16 (MTG-017): mirror into v2 now (default mode; best effort, never fails the write).
+    state.meeting.compat.mirror_legacy_write(meeting.id).await;
 
     let response = MeetingResponse {
         id: meeting.id,

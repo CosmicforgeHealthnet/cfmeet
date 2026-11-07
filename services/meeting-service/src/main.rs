@@ -37,9 +37,26 @@ async fn main() -> anyhow::Result<()> {
         .acquire_timeout(std::time::Duration::from_secs(30))
         .idle_timeout(std::time::Duration::from_secs(300))
         .max_lifetime(std::time::Duration::from_secs(1800))
-        .sqlx_logging(false);
+        .sqlx_logging(false)
+        // DATA-001: legacy tables keep naive `TIMESTAMP` columns that hold UTC. Pin every
+        // session to UTC explicitly (a later `-c` wins over any `options` in the URL), so
+        // `DEFAULT CURRENT_TIMESTAMP`, `now()` comparisons and `AT TIME ZONE` casts never
+        // follow a server or URL default.
+        .map_sqlx_postgres_opts(|o| o.options([("TimeZone", "UTC")]));
     let db = Database::connect(db_opts).await?;
+    backend::utils::datetime::assert_session_utc(&db)
+        .await
+        .expect("database session time zone must be UTC (DATA-001)");
     tracing::info!("✅ Database connected successfully");
+
+    // DATA-011 target rule for the base history: applied ⊇ known, unknown versions fail
+    // closed (the additive histories below follow the same rule).
+    if !migration::base_ready(&db)
+        .await
+        .expect("Base migration readiness")
+    {
+        panic!("Base migrations are pending (migration up)");
+    }
 
     // Load email configuration
     let email_config = match EmailConfig::from_env() {

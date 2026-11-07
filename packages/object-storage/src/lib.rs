@@ -57,6 +57,9 @@ pub struct StoredObject {
     pub content_type: String,
     /// Whether the store confirmed server-side encryption of the object.
     pub encrypted: bool,
+    /// The store's quote-stripped ETag, when it reports one (single-part S3 uploads:
+    /// the MD5 of the bytes; multipart ETags end in `-N`).
+    pub etag: Option<String>,
 }
 
 /// Metadata of an existing object.
@@ -65,6 +68,16 @@ pub struct ObjectMeta {
     pub size: u64,
     pub content_type: Option<String>,
     pub encrypted: bool,
+    /// The store's quote-stripped ETag, when it reports one.
+    pub etag: Option<String>,
+}
+
+fn etag_of(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .map(|e| e.trim_matches('"').to_string())
+        .filter(|e| !e.is_empty())
 }
 
 /// A short-lived read URL (never stored).
@@ -750,6 +763,47 @@ impl S3ObjectStore {
             s => Err(StorageError::Rejected(s)),
         }
     }
+
+    /// Streams ONE object of at most `max_bytes` through `visit`, chunk by chunk, without
+    /// buffering it (server-side integrity hashing of large recordings). `Ok(None)`: no
+    /// such object; `Ok(Some(size))`: bytes visited. A larger object is
+    /// [`StorageError::Integrity`] (the visit stops at the limit).
+    pub async fn get_streaming<F>(
+        &self,
+        key: &str,
+        max_bytes: u64,
+        mut visit: F,
+    ) -> StorageResult<Option<u64>>
+    where
+        F: FnMut(&[u8]) + Send,
+    {
+        if !valid_key(key) {
+            return Err(StorageError::Rejected(400));
+        }
+        let empty = sha256_hex(b"");
+        let mut res = self
+            .request(reqwest::Method::GET, Some(key), &empty, &[])
+            .send()
+            .await
+            .map_err(|_| StorageError::Unavailable)?;
+        match res.status().as_u16() {
+            404 => return Ok(None),
+            s if (200..300).contains(&s) => {}
+            s => return Err(status_error(s)),
+        }
+        if res.content_length().is_some_and(|n| n > max_bytes) {
+            return Err(StorageError::Integrity);
+        }
+        let mut size = 0u64;
+        while let Some(chunk) = res.chunk().await.map_err(|_| StorageError::Unavailable)? {
+            size += chunk.len() as u64;
+            if size > max_bytes {
+                return Err(StorageError::Integrity);
+            }
+            visit(&chunk);
+        }
+        Ok(Some(size))
+    }
 }
 
 fn status_error(status: u16) -> StorageError {
@@ -802,6 +856,7 @@ impl ObjectStore for S3ObjectStore {
             sha256,
             content_type: content_type.to_string(),
             encrypted,
+            etag: etag_of(res.headers()),
         })
     }
 
@@ -827,6 +882,7 @@ impl ObjectStore for S3ObjectStore {
                         .and_then(|v| v.to_str().ok())
                         .map(str::to_string),
                     encrypted: h.get("x-amz-server-side-encryption").is_some(),
+                    etag: etag_of(h),
                 }))
             }
             s => Err(status_error(s)),
@@ -1182,6 +1238,7 @@ impl ObjectStore for MemoryObjectStore {
             sha256,
             content_type: content_type.to_string(),
             encrypted: true,
+            etag: None,
         };
         self.objects
             .lock()
@@ -1201,6 +1258,7 @@ impl ObjectStore for MemoryObjectStore {
                 size: b.len() as u64,
                 content_type: Some(ct.clone()),
                 encrypted: true,
+                etag: None,
             }))
     }
 
@@ -1327,6 +1385,22 @@ impl ObjectStore for MemoryObjectStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn etag_is_quote_stripped_and_optional() {
+        let mut h = reqwest::header::HeaderMap::new();
+        assert_eq!(etag_of(&h), None);
+        h.insert(
+            "etag",
+            "\"9e107d9d372bb6826bd81d3542a419d6\"".parse().unwrap(),
+        );
+        assert_eq!(
+            etag_of(&h).as_deref(),
+            Some("9e107d9d372bb6826bd81d3542a419d6")
+        );
+        h.insert("etag", "\"\"".parse().unwrap());
+        assert_eq!(etag_of(&h), None);
+    }
     use chrono::TimeZone;
 
     #[test]
