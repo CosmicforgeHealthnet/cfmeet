@@ -146,7 +146,7 @@ async fn legacy_api_keys_are_stored_as_verifiers_and_still_authenticate() {
     assert_eq!(call_with_key(&app, "short").await, StatusCode::UNAUTHORIZED);
     assert_eq!(
         app.scalar(&format!(
-            "SELECT used_count FROM api_keys WHERE id = '{id}'"
+            "SELECT used_count::bigint FROM api_keys WHERE id = '{id}'"
         ))
         .await,
         1
@@ -201,7 +201,7 @@ async fn plaintext_rows_are_found_once_and_healed() {
     assert!(authenticated(call_with_key(&app, &key).await));
     assert_eq!(
         app.scalar(&format!(
-            "SELECT used_count FROM api_keys WHERE id = '{id}'"
+            "SELECT used_count::bigint FROM api_keys WHERE id = '{id}'"
         ))
         .await,
         2
@@ -244,7 +244,7 @@ async fn api_key_quota_is_atomic_under_concurrency() {
     assert_eq!((ok, over), (5, 15));
     assert_eq!(
         app.scalar(&format!(
-            "SELECT used_count FROM api_keys WHERE id = '{id}'"
+            "SELECT used_count::bigint FROM api_keys WHERE id = '{id}'"
         ))
         .await,
         5
@@ -289,7 +289,9 @@ async fn legacy_webhook_secrets_are_not_stored() {
 
 async fn legacy_meeting_with_guest(app: &TestApp, host: &User) -> (Uuid, String, Uuid) {
     let id = Uuid::new_v4();
-    let code = format!("H{}", &id.simple().to_string()[..7]).to_uppercase();
+    let code = format!("H{}", &id.simple().to_string()[..7])
+        .to_uppercase()
+        .replace(['0', '1', 'O', 'I'], "Q");
     let participant = Uuid::new_v4();
     app.db
         .conn
