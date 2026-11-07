@@ -3,9 +3,11 @@
 `services/organizations` (`cfmeet.organizations`) is the first-party **business
 organization authority** of CF Meet (Blueprint v1.0 Sections 3–5,
 [ADR 0056](../../docs/decisions/0056-first-party-organizations-and-workspace-boundaries.md)).
-It owns organizations, profiles, memberships (with history), invitations, their audit
-events and outbox, and — from Section 7 — organization ↔ Platform Access scope mappings
-and provisioning workflows.
+It owns organizations, profiles, memberships (with history), invitations, teams and team
+members (Section 6), typed organization policies (Section 6), their audit events and
+outbox, and organization ↔ Platform Access scope mappings with the provisioning saga
+(Section 7, [ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md);
+off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`).
 
 * **Contract:** [`docs/api/organizations-internal-v1.md`](../../docs/api/organizations-internal-v1.md)
   (machine-readable: `packages/contracts/organizations/internal/v1.openapi.json`, served at
