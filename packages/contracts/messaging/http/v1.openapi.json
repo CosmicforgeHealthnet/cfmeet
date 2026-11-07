@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.15.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints."
+    "version": "1.16.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011)."
   },
   "tags": [
     {
@@ -204,6 +204,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. A single-use challenge (server nonce, server-assigned device id) for the acting principal, bound to the credential and environment; rate-limited per principal. 503 FEATURE_DISABLED where E2EE device operations are not enabled.",
         "parameters": [
           {
@@ -257,6 +258,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Registers the device by its registration KeyPackage: RFC 9420 validation, the server-assigned credential identity and the signed challenge binding prove possession of the device key and freshness. Stores PUBLIC material only, appends a transparency leaf. Replaying the same answer returns the device (200).",
         "parameters": [
           {
@@ -332,6 +334,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Publishes 1–20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
         "parameters": [
           {
@@ -415,6 +418,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Revokes the acting principal's device (terminal), closes its KeyPackages and appends a transparency leaf. Idempotent.",
         "parameters": [
           {
@@ -492,6 +496,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The ACTIVE devices (public keys) of an ACTIVE messaging principal of the credential's own environment; any other principal is NOT_FOUND. Rate-limited per credential. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
@@ -559,6 +564,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. Inclusion proofs (RFC 9162) of a device's log entries against the current tree head and, with fromTreeSize, a consistency proof. The log is UNWITNESSED: verifiable, not anti-equivocation. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
@@ -632,6 +638,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.create",
         "description": "Scope conversations.create; the acting principal becomes the owner. Context class and security profile are checked against the persisted effective policy: the profile defaults to the context's default (PRIVATE_E2EE where eligible), MANAGED only where the application policy allows it, never a silent fallback (E2EE_NOT_AVAILABLE when encryption cannot be established). DIRECT conversations are deduplicated per principal pair and profile; a live context reference is unique. Idempotency-Key replays the stored response (200).",
         "parameters": [
           {
@@ -876,6 +883,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE).",
         "parameters": [
           {
@@ -953,6 +961,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. The environment's overrides, their version and the effective policy.",
         "parameters": [],
         "responses": {
@@ -991,6 +1000,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Replaces the overrides (validated; optimistic concurrency on expectedVersion: POLICY_VERSION_CONFLICT). Audited; existing conversations keep their snapshot.",
         "parameters": [],
         "responses": {
@@ -1135,6 +1145,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). The principal must be ACTIVE and messaging-capable in the same environment; re-admission opens a NEW history window (no server-granted history, AD-07). DIRECT membership is fixed. With invite: true the principal is INVITED (201, state INVITED) and becomes a member only when it accepts.",
         "parameters": [
           {
@@ -1311,6 +1322,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
         "parameters": [
           {
@@ -1402,6 +1414,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. Canonical order by sequence, within the member's history window; tombstones carry no content.",
         "parameters": [
           {
@@ -1508,6 +1521,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content.",
         "parameters": [
           {
@@ -1601,6 +1615,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Permalink resolution (scope messages.read): current membership is checked on every resolution; a permalink is never authority.",
         "parameters": [
           {
@@ -1677,6 +1692,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "MANAGED only (PRIVATE_E2EE edits are new ciphertexts with kind EDIT). Scope messages.send; the sender, within the policy's edit window. The superseded version is kept as a sealed revision (never overwritten in place); expectedEditCount turns a concurrent edit into 409 VERSION_CONFLICT.",
         "parameters": [
           {
@@ -1766,6 +1782,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. scope=EVERYONE (default, sender only): a server tombstone for every member, purged after the retention grace unless a legal hold protects it. scope=ME: hidden on the acting principal's own devices.",
         "parameters": [
           {
@@ -1855,6 +1872,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
         "parameters": [
           {
@@ -1936,6 +1954,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. A monotonic read position (distinct from transport delivery and application acknowledgements); shared as read.cursor.updated only when the privacy policy enables read receipts.",
         "parameters": [
           {
@@ -2016,6 +2035,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. Durable events after a per-conversation cursor (exclusive), oldest first, within the member's history window; the REST synchronization path of realtime clients.",
         "parameters": [
           {
@@ -2106,6 +2126,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only).",
         "parameters": [
           {
@@ -2199,6 +2220,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member: the group's current epoch and pending removals.",
         "parameters": [
           {
@@ -2269,6 +2291,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member: claims (single use) one published KeyPackage of every ACTIVE device of the given ACTIVE members.",
         "parameters": [
           {
@@ -2349,6 +2372,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: pending Welcomes of one of the acting principal's ACTIVE devices, for conversations it is still an ACTIVE member of.",
         "parameters": [
           {
@@ -2419,6 +2443,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send: marks a Welcome processed.",
         "parameters": [
           {
@@ -2497,6 +2522,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: the acting principal's blocks.",
         "parameters": [
           {
@@ -2557,6 +2583,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Blocks direct conversations and direct messages with the principal (either direction); serialized with concurrent sends (no message commits after the block). Never changes Calling or Meeting permissions.",
         "parameters": [
           {
@@ -2639,6 +2666,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send.",
         "parameters": [
           {
@@ -2785,6 +2813,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting principal: a short-lived client access token for one of the principal's ACTIVE devices (a new session; never a permanent credential). Scopes are the credential's messages.read / messages.send only.",
         "parameters": [
           {
@@ -2854,6 +2883,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, the session's principal. Terminal; every gateway closes the session's connections after commit.",
         "parameters": [
           {
@@ -2924,6 +2954,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: the acting principal's presence visibility.",
         "parameters": [
           {
@@ -2984,6 +3015,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. HIDDEN: reported OFFLINE everywhere, indistinguishable from offline; last seen is shared only when the policy allows it and shareLastSeen is true.",
         "parameters": [
           {
@@ -3056,6 +3088,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, the device's principal: the device's push handle and preference. Payloads are metadata only (never content, ciphertext or keys).",
         "parameters": [
           {
@@ -3134,6 +3167,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send: disables notifications for the device.",
         "parameters": [
           {
@@ -3204,6 +3238,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.write",
         "description": "Scope attachments.write, acting member. Policy-checked (attachments enabled for the environment and context, kind, size, quotas reserved atomically). Returns a signed upload bound to size / digest / type. PRIVATE_E2EE: the client encrypts BEFORE upload; file name, media type and durations are refused (they travel inside MLS). 200: the same pending upload reused.",
         "parameters": [
           {
@@ -3297,6 +3332,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. The uploader, or a member through a message within their history window.",
         "parameters": [
           {
@@ -3375,6 +3411,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.write",
         "description": "Scope attachments.write, the uploader. Re-verifies the stored object's size and SHA-256; MANAGED: content-type security and the self-hosted scan (fail closed: VERIFYING while the scanner is unavailable, QUARANTINED when infected). Idempotent.",
         "parameters": [
           {
@@ -3456,6 +3493,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. Authorization re-checked now (membership, history window, message ACTIVE, attachment READY); a removed member gets no fresh grant.",
         "parameters": [
           {
@@ -3534,6 +3572,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. A proxied, bounded read re-authorized on every request (immediate revocation). Responds with the stored bytes, Content-Disposition: attachment, X-Content-Type-Options: nosniff, Cache-Control: no-store and a sandboxing CSP.",
         "parameters": [
           {
@@ -3613,6 +3652,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [],
         "responses": {
@@ -3660,6 +3700,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Held messages, attachments and metadata are never purged; nothing becomes decryptable.",
         "parameters": [],
         "responses": {
@@ -3719,6 +3760,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -3777,6 +3819,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Held deletions resume afterwards.",
         "parameters": [
           {
@@ -3848,6 +3891,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY — search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
         "parameters": [
           {
@@ -3946,6 +3990,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting principal: their ACTIVE MANAGED conversations (E2EE conversations counted, never searched).",
         "parameters": [
           {
@@ -4028,6 +4073,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. Policy: moderation and reporting enabled for the environment and context; rate-limited.",
         "parameters": [
           {
@@ -4105,6 +4151,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -4177,6 +4224,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. MANAGED text appears only when policy moderation.managedEvidenceAllowed; E2EE evidence only as reporter-disclosed and unverifiable.",
         "parameters": [
           {
@@ -4235,6 +4283,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -4293,6 +4342,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. REMOVE_MESSAGE tombstones (MODERATED) then purges; mutes / restrictions are time-bounded.",
         "parameters": [],
         "responses": {
@@ -4352,6 +4402,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. MANAGED conversations with exportsEnabled only; PRIVATE_E2EE: E2EE_EXPORT_NOT_AVAILABLE.",
         "parameters": [],
         "responses": {
@@ -4411,6 +4462,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -4469,6 +4521,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. A short-lived signed read with a forced download.",
         "parameters": [
           {
@@ -4527,6 +4580,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Executed asynchronously; legal holds preserve held items.",
         "parameters": [],
         "responses": {
@@ -4586,6 +4640,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -4644,6 +4699,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. The application environment's append-only audit trail, newest first.",
         "parameters": [
           {
@@ -4739,6 +4795,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting principal: ends every ACTIVE client session of the principal (logout everywhere); gateways close them after commit.",
         "parameters": [
           {
@@ -4798,6 +4855,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H §106).",
         "responses": {
           "200": {
@@ -4849,6 +4907,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members).",
         "parameters": [
           {
@@ -4917,6 +4976,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (acting ADMIN / OWNER). Bridges a MANAGED conversation to one external party (TELEPHONE_ENDPOINT principal) by SMS after the explicit disclosure; never a PRIVATE_E2EE conversation.",
         "parameters": [
           {
@@ -4997,6 +5057,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (acting ADMIN / OWNER). Closes the carrier side first.",
         "parameters": [
           {
@@ -5078,6 +5139,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members). The carrier state of a bridged message (separate from in-app receipts).",
         "parameters": [
           {
@@ -5156,6 +5218,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -5224,6 +5287,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Removes the member (PRIVATE_E2EE: pending MLS removal) and refuses re-adding until unbanned. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -5304,6 +5368,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Lifts the ban; does not re-add. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -5385,6 +5450,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members, within their history window). Counts per reaction; no list of who reacted.",
         "parameters": [
           {
@@ -5466,6 +5532,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (members). MANAGED only: in PRIVATE_E2EE conversations reactions are encrypted application messages (E2EE_REACTIONS_ARE_MESSAGES). Idempotent per principal; emits messaging.reaction.added.",
         "parameters": [
           {
@@ -5556,6 +5623,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (members). Idempotent; emits messaging.reaction.removed.",
         "parameters": [
           {
@@ -5648,6 +5716,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members; only pins inside their history window).",
         "parameters": [
           {
@@ -5718,6 +5787,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (acting OWNER / ADMIN, NOT_ADMIN otherwise). Pins reference message ids only, so PRIVATE_E2EE content stays opaque. Emits messaging.pin.added. Optional body {expiresAt}: the pin expires then (an expired pin is not listed nor counted; pinning again renews it).",
         "parameters": [
           {
@@ -5804,6 +5874,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (acting OWNER / ADMIN). Emits messaging.pin.removed.",
         "parameters": [
           {
@@ -5885,6 +5956,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members). Application messages of others after the read cursor, inside the history window, not hidden.",
         "parameters": [
           {
@@ -5955,6 +6027,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "usage.read",
         "description": "Scope usage.read. Totals per usage type and security profile in [from, to) (at most 93 days): accepted messages, stored attachment bytes, bridged SMS segments, realtime connection seconds (recorded when a connection closes), attachment egress bytes (authorized by a grant or served by the proxied read) and MANAGED search queries. Facts only: Messaging does not price or bill.",
         "parameters": [
           {
@@ -6020,6 +6093,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The NEW (target) device's request for history held by an existing (source) device of the same principal: a single-use transfer public key and an expiry, signed with the target's device key (verified against its registered key). E2EE devices only (FEATURE_DISABLED where production E2EE is off).",
         "parameters": [
           {
@@ -6090,6 +6164,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The transfers of one of the acting principal's ACTIVE devices (as source or target), newest first.",
         "parameters": [
           {
@@ -6157,6 +6232,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. One transfer of the acting principal.",
         "parameters": [
           {
@@ -6224,6 +6300,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The SOURCE device's sealed history (accepted only when its signature verifies under the source device key for exactly this transfer; at most MESSAGING_HISTORY_TRANSFER_MAX_BYTES). Messaging stores ciphertext only.",
         "parameters": [
           {
@@ -6305,6 +6382,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The sealed history, for the TARGET device to verify and open (while SEALED and unexpired).",
         "parameters": [
           {
@@ -6375,6 +6453,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The target opened the history; the sealed bytes are deleted.",
         "parameters": [
           {
@@ -6445,6 +6524,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Either device ends the transfer (e.g. the comparison codes differed); the sealed bytes are deleted.",
         "parameters": [
           {
@@ -6525,6 +6605,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
         "parameters": [
           {
@@ -6603,6 +6684,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -6678,6 +6760,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. Metadata of the acting principal's newest READY backup (404 when none). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -6737,6 +6820,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Marks the backup DELETED and queues its object for deletion. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -6804,6 +6888,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Verifies the uploaded object (size, SHA-256, format magic, header principal = acting principal); READY on success (idempotent), else REJECTED with 422 INTEGRITY_CHECK_FAILED (SIZE_MISMATCH, DIGEST_MISMATCH, NOT_A_BACKUP, WRONG_PRINCIPAL) and the object is deleted. Keeps the newest backups.retainCount READY backups. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -6877,6 +6962,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. A short-lived signed read of a READY backup object (409 BACKUP_NOT_READY otherwise). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -6950,6 +7036,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members, within their history window). The thread rooted at messageId: reply count, last reply sequence / time and the caller's unread replies (after their read cursor). With threads turned off by policy no reply records a thread root, so the count is 0.",
         "parameters": [
           {
@@ -7031,6 +7118,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The acting principal accepts its open invitation: it becomes an ACTIVE member with the invited role and a history window starting now (authoritySource INVITATION). No open invitation: NOT_FOUND; expired: CONFLICT / INVITATION_EXPIRED (the invitation is closed); banned meanwhile: PRINCIPAL_BANNED.",
         "parameters": [
           {
@@ -7104,6 +7192,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The acting principal declines its open invitation (state LEFT, reason INVITATION_DECLINED).",
         "parameters": [
           {
@@ -7177,6 +7266,7 @@
             "clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The acting principal's open invitations.",
         "parameters": [
           {
@@ -7239,6 +7329,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Section 13 (ADR 0049 amendment A1), scope messages.read, acting principal, FIRST_PARTY application environments only (PRINCIPAL_NOT_AUTHORIZED / SESSION_DEVICES_FIRST_PARTY_ONLY otherwise): creates (or, with sessionDeviceId, renews) a session device bound to the relay's account-session reference and returns a realtime-only client token for MANAGED conversations (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past notAfter). A session device is not an MLS device: it cannot publish KeyPackages, join MLS groups, receive PRIVATE_E2EE traffic, use device-direct REST operations or count as an end-to-end encrypted device. FEATURE_DISABLED / SESSION_DEVICES_DISABLED while MESSAGING_SESSION_DEVICES_ENABLED is off; a renewal of an unknown, revoked, expired or differently bound session device is NOT_FOUND.",
         "parameters": [
           {
@@ -7305,6 +7396,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Section 13, scope messages.send, acting principal, FIRST_PARTY only: the account session behind accountSessionRef ended; its session devices and their client sessions are revoked now and connected gateways close them after commit. Always available (also with session devices switched off). POST /v1/messaging/client-sessions/revoke-all also revokes every session device of the principal.",
         "parameters": [
           {

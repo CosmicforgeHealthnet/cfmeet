@@ -3634,7 +3634,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.create"
     },
     {
       "id": "messaging.getConversation",
@@ -3665,7 +3666,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.createAttachmentIntent",
@@ -3681,7 +3683,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.write"
     },
     {
       "id": "messaging.getAttachment",
@@ -3697,7 +3700,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.read"
     },
     {
       "id": "messaging.readAttachmentContent",
@@ -3713,7 +3717,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.read"
     },
     {
       "id": "messaging.grantAttachmentDownload",
@@ -3729,7 +3734,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.read"
     },
     {
       "id": "messaging.finalizeAttachment",
@@ -3745,7 +3751,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.write"
     },
     {
       "id": "messaging.createThumbnailGrant",
@@ -3761,7 +3768,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "attachments.read"
     },
     {
       "id": "messaging.listBans",
@@ -3776,7 +3784,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.banMember",
@@ -3791,7 +3800,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.unbanMember",
@@ -3806,7 +3816,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.replayConversationEvents",
@@ -3822,7 +3833,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.acceptInvitation",
@@ -3838,7 +3850,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.declineInvitation",
@@ -3854,7 +3867,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listMembers",
@@ -3885,7 +3899,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.removeMember",
@@ -3915,7 +3930,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.listMessages",
@@ -3931,7 +3947,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.sendMessage",
@@ -3947,7 +3964,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.deleteMessage",
@@ -3963,7 +3981,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.resolveMessage",
@@ -3979,7 +3998,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.editManagedMessage",
@@ -3995,7 +4015,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listReactions",
@@ -4011,7 +4032,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.removeReaction",
@@ -4027,7 +4049,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.addReaction",
@@ -4043,7 +4066,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listMessageRevisions",
@@ -4059,7 +4083,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.getSmsTransport",
@@ -4075,7 +4100,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.getThreadSummary",
@@ -4091,7 +4117,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.submitMlsCommit",
@@ -4107,7 +4134,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.claimKeyPackages",
@@ -4123,7 +4151,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.getMlsGroupState",
@@ -4139,7 +4168,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.listPins",
@@ -4155,7 +4185,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.unpinMessage",
@@ -4170,7 +4201,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.pinMessage",
@@ -4185,7 +4217,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.setReadCursor",
@@ -4201,7 +4234,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.createReport",
@@ -4217,7 +4251,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.searchConversation",
@@ -4233,7 +4268,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.listSmsBridges",
@@ -4248,7 +4284,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.createSmsBridge",
@@ -4263,7 +4300,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.closeSmsBridge",
@@ -4278,7 +4316,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.getUnreadCount",
@@ -4294,7 +4333,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "gateway.getDeveloperPlatformContext",
@@ -5917,7 +5957,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.createBackupUpload",
@@ -5933,7 +5974,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.getLatestBackup",
@@ -5949,7 +5991,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.deleteBackup",
@@ -5965,7 +6008,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.createBackupDownloadGrant",
@@ -5981,7 +6025,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.finalizeBackup",
@@ -5997,7 +6042,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listBlocks",
@@ -6013,7 +6059,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.createBlock",
@@ -6029,7 +6076,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.removeBlock",
@@ -6045,7 +6093,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.revokeAllClientSessions",
@@ -6060,7 +6109,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.revokeClientSession",
@@ -6075,7 +6125,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.issueClientToken",
@@ -6090,7 +6141,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.requestDataDeletion",
@@ -6105,7 +6157,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.getDataDeletion",
@@ -6120,7 +6173,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.registerDevice",
@@ -6135,7 +6189,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.createDeviceRegistrationChallenge",
@@ -6150,7 +6205,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.publishKeyPackages",
@@ -6166,7 +6222,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.unregisterPush",
@@ -6182,7 +6239,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.registerPush",
@@ -6198,7 +6256,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.revokeDevice",
@@ -6213,7 +6272,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listWelcomes",
@@ -6229,7 +6289,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.consumeWelcome",
@@ -6245,7 +6306,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.requestExport",
@@ -6260,7 +6322,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messaging.export"
     },
     {
       "id": "messaging.getExport",
@@ -6275,7 +6338,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messaging.export"
     },
     {
       "id": "messaging.grantExportDownload",
@@ -6290,7 +6354,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messaging.export"
     },
     {
       "id": "messaging.listHistoryTransfers",
@@ -6306,7 +6371,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.createHistoryTransfer",
@@ -6322,7 +6388,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.getHistoryTransfer",
@@ -6338,7 +6405,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.cancelHistoryTransfer",
@@ -6354,7 +6422,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.completeHistoryTransfer",
@@ -6370,7 +6439,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.getSealedHistory",
@@ -6386,7 +6456,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.sealHistoryTransfer",
@@ -6402,7 +6473,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listInvitations",
@@ -6418,7 +6490,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.getKeyTransparencyProofs",
@@ -6434,7 +6507,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.listLegalHolds",
@@ -6449,7 +6523,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.createLegalHold",
@@ -6464,7 +6539,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.getLegalHold",
@@ -6479,7 +6555,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.releaseLegalHold",
@@ -6494,7 +6571,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.listModerationActions",
@@ -6509,7 +6587,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "moderation.manage"
     },
     {
       "id": "messaging.applyModerationAction",
@@ -6524,7 +6603,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "moderation.manage"
     },
     {
       "id": "messaging.getMessagingPolicy",
@@ -6539,7 +6619,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.updateMessagingPolicy",
@@ -6554,7 +6635,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "conversations.manage"
     },
     {
       "id": "messaging.getPresenceSettings",
@@ -6570,7 +6652,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.putPresenceSettings",
@@ -6586,7 +6669,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.send"
     },
     {
       "id": "messaging.listPrincipalDevices",
@@ -6602,7 +6686,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.listReports",
@@ -6617,7 +6702,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "moderation.manage"
     },
     {
       "id": "messaging.getReport",
@@ -6632,7 +6718,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "moderation.manage"
     },
     {
       "id": "messaging.searchMessages",
@@ -6648,7 +6735,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.getSmsBridgeDisclosure",
@@ -6663,7 +6751,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "messages.read"
     },
     {
       "id": "messaging.getMessagingUsage",
@@ -6678,7 +6767,8 @@
       ],
       "forwardHeaders": [
         "cf-acting-principal"
-      ]
+      ],
+      "requiredScope": "usage.read"
     },
     {
       "id": "numbering.listAcquisitions",
@@ -6691,7 +6781,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.createAcquisition",
@@ -6704,7 +6795,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getAcquisition",
@@ -6717,7 +6809,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.configureAcquisitionRoutes",
@@ -6730,7 +6823,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.listAssignments",
@@ -6743,7 +6837,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.createAssignment",
@@ -6756,7 +6851,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.assign"
     },
     {
       "id": "numbering.getAssignment",
@@ -6769,7 +6865,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.activateAssignment",
@@ -6782,7 +6879,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.assign"
     },
     {
       "id": "numbering.getAssignmentCapabilities",
@@ -6795,7 +6893,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.getAssignmentHistory",
@@ -6808,7 +6907,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.offboardEmployee",
@@ -6821,7 +6921,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getAssignmentQuarantine",
@@ -6834,7 +6935,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.releaseAssignment",
@@ -6847,7 +6949,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.restoreAssignment",
@@ -6860,7 +6963,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getAssignmentRouting",
@@ -6873,7 +6977,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.updateAssignmentRouting",
@@ -6886,7 +6991,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.suspendAssignment",
@@ -6899,7 +7005,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getAssignmentSuspension",
@@ -6912,7 +7019,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.transferAssignment",
@@ -6925,7 +7033,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.assign"
     },
     {
       "id": "numbering.getCatalogCountry",
@@ -6951,7 +7060,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.search"
     },
     {
       "id": "numbering.listNumberTypes",
@@ -6964,7 +7074,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.search"
     },
     {
       "id": "numbering.evaluateEligibility",
@@ -6977,7 +7088,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.read"
     },
     {
       "id": "numbering.getEligibilityDecision",
@@ -6990,7 +7102,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.read"
     },
     {
       "id": "numbering.createKycCase",
@@ -7003,7 +7116,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.manage"
     },
     {
       "id": "numbering.getKycCase",
@@ -7016,7 +7130,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.read"
     },
     {
       "id": "numbering.appealKycCase",
@@ -7029,7 +7144,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.manage"
     },
     {
       "id": "numbering.submitKycEvidence",
@@ -7042,7 +7158,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.manage"
     },
     {
       "id": "numbering.getKycCaseHistory",
@@ -7055,7 +7172,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.read"
     },
     {
       "id": "numbering.submitKycCase",
@@ -7068,7 +7186,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.manage"
     },
     {
       "id": "numbering.getKycRequirements",
@@ -7081,7 +7200,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.kyc.read"
     },
     {
       "id": "numbering.listPools",
@@ -7094,7 +7214,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.createPool",
@@ -7107,7 +7228,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getPool",
@@ -7120,7 +7242,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.addPoolMember",
@@ -7133,7 +7256,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.removePoolMember",
@@ -7146,7 +7270,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.listPortRequests",
@@ -7159,7 +7284,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.createPortRequest",
@@ -7172,7 +7298,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getPortRequest",
@@ -7185,7 +7312,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.cancelPortRequest",
@@ -7198,7 +7326,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.addPortEvidence",
@@ -7211,7 +7340,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.submitPortRequest",
@@ -7224,7 +7354,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.reassignNumber",
@@ -7237,7 +7368,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.assign"
     },
     {
       "id": "numbering.getRelease",
@@ -7250,7 +7382,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.listReservations",
@@ -7263,7 +7396,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.createReservation",
@@ -7276,7 +7410,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getReservation",
@@ -7289,7 +7424,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.cancelReservation",
@@ -7302,7 +7438,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.getRiskDecision",
@@ -7315,7 +7452,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "numbering.appealRiskDecision",
@@ -7328,7 +7466,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.manage"
     },
     {
       "id": "numbering.searchNumbers",
@@ -7341,7 +7480,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.search"
     },
     {
       "id": "numbering.getNumberUsage",
@@ -7354,7 +7494,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "numbers.read"
     },
     {
       "id": "developer-platform.listOrganizations",
@@ -8197,7 +8338,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.read"
     },
     {
       "id": "sms.sendMessage",
@@ -8210,7 +8352,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.send"
     },
     {
       "id": "sms.getMessage",
@@ -8223,7 +8366,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.read"
     },
     {
       "id": "sms.createOptOut",
@@ -8236,7 +8380,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.send"
     },
     {
       "id": "sms.listThreads",
@@ -8249,7 +8394,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.read"
     },
     {
       "id": "sms.listThreadMessages",
@@ -8262,7 +8408,8 @@
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
-      "forwardHeaders": []
+      "forwardHeaders": [],
+      "requiredScope": "sms.read"
     },
     {
       "id": "calling.listUsage",

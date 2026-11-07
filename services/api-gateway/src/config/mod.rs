@@ -10,6 +10,7 @@
 //! | `API_GATEWAY_REDIS_URL` | no | Redis for SHARED atomic quota counters across instances (`redis://` local / test, `rediss://` otherwise); unset: per-instance counters (quotas still enforced, limits from the Developer Platform) |
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
 //! | `API_GATEWAY_REDIS_TIMEOUT_MS` | no | bound of one quota-store call and of one connection attempt (20–5000, default 250); past it the request is counted per instance (`quotas: degraded`) |
+//! | `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` | no | per-token request ceiling of end-user / device traffic (meeting sessions, participant tokens, developer sessions, client tokens, signaling credentials, realtime tickets): `0` (default) off, else 10–100000 requests per token per minute, counted in the same quota store; anonymous requests carry no token and stay with the services and the edge |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. The gateway has NO
@@ -53,8 +54,13 @@ pub struct FeatureFlags {
     pub websockets: bool,
 }
 
-/// Redis settings of the future shared quota store (Sections 50+). Configuration only:
-/// no quota is enforced by this foundation.
+/// The quota store shared by every gateway instance. With `API_GATEWAY_REDIS_URL` the
+/// counters are shared atomic Redis windows; without it (or while it is unreachable)
+/// each instance keeps its own counters. Either way the gateway ENFORCES the platform
+/// request quotas of platform-credential traffic (per application environment and, when
+/// restricted, per service account / credential; limits from the Developer Platform)
+/// and, when `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` is set, the per-token ceiling of
+/// end-user / device traffic ([`crate::quota`]).
 #[derive(Clone)]
 pub struct QuotaSettings {
     redis_url: Option<SecretString>,
@@ -120,6 +126,8 @@ pub struct ApiGatewayConfig {
     pub upstream_timeout: Duration,
     pub max_body_bytes: usize,
     pub quotas: QuotaSettings,
+    /// Per-token requests per minute of end-user / device traffic (`0`: off).
+    pub token_rate_limit_per_minute: u64,
     pub log_format: LogFormat,
 }
 
@@ -131,6 +139,10 @@ impl fmt::Debug for ApiGatewayConfig {
             .field("upstream_timeout", &self.upstream_timeout)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("quotas", &self.quotas)
+            .field(
+                "token_rate_limit_per_minute",
+                &self.token_rate_limit_per_minute,
+            )
             .finish_non_exhaustive()
     }
 }
@@ -303,6 +315,21 @@ impl ApiGatewayConfig {
             100,
             300_000,
         )? as u64);
+        let token_rate_limit_per_minute = match bounded(
+            &get,
+            "API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE",
+            0,
+            0,
+            100_000,
+        )? {
+            1..=9 => {
+                return Err(ConfigError::invalid(
+                    "API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE",
+                    "must be 0 (off) or between 10 and 100000",
+                ))
+            }
+            n => n as u64,
+        };
         let log_format = match get("LOG_FORMAT").as_deref() {
             None | Some("pretty") => LogFormat::Pretty,
             Some("json") => LogFormat::Json,
@@ -329,6 +356,7 @@ impl ApiGatewayConfig {
                 key_prefix,
                 redis_timeout,
             },
+            token_rate_limit_per_minute,
             log_format,
         })
     }
@@ -354,9 +382,39 @@ mod tests {
         assert_eq!(cfg.bind_address.to_string(), DEFAULT_BIND_ADDRESS);
         assert_eq!(cfg.flags, FeatureFlags::default());
         assert!(!cfg.quotas.configured());
+        assert_eq!(
+            cfg.token_rate_limit_per_minute, 0,
+            "the token ceiling is off"
+        );
         assert!(
             ApiGatewayConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).is_err()
         );
+    }
+
+    #[test]
+    fn the_token_ceiling_is_off_or_bounded() {
+        let on = ApiGatewayConfig::from_lookup(lookup(&[(
+            "API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE",
+            "600",
+        )]))
+        .unwrap();
+        assert_eq!(on.token_rate_limit_per_minute, 600);
+        let off = ApiGatewayConfig::from_lookup(lookup(&[(
+            "API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE",
+            "0",
+        )]))
+        .unwrap();
+        assert_eq!(off.token_rate_limit_per_minute, 0);
+        for bad in ["5", "100001", "-1", "lots"] {
+            assert!(
+                ApiGatewayConfig::from_lookup(lookup(&[(
+                    "API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE",
+                    bad
+                )]))
+                .is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

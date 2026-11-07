@@ -272,6 +272,41 @@ impl Default for AuthFailurePolicy {
 /// The failure bucket of every presented key id that names no credential.
 const UNKNOWN_KEY_BUCKET: &str = "unknown";
 
+/// Section 15 (PLT-008): a credential's last use is recorded at most once per this many
+/// seconds — per instance in memory, and across instances by the conditional upsert — so
+/// authentication never writes on every request.
+pub const USAGE_DEBOUNCE_SECONDS: i64 = 300;
+
+/// Remembered last-recorded uses kept in memory before stale entries are dropped.
+const USAGE_MEMORY_CAP: usize = 50_000;
+
+/// In-memory debounce of last-use writes (`credential id -> last recorded`).
+#[derive(Debug, Default)]
+pub struct UsageDebounce {
+    recorded: std::sync::Mutex<std::collections::HashMap<Uuid, DateTime<Utc>>>,
+}
+
+impl UsageDebounce {
+    /// Whether a use of `credential` at `now` should be written (and, if so, remembers
+    /// it). Bounded memory: past the cap, entries older than the window are dropped
+    /// (and, if every entry is fresh, the map restarts — at worst one extra write each).
+    pub fn should_record(&self, credential: Uuid, now: DateTime<Utc>) -> bool {
+        let window = chrono::Duration::seconds(USAGE_DEBOUNCE_SECONDS);
+        let mut map = self.recorded.lock().unwrap_or_else(|p| p.into_inner());
+        if map.get(&credential).is_some_and(|at| now - *at < window) {
+            return false;
+        }
+        if map.len() >= USAGE_MEMORY_CAP {
+            map.retain(|_, at| now - *at < window);
+            if map.len() >= USAGE_MEMORY_CAP {
+                map.clear();
+            }
+        }
+        map.insert(credential, now);
+        true
+    }
+}
+
 /// Verifies presented credentials against the persisted authority chain.
 pub struct CredentialAuthenticator {
     db: DatabaseConnection,
@@ -279,6 +314,7 @@ pub struct CredentialAuthenticator {
     registry: Arc<ScopeRegistry>,
     clock: SharedClock,
     failures: AuthFailurePolicy,
+    usage: UsageDebounce,
 }
 
 impl CredentialAuthenticator {
@@ -294,6 +330,36 @@ impl CredentialAuthenticator {
             registry,
             clock,
             failures: AuthFailurePolicy::default(),
+            usage: UsageDebounce::default(),
+        }
+    }
+
+    /// Records that `credential` authenticated at `now` — debounced (see
+    /// [`USAGE_DEBOUNCE_SECONDS`]) and best effort: a failure is logged, never turned
+    /// into an authentication failure.
+    async fn note_use(&self, credential: Uuid, now: DateTime<Utc>) {
+        if !self.usage.should_record(credential, now) {
+            return;
+        }
+        let written = self
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "INSERT INTO platform_credential_usage (credential_id, last_authenticated_at) \
+                 VALUES ($1, $2) \
+                 ON CONFLICT (credential_id) DO UPDATE \
+                     SET last_authenticated_at = EXCLUDED.last_authenticated_at \
+                     WHERE platform_credential_usage.last_authenticated_at \
+                           < EXCLUDED.last_authenticated_at - make_interval(secs => $3)",
+                [
+                    credential.into(),
+                    now.into(),
+                    (USAGE_DEBOUNCE_SECONDS as f64).into(),
+                ],
+            ))
+            .await;
+        if let Err(e) = written {
+            tracing::warn!(summary = %summarize_db_error(&e), "credential last use not recorded");
         }
     }
 
@@ -440,8 +506,11 @@ impl CredentialAuthenticator {
             ));
         }
 
-        evaluate(row, presented.tag_kind, self.clock.now(), &self.registry)
-            .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))
+        let now = self.clock.now();
+        let chain = evaluate(row, presented.tag_kind, now, &self.registry)
+            .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))?;
+        self.note_use(chain.credential.id, now).await;
+        Ok(chain)
     }
 
     /// The CURRENT authority chain of a credential identified by its Platform Access id,
@@ -572,4 +641,26 @@ fn evaluate(
         scopes,
         principal_restriction: row.restricted_principals,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn last_use_is_written_at_most_once_per_window_per_credential() {
+        let d = UsageDebounce::default();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let t0 = DateTime::<Utc>::from_timestamp(1_790_000_000, 0).unwrap();
+        let s = |n: i64| t0 + chrono::Duration::seconds(n);
+        assert!(d.should_record(a, t0));
+        assert!(!d.should_record(a, s(1)));
+        assert!(!d.should_record(a, s(USAGE_DEBOUNCE_SECONDS - 1)));
+        // Another credential has its own window.
+        assert!(d.should_record(b, s(1)));
+        // The window elapsed: one more write, then quiet again.
+        assert!(d.should_record(a, s(USAGE_DEBOUNCE_SECONDS)));
+        assert!(!d.should_record(a, s(USAGE_DEBOUNCE_SECONDS + 1)));
+    }
 }

@@ -530,15 +530,17 @@ class Credential {
   const Credential.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Credential.create({required String? createdAt, required CredentialEffectiveState? effectiveState, required Uuid environmentId, required EnvironmentKind? environmentKind, required String? expiresAt, required Uuid id, required String? label, required QuotaRestrictionValues? limits, required String? masked, required String? notBefore, required Uuid organizationId, required Uuid projectId, required String? publicId, required String? revokedAt, required Uuid? rotatedFromCredentialId, required List<String>? scopes, required Uuid? serviceAccountId, required String? status, required Uuid? supersededByCredentialId, required String? supersessionValidUntil, required String? suspendedAt, required String? updatedAt}) =>
+  factory Credential.create({required String? createdAt, required CredentialEffectiveState? effectiveState, required Uuid environmentId, required EnvironmentKind? environmentKind, required String? expiresAt, required bool? expiringSoon, required Uuid id, required String? label, required String? lastAuthenticatedAt, required QuotaRestrictionValues? limits, required String? masked, required String? notBefore, required Uuid organizationId, required Uuid projectId, required String? publicId, required String? revokedAt, required Uuid? rotatedFromCredentialId, required List<String>? scopes, required Uuid? serviceAccountId, required String? status, required Uuid? supersededByCredentialId, required String? supersessionValidUntil, required String? suspendedAt, required String? updatedAt}) =>
       Credential.fromJson(<String, Object?>{
         'createdAt': createdAt,
         'effectiveState': effectiveState,
         'environmentId': environmentId,
         'environmentKind': environmentKind,
         'expiresAt': expiresAt,
+        'expiringSoon': expiringSoon,
         'id': id,
         'label': label,
+        'lastAuthenticatedAt': lastAuthenticatedAt,
         'limits': limits,
         'masked': masked,
         'notBefore': notBefore,
@@ -569,9 +571,15 @@ class Credential {
 
   String? get expiresAt => json['expiresAt'] as String?;
 
+  /// Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority.
+  bool? get expiringSoon => json['expiringSoon'] as bool?;
+
   Uuid get id => json['id']! as String;
 
   String? get label => json['label'] as String?;
+
+  /// Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began.
+  String? get lastAuthenticatedAt => json['lastAuthenticatedAt'] as String?;
 
   QuotaRestrictionValues? get limits => json['limits'] == null ? null : json['limits']! as Map<String, Object?>;
 

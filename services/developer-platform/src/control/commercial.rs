@@ -63,7 +63,7 @@ pub fn validate_entitlements(v: &Value) -> Result<(), ApiError> {
     let map = v.as_object().ok_or(ApiError(ErrorCode::ValidationError))?;
     for (k, val) in map {
         if !ENTITLEMENT_KEYS.contains(&k.as_str())
-            || !val.as_u64().is_some_and(|n| n <= 10_000_000_000_000)
+            || val.as_u64().is_none_or(|n| n > 10_000_000_000_000)
         {
             return Err(ApiError(ErrorCode::ValidationError));
         }

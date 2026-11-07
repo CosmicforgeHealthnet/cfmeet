@@ -186,11 +186,13 @@ fn cases() -> Vec<Case> {
         Case {
             service: "platform-access",
             bin: "platform-access-migration",
-            // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058): both are newer than
-            // the deployed schema and are upgraded / rolled back together.
+            // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058) and Section 15
+            // (credential last use, TENANT_RENAMED): all newer than the deployed schema and
+            // upgraded / rolled back together.
             part_vi: &[
                 "m20261120_000004_credential_suspension_production_activation",
                 "m20261121_000005_first_party_organization_scopes",
+                "m20261122_000006_credential_usage_tenant_rename",
             ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
@@ -238,6 +240,10 @@ fn cases() -> Vec<Case> {
                     "SELECT count(*) = 0 FROM platform_organization_scopes",
                 ),
                 (
+                    "no credential use is invented by the upgrade",
+                    "SELECT count(*) = 0 FROM platform_credential_usage",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
@@ -253,7 +259,10 @@ fn cases() -> Vec<Case> {
                    environment_id, requested_by, created_at) VALUES \
                    ('7e000000-0000-4000-8000-0000000000aa', 'primary', '7e000000-0000-4000-8000-000000000001', \
                     '7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000003', \
-                    'cfmeet.organizations', now())",
+                    'cfmeet.organizations', now()); \
+                 INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
+                   (gen_random_uuid(), 'devplat.u-0123456789abcdef0123456789abcdef', 'corr-upgrade-ren', 'TENANT_RENAMED', \
+                    'TENANT', '7e000000-0000-4000-8000-000000000001', '7e000000-0000-4000-8000-000000000001')",
             ),
         },
     ]

@@ -197,6 +197,10 @@ fn view(pa: &Value, environment_id: Uuid, env: &EnvironmentRef) -> Result<Value,
         "rotatedFromCredentialId": f("rotatedFromCredentialId"),
         "supersededByCredentialId": f("supersededByCredentialId"),
         "supersessionValidUntil": f("supersessionValidUntil"),
+        // Section 15 (PLT-008): debounced last successful authentication and the expiry
+        // warning, both computed by Platform Access (null from an older authority).
+        "lastAuthenticatedAt": f("lastAuthenticatedAt"),
+        "expiringSoon": pa.get("expiringSoon").and_then(Value::as_bool).map_or(Value::Null, Value::Bool),
         "createdAt": f("createdAt"),
         "updatedAt": f("updatedAt"),
     }))
