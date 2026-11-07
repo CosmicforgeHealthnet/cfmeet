@@ -6,6 +6,8 @@
 //! * [`domain`]: roles, capabilities and the authorization decision.
 //! * [`import`]: the Meeting Service → Organizations migration import and reconciliation.
 //! * [`outbox`] / [`worker`]: transactional outbox and the maintenance loop.
+//! * [`policy`]: the typed organization policy (Section 6; restrictive only).
+//! * [`provisioning`]: the Organizations to Platform Access scope saga (Section 7).
 //!
 //! It owns no account credential and no meeting, message or call data, stores users as
 //! opaque ids and never reads another service's database.
@@ -18,6 +20,8 @@ pub mod http;
 pub mod idempotency;
 pub mod import;
 pub mod outbox;
+pub mod policy;
+pub mod provisioning;
 pub mod state;
 pub mod store;
 pub mod validation;

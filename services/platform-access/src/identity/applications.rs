@@ -66,7 +66,14 @@ impl PlatformService {
     ) -> PlatformResult<ApplicationView> {
         let slug = Slug::parse(&new.slug).map_err(PlatformError::Validation)?;
         let display_name = display_name(&new.display_name)?;
-        let tenant = self.tenant(tenant_id).await?;
+        // Read through the caller's connection: inside a transaction the tenant may have
+        // been created by that same transaction (Section 7 organization scopes).
+        let tenant: super::tenants::TenantView =
+            crate::models::tenants::Entity::find_by_id(tenant_id.as_uuid())
+                .one(db)
+                .await?
+                .map(Into::into)
+                .ok_or(PlatformError::NotFound("tenant"))?;
         let now = self.clock.now();
         let model = applications::ActiveModel {
             id: Set(ApplicationId::generate().as_uuid()),

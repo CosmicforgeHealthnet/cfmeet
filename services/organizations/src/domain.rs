@@ -46,6 +46,12 @@ string_enum!(
     Role { Owner = "OWNER", Admin = "ADMIN", Manager = "MANAGER", Member = "MEMBER", Guest = "GUEST" }
 );
 string_enum!(LifecycleStatus { Active = "ACTIVE", Suspended = "SUSPENDED", Archived = "ARCHIVED" });
+string_enum!(
+    /// Role inside one team (Section 6). Distinct from the organization role: a
+    /// TEAM_MANAGER manages that team only, and only while their organization role still
+    /// holds `organization.teams.manage`.
+    TeamRole { TeamManager = "TEAM_MANAGER", TeamMember = "TEAM_MEMBER" }
+);
 string_enum!(MembershipStatus { Active = "ACTIVE", Suspended = "SUSPENDED", Removed = "REMOVED" });
 string_enum!(
     /// Capabilities of the contract matrix.
@@ -109,6 +115,8 @@ pub enum DecisionReason {
     OrganizationSuspended,
     OrganizationArchived,
     CapabilityNotGranted,
+    /// The role grants the capability but the organization policy removes it.
+    PolicyRestricted,
 }
 
 impl DecisionReason {
@@ -120,6 +128,7 @@ impl DecisionReason {
             DecisionReason::OrganizationSuspended => "ORGANIZATION_SUSPENDED",
             DecisionReason::OrganizationArchived => "ORGANIZATION_ARCHIVED",
             DecisionReason::CapabilityNotGranted => "CAPABILITY_NOT_GRANTED",
+            DecisionReason::PolicyRestricted => "POLICY_RESTRICTED",
         }
     }
 
@@ -156,6 +165,37 @@ pub fn evaluate(
     } else {
         DecisionReason::CapabilityNotGranted
     }
+}
+
+/// [`evaluate`] followed by the organization policy (which can only remove a capability
+/// the role holds).
+pub fn evaluate_with_policy(
+    membership: Option<(Role, MembershipStatus)>,
+    org_status: LifecycleStatus,
+    capability: Capability,
+    policy: &crate::policy::PolicyDocument,
+) -> DecisionReason {
+    let decision = evaluate(membership, org_status, capability);
+    match (decision, membership) {
+        (DecisionReason::Allowed, Some((role, _))) if policy.restricts(role, capability) => {
+            DecisionReason::PolicyRestricted
+        }
+        _ => decision,
+    }
+}
+
+/// Every capability a membership effectively holds now under `policy`.
+pub fn effective_capabilities_with_policy(
+    role: Role,
+    status: MembershipStatus,
+    org_status: LifecycleStatus,
+    policy: &crate::policy::PolicyDocument,
+) -> Vec<Capability> {
+    Capability::ALL
+        .iter()
+        .copied()
+        .filter(|c| evaluate_with_policy(Some((role, status)), org_status, *c, policy).allowed())
+        .collect()
 }
 
 /// Every capability a membership effectively holds now (sorted as the matrix).

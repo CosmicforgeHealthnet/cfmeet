@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.0.0",
-    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress."
+    "version": "1.1.0",
+    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default."
   },
   "tags": [
     {
@@ -13,6 +13,14 @@
     {
       "name": "Memberships",
       "description": "Memberships, self-leave and ownership transfer."
+    },
+    {
+      "name": "Teams",
+      "description": "Organization-scoped teams and team members (Section 6)."
+    },
+    {
+      "name": "Policies",
+      "description": "Organization policies: organization-level constraints only, compare-and-swap (Section 6)."
     },
     {
       "name": "Invitations",
@@ -2597,6 +2605,1560 @@
           }
         }
       }
+    },
+    "/internal/v1/organizations/{id}/teams": {
+      "get": {
+        "operationId": "listTeams",
+        "summary": "List teams",
+        "description": "Teams of the organization (id order, keyset cursor) with their ACTIVE member counts. An actor needs organization.members.read (policy-aware); a service read without an actor gets the authoritative list.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/TeamStatus"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The teams.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTeam",
+        "summary": "Create a team",
+        "description": "OWNER / ADMIN create teams (optional parentTeamId in the same organization, no cycle, depth at most 5). A MANAGER creates a team only when delegatedAdministration.managersMayCreateTeams is true (else 403 POLICY_RESTRICTED), never with a parent, and becomes its TEAM_MANAGER. Names are unique among ACTIVE teams (case-folded, 409 TEAM_NAME_TAKEN). At most 500 ACTIVE teams. Audited; emits team.created.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTeamRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/teams/{teamId}": {
+      "get": {
+        "operationId": "getTeam",
+        "summary": "Read a team",
+        "description": "One team (same read rule as the listing). A team of another organization is TEAM_NOT_FOUND.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateTeam",
+        "summary": "Change a team",
+        "description": "name / description by OWNER / ADMIN or the team's TEAM_MANAGER (an organization MANAGER); parentTeamId (null detaches) by OWNER / ADMIN only, refused when it would create a cycle or exceed depth 5. expectedVersion is the team version. ACTIVE teams only (409 TEAM_ARCHIVED). Audited; emits team.updated.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTeamRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/teams/{teamId}/archive": {
+      "post": {
+        "operationId": "archiveTeam",
+        "summary": "Archive a team",
+        "description": "OWNER / ADMIN only; idempotent; refused while ACTIVE child teams exist. Every ACTIVE team membership ends (history TEAM_ARCHIVED, team.member_removed). Audited; emits team.archived.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archived team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveTeamRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/teams/{teamId}/members": {
+      "get": {
+        "operationId": "listTeamMembers",
+        "summary": "List team members",
+        "description": "ACTIVE team memberships (id order, keyset cursor); same read rule as the team listing.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The team members.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addTeamMember",
+        "summary": "Add a team member",
+        "description": "Adds an ACTIVE organization member (membershipId or userId) as TEAM_MEMBER or TEAM_MANAGER. OWNER / ADMIN add either role (TEAM_MANAGER only for organization MANAGERs, ADMINs and OWNERs); a TEAM_MANAGER adds TEAM_MEMBERs to their own team only. Suspended / removed organization members are refused (400). Re-adding with the same role is idempotent (200). Audited; history ADDED; emits team.member_added.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Already a member with this role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMember"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The team member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTeamMemberRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/teams/{teamId}/members/{teamMemberId}": {
+      "patch": {
+        "operationId": "updateTeamMember",
+        "summary": "Change a team member's role",
+        "description": "OWNER / ADMIN assign either role (never raising their own team role); a TEAM_MANAGER only steps down (own row to TEAM_MEMBER). Nobody raises their own team role. expectedVersion is the team-membership version. Audited; history ROLE_CHANGED; emits team.member_role_changed.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamMemberId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The team member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTeamMemberRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/teams/{teamId}/members/{teamMemberId}/remove": {
+      "post": {
+        "operationId": "removeTeamMember",
+        "summary": "Remove a team member",
+        "description": "OWNER / ADMIN remove anyone, a TEAM_MANAGER removes TEAM_MEMBERs of their own team, every member leaves a team themselves. ACTIVE organizations only. Idempotent. Audited; history REMOVED; emits team.member_removed.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/TeamMemberId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The (removed) team member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/policies": {
+      "get": {
+        "operationId": "getPolicies",
+        "summary": "Read the organization policy",
+        "description": "The typed policy document (revision 0 = defaults, equal to the Section 3 matrix) and the legacy Meeting Service profile policy carried verbatim. Any member with organization.read, or a service read.",
+        "tags": [
+          "Policies"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePolicies",
+        "summary": "Change the organization policy",
+        "description": "Compare-and-swap: expectedRevision must equal the current revision (409 VERSION_CONFLICT). The partial document is merged into the current one and validated strictly (unknown keys, bounds: 400). Requires organization.policies.manage (OWNER; ADMIN unless delegatedAdministration.adminsMayManagePolicies is false); delegatedAdministration is OWNER-only. A policy only removes capabilities and never weakens a stricter owner-service policy. An unchanged document writes nothing. Audited; emits policy.updated (aggregateVersion = revision).",
+        "tags": [
+          "Policies"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePolicyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/policies/effective": {
+      "get": {
+        "operationId": "getEffectiveConstraints",
+        "summary": "Read the effective organization constraints",
+        "description": "The organization-level constraints owner services (Meeting, Calling, Messaging, Communications Hub) combine with their own policy (stricter wins), with the lifecycle and provisioning state they must also honour and the legacy Meeting profile policy.",
+        "tags": [
+          "Policies"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The constraints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveConstraints"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/roles/capabilities": {
+      "get": {
+        "operationId": "getRoleCapabilities",
+        "summary": "Read the role / capability matrix",
+        "description": "The shared default-deny vocabulary for UIs: every capability, each role's matrix capabilities and what it effectively holds under the organization's current policy and status, and the team roles.",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The matrix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleCapabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/scopes/resolve": {
+      "post": {
+        "operationId": "resolveScope",
+        "summary": "Resolve the verified technical scope",
+        "description": "The Platform Access tenant / application / environment of the organization, ONLY when the organization is ACTIVE, provisioning is READY, the mapping is READY (verified server-side) and its tenant status is applied; otherwise 409 PROVISIONING_PENDING (or ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED). With userId (or an acting user) the user must hold an ACTIVE membership (404 otherwise).",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The verified scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopeResolveRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/provisioning/retry": {
+      "post": {
+        "operationId": "retryProvisioning",
+        "summary": "Retry a failed provisioning",
+        "description": "Operator retry: a FAILED (or CANCELLED) workflow becomes PENDING with attempts reset and is due now; a failed mapping keeps its ids so the retry must confirm the same triple. READY and in-flight workflows are left unchanged (idempotent). ARCHIVED organizations: 409 ORGANIZATION_ARCHIVED. Audited (provisioning.retry_requested).",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The provisioning state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Provisioning"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or TEAM_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2710,9 +4272,67 @@
           "default": 50
         },
         "description": "Page size."
+      },
+      "TeamId": {
+        "name": "teamId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Team id."
+      },
+      "TeamMemberId": {
+        "name": "teamMemberId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Team membership id."
+      },
+      "TeamStatus": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "ARCHIVED"
+          ]
+        },
+        "description": "Team status filter (default ACTIVE)."
       }
     },
     "schemas": {
+      "AddTeamMemberRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role"
+        ],
+        "description": "Exactly one of membershipId and userId.",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "TEAM_MANAGER",
+              "TEAM_MEMBER"
+            ]
+          }
+        }
+      },
       "AdminCreateOrganizationRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -2759,6 +4379,15 @@
         "required": [
           "status"
         ]
+      },
+      "ArchiveTeamRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer"
+          }
+        }
       },
       "AuditEvent": {
         "type": "object",
@@ -2923,6 +4552,138 @@
         ],
         "description": "No user id, role or tenant is accepted from the body: the acting user is the signed X-CF-Acting-User."
       },
+      "CreateTeamRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "parentTeamId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "EffectiveConstraints": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "lifecycleStatus",
+          "provisioningState",
+          "revision",
+          "constraints",
+          "legacyMeetingProfilePolicy"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycleStatus": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "ARCHIVED"
+            ]
+          },
+          "provisioningState": {
+            "type": "string",
+            "enum": [
+              "NOT_REQUIRED",
+              "PENDING",
+              "IN_PROGRESS",
+              "READY",
+              "FAILED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "legacyMeetingProfilePolicy": {
+            "type": "object"
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "memberDirectory",
+              "externalGuestsAllowed",
+              "meetingHostCreation",
+              "enabledFeatures",
+              "retentionHintDays",
+              "combination"
+            ],
+            "properties": {
+              "memberDirectory": {
+                "type": "object",
+                "properties": {
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "MEMBERS",
+                      "MANAGERS",
+                      "ADMINS"
+                    ]
+                  },
+                  "searchable": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "externalGuestsAllowed": {
+                "type": "boolean"
+              },
+              "meetingHostCreation": {
+                "type": "string",
+                "enum": [
+                  "MEMBERS",
+                  "MANAGERS",
+                  "ADMINS"
+                ]
+              },
+              "enabledFeatures": {
+                "type": "object",
+                "properties": {
+                  "meetings": {
+                    "type": "boolean"
+                  },
+                  "messaging": {
+                    "type": "boolean"
+                  },
+                  "calling": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "retentionHintDays": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "combination": {
+                "const": "STRICTER_WINS"
+              }
+            }
+          }
+        }
+      },
       "Error": {
         "type": "object",
         "additionalProperties": false,
@@ -2955,6 +4716,10 @@
                   "INTERNAL_AUTHENTICATION_FAILED",
                   "INTERNAL_PERMISSION_DENIED",
                   "SERVICE_UNAVAILABLE",
+                  "POLICY_RESTRICTED",
+                  "TEAM_NOT_FOUND",
+                  "TEAM_ARCHIVED",
+                  "TEAM_NAME_TAKEN",
                   "NOT_FOUND",
                   "METHOD_NOT_ALLOWED",
                   "PAYLOAD_TOO_LARGE",
@@ -3015,6 +4780,11 @@
               "calling.enterprise.manage",
               "messaging.organization.moderate"
             ]
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Team context: with organization.teams.manage a MANAGER is allowed only as that team's TEAM_MANAGER."
           }
         },
         "required": [
@@ -3038,7 +4808,8 @@
               "MEMBERSHIP_SUSPENDED",
               "ORGANIZATION_SUSPENDED",
               "ORGANIZATION_ARCHIVED",
-              "CAPABILITY_NOT_GRANTED"
+              "CAPABILITY_NOT_GRANTED",
+              "POLICY_RESTRICTED"
             ]
           },
           "organizationStatus": {
@@ -3085,6 +4856,24 @@
               "calling.enterprise.manage",
               "messaging.organization.moderate"
             ]
+          },
+          "teamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "teamRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "TEAM_MANAGER",
+              "TEAM_MEMBER",
+              null
+            ]
           }
         },
         "required": [
@@ -3092,9 +4881,11 @@
           "reason",
           "organizationStatus",
           "role",
-          "capability"
+          "capability",
+          "teamId",
+          "teamRole"
         ],
-        "description": "A non-member (or unknown organization) gets NOT_A_MEMBER with null organizationStatus and role (non-enumerating)."
+        "description": "A non-member (or unknown organization) gets NOT_A_MEMBER with null organizationStatus and role (non-enumerating). POLICY_RESTRICTED: the role holds the capability but the organization policy removes it."
       },
       "Health": {
         "type": "object",
@@ -3781,6 +5572,53 @@
           "nextCursor"
         ]
       },
+      "OrganizationPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "organizationId",
+          "revision",
+          "policy",
+          "updatedBy",
+          "updatedAt",
+          "legacyMeetingProfilePolicy"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 1
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyDocument"
+          },
+          "updatedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "legacyMeetingProfilePolicy": {
+            "type": "object",
+            "description": "The Meeting Service profile_policy JSON, verbatim (still enforced by the Meeting Service)."
+          }
+        }
+      },
       "OwnershipTransferRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -3799,6 +5637,106 @@
           "toMembershipId",
           "expectedVersion"
         ]
+      },
+      "PolicyDocument": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Organization-level constraints (schema version 1). Defaults equal the Section 3 role matrix. A policy only removes capabilities and never touches OWNER administration.",
+        "properties": {
+          "memberDirectory": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "visibility": {
+                "type": "string",
+                "enum": [
+                  "MEMBERS",
+                  "MANAGERS",
+                  "ADMINS"
+                ],
+                "description": "Who may list members (organization.members.read). Default MEMBERS."
+              },
+              "searchable": {
+                "type": "boolean",
+                "description": "Colleague discovery hint for the Communications Hub. Default true."
+              }
+            }
+          },
+          "guests": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "invitationsAllowed": {
+                "type": "boolean",
+                "description": "GUEST invitations created or accepted. Default true."
+              }
+            }
+          },
+          "meetings": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hostCreation": {
+                "type": "string",
+                "enum": [
+                  "MEMBERS",
+                  "MANAGERS",
+                  "ADMINS"
+                ],
+                "description": "Who may host organization meetings (meetings.organization.create). Default MEMBERS."
+              }
+            }
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "meetings": {
+                "type": "boolean"
+              },
+              "messaging": {
+                "type": "boolean"
+              },
+              "calling": {
+                "type": "boolean"
+              }
+            },
+            "description": "A disabled feature removes its capabilities for every role. Defaults true."
+          },
+          "retention": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hintDays": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 3650
+              }
+            }
+          },
+          "delegatedAdministration": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "OWNER-only.",
+            "properties": {
+              "managersMayInvite": {
+                "type": "boolean",
+                "description": "Default true."
+              },
+              "managersMayCreateTeams": {
+                "type": "boolean",
+                "description": "Default false."
+              },
+              "adminsMayManagePolicies": {
+                "type": "boolean",
+                "description": "Default true."
+              }
+            }
+          }
+        }
       },
       "Profile": {
         "type": "object",
@@ -4046,6 +5984,23 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "provisioningEnabled": {
+            "type": "boolean",
+            "description": "Whether the Section 7 saga runs (ORGANIZATIONS_PROVISIONING_ENABLED, default false). While false organizations stay PENDING."
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScopeMapping"
+            }
           }
         },
         "required": [
@@ -4056,7 +6011,10 @@
           "step",
           "attempts",
           "lastErrorClass",
-          "updatedAt"
+          "updatedAt",
+          "provisioningEnabled",
+          "nextAttemptAt",
+          "scopes"
         ]
       },
       "Ready": {
@@ -4089,6 +6047,14 @@
               "object",
               "null"
             ]
+          },
+          "provisioning": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
           }
         }
       },
@@ -4246,6 +6212,34 @@
           },
           "organizationVersion": {
             "type": "integer"
+          },
+          "policyRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "teamId",
+                "role"
+              ],
+              "properties": {
+                "teamId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "TEAM_MANAGER",
+                    "TEAM_MEMBER"
+                  ]
+                }
+              }
+            }
           }
         },
         "required": [
@@ -4257,8 +6251,538 @@
           "organizationStatus",
           "provisioningState",
           "membershipVersion",
-          "organizationVersion"
+          "organizationVersion",
+          "policyRevision",
+          "teams"
         ]
+      },
+      "ResolvedScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "capability",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "mappingVersion",
+          "verifiedAt"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mappingVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RoleCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "lifecycleStatus",
+          "policyRevision",
+          "capabilities",
+          "roles",
+          "teamRoles"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lifecycleStatus": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "ARCHIVED"
+            ]
+          },
+          "policyRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "organization.read",
+                "organization.members.read",
+                "organization.profile.write",
+                "organization.members.invite",
+                "organization.members.manage",
+                "organization.ownership.transfer",
+                "organization.lifecycle.manage",
+                "organization.audit.read",
+                "organization.policies.manage",
+                "organization.teams.manage",
+                "meetings.organization.create",
+                "meetings.organization.manage",
+                "calling.enterprise.manage",
+                "messaging.organization.moderate"
+              ]
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "capabilities",
+                "effectiveCapabilities"
+              ],
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "OWNER",
+                    "ADMIN",
+                    "MANAGER",
+                    "MEMBER",
+                    "GUEST"
+                  ]
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "organization.read",
+                      "organization.members.read",
+                      "organization.profile.write",
+                      "organization.members.invite",
+                      "organization.members.manage",
+                      "organization.ownership.transfer",
+                      "organization.lifecycle.manage",
+                      "organization.audit.read",
+                      "organization.policies.manage",
+                      "organization.teams.manage",
+                      "meetings.organization.create",
+                      "meetings.organization.manage",
+                      "calling.enterprise.manage",
+                      "messaging.organization.moderate"
+                    ]
+                  }
+                },
+                "effectiveCapabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "organization.read",
+                      "organization.members.read",
+                      "organization.profile.write",
+                      "organization.members.invite",
+                      "organization.members.manage",
+                      "organization.ownership.transfer",
+                      "organization.lifecycle.manage",
+                      "organization.audit.read",
+                      "organization.policies.manage",
+                      "organization.teams.manage",
+                      "meetings.organization.create",
+                      "meetings.organization.manage",
+                      "calling.enterprise.manage",
+                      "messaging.organization.moderate"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "teamRoles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "description"
+              ],
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "TEAM_MANAGER",
+                    "TEAM_MEMBER"
+                  ]
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ScopeMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The organization's technical scope mapping (ids and verification state only; Platform Access stays the tenant authority).",
+        "required": [
+          "id",
+          "capability",
+          "mappingState",
+          "mappingVersion",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "verifiedAt",
+          "tenantStatusDesired",
+          "tenantStatusApplied",
+          "syncAttempts",
+          "lastSyncErrorClass"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "mappingState": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "VERIFYING",
+              "READY",
+              "FAILED",
+              "SUSPENDED",
+              "RETIRED"
+            ]
+          },
+          "mappingVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tenantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "tenantStatusDesired": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              null
+            ]
+          },
+          "tenantStatusApplied": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              null
+            ]
+          },
+          "syncAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastSyncErrorClass": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "ScopeResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "Team": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "name",
+          "description",
+          "parentTeamId",
+          "status",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "version",
+          "memberCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "parentTeamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "ARCHIVED"
+            ]
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "TeamList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "TeamMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "organizationId",
+          "teamId",
+          "membershipId",
+          "userId",
+          "role",
+          "status",
+          "addedBy",
+          "createdAt",
+          "updatedAt",
+          "removedAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "membershipId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "TEAM_MANAGER",
+              "TEAM_MEMBER"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "REMOVED"
+            ]
+          },
+          "addedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "removedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "TeamMemberList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamMember"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
       },
       "UpdateMembershipRequest": {
         "type": "object",
@@ -4315,6 +6839,76 @@
         "required": [
           "expectedVersion"
         ]
+      },
+      "UpdatePolicyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "policy"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policy": {
+            "type": "object",
+            "description": "A partial PolicyDocument merged into the current one."
+          }
+        }
+      },
+      "UpdateTeamMemberRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "role"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "TEAM_MANAGER",
+              "TEAM_MEMBER"
+            ]
+          }
+        }
+      },
+      "UpdateTeamRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "parentTeamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "null detaches the team from its parent; absent leaves it unchanged."
+          }
+        }
       },
       "UserOrganization": {
         "type": "object",

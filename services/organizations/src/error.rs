@@ -63,6 +63,11 @@ error_codes! {
     InternalAuthenticationFailed = "INTERNAL_AUTHENTICATION_FAILED" => UNAUTHORIZED, "Internal service authentication failed.";
     InternalPermissionDenied = "INTERNAL_PERMISSION_DENIED" => FORBIDDEN, "The caller is not permitted to perform this operation.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
+    // Section 6.
+    PolicyRestricted = "POLICY_RESTRICTED" => FORBIDDEN, "The organization policy does not permit this operation.";
+    TeamNotFound = "TEAM_NOT_FOUND" => NOT_FOUND, "The team was not found.";
+    TeamArchived = "TEAM_ARCHIVED" => CONFLICT, "The team is archived.";
+    TeamNameTaken = "TEAM_NAME_TAKEN" => CONFLICT, "An active team of the organization already has this name.";
     // Infrastructure codes (unknown route / method, oversized body, unexpected failure).
     NotFound = "NOT_FOUND" => NOT_FOUND, "The resource was not found.";
     MethodNotAllowed = "METHOD_NOT_ALLOWED" => METHOD_NOT_ALLOWED, "The method is not allowed.";

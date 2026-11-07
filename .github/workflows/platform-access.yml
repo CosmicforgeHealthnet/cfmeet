@@ -117,6 +117,8 @@ jobs:
         run: cargo test --locked --test handoff
       - name: Migrations (up / down / up, schema guards)
         run: cargo test --locked --test migrations
+      - name: FIRST_PARTY organization scopes (Organizations only, idempotent, isolated; ADR 0058)
+        run: cargo test --locked --test organization_scopes
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 

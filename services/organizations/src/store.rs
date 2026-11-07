@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     db,
-    domain::{effective_capabilities, LifecycleStatus, MembershipStatus, Role},
+    domain::{effective_capabilities_with_policy, LifecycleStatus, MembershipStatus, Role},
+    policy::PolicyDocument,
     validation::{LegalValues, ProfileValues},
 };
 
@@ -368,6 +369,47 @@ pub async fn other_active_owners<C: ConnectionTrait>(
     .await
 }
 
+/// The stored policy of an organization (absent = revision 0, defaults).
+#[derive(Debug, Clone, FromQueryResult)]
+pub struct PolicyRow {
+    pub revision: i64,
+    pub document: Value,
+    pub updated_by: Option<Uuid>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub async fn policy_row<C: ConnectionTrait>(
+    c: &C,
+    organization: Uuid,
+    lock: bool,
+) -> Result<Option<PolicyRow>, DbErr> {
+    let sql = format!(
+        "SELECT revision, document, updated_by, updated_at FROM organization_policies WHERE organization_id = $1{}",
+        if lock { " FOR UPDATE" } else { "" }
+    );
+    db::one(c, &sql, vec![organization.into()]).await
+}
+
+/// Parses a stored policy document; an absent one is the defaults. A stored document
+/// that no longer parses fails the request (fail closed: never fall back to defaults,
+/// which may be more permissive).
+pub fn parse_policy(document: Option<&Value>) -> Result<PolicyDocument, DbErr> {
+    match document {
+        None | Some(Value::Null) => Ok(PolicyDocument::default()),
+        Some(v) => PolicyDocument::parse(v)
+            .map_err(|_| DbErr::Custom("stored organization policy is invalid".into())),
+    }
+}
+
+/// The effective policy of an organization.
+pub async fn policy<C: ConnectionTrait>(
+    c: &C,
+    organization: Uuid,
+) -> Result<PolicyDocument, DbErr> {
+    let row = policy_row(c, organization, false).await?;
+    parse_policy(row.as_ref().map(|r| &r.document))
+}
+
 /// The Organization resource; `viewer` is the actor's membership (detail for an actor).
 pub async fn organization_json<C: ConnectionTrait>(
     c: &C,
@@ -392,11 +434,12 @@ pub async fn organization_json<C: ConnectionTrait>(
         "memberCount": member_count,
     });
     if let Some(m) = viewer {
+        let policy = policy(c, org.id).await?;
         doc["viewer"] = json!({
             "membershipId": m.id,
             "role": m.role,
             "status": m.status,
-            "capabilities": effective_capabilities(m.role(), m.status(), org.status()),
+            "capabilities": effective_capabilities_with_policy(m.role(), m.status(), org.status(), &policy),
         });
     }
     Ok(doc)

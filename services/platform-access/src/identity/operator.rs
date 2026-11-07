@@ -69,6 +69,7 @@ text_enum!(
         CredentialSuspended = "CREDENTIAL_SUSPENDED",
         CredentialResumed = "CREDENTIAL_RESUMED",
         ProductionEnvironmentActivated = "PRODUCTION_ENVIRONMENT_ACTIVATED",
+        OrganizationScopeProvisioned = "ORGANIZATION_SCOPE_PROVISIONED",
     }
 );
 
@@ -801,8 +802,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000003 / 000004 (an unknown code is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 23);
+        // Kept in step with migrations 000003 / 000004 / 000005 (an unknown code is
+        // refused there).
+        assert_eq!(OperatorAction::ALL.len(), 24);
         assert_eq!(AuditTargetKind::ALL.len(), 7);
     }
 }

@@ -19,6 +19,12 @@ Authority rules: [ADR 0056](../../../docs/decisions/0056-first-party-organizatio
 | `organization_import_runs` | migration import receipts |
 | `organization_platform_scopes`, `organization_provisioning` | Section 7 scope mapping / provisioning (ids and states only; empty in Section 5) |
 
+Sections 6–7 add `organization_teams`, `organization_team_members` (+ append-only
+`organization_team_member_history`), `organization_policies` (typed document, revision) and
+put `organization_platform_scopes` / `organization_provisioning` to use: Platform Access ids
+and verification evidence only — Platform Access stays the tenant authority and is reached
+over its signed API (`platform-identity.provision-first-party`), never through its database.
+
 ## Not owned
 
 * Accounts, passwords, sessions, Google identities — the CF Meet account authority

@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests). 1.13.0 (Blueprint Sections 3-5): service identity cfmeet.organizations; permissions organization.read, organization.write, organization.act-for-user, organization.administer and organization.migrate (received by Organizations)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests). 1.13.0 (Blueprint Sections 3-5): service identity cfmeet.organizations; permissions organization.read, organization.write, organization.act-for-user, organization.administer and organization.migrate (received by Organizations). 1.14.0 (Blueprint Section 7, ADR 0058): permission platform-identity.provision-first-party (received by Platform Access, grantable to cfmeet.organizations only, sensitive)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -203,14 +203,14 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom."
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service (platform-identity.provision-first-party): idempotent create-or-return, read-back and tenant suspension / resumption."
     },
     {
       "id": "cfmeet.numbering.common",
@@ -658,7 +658,7 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api-bundled",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "bundled/platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
@@ -764,14 +764,14 @@
     },
     {
       "id": "cfmeet.organizations.internal-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "organizations/internal/v1.openapi.json",
       "owner": "organizations",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress."
+      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies (compare-and-swap, effective constraints, POLICY_RESTRICTED), the role / capability matrix, team context in resolve / evaluate, verified technical-scope resolution and the operator provisioning retry."
     },
     {
       "id": "cfmeet.developer-platform.control",

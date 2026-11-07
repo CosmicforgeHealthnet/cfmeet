@@ -14,6 +14,8 @@ pub mod members;
 pub mod middleware;
 pub mod migration;
 pub mod organizations;
+pub mod policies;
+pub mod teams;
 
 use axum::{
     body::Bytes,
@@ -30,7 +32,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
-    domain::{evaluate, Capability, DecisionReason},
+    domain::{evaluate_with_policy, Capability, DecisionReason},
     error::{error_response, ApiError, ErrorCode},
     state::AppState,
     store::{self, MembershipRow, OrgRow},
@@ -59,6 +61,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/organizations/authorization/evaluate",
             post(authorization::evaluate),
+        )
+        .route(
+            "/organizations/scopes/resolve",
+            post(authorization::resolve_scope),
         )
         .route(
             "/organizations/:id",
@@ -105,6 +111,42 @@ pub fn app(state: AppState) -> Router {
             get(organizations::provisioning),
         )
         .route(
+            "/organizations/:id/roles/capabilities",
+            get(authorization::roles_capabilities),
+        )
+        .route(
+            "/organizations/:id/policies",
+            get(policies::get).patch(policies::update),
+        )
+        .route(
+            "/organizations/:id/policies/effective",
+            get(policies::effective),
+        )
+        .route(
+            "/organizations/:id/teams",
+            get(teams::list).post(teams::create),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id",
+            get(teams::detail).patch(teams::update),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/archive",
+            post(teams::archive),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members",
+            get(teams::members).post(teams::add_member),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members/:team_member_id",
+            patch(teams::update_member),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members/:team_member_id/remove",
+            post(teams::remove),
+        )
+        .route(
             "/users/:user_id/organizations",
             get(organizations::user_organizations),
         )
@@ -115,6 +157,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/admin/organizations/:id",
             patch(organizations::admin_update),
+        )
+        .route(
+            "/admin/organizations/:id/provisioning/retry",
+            post(organizations::provisioning_retry),
         )
         .route(
             "/migration/import",
@@ -181,6 +227,7 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
                 "oldestPendingAt": b.oldest.map(store::rfc3339),
                 "delivery": "disabled",
             })),
+            "provisioning": { "enabled": state.provisioning_enabled },
         })),
     )
 }
@@ -280,10 +327,12 @@ pub async fn authorize<C: ConnectionTrait>(
     let membership = store::current_membership(c, organization, user, false)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
-    let decision = evaluate(
+    let policy = store::policy(c, organization).await?;
+    let decision = evaluate_with_policy(
         Some((membership.role(), membership.status())),
         org.status(),
         capability,
+        &policy,
     );
     match decision {
         DecisionReason::Allowed => Ok(Access { org, membership }),
@@ -294,6 +343,7 @@ pub async fn authorize<C: ConnectionTrait>(
         }
         DecisionReason::OrganizationArchived => Err(ApiError::new(ErrorCode::OrganizationArchived)),
         DecisionReason::CapabilityNotGranted => Err(ApiError::new(ErrorCode::PermissionDenied)),
+        DecisionReason::PolicyRestricted => Err(ApiError::new(ErrorCode::PolicyRestricted)),
     }
 }
 
