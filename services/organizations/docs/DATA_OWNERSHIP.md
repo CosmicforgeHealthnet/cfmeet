@@ -18,6 +18,7 @@ Authority rules: [ADR 0056](../../../docs/decisions/0056-first-party-organizatio
 | `organization_service_nonces` | first use of each service token (replay refusal) |
 | `organization_import_runs` | migration import receipts |
 | `organization_platform_scopes`, `organization_provisioning` | Section 7 scope mapping / provisioning (ids and states only; empty in Section 5) |
+| `organization_scope_service_bindings` | Section 12 follow-up: operator-recorded Platform Access service account / credential **ids** for Enterprise Calling inside an organization's triple (never a credential value; Platform Access re-verifies at use) |
 
 Sections 6–7 add `organization_teams`, `organization_team_members` (+ append-only
 `organization_team_member_history`), `organization_policies` (typed document, revision) and

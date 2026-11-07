@@ -48,6 +48,11 @@ pub struct CallingConfig {
     /// with `CF-Usage-Migration: moved` — the legacy compatibility, independently
     /// disableable after the central-usage cutover.
     pub legacy_usage_retired: bool,
+    /// Blueprint Section 12 follow-up (CAL-007) `CALLING_ORGANIZATION_FORWARDING_ENABLED`
+    /// (`true` / `false`, default `false`): accept first-party organization requests the
+    /// Meeting Service forwards (`calling-request.act-for-organization`; organization
+    /// credential re-verified with Platform Access, acting principal recorded).
+    pub organization_forwarding_enabled: bool,
 }
 
 impl fmt::Debug for CallingConfig {
@@ -60,6 +65,10 @@ impl fmt::Debug for CallingConfig {
             .field("limit_defaults", &self.limit_defaults)
             .field("log_format", &self.log_format)
             .field("legacy_usage_retired", &self.legacy_usage_retired)
+            .field(
+                "organization_forwarding_enabled",
+                &self.organization_forwarding_enabled,
+            )
             .finish()
     }
 }
@@ -164,6 +173,21 @@ impl CallingConfig {
             }
         };
 
+        let organization_forwarding_enabled =
+            match non_empty("CALLING_ORGANIZATION_FORWARDING_ENABLED")
+                .map(|v| v.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                None | Some("false") => false,
+                Some("true") => true,
+                Some(_) => {
+                    return Err(ConfigError::invalid(
+                        "CALLING_ORGANIZATION_FORWARDING_ENABLED",
+                        "must be `true` or `false`".to_string(),
+                    ))
+                }
+            };
+
         Ok(Self {
             database_url,
             database_max_connections: u32::try_from(database_max_connections).map_err(|_| {
@@ -177,6 +201,7 @@ impl CallingConfig {
             identity_sync_interval,
             log_format,
             legacy_usage_retired,
+            organization_forwarding_enabled,
         })
     }
 
@@ -268,6 +293,28 @@ mod tests {
             ("CALLING_LEGACY_USAGE_AUTHORITY", "maybe"),
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn organization_forwarding_is_off_unless_explicitly_enabled() {
+        let base = ("DATABASE_URL", "postgres://x/y");
+        let cfg = CallingConfig::from_lookup(lookup(&[base])).unwrap();
+        assert!(!cfg.organization_forwarding_enabled);
+        for (value, expected) in [("false", false), ("true", true), ("TRUE", true)] {
+            let cfg = CallingConfig::from_lookup(lookup(&[
+                base,
+                ("CALLING_ORGANIZATION_FORWARDING_ENABLED", value),
+            ]))
+            .unwrap();
+            assert_eq!(cfg.organization_forwarding_enabled, expected, "{value}");
+        }
+        for bad in ["1", "yes", "on"] {
+            assert!(CallingConfig::from_lookup(lookup(&[
+                base,
+                ("CALLING_ORGANIZATION_FORWARDING_ENABLED", bad),
+            ]))
+            .is_err());
+        }
     }
 
     #[test]

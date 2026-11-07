@@ -155,7 +155,8 @@
         "organization.act-for-user",
         "organization.administer",
         "organization.migrate",
-        "platform-identity.provision-first-party"
+        "platform-identity.provision-first-party",
+        "calling-request.act-for-organization"
       ]
     }
   }

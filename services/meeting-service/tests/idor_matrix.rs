@@ -423,7 +423,7 @@ async fn idor_cross_conference_matrix() {
     // Positive control: the same read routes with A's OWN ids succeed for A's owner,
     // so every rejection above is the scope check, not a malformed request.
     let mut controls = 0;
-    for (path, item) in doc["paths"].as_object().unwrap() {
+    'paths: for (path, item) in doc["paths"].as_object().unwrap() {
         if !path.starts_with("/api/v2/") || !item.as_object().unwrap().contains_key("get") {
             continue;
         }
@@ -445,7 +445,12 @@ async fn idor_cross_conference_matrix() {
                     a.cid
                 }
             } else {
-                subordinate(n, path, &a).unwrap()
+                match subordinate(n, path, &a) {
+                    Some(v) => v,
+                    // Relay catch-alls (`{path}`) carry no subordinate id; the first
+                    // loop skips them the same way.
+                    None => continue 'paths,
+                }
             };
             uri = uri.replace(&format!("{{{n}}}"), &v.to_string());
         }

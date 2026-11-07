@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.1.0",
-    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default."
+    "version": "1.2.0",
+    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling."
   },
   "tags": [
     {
@@ -3965,7 +3965,7 @@
       "post": {
         "operationId": "resolveScope",
         "summary": "Resolve the verified technical scope",
-        "description": "The Platform Access tenant / application / environment of the organization, ONLY when the organization is ACTIVE, provisioning is READY, the mapping is READY (verified server-side) and its tenant status is applied; otherwise 409 PROVISIONING_PENDING (or ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED). With userId (or an acting user) the user must hold an ACTIVE membership (404 otherwise).",
+        "description": "The Platform Access tenant / application / environment of the organization, ONLY when the organization is ACTIVE, provisioning is READY, the mapping is READY (verified server-side) and its tenant status is applied; otherwise 409 PROVISIONING_PENDING (or ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED). With userId (or an acting user) the user must hold an ACTIVE membership (404 otherwise). 1.2.0: serviceBindings.calling carries the operator-recorded Calling service account / credential ids of this triple (null when none).",
         "tags": [
           "Authorization"
         ],
@@ -4139,6 +4139,280 @@
           },
           "409": {
             "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, VERSION_CONFLICT, TEAM_ARCHIVED, TEAM_NAME_TAKEN, PROVISIONING_PENDING or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling": {
+      "get": {
+        "operationId": "getCallingServiceBinding",
+        "summary": "Read the Calling service binding",
+        "description": "The Platform Access service account and credential (ids only) an operator recorded for Enterprise Calling inside the organization's own FIRST_PARTY triple. 404 ORGANIZATION_NOT_FOUND for an unknown organization, 404 NOT_FOUND when no binding is recorded.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The binding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (unknown organization) or NOT_FOUND (no binding recorded).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setCallingServiceBinding",
+        "summary": "Record the Calling service binding",
+        "description": "Create or replace the binding. Organizations stores identifiers only (never a credential value) and does not verify them: Platform Access re-verifies the credential against the organization's triple on every forwarded request, so a wrong binding can only refuse. Repeating the recorded ids is a no-op (same version, nothing audited); expectedVersion (0 = none yet) guards replacement (409 VERSION_CONFLICT). Refused while the organization has no recorded triple (409 PROVISIONING_PENDING) and for ARCHIVED organizations (409 ORGANIZATION_ARCHIVED). A relayed acting user is recorded as boundBy. Audited (scope.service_binding_set).",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The binding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED, PROVISIONING_PENDING or VERSION_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceBindingRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearCallingServiceBinding",
+        "summary": "Clear the Calling service binding",
+        "description": "Remove the binding (idempotent; also allowed for ARCHIVED organizations because removal only narrows). Organization calling forwarding stops at once (resolveScope answers serviceBindings.calling = null). Audited (scope.service_binding_cleared) when a binding was removed.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether a binding was removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBindingRemoval"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED, POLICY_RESTRICTED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6266,7 +6540,8 @@
           "applicationId",
           "environmentId",
           "mappingVersion",
-          "verifiedAt"
+          "verifiedAt",
+          "serviceBindings"
         ],
         "properties": {
           "organizationId": {
@@ -6298,6 +6573,49 @@
           "verifiedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "serviceBindings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "calling"
+            ],
+            "description": "Operator-recorded service bindings inside this triple (ids only; Platform Access re-verifies them at use). Section 12 follow-up.",
+            "properties": {
+              "calling": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ResolvedServiceBinding"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "ResolvedServiceBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "serviceAccountId",
+          "credentialId",
+          "version"
+        ],
+        "properties": {
+          "serviceAccountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credentialId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -6571,6 +6889,122 @@
           "userId": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "ServiceBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "capability",
+          "service",
+          "serviceAccountId",
+          "credentialId",
+          "version",
+          "boundBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "enum": [
+              "calling"
+            ]
+          },
+          "serviceAccountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credentialId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "boundBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ServiceBindingRemoval": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organizationId",
+          "capability",
+          "service",
+          "removed"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "enum": [
+              "calling"
+            ]
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ServiceBindingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "serviceAccountId",
+          "credentialId"
+        ],
+        "properties": {
+          "serviceAccountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Platform Access service account in the organization's triple (non-nil)."
+          },
+          "credentialId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Platform Access credential of that service account (id only, never a secret; non-nil)."
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current binding version; 0 = no binding yet."
           }
         }
       },

@@ -197,6 +197,9 @@ pub struct AdminActor {
     pub kind: AdminActorKind,
     pub service_account_id: Option<ServiceAccountId>,
     pub credential_id: Option<CredentialId>,
+    /// The human member an organization-forwarded request acts for (Blueprint Section 12
+    /// follow-up, CAL-007): from the authenticated context only, never request data.
+    pub acting_principal_id: Option<uuid::Uuid>,
     pub request_id: String,
     pub correlation_id: String,
 }
@@ -208,6 +211,7 @@ impl AdminActor {
             kind: AdminActorKind::CustomerApplication,
             service_account_id: Some(ctx.service_account_id()),
             credential_id: Some(ctx.credential_id()),
+            acting_principal_id: ctx.acting_principal_id(),
             request_id: ctx.request_id().as_str().to_string(),
             correlation_id: ctx.correlation_id().as_str().to_string(),
         }
@@ -221,6 +225,7 @@ impl AdminActor {
             kind: AdminActorKind::Operator,
             service_account_id: None,
             credential_id: None,
+            acting_principal_id: None,
             request_id: request.request_id.as_str().to_string(),
             correlation_id: request.correlation_id.as_str().to_string(),
         }
@@ -234,6 +239,7 @@ impl AdminActor {
             kind: AdminActorKind::System,
             service_account_id: None,
             credential_id: None,
+            acting_principal_id: None,
             request_id: request.request_id.as_str().to_string(),
             correlation_id: correlation_id.to_string(),
         }

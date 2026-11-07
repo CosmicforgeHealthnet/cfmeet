@@ -634,6 +634,16 @@ impl AdmissionService {
                 "This meeting is no longer active",
             ));
         }
+        // Blueprint Section 12 follow-up: an organization membership counts for this join
+        // only while the organization allows meetings for the member (authoritative mode;
+        // the same decision the workspace capabilities read reports).
+        let narrowed = crate::services::organization_policy::admission_actor(
+            &self.core,
+            ctx,
+            space.organization_id,
+        )
+        .await?;
+        let ctx: &ActorContext = &narrowed;
         // 5./6. Access policy (membership / invitation / passcode / adapters).
         let invitation = match req.invitation_token.as_deref() {
             Some(t) => Some(
@@ -1527,6 +1537,24 @@ impl AdmissionService {
         all: bool,
     ) -> ApiResult<BulkOutcome> {
         self.require_waiting_room_feature()?;
+        // Blueprint Section 12 follow-up: admitting into an organization's meeting needs
+        // the organization to allow meetings (authoritative mode). Evaluated before the
+        // management transaction so no row lock is held across the Organizations reads.
+        if crate::services::organization_policy::authoritative(&self.core).is_some() {
+            let space_id = find_conference(&self.core.db, conference_id)
+                .await?
+                .meeting_space_id;
+            let organization = find_space(&self.core.db, space_id)
+                .await
+                .map_err(|_| crate::services::meeting_core::not_found_conference())?
+                .organization_id;
+            crate::services::organization_policy::require_meetings_enabled(
+                &self.core,
+                ctx,
+                organization,
+            )
+            .await?;
+        }
         let (txn, conference, space, authority, pctx) = self
             .begin_management(ctx, conference_id, Permission::ParticipantAdmit)
             .await?;

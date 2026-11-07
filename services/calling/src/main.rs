@@ -484,6 +484,11 @@ async fn main() -> anyhow::Result<()> {
     state = state.with_communications(personal);
     state.communications_launch_credential = launch_credential;
     state.legacy_usage_retired = config.legacy_usage_retired;
+    state.organization_forwarding_enabled = config.organization_forwarding_enabled;
+    tracing::info!(
+        organization_forwarding = config.organization_forwarding_enabled,
+        "first-party organization requests forwarded by the Meeting Service (CALLING_ORGANIZATION_FORWARDING_ENABLED)"
+    );
     tracing::info!(
         legacy_usage_authority = if config.legacy_usage_retired {
             "retired"

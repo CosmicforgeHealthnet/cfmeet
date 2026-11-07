@@ -282,6 +282,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// The public API Gateway: `calling-request.forward` only (Part VI §51).
     pub api_gateway: Arc<ServiceTokenSigner>,
+    /// The Meeting Service: `calling-request.act-for-organization` only (Blueprint
+    /// Section 12 follow-up, CAL-007; accepted only while the Calling flag is on).
+    pub meeting_service: Arc<ServiceTokenSigner>,
     /// The Developer Platform: the webhook migration export and rollback only
     /// (`webhook-migration.export`, `webhook-migration.import`; Part VI §53).
     pub developer_platform: Arc<ServiceTokenSigner>,
@@ -337,6 +340,7 @@ pub fn service_auth_fixture_targeting(
     let sms_gateway_key = service_key("sms-gateway-test-1");
     let messaging_key = service_key("messaging-test-1");
     let api_gateway_key = service_key("api-gateway-test-1");
+    let meeting_service_key = service_key("meeting-service-test-1");
     let developer_platform_key = service_key("developer-platform-test-1");
     let communications_key = service_key("communications-test-1");
     let calling_jwk = calling_key.public_jwk();
@@ -381,6 +385,11 @@ pub fn service_auth_fixture_targeting(
                     cf_service_auth::services::API_GATEWAY,
                     vec![api_gateway_key.public_jwk()],
                     &["calling-request.forward"],
+                ),
+                (
+                    cf_service_auth::services::MEETING_SERVICE,
+                    vec![meeting_service_key.public_jwk()],
+                    &["calling-request.act-for-organization"],
                 ),
                 (
                     cf_service_auth::services::DEVELOPER_PLATFORM,
@@ -479,6 +488,13 @@ pub fn service_auth_fixture_targeting(
             ServiceId::api_gateway(),
             env,
             api_gateway_key,
+            TokenTtl::seconds(60).unwrap(),
+            shared.clone(),
+        )),
+        meeting_service: Arc::new(ServiceTokenSigner::new(
+            ServiceId::meeting_service(),
+            env,
+            meeting_service_key,
             TokenTtl::seconds(60).unwrap(),
             shared.clone(),
         )),
@@ -887,6 +903,7 @@ pub fn context_json(ctx: &PlatformAuthContext) -> Value {
         "service_account_id": ctx.service_account_id(),
         "credential_id": ctx.credential_id(),
         "scopes": ctx.scopes().names(),
+        "acting_principal_id": ctx.acting_principal_id(),
         "request_id": ctx.request_id().as_str(),
         "correlation_id": ctx.correlation_id().as_str(),
     })

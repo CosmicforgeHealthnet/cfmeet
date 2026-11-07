@@ -76,10 +76,11 @@ class AuditRecord {
   const AuditRecord.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory AuditRecord.create({required Uuid? actorCredentialId, required String actorKind, required Uuid? actorServiceAccountId, required Uuid auditId, required String correlationId, required SafeEventData details, required int? newVersion, required String occurredAt, required int? oldVersion, required String operation, required String requestId, required Uuid resourceId, required String resourceType}) =>
+  factory AuditRecord.create({required Uuid? actorCredentialId, required String actorKind, required Uuid? actorPrincipalId, required Uuid? actorServiceAccountId, required Uuid auditId, required String correlationId, required SafeEventData details, required int? newVersion, required String occurredAt, required int? oldVersion, required String operation, required String requestId, required Uuid resourceId, required String resourceType}) =>
       AuditRecord.fromJson(<String, Object?>{
         'actorCredentialId': actorCredentialId,
         'actorKind': actorKind,
+        'actorPrincipalId': actorPrincipalId,
         'actorServiceAccountId': actorServiceAccountId,
         'auditId': auditId,
         'correlationId': correlationId,
@@ -100,6 +101,9 @@ class AuditRecord {
 
   /// Who the change is attributed to.
   String get actorKind => json['actorKind']! as String;
+
+  /// The acting human member's principal (in this scope) when a first-party organization request forwarded by the Meeting Service made the change; null for API credentials, the operator CLI and Calling workers.
+  Uuid? get actorPrincipalId => json['actorPrincipalId'] as String?;
 
   Uuid? get actorServiceAccountId => json['actorServiceAccountId'] as String?;
 

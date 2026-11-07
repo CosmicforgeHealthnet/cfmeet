@@ -172,3 +172,17 @@ The Meeting Service `profile_policy` JSON is carried verbatim as `legacyMeetingP
 * `POST /internal/v1/organizations/scopes/resolve` `{organizationId, capability?: "primary", userId?}` (`organization.read`) returns `{organizationId, capability, tenantId, applicationId, environmentId, mappingVersion, verifiedAt}` only when the organization is ACTIVE, provisioning READY, the mapping READY and its tenant status applied in Platform Access; otherwise 409 `PROVISIONING_PENDING` / `ORGANIZATION_SUSPENDED` / `ORGANIZATION_ARCHIVED`. With `userId` (or an acting user) the user must hold an ACTIVE membership (404 otherwise). Calling is not switched to it yet.
 * `POST /internal/v1/admin/organizations/{id}/provisioning/retry` (`organization.administer`) — operator retry of a FAILED / cancelled workflow (idempotent; READY and in-flight workflows unchanged; archived 409).
 * Suspending / archiving an organization suspends its mapping and tenant (fail closed locally at once, Platform Access applied with retries); reactivation restores a verified mapping once the tenant is resumed.
+
+### 8.5 Service bindings (Section 12 follow-up, contract 1.2.0; CAL-007 / ORG-012 / CAL-009)
+
+Per-organization Enterprise Calling runs in the organization's own triple. Provisioning creates no service account, credential or scope grant (ADR 0058 §1), so an operator creates them in Platform Access (an explicit operator decision) and records their **identifiers** here. Organizations stores ids only — never a credential value — and does not verify them: Platform Access re-verifies the credential against the triple on every forwarded request (`/internal/v1/credentials/delegated-authority`), so a wrong binding can only refuse.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling` | `organization.administer` | the binding (404 `NOT_FOUND` when none; 404 `ORGANIZATION_NOT_FOUND` for an unknown organization) |
+| PUT | same | `organization.administer` | `{serviceAccountId, credentialId, expectedVersion?}` (non-nil UUIDs; `expectedVersion` 0 = none yet) → the binding; repeating the recorded ids is a no-op (same version, nothing audited); stale `expectedVersion` 409 `VERSION_CONFLICT`; no recorded triple 409 `PROVISIONING_PENDING`; archived 409 `ORGANIZATION_ARCHIVED` |
+| DELETE | same | `organization.administer` | idempotent removal `{organizationId, capability, service, removed}` (allowed for archived organizations) |
+
+**ServiceBinding** `{"organizationId","capability":"primary","service":"calling","serviceAccountId","credentialId","version","boundBy":"uuid|null","createdAt","updatedAt"}` — `boundBy` is the relayed acting operator (`X-CF-Acting-User`, only from `organization.act-for-user` callers), else `null`. Changes write `scope.service_binding_set` / `scope.service_binding_cleared` audit events (actor `OPERATOR`; ids only). No outbox event: consumers read the binding through `scopes/resolve` on every request.
+
+`POST /internal/v1/organizations/scopes/resolve` adds `serviceBindings: {"calling": {serviceAccountId, credentialId, version} | null}` to its 200 answer; every refusal is unchanged (a suspended or archived organization, or a scope that is not READY, never exposes a binding). Table `organization_scope_service_bindings` (migration `m20261108_000003_scope_service_bindings`, additive; PK organization + capability + service; `service` CHECK `calling`).

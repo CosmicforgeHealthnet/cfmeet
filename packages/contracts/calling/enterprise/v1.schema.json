@@ -749,6 +749,7 @@
         "actorKind",
         "actorServiceAccountId",
         "actorCredentialId",
+        "actorPrincipalId",
         "resourceType",
         "resourceId",
         "operation",
@@ -783,6 +784,17 @@
           ]
         },
         "actorCredentialId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorPrincipalId": {
+          "description": "The acting human member's principal (in this scope) when a first-party organization request forwarded by the Meeting Service made the change; null for API credentials, the operator CLI and Calling workers.",
           "oneOf": [
             {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
