@@ -38,6 +38,12 @@ pub mod services {
     /// scanning in front of an existing ClamAV engine. Receives file bytes only from
     /// registered callers; owns no storage and no other product's data.
     pub const SECURITY_SCAN: &str = "cfmeet.security-scan";
+    /// First-party business Organizations authority (Blueprint v1.0 Sections 3–5,
+    /// ADR 0056): organizations, profiles, memberships, invitations and their audit /
+    /// outbox. Receives signed calls from the Meeting Service (account-authenticated
+    /// relay), Calling, Messaging, Communications and operator tooling; owns no account
+    /// credential, meeting, message or call data.
+    pub const ORGANIZATIONS: &str = "cfmeet.organizations";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -136,6 +142,10 @@ impl ServiceId {
 
     pub fn security_scan() -> Self {
         Self(services::SECURITY_SCAN.to_string())
+    }
+
+    pub fn organizations() -> Self {
+        Self(services::ORGANIZATIONS.to_string())
     }
 }
 

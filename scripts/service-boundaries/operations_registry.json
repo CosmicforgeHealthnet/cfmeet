@@ -21,6 +21,18 @@
       ]
     },
     {
+      "id": "organizations-maintenance",
+      "owner": "organizations",
+      "source": "src/worker.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/worker.rs::the_maintenance_pass_expires_invitations_and_sweeps_nonces_and_idempotency",
+        "tests/worker.rs::outbox_leases_are_exclusive_and_failures_back_off",
+        "tests/worker.rs::an_enabled_dispatcher_delivers_each_pending_event",
+        "tests/worker.rs::the_worker_loop_runs_until_shutdown"
+      ]
+    },
+    {
       "id": "messaging-kt-rollback-monitor",
       "owner": "messaging",
       "source": "src/operations.rs",

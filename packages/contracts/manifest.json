@@ -93,14 +93,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests). 1.13.0 (Blueprint Sections 3-5): service identity cfmeet.organizations; permissions organization.read, organization.write, organization.act-for-user, organization.administer and organization.migrate (received by Organizations)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -761,6 +761,17 @@
       "lifecycle": "experimental",
       "authority": "contract-first",
       "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes. 1.5.0 the Section 53 webhook migration operator routes (/internal/v1/operator/webhook-migration/**). 1.6.0: usage ingestion / reconciliation, operator production-access decisions, overrides, first-party grants, cost-centre usage, support profiles, forwarded /v1/usage and /v1/limits. 1.7.0: conflicting event replays refused (CONFLICTING_REPLAY) and the operator ingestion health view. 1.8.0 forwardedListUsage / forwardedGetLimits keep Calling's published /v1/usage and /v1/limits contract (§19.4)."
+    },
+    {
+      "id": "cfmeet.organizations.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "organizations/internal/v1.openapi.json",
+      "owner": "organizations",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress."
     },
     {
       "id": "cfmeet.developer-platform.control",
