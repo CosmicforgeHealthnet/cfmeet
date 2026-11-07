@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.5.0"
+      "description": "cfmeet.developer-platform.http-api 1.6.0"
     },
     {
       "name": "gateway",
@@ -63195,6 +63195,8 @@
           "rotatedFromCredentialId",
           "supersededByCredentialId",
           "supersessionValidUntil",
+          "lastAuthenticatedAt",
+          "expiringSoon",
           "createdAt",
           "updatedAt",
           "limits"
@@ -63371,6 +63373,29 @@
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAuthenticatedAt": {
+            "description": "Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began.",
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiringSoon": {
+            "description": "Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority.",
+            "oneOf": [
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"

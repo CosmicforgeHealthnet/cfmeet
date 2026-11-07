@@ -3312,6 +3312,10 @@ export namespace DeveloperPlatform {
     rotatedFromCredentialId: Uuid | null;
     supersededByCredentialId: Uuid | null;
     supersessionValidUntil: string | null;
+    /** Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began. */
+    lastAuthenticatedAt: string | null;
+    /** Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority. */
+    expiringSoon: boolean | null;
     createdAt: string | null;
     updatedAt: string | null;
     limits: QuotaRestrictionValues;
