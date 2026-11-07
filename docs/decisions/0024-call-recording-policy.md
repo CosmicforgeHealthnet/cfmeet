@@ -112,3 +112,17 @@ idempotent. Recording retention is never tied to any meeting configuration.
   egress) are not implemented; both are recorded as deferred items. Policies requiring
   their consent deny recording rather than assume it.
 * Recordings longer than 24 minutes need a chunked delivery path (not offered).
+
+## Amendment — Blueprint v1.0 §12: recording discovery (CAL-017, 2026-11)
+
+`GET /v1/enterprise/recordings` (`enterprise.recording.read`) lists the recordings of
+the credential's tenant / application / environment, newest first (keyset cursor over
+`created_at, id`, page 1–100), filtered by `callId`, `participantPrincipalId`, `state`,
+`startedFrom` / `startedBefore`. Without `principalId` the credential must hold
+`enterprise.recording.manage` (recording administrator); with `principalId` only
+recordings of Calls that principal took part in are listed. The list carries integrity
+metadata only (the `CallRecording` representation: no object key, bucket or URL — media
+through `media-access`). Listing is a retrieval: every listed recording writes one
+`READ_METADATA` / `GRANTED` access-audit record with reason `LISTED` (on behalf of the
+principal, if any). Another scope's recordings are never listed (empty page, never 404).
+

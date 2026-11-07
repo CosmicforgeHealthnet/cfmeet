@@ -57,7 +57,9 @@ async fn only_the_current_generation_of_an_authorized_session_is_admitted() {
     let Some(a) = AppWorld::new().await else {
         return;
     };
-    let (call, caller, callee) = a.connected_call("VOICE").await;
+    // A group Call: removing the callee's session leaves a live two-party Call (a
+    // one-to-one Call would end automatically, CAL-001).
+    let (call, caller, callee, _third) = a.connected_group_call("VOICE").await;
     let s_caller = a.session_on(call, caller.endpoint).await.unwrap();
     let s_callee = a.session_on(call, callee.endpoint).await.unwrap();
     let (callee_id, gen) = identity_of(&a, s_callee).await;

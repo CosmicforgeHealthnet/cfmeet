@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 38,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 572,
+    "PUBLIC_CUSTOMER": 573,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -5021,6 +5021,20 @@
       "requiredScope": "enterprise.recording.manage"
     },
     {
+      "id": "calling.listRecordings",
+      "domain": "calling",
+      "method": "GET",
+      "pattern": "/v1/enterprise/recordings",
+      "protocol": "REST",
+      "upstream": "cfmeet.calling",
+      "upstreamPath": "/v1/enterprise/recordings",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "enterprise.recording.read"
+    },
+    {
       "id": "calling.deleteCallRecording",
       "domain": "calling",
       "method": "DELETE",
@@ -9232,6 +9246,14 @@
       "operationId": "updateRecordingPolicy",
       "method": "PATCH",
       "path": "/v1/enterprise/recording-policies/{recording_policy_id}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "contract": "cfmeet.calling.http-api",
+      "operationId": "listRecordings",
+      "method": "GET",
+      "path": "/v1/enterprise/recordings",
       "class": "PUBLIC_CUSTOMER"
     },
     {

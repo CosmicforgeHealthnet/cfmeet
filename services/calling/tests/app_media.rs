@@ -267,7 +267,9 @@ async fn reconciliation_repairs_drift_without_creating_authority() {
     let Some(a) = AppWorld::new().await else {
         return;
     };
-    let (call, _caller, callee) = a.connected_call("VOICE").await;
+    // A group Call: the removal below leaves two parties (a one-to-one Call would end
+    // automatically, CAL-001).
+    let (call, _caller, callee, _third) = a.connected_group_call("VOICE").await;
     let room = AppWorld::room(call);
     let voice = MediaPermissions::default_for(CallKind::Voice);
 
@@ -305,7 +307,7 @@ async fn reconciliation_repairs_drift_without_creating_authority() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(
         a.media().participants(&room).len(),
-        3,
+        4,
         "removal not yet enforced"
     );
     assert_eq!(
@@ -321,8 +323,8 @@ async fn reconciliation_repairs_drift_without_creating_authority() {
     let report = a.h().state.app.reconcile_due(100).await.unwrap();
     let _ = report;
     let left = a.media().participants(&room);
-    assert_eq!(left.len(), 1, "{left:?}");
-    assert_eq!(left[0].permissions, voice);
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(left.iter().all(|p| p.permissions == voice), "{left:?}");
     assert_eq!(
         scalar(
             &a,
@@ -337,7 +339,7 @@ async fn reconciliation_repairs_drift_without_creating_authority() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        3
     );
     assert_eq!(
         scalar(
@@ -345,7 +347,7 @@ async fn reconciliation_repairs_drift_without_creating_authority() {
             "SELECT count(*) FROM call_sessions WHERE media_access = 'AUTHORIZED'"
         )
         .await,
-        1
+        2
     );
     assert!(
         scalar(

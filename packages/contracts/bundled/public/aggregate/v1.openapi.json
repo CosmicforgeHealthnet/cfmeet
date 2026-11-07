@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.14.0"
+      "description": "cfmeet.calling.http-api 1.15.0"
     },
     {
       "name": "privacy-relay",
@@ -23655,7 +23655,7 @@
           "calling"
         ],
         "summary": "Open the endpoint's realtime signaling channel (WebSocket)",
-        "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong and closes with code 4001 when the credential expires. Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
+        "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong closes with code 4001 when the credential expires and with code 4401 when its authority is revoked (the endpoint revoked, its principal or the minting credential chain no longer valid, or communications authorization withdrawn; re-checked every 5 s and before every delivery). Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
         "security": [
           {
             "calling.signalingCredential": []
@@ -33980,6 +33980,142 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.disableRecordingPolicy",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/enterprise/recordings": {
+      "get": {
+        "operationId": "listRecordings",
+        "tags": [
+          "calling"
+        ],
+        "summary": "List the scope's recordings",
+        "description": "Requires enterprise.recording.read. Recording discovery for compliance review (CAL-017): the recordings of the credential's tenant / application / environment, newest first, keyset-paginated, filtered by Call, participant principal, state and start time. Without principalId the credential must hold enterprise.recording.manage and lists every recording of the scope as a recording administrator; with principalId only recordings of Calls that principal took part in. Integrity metadata only: no object key, bucket or URL (media through POST /v1/enterprise/recordings/{recording_id}/media-access). Every listed recording is access-audited (READ_METADATA, GRANTED, reason LISTED), like a single read. Another scope's recordings are never listed.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "enterprise.recording.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.recording.read",
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Act for this principal: only recordings of Calls it took part in. Without it the credential must hold enterprise.recording.manage and acts as a recording administrator.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "callId",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings of this Call.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "participantPrincipalId",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings of Calls this principal took part in.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings in this processing state.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.calling.enterprise.v1.RecordingState"
+            }
+          },
+          {
+            "name": "startedFrom",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings started at or after this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings started strictly before this instant (RFC 3339); after startedFrom.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of recordings (newest first).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.enterprise.v1.CallRecordingList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.ServiceUnavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.listRecordings",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
