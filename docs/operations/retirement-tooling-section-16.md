@@ -130,6 +130,12 @@ change. Until then new additive changes keep the separate-history pattern.
   involved.
 * **Checks after release.** `curl -I` a legacy webhook route shows `Deprecation`; the counters
   above appear at `/internal/metrics`; artefact download URLs show `X-Amz-Expires` ≤ 900.
+* **Served Swagger changes.** Meeting-service `/api-docs/messaging.json` is now the public
+  Messaging bundle: 96 operations (was 80; the 16 compliance operations the gateway publishes
+  are no longer hidden), 71 native bindings (unchanged). The production acceptance script
+  `infra/calling/production/messaging_acceptance.py` expects 96; a unit test pins both numbers.
+  `/api-docs/communications.json` and the Calling enterprise paths in `/api-docs/calling.json`
+  are unchanged in substance (the latter's internal paths were already absent).
 
 ## 8. Owner steps
 

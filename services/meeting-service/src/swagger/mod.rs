@@ -1180,6 +1180,10 @@ pub fn swagger_router(_server_addr: &str) -> Router {
 mod tests {
     use super::*;
 
+    /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
+    const SERVED_MESSAGING_OPERATIONS: usize = 96;
+    const SERVED_MESSAGING_NATIVE: usize = 71;
+
     fn peer(name: &str) -> &'static str {
         PEER_DOCS
             .iter()
@@ -1429,6 +1433,34 @@ mod tests {
             public_messaging["paths"]["/v1/messaging/client-sessions/revoke-all"]["post"]
                 ["x-cfmeet-native-path"],
             "/api/v2/messaging/client-sessions/revoke-all"
+        );
+        // Pinned for the production acceptance script
+        // (`infra/calling/production/messaging_acceptance.py`): operation count and native
+        // bindings of the served Messaging document.
+        let ops: Vec<&serde_json::Value> = public_messaging["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|item| item.as_object().unwrap().iter())
+            .filter(|(m, _)| {
+                matches!(
+                    m.as_str(),
+                    "get" | "post" | "put" | "patch" | "delete" | "options" | "head"
+                )
+            })
+            .map(|(_, op)| op)
+            .collect();
+        let native = ops
+            .iter()
+            .filter(|op| op.get("x-cfmeet-native-path").is_some())
+            .count();
+        println!(
+            "served messaging: {} operations, {native} native",
+            ops.len()
+        );
+        assert_eq!(
+            (ops.len(), native),
+            (SERVED_MESSAGING_OPERATIONS, SERVED_MESSAGING_NATIVE)
         );
         let description = public_messaging["info"]["description"].as_str().unwrap();
         assert!(description.contains("PRIVATE_E2EE requires approved enrollment"));
