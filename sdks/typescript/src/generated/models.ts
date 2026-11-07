@@ -6787,6 +6787,11 @@ export namespace Messaging {
     successorConversationId: Uuid | null;
     /** Appendix K: false — no read receipts in this conversation; null — the environment policy decides. */
     readReceipts: boolean | null;
+    /** Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group). */
+    title?: string | null;
+    /** Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. */
+    avatarRef?: string | null;
+    inbox?: ConversationInbox;
   };
   /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
   export type ConversationEvent = {
@@ -6801,6 +6806,28 @@ export namespace Messaging {
     tenantId: Uuid;
     applicationId: Uuid;
     environmentId: Uuid;
+  };
+  /** Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content. */
+  export type ConversationInbox = {
+    /** The latest application message (or the creation time); the key of orderBy=lastActivity. */
+    lastActivityAt: string;
+    lastMessage: ConversationLastMessage | null;
+    /** Active application messages from others after the member's read cursor, inside its history window, not hidden for it. */
+    unreadCount: number;
+    /** Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext). */
+    mentionCount: number;
+  };
+  /** Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured). */
+  export type ConversationLastMessage = {
+    messageId: Uuid;
+    sequence: number;
+    senderPrincipalId: Uuid;
+    createdAt: string;
+    lifecycle: MessageLifecycle;
+    securityProfile: SecurityProfile;
+    attachmentCount: number;
+    /** MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones. */
+    previewText: string | null;
   };
   export type ConversationPage = {
     conversations: Array<Conversation>;
@@ -6828,6 +6855,10 @@ export namespace Messaging {
     readReceipts?: boolean;
     /** Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged. */
     counterpartCfMeetId?: string;
+    /** Section 13: display title (MANAGED only; PRIVATE_E2EE refuses it with CONTENT_REJECTED / DISPLAY_METADATA_MANAGED_ONLY). */
+    title?: string;
+    /** Section 13: opaque avatar reference (MANAGED only). */
+    avatarRef?: string;
   };
   /** Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE). */
   export type CreateSmsBridgeRequest = {
@@ -7501,6 +7532,8 @@ export namespace Messaging {
     /** MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext). */
     managedPresentation?: "STANDARD" | "ANNOUNCEMENT";
     replyToMessageId?: Uuid;
+    /** Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate … */
+    mentionedPrincipalIds?: Array<Uuid>;
   };
   export type SmsBridge = {
     bridgeId: Uuid;
@@ -7632,6 +7665,10 @@ export namespace Messaging {
     expiresAt?: string;
     /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS). */
     retentionSeconds?: number;
+    /** Section 13: a new display title; null clears it (MANAGED only, owner). */
+    title?: string | null;
+    /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
+    avatarRef?: string | null;
   };
   /** Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost. */
   export type UsageSummary = {
@@ -7940,7 +7977,7 @@ export namespace Messaging {
     };
     /** GET /v1/conversations; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     listConversations: {
-      params: { query?: { lifecycleState?: LifecycleState; contextClass?: ContextClass; limit?: number; cursor?: string }; headers?: { "cf-acting-principal"?: Uuid } };
+      params: { query?: { lifecycleState?: LifecycleState; contextClass?: ContextClass; limit?: number; cursor?: string; orderBy?: "createdAt" | "lastActivity" }; headers?: { "cf-acting-principal"?: Uuid } };
       response: ConversationPage;
       item: NonNullable<(ConversationPage)["conversations"]>[number];
     };

@@ -227,6 +227,100 @@ impl UnifiedMessaging {
             .map_err(|e| chat_error(&e))
     }
 
+    /// The opaque reference Messaging stores for a CF Meet account session (Blueprint
+    /// Section 13, ADR 0049 amendment A1): a domain-separated SHA-256 of the FIRST_PARTY
+    /// environment and the session id. Messaging can match it, never reverse it.
+    pub fn account_session_ref(&self, account_session_id: Uuid) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"cfmeet-account-session:v1|");
+        h.update(self.environment_id().as_bytes());
+        h.update(b"|");
+        h.update(account_session_id.as_bytes());
+        hex::encode(h.finalize())
+    }
+
+    /// Issues (or renews, with `sessionDeviceId`) a MANAGED-realtime session-device token
+    /// bound to the caller's VERIFIED account session. The client may name only the
+    /// session device to renew and a shorter lifetime; the account-session binding and
+    /// the latest expiry (`notAfter`: the presented access token's own expiry) are
+    /// Meeting's, never the client's. Messaging's answer is returned unchanged.
+    pub async fn issue_session_token(
+        &self,
+        user_id: Uuid,
+        account_session_id: Uuid,
+        not_after: chrono::DateTime<chrono::Utc>,
+        session_device_id: Option<Uuid>,
+        ttl_seconds: Option<i64>,
+    ) -> ApiResult<(u16, Value)> {
+        let principal = self.principal_for_user(user_id).await?;
+        let mut body = json!({
+            "accountSessionRef": self.account_session_ref(account_session_id),
+            "notAfter": super::rfc3339(not_after),
+        });
+        if let Some(d) = session_device_id {
+            body["sessionDeviceId"] = json!(d);
+        }
+        if let Some(t) = ttl_seconds {
+            body["ttlSeconds"] = json!(t);
+        }
+        self.gateway
+            .call_raw(
+                Peer::Messaging,
+                Some(Acting {
+                    principal_id: principal,
+                    kind: PrincipalKind::NativeCfUser,
+                }),
+                Method::POST,
+                "/internal/v1/delegated/v1/messaging/session-devices",
+                &[],
+                Some(&body),
+            )
+            .await
+            .map_err(|e| chat_error(&e))
+    }
+
+    /// One account session ended (signed out on one device): revoke the session devices
+    /// bound to it right away. Best effort — the session device's own tokens are
+    /// short-lived and every renewal re-verifies the account session, so a Messaging
+    /// outage bounds the exposure to one token lifetime and never blocks the sign-out.
+    pub async fn revoke_session_devices_for(&self, user_id: Uuid, account_session_id: Uuid) {
+        let env = self.environment_id();
+        let principal: Option<Uuid> = match one(
+            &self.db,
+            "SELECT principal_id FROM communication_principal_links \
+             WHERE subject_kind = 'USER' AND subject_id = $1 AND environment_id = $2",
+            vec![user_id.into(), env.into()],
+        )
+        .await
+        {
+            Ok(r) => r.and_then(|r| r.try_get_by_index(0).ok()),
+            Err(e) => {
+                tracing::warn!(error = %e, "session-device revocation skipped (principal lookup)");
+                return;
+            }
+        };
+        let Some(principal) = principal else { return };
+        if let Err(e) = self
+            .gateway
+            .call(
+                Peer::Messaging,
+                Some(Acting {
+                    principal_id: principal,
+                    kind: PrincipalKind::NativeCfUser,
+                }),
+                Method::POST,
+                "/internal/v1/delegated/v1/messaging/session-devices/revoke",
+                &[],
+                Some(&json!({ "accountSessionRef": self.account_session_ref(account_session_id) })),
+            )
+            .await
+        {
+            inc(&OM.unified_messaging_revocations_failed);
+            tracing::warn!(error = ?e, "session-device revocation deferred to token expiry");
+        }
+    }
+
     /// Logout: queue (and try now) the revocation of every Messaging client session of
     /// the account's principal. Never fails the logout itself.
     pub async fn revoke_sessions_for_user(&self, user_id: Uuid, reason: &'static str) {

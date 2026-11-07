@@ -395,6 +395,20 @@ async fn client_token_request(
             return e.into_response();
         }
     };
+    // Section 13: a session device is accepted only by the realtime gateway; it never
+    // reaches a device-direct REST operation (KeyPackages, Welcomes, MLS commits,
+    // ciphertext, push registration, ...).
+    if session.is_session_device() {
+        crate::metrics::inc(
+            "messaging_client_token_rest_total",
+            &[("outcome", "session_device_refused")],
+        );
+        return ApiError::reason(
+            ErrorCode::ClientTokensNotEnabled,
+            "SESSION_DEVICE_REALTIME_ONLY",
+        )
+        .into_response();
+    }
     // Own-device routes: another device of the same principal is NOT_FOUND.
     if device.is_some_and(|d| Uuid::parse_str(&d).ok() != Some(session.device_id)) {
         return ApiError::code(ErrorCode::NotFound).into_response();

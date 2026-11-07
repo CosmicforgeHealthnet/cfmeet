@@ -13484,6 +13484,149 @@
             "bearer_auth": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message).",
+        "description": "Forwards an allowlisted PATCH of the Messaging client API (updating a conversation's\nlifecycle, expiry, retention or display title, changing a member's role, or editing a\nMANAGED message with its `expectedEditCount`) to the Messaging service, acting as the\ncaller's own principal, which is never taken from the request. The JSON body (at most\n1 MiB; empty means `{}`) is forwarded as-is; Messaging enforces ownership, roles and\noptimistic concurrency. Paths outside the allowlist return ENDPOINT_NOT_FOUND and are\nnot forwarded. Messaging's status and JSON body are returned unchanged.",
+        "operationId": "v2_messaging_relay_patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "An allowlisted Messaging customer path under v1/",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (status relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ENDPOINT_NOT_FOUND (not relayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/messaging/session-tokens": {
+      "post": {
+        "tags": [
+          "Messaging (v2)"
+        ],
+        "summary": "Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed).",
+        "description": "Blueprint Section 13 (ADR 0049 amendment A1): returns a Messaging client token bound to\na *session device* of the signed-in user. A session device is not an MLS device: it can\nonly open the realtime gateway and subscribe to MANAGED conversations; it cannot publish\nKeyPackages, join MLS groups, receive PRIVATE_E2EE ciphertext, use device-direct REST\noperations or count as an end-to-end encrypted device. It is bound to the caller's\naccount session: the token never outlives the presented access token, every renewal\nre-verifies the session, and signing out (this session, everywhere, or a security\nrevocation) ends it. Send `sessionDeviceId` to renew the same session device (an open\nconnection then continues with `auth.refresh`). Answers FEATURE_DISABLED while\nMessaging has session devices switched off.",
+        "operationId": "v2_messaging_session_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Session-device client token (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (no session-bound sign-in)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "CHAT_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/api/v2/organization-invitations/accept": {

@@ -11,6 +11,13 @@ listed architecture decisions are accepted". None of AD-01…AD-10 is recorded a
 The implementation therefore keeps every production E2EE capability disabled outside
 `local` / `test` (`MESSAGING_E2EE_DEVICES_ENABLED`, ADR 0045) and makes no production claim.
 
+Blueprint v1.0 Section 13 (ADR 0049 amendment A1) adds MANAGED-only realtime for
+first-party users without an E2EE device: a *session device* bound to the verified account
+session, accepted only by the realtime gateway, refused every PRIVATE_E2EE subscription and
+every device-direct REST operation, and never an MLS device. Its switch
+(`MESSAGING_SESSION_DEVICES_ENABLED`) is independent of the E2EE switch, which production
+still refuses; no E2EE property is claimed for MANAGED traffic.
+
 ## 1. Architecture decision register (Appendix G.1)
 
 "Proposed position" is quoted from the specification. **Status** is the owner's decision,

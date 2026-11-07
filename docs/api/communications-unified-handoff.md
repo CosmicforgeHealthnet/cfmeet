@@ -27,8 +27,8 @@ The Account session is the only credential the app holds for these APIs.
 | Class | Examples | Credential |
 |---|---|---|
 | Consumer public REST | everything under `/api/v2/communications`, `/api/v2/messaging` | Account bearer session |
-| Consumer delegated-device | Messaging client tokens, Calling signaling credentials | short-lived device token issued after enrollment |
-| Authenticated WebSocket | `wss://api.cfmeet.com/v1/realtime` (Messaging), Calling signaling | one-use ticket / signaling credential |
+| Consumer delegated-device | Messaging client tokens (`/api/v2/messaging/client-tokens`, E2EE device), MANAGED session-device tokens (`/api/v2/messaging/session-tokens`, no E2EE device; ADR 0049 amendment A1), Calling signaling credentials | short-lived device token issued after enrollment (session-device tokens: bound to the account session, realtime only) |
+| Authenticated WebSocket | `wss://api.cfmeet.com/v1/realtime` (Messaging; `POST /v1/realtime/tickets` first). Routed by the realtime ingress (`infra/calling/ingress-ci/realtime_ingress.py`), not the API Gateway catalogue (`public-routes.json` lists HTTP operations only). Calling signaling | one-use ticket / signaling credential |
 | Internal service-to-service | `/internal/v1/communications/*`, owner `/internal/v1/...` | signed service tokens; never reachable publicly |
 | Operator-only | Hub `admin/*`, `reconciliation/range`, `readiness` | operator console key; never in apps |
 | Webhook / worker-only | owner outboxes, Calling/Messaging workers | none for clients |

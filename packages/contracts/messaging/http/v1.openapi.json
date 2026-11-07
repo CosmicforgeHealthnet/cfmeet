@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.14.0",
+    "version": "1.15.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints."
   },
   "tags": [
@@ -711,7 +711,7 @@
             "clientToken": []
           }
         ],
-        "description": "Keyset-paginated, newest first (limit 1-100, cursor). With CF-Acting-Principal: that principal's conversations (messages.read); without: the environment's conversations (conversations.manage).",
+        "description": "Keyset-paginated (limit 1-100, cursor). orderBy=createdAt (default): newest first. orderBy=lastActivity: the inbox order, latest application message first (Section 13, MSG-007); a cursor is valid only with the orderBy that produced it. With CF-Acting-Principal: that principal's conversations with ACTIVE membership (messages.read), each carrying its inbox summary (last activity, last visible message preview metadata, unread and mention counts); without: the environment's conversations (conversations.manage), without summaries.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -754,6 +754,19 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "orderBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "lastActivity"
+              ],
+              "default": "createdAt"
             }
           }
         ],
@@ -2029,7 +2042,8 @@
             "schema": {
               "type": "integer",
               "minimum": 0
-            }
+            },
+            "description": "The canonical replay cursor: events with eventSequence > after. (The WebSocket subscribe frame names the same cursor afterEventSequence; omit it there to resume from the device's stored ack cursor.)"
           },
           {
             "name": "limit",
@@ -7209,6 +7223,138 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/session-devices": {
+      "post": {
+        "operationId": "issueSessionDeviceToken",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "issue Session Device Token",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Section 13 (ADR 0049 amendment A1), scope messages.read, acting principal, FIRST_PARTY application environments only (PRINCIPAL_NOT_AUTHORIZED / SESSION_DEVICES_FIRST_PARTY_ONLY otherwise): creates (or, with sessionDeviceId, renews) a session device bound to the relay's account-session reference and returns a realtime-only client token for MANAGED conversations (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past notAfter). A session device is not an MLS device: it cannot publish KeyPackages, join MLS groups, receive PRIVATE_E2EE traffic, use device-direct REST operations or count as an end-to-end encrypted device. FEATURE_DISABLED / SESSION_DEVICES_DISABLED while MESSAGING_SESSION_DEVICES_ENABLED is off; a renewal of an unknown, revoked, expired or differently bound session device is NOT_FOUND.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SessionDeviceToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SessionDeviceTokenRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/session-devices/revoke": {
+      "post": {
+        "operationId": "revokeSessionDevices",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "revoke Session Devices",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "description": "Section 13, scope messages.send, acting principal, FIRST_PARTY only: the account session behind accountSessionRef ended; its session devices and their client sessions are revoked now and connected gateways close them after commit. Always available (also with session devices switched off). POST /v1/messaging/client-sessions/revoke-all also revokes every session device of the principal.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SessionDeviceRevocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SessionDeviceRevokeRequest"
+              }
+            }
           }
         }
       }

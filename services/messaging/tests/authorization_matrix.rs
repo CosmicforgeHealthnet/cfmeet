@@ -1215,6 +1215,8 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("GET", "/openapi.json", "public contract"),
     ("POST", "/v1/realtime/tickets", "device-direct client-token route: `realtime_routes_refuse_customer_credentials_and_missing_tokens` below; tests/realtime.rs"),
     ("GET", "/v1/realtime", "WebSocket upgrade with a single-use ticket: `realtime_routes_refuse_customer_credentials_and_missing_tokens` below; tests/realtime.rs"),
+    ("POST", "/v1/messaging/session-devices", "Section 13 first-party relay only (this matrix's customers are third-party and are refused): tests/realtime.rs `session_devices_*`"),
+    ("POST", "/v1/messaging/session-devices/revoke", "Section 13 first-party relay only: tests/realtime.rs `session_devices_*`"),
 ];
 
 // ---------------------------------------------------------------------- execution

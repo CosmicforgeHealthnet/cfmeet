@@ -456,6 +456,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::unified_messaging::client_token),
         )
         .route(
+            "/messaging/session-tokens",
+            post(crate::handlers::v2::unified_messaging::session_token),
+        )
+        .route(
             "/messaging/client-sessions/revoke-all",
             post(crate::handlers::v2::unified_messaging::revoke_all_sessions),
         )
@@ -480,6 +484,7 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(crate::handlers::v2::unified_messaging::relay_get)
                 .post(crate::handlers::v2::unified_messaging::relay_post)
                 .put(crate::handlers::v2::unified_messaging::relay_put)
+                .patch(crate::handlers::v2::unified_messaging::relay_patch)
                 .delete(crate::handlers::v2::unified_messaging::relay_delete)
                 .layer(axum::extract::DefaultBodyLimit::max(
                     crate::handlers::v2::unified_messaging::RELAY_MAX_BODY_BYTES,

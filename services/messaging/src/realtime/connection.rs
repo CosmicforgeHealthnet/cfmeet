@@ -488,6 +488,21 @@ impl Connection {
                 .await;
                 return Flow::Continue;
             }
+            // Section 13 (ADR 0049 A1): a session device never receives PRIVATE_E2EE
+            // traffic (no ciphertext, typing or presence of an encrypted conversation).
+            Ok((c, _))
+                if self.session.is_session_device()
+                    && c.profile() == crate::domain::SecurityProfile::PrivateE2ee =>
+            {
+                crate::metrics::inc("messaging_realtime_session_device_e2ee_refused_total", &[]);
+                self.send(error_frame(
+                    "E2EE_DEVICE_REQUIRED",
+                    "End-to-end encrypted conversations need a registered end-to-end encrypted device.",
+                    rid,
+                ))
+                .await;
+                return Flow::Continue;
+            }
             Ok((_, m)) => m,
             // Unknown, foreign and non-member conversations are indistinguishable.
             Err(e) => return self.api_error(e, rid).await,
@@ -867,6 +882,7 @@ impl Connection {
             Ok(next)
                 if next.principal_id == self.session.principal_id
                     && next.device_id == self.session.device_id
+                    && next.device_kind == self.session.device_kind
                     && next.environment_id == self.session.environment_id =>
             {
                 self.session = next;
@@ -914,6 +930,8 @@ impl Connection {
                 }
                 self.deliver_until(conversation_id, event_sequence).await
             }
+            // Device events (Welcomes, KeyPackages, device changes) belong to MLS devices.
+            HubEvent::Device { .. } if self.session.is_session_device() => Flow::Continue,
             HubEvent::Device {
                 event_type,
                 reference_id,

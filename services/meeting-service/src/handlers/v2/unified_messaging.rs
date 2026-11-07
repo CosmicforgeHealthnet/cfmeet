@@ -204,6 +204,106 @@ pub async fn client_token(
     .await
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionTokenRequest {
+    /// Renew the token of this (still active) session device instead of creating one.
+    #[serde(default)]
+    pub session_device_id: Option<Uuid>,
+    /// A shorter lifetime than Messaging's session-device maximum.
+    #[serde(default)]
+    pub ttl_seconds: Option<i64>,
+}
+
+/// The account session of the presented bearer token and that token's expiry.
+fn account_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(Uuid, i64)> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+        })
+        .map(str::trim)
+        .ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "A bearer token is required",
+            )
+        })?;
+    let claims = state.jwt_service.verify_token(token).map_err(|_| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Invalid or expired token",
+        )
+    })?;
+    let session = claims.session_id().ok_or_else(|| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Live updates need a session-bound sign-in; sign in again",
+        )
+    })?;
+    Ok((session, claims.exp))
+}
+
+/// Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed).
+///
+/// Blueprint Section 13 (ADR 0049 amendment A1): returns a Messaging client token bound to
+/// a *session device* of the signed-in user. A session device is not an MLS device: it can
+/// only open the realtime gateway and subscribe to MANAGED conversations; it cannot publish
+/// KeyPackages, join MLS groups, receive PRIVATE_E2EE ciphertext, use device-direct REST
+/// operations or count as an end-to-end encrypted device. It is bound to the caller's
+/// account session: the token never outlives the presented access token, every renewal
+/// re-verifies the session, and signing out (this session, everywhere, or a security
+/// revocation) ends it. Send `sessionDeviceId` to renew the same session device (an open
+/// connection then continues with `auth.refresh`). Answers FEATURE_DISABLED while
+/// Messaging has session devices switched off.
+#[utoipa::path(
+    post, path = "/api/v2/messaging/session-tokens", tag = "Messaging (v2)", operation_id = "v2_messaging_session_token",
+    request_body = Object,
+    responses((status = 201, description = "Session-device client token (Messaging contract)", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED (no session-bound sign-in)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn session_token(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let um = integration(&state)?;
+    let user = verified_user(&actor)?;
+    let request: SessionTokenRequest = if body.is_empty() {
+        SessionTokenRequest::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::domain(
+                ErrorCode::ValidationError,
+                "The body may name only sessionDeviceId and ttlSeconds",
+            )
+        })?
+    };
+    let (session, expires) = account_session(&state, &headers)?;
+    let not_after = chrono::DateTime::from_timestamp(expires, 0).ok_or_else(|| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Invalid or expired token",
+        )
+    })?;
+    let (status, value) = um
+        .issue_session_token(
+            user,
+            session,
+            not_after,
+            request.session_device_id,
+            request.ttl_seconds,
+        )
+        .await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
+}
+
 /// End every Messaging client session of the caller (all devices).
 ///
 /// Asks the Messaging service to revoke every client session of the signed-in user's principal, on
@@ -512,6 +612,33 @@ pub async fn relay_put(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     relay_operation(state, actor, Method::PUT, path, query, headers, body).await
+}
+
+/// Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message).
+///
+/// Forwards an allowlisted PATCH of the Messaging client API (updating a conversation's
+/// lifecycle, expiry, retention or display title, changing a member's role, or editing a
+/// MANAGED message with its `expectedEditCount`) to the Messaging service, acting as the
+/// caller's own principal, which is never taken from the request. The JSON body (at most
+/// 1 MiB; empty means `{}`) is forwarded as-is; Messaging enforces ownership, roles and
+/// optimistic concurrency. Paths outside the allowlist return ENDPOINT_NOT_FOUND and are
+/// not forwarded. Messaging's status and JSON body are returned unchanged.
+#[utoipa::path(
+    patch, path = "/api/v2/messaging/relay/{path}", tag = "Messaging (v2)", operation_id = "v2_messaging_relay_patch",
+    params(("path" = String, Path, description = "An allowlisted Messaging customer path under v1/")),
+    request_body = Object,
+    responses((status = 200, description = "Messaging contract answer (status relayed)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ENDPOINT_NOT_FOUND (not relayed)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn relay_patch(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path(path): Path<String>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    relay_operation(state, actor, Method::PATCH, path, query, headers, body).await
 }
 
 /// Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation).
