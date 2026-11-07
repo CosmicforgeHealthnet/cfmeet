@@ -877,6 +877,58 @@ async fn concurrent_invitation_creation_cannot_survive_disabling_and_reenabling_
     h.close().await;
 }
 
+/// Blueprint Section 11: the Account learns only which recipients turned meeting
+/// notifications off; only the Meeting Service with `communications-preferences.read` may ask.
+#[tokio::test]
+async fn meeting_notification_opt_outs_are_listed_for_the_account_only() {
+    let h = Harness::new().await;
+    let quiet = h.account();
+    let loud = h.account();
+    let quiet_profile = h.profile(&quiet).await;
+    let loud_profile = h.profile(&loud).await;
+    let without_profile = format!("cfmeet-user:{}", Uuid::new_v4());
+    execute(&h.state.store.db,
+        "INSERT INTO communication_notification_preferences(profile_id,meeting_invitations) VALUES($1,false),($2,true)",
+        vec![quiet_profile.id.into(), loud_profile.id.into()]).await.unwrap();
+    let path = "/internal/v1/communications/notification-preferences/resolve";
+    let body = json!({"category":"MEETINGS","accountReferences":[quiet.account_reference,loud.account_reference,without_profile]});
+    let (status, result) = h
+        .http(&h.account_signer, path, body.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["schemaVersion"], 1);
+    assert_eq!(result["optedOut"], json!([quiet.account_reference]));
+    // Any other caller is refused (Calling holds communications-policy.check only).
+    let (status, _) = h
+        .http(&h.calling_signer, path, body.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 403);
+    // Bounded, canonical input only.
+    for bad in [
+        json!({"category":"CALLS","accountReferences":[quiet.account_reference]}),
+        json!({"category":"MEETINGS","accountReferences":[]}),
+        json!({"category":"MEETINGS","accountReferences":["someone@example.com"]}),
+        json!({"category":"MEETINGS","accountReferences":[quiet.account_reference,quiet.account_reference]}),
+        json!({"category":"MEETINGS","accountReferences":[quiet.account_reference],"extra":true}),
+    ] {
+        let (status, _) = h.http(&h.account_signer, path, bad, h.scope.clone()).await;
+        assert_eq!(status, 400);
+    }
+    let many: Vec<String> = (0..101)
+        .map(|_| format!("cfmeet-user:{}", Uuid::new_v4()))
+        .collect();
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            path,
+            json!({"category":"MEETINGS","accountReferences":many}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 400);
+    h.close().await;
+}
+
 /// Section 14 (ACC-010): an account that never opened the Hub still has its Messaging
 /// and Calling credentials revoked. The Hub asks Account for the principal and fans the
 /// revocation out durably, exactly once per Account event.

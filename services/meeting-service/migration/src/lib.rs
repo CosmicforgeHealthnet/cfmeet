@@ -30,6 +30,8 @@ mod m20261103_000001_communications_account_authority;
 mod m20261105_000001_communications_meeting_facade;
 mod m20261106_000001_account_security;
 mod m20261107_000001_meetings_calendar;
+mod m20261108_000001_account_profile;
+mod m20261108_000002_meeting_notifications;
 
 pub mod phase2_backfill;
 
@@ -251,6 +253,57 @@ pub async fn meetings_calendar_ready<C: sea_orm_migration::sea_orm::ConnectionTr
         ))
         .await?;
     let known: std::collections::BTreeSet<_> = MeetingsCalendarMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
+/// Blueprint v1.0 Sections 9 and 11: the personal account profile (nullable `users`
+/// columns) and durable meeting notification jobs. A SEPARATE additive history so the
+/// previously deployed image still starts after it is applied (rollback safety).
+pub struct ProfileNotificationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ProfileNotificationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261108_000001_account_profile::Migration),
+            Box::new(m20261108_000002_meeting_notifications::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("profile_notifications_migrations").into_iden()
+    }
+}
+
+/// Exactly the known profile/notifications history has been applied.
+pub async fn profile_notifications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('public.profile_notifications_migrations') IS NOT NULL AS present"
+                .to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM profile_notifications_migrations".to_owned(),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = ProfileNotificationsMigrator::migrations()
         .iter()
         .map(|m| m.name().to_owned())
         .collect();

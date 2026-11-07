@@ -14,6 +14,7 @@ pub mod meetings;
 pub mod model;
 pub mod owners;
 pub mod policy;
+pub mod preferences;
 pub mod profiles;
 pub mod relationships;
 pub mod store;

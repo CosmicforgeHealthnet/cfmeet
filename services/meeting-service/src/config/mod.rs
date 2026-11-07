@@ -3,6 +3,7 @@ mod email;
 mod features;
 mod livekit;
 pub mod logging;
+pub mod notifications;
 pub mod operations;
 mod redis;
 

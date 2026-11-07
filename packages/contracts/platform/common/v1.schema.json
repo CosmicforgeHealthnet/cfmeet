@@ -88,6 +88,7 @@
         "communications-profile.suspend",
         "meeting-communications.read",
         "meeting-communications.create",
+        "communications-preferences.read",
         "communication.authorize",
         "communication-context.read",
         "protected-contact.resolve-for-execution",

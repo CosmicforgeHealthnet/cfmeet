@@ -67,8 +67,9 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // Section 4 first-party organization operations + 3 Blueprint Section 10 calendar
     // operations (agenda, conference and meeting-space ICS) + 2 Blueprint Section 8
     // workspace-context operations (workspaces, workspace capabilities) + 2 Blueprint
-    // Section 13 Messaging operations (relay PATCH, MANAGED-realtime session tokens).
-    assert_eq!(probed, 181, "all v2 operations probed");
+    // Section 13 Messaging operations (relay PATCH, MANAGED-realtime session tokens) + 2
+    // Blueprint Section 9 account-profile operations (read, update).
+    assert_eq!(probed, 183, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

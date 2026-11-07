@@ -234,7 +234,7 @@ impl PreJoinService {
                 .one(&self.core.db)
                 .await?
                 .map(|u| PreJoinOrganizer {
-                    display_name: u.username,
+                    display_name: u.presentation_name(),
                 }),
             None => None,
         };

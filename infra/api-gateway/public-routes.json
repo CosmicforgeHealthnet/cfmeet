@@ -2237,6 +2237,20 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/me/profile",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/me/profile",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/meeting-spaces",
       "class": "PUBLIC_CUSTOMER"
     },

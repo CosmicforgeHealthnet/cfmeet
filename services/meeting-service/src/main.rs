@@ -146,6 +146,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Meetings calendar migration is required (meetings-calendar-migration up)");
     }
 
+    // Blueprint Sections 9 and 11: profile columns on `users` and notification jobs live
+    // in their own additive history (`profile-notifications-migration up`).
+    if !migration::profile_notifications_ready(&state.db)
+        .await
+        .expect("Profile/notifications migration readiness")
+    {
+        panic!("Profile/notifications migration is required (profile-notifications-migration up)");
+    }
+
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
     // stopped startup there).
@@ -162,6 +171,16 @@ async fn main() -> anyhow::Result<()> {
 
     state.communications = backend::services::communications::Bridge::from_env()
         .unwrap_or_else(|e| panic!("Communications configuration error: {e}"));
+    // Blueprint Section 11: recipient notification preferences live in the Hub when it is
+    // configured (signed read); otherwise no preference exists.
+    if let Some(bridge) = state.communications.clone() {
+        state.notifier = std::sync::Arc::new(backend::services::notifications::Notifier::new(
+            state.email_service.clone(),
+            std::sync::Arc::new(backend::services::notifications::HubPreferences::new(
+                bridge,
+            )),
+        ));
+    }
     if state.communications.is_some() {
         if !migration::communications_ready(&state.db)
             .await
@@ -204,6 +223,24 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         tracing::info!("ℹ️ Email worker not started (SMTP not configured)");
+        None
+    };
+
+    // Blueprint Section 11: meeting notifications (reschedule/cancel notices, reminders).
+    // Off unless NOTIFICATIONS_EMAIL_ENABLED=true; emails still need the SMTP worker above.
+    let notification_context =
+        backend::services::notifications::NotificationContext::from_state(&state);
+    let _notification_worker = if notification_context.config.email_enabled {
+        if email_config.smtp_host.is_empty() {
+            tracing::warn!(
+                "Notification email is enabled but SMTP is not configured: emails stay queued"
+            );
+        }
+        Some(backend::services::notifications::spawn_worker(
+            notification_context,
+        ))
+    } else {
+        tracing::info!("ℹ️ Notification email disabled (NOTIFICATIONS_EMAIL_ENABLED)");
         None
     };
 

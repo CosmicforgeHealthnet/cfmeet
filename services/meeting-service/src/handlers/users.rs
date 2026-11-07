@@ -1,19 +1,38 @@
 use axum::{extract::State, Extension, Json};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use validator::Validate;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 use crate::{
     dto::{MessageResponse, UpdateMeRequest, UserMeResponse},
     error::{ApiError, ApiResult},
     middleware::AuthContext,
     models::users::{self, Entity as Users},
+    services::account_profile::{self as profile, ApplyError, ProfileChange},
     state::AppState,
 };
+
+/// v1 representation (ACC-022: one status rendering for every v1 sign-in response).
+fn me_response(state: &AppState, user: users::Model) -> UserMeResponse {
+    UserMeResponse {
+        id: user.id,
+        status: state
+            .auth_policy
+            .status_format
+            .render(&user.status)
+            .to_owned(),
+        role: format!("{:?}", user.role).to_lowercase(),
+        created_at: user.created_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        email: user.email,
+        username: user.username,
+    }
+}
 
 /// Get current authenticated user's information
 ///
 /// Returns the full user profile for the authenticated user.
-/// Requires authentication via JWT token.
+/// Requires authentication via JWT token. `status` is `pending_verification`, `active`,
+/// `inactive` or `suspended`; until `ACCOUNT_STATUS_FORMAT=canonical` is set the unverified
+/// state is spelled `pendingverification` (historical v1 value). The full profile (display
+/// name, avatar, time zone, locale) is `GET /api/v2/me/profile`.
 #[utoipa::path(
     get,
     path = "/api/v1/users/me",
@@ -31,31 +50,19 @@ pub async fn get_current_user(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,
 ) -> ApiResult<Json<UserMeResponse>> {
-    // Query user from database
     let user = Users::find_by_id(auth_context.user_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::Unauthorized("User not found".to_string()))?;
-
-    // Map to response DTO
-    let response = UserMeResponse {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: format!("{:?}", user.role).to_lowercase(),
-        status: format!("{:?}", user.status)
-            .to_lowercase()
-            .replace('_', "_"),
-        created_at: user.created_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-    };
-
-    Ok(Json(response))
+    Ok(Json(me_response(&state, user)))
 }
 
 /// Update current authenticated user's profile
 ///
-/// Allows users to update their username. Email, role, status, and password
-/// cannot be updated through this endpoint.
+/// Allows users to update their username (3-50 letters, digits or underscores after
+/// surrounding spaces are removed: the registration rule). Email, role, status, and password
+/// cannot be updated through this endpoint. Display name, avatar, time zone and locale are
+/// changed with `PATCH /api/v2/me/profile`.
 #[utoipa::path(
     patch,
     path = "/api/v1/users/me",
@@ -77,71 +84,29 @@ pub async fn update_current_user(
     Extension(auth_context): Extension<AuthContext>,
     Json(payload): Json<UpdateMeRequest>,
 ) -> ApiResult<Json<UserMeResponse>> {
-    // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
-
-    // Check if at least one field is provided
-    if payload.username.is_none() {
+    let Some(username) = payload.username else {
         return Err(ApiError::BadRequest(
             "No fields to update. Please provide at least one field.".to_string(),
         ));
-    }
-
-    // Query current user from database
-    let user = Users::find_by_id(auth_context.user_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| ApiError::Unauthorized("User not found".to_string()))?;
-
-    // Check if username is being changed and if it's already taken
-    if let Some(ref new_username) = payload.username {
-        let trimmed_username = new_username.trim();
-
-        // Only check if username is actually different
-        if trimmed_username != user.username {
-            let existing_user = Users::find()
-                .filter(users::Column::Username.eq(trimmed_username))
-                .one(&state.db)
-                .await?;
-
-            if existing_user.is_some() {
-                return Err(ApiError::Conflict("Username is already taken".to_string()));
-            }
-        }
-    }
-
-    // Update user using ActiveModel
-    let mut user_active: users::ActiveModel = user.into();
-
-    // Update fields if provided
-    if let Some(username) = payload.username {
-        user_active.username = Set(username.trim().to_string());
-    }
-
-    // Always update the updated_at timestamp
-    user_active.updated_at = Set(chrono::Utc::now().naive_utc());
-
-    // Save changes
-    let updated_user = user_active.update(&state.db).await?;
-
-    // Return updated user profile
-    let response = UserMeResponse {
-        id: updated_user.id,
-        email: updated_user.email,
-        username: updated_user.username,
-        role: format!("{:?}", updated_user.role).to_lowercase(),
-        status: format!("{:?}", updated_user.status)
-            .to_lowercase()
-            .replace('_', "_"),
-        created_at: updated_user
-            .created_at
-            .format("%Y-%m-%dT%H:%M:%SZ")
-            .to_string(),
     };
-
-    Ok(Json(response))
+    // ACC-021: the registration rule, applied to the trimmed value.
+    let change = ProfileChange {
+        username: Some(username),
+        ..Default::default()
+    }
+    .validated()
+    .map_err(|e| ApiError::ValidationError(e.0.to_string()))?;
+    let updated = match profile::apply(&state.db, auth_context.user_id, &change).await {
+        Ok(u) => u,
+        Err(ApplyError::NotFound) => {
+            return Err(ApiError::Unauthorized("User not found".to_string()))
+        }
+        Err(ApplyError::UsernameTaken) => {
+            return Err(ApiError::Conflict("Username is already taken".to_string()))
+        }
+        Err(ApplyError::Db(e)) => return Err(e),
+    };
+    Ok(Json(me_response(&state, updated)))
 }
 
 /// Deactivate current user's account (soft delete)

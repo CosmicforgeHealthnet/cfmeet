@@ -1,3 +1,4 @@
+pub mod account_profile;
 pub mod account_security;
 pub mod auth;
 pub mod email;
@@ -26,6 +27,7 @@ pub mod meeting_events;
 pub mod meeting_permissions;
 pub mod meeting_space;
 pub mod membership;
+pub mod notifications;
 pub mod ops_metrics;
 pub mod organization_export;
 pub mod organizations;
