@@ -986,6 +986,72 @@ impl OrganizationsAuthority {
         }
     }
 
+    /// The acting user's verified organizations (ACTIVE, non-GUEST memberships of ACTIVE
+    /// organizations) with each one's CF Meet creation time, from the local projection
+    /// (refreshed with the authority's name) or, for an organization not yet projected,
+    /// from the authoritative snapshot.
+    pub async fn my_organizations(
+        &self,
+        db: &DatabaseConnection,
+        actor: &ActingUser,
+    ) -> Result<Vec<(UserOrganization, DateTime<Utc>)>, ApiError> {
+        let items: Vec<UserOrganization> = match self.user_organizations(actor).await {
+            Ok(items) => items
+                .into_iter()
+                .filter(UserOrganization::grants_meeting_membership)
+                .collect(),
+            Err(AuthorityError::Refused(reply)) => return Err(relayed_error(&reply)),
+            Err(AuthorityError::Unavailable(_)) => return Err(unavailable()),
+        };
+        let ids: Vec<Uuid> = items.iter().map(|i| i.organization_id).collect();
+        let rows = db
+            .query_all(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT id, created_at FROM organizations WHERE id = ANY($1)",
+                [ids.into()],
+            ))
+            .await?;
+        let mut created = BTreeMap::new();
+        for r in rows {
+            let id: Uuid = r.try_get("", "id")?;
+            let at: DateTime<Utc> = r.try_get("", "created_at")?;
+            created.insert(id, at);
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let created_at = match created.get(&item.organization_id) {
+                Some(at) => {
+                    // Keep the projection's name and status current (best effort).
+                    let refreshed = db
+                        .execute(Statement::from_sql_and_values(
+                            DbBackend::Postgres,
+                            "UPDATE organizations SET name = $2, status = 'ACTIVE' \
+                             WHERE id = $1 AND (name <> $2 OR status <> 'ACTIVE')",
+                            [
+                                item.organization_id.into(),
+                                item.name.chars().take(200).collect::<String>().into(),
+                            ],
+                        ))
+                        .await;
+                    if refreshed.is_err() {
+                        bump(
+                            &self.stats.projection_failures,
+                            &OM.organizations_projection_failures,
+                        );
+                    }
+                    *at
+                }
+                None => {
+                    self.ensure_projection(db, item.organization_id)
+                        .await?
+                        .created_at
+                }
+            };
+            out.push((item, created_at));
+        }
+        Ok(out)
+    }
+
     // -- directory --------------------------------------------------------------------
 
     async fn authoritative_organizations(&self, user_id: Uuid) -> Vec<Uuid> {

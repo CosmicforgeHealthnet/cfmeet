@@ -14,7 +14,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -511,54 +510,9 @@ pub async fn my_organizations(
     if let Some(authority) = authoritative(&state) {
         let user = actor.require_registered()?;
         let acting = ActingUser::of(user);
-        let items: Vec<_> = authority
-            .user_organizations(&acting)
-            .await
-            .map_err(authority_error)?
-            .into_iter()
-            .filter(|i| i.grants_meeting_membership())
-            .collect();
-        let ids: Vec<Uuid> = items.iter().map(|i| i.organization_id).collect();
-        let rows = state
-            .db
-            .query_all(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "SELECT id, created_at FROM organizations WHERE id = ANY($1)",
-                [ids.into()],
-            ))
-            .await?;
-        let mut created = std::collections::HashMap::new();
-        for r in rows {
-            let id: Uuid = r.try_get("", "id")?;
-            let at: chrono::DateTime<chrono::Utc> = r.try_get("", "created_at")?;
-            created.insert(id, at);
-        }
+        let items = authority.my_organizations(&state.db, &acting).await?;
         let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            let created_at = match created.get(&item.organization_id) {
-                Some(at) => {
-                    // Keep the projection's name and status current (best effort).
-                    let _ = state
-                        .db
-                        .execute(Statement::from_sql_and_values(
-                            DbBackend::Postgres,
-                            "UPDATE organizations SET name = $2, status = 'ACTIVE' \
-                             WHERE id = $1 AND (name <> $2 OR status <> 'ACTIVE')",
-                            [
-                                item.organization_id.into(),
-                                item.name.chars().take(200).collect::<String>().into(),
-                            ],
-                        ))
-                        .await;
-                    *at
-                }
-                None => {
-                    authority
-                        .ensure_projection(&state.db, item.organization_id)
-                        .await?
-                        .created_at
-                }
-            };
+        for (item, created_at) in items {
             out.push(MyOrganizationResponse {
                 organization: OrganizationResponse {
                     id: item.organization_id,

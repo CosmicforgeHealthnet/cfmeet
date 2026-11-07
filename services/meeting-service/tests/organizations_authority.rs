@@ -439,6 +439,15 @@ impl Fake {
         self.state.requests.lock().unwrap().clone()
     }
 
+    /// Requests other than the membership resolution every authenticated request makes
+    /// in authoritative mode (the directory read of the account authority).
+    fn relayed(&self) -> usize {
+        self.requests()
+            .iter()
+            .filter(|r| r.path != "/internal/v1/organizations/memberships/resolve")
+            .count()
+    }
+
     fn last(&self, method: &str, path: &str) -> Recorded {
         self.requests()
             .into_iter()
@@ -1014,7 +1023,7 @@ async fn s4_relay_acts_only_for_the_verified_account() {
     );
 
     // No credential → nothing reaches Organizations.
-    let before = fake.requests().len();
+    let before = fake.relayed();
     let (s, v) = app
         .call_with_headers(
             Method::GET,
@@ -1027,7 +1036,7 @@ async fn s4_relay_acts_only_for_the_verified_account() {
         (s, code(&v)),
         (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
     );
-    assert_eq!(fake.requests().len(), before);
+    assert_eq!(fake.relayed(), before);
     // Unknown query parameters are refused before relaying.
     let (s, v) = app
         .get(
@@ -1039,7 +1048,7 @@ async fn s4_relay_acts_only_for_the_verified_account() {
         )
         .await;
     assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
-    assert_eq!(fake.requests().len(), before);
+    assert_eq!(fake.relayed(), before);
     // Every relayed request carried a token Organizations verified.
     assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
     assert!(fake
