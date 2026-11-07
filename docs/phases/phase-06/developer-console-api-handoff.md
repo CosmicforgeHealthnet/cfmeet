@@ -112,3 +112,35 @@ response and request `$defs`.
   APIs under `/internal/v1/operator/**`. They are never available from the customer
   console.
 * There is no ticketing system. The support profile is routing metadata only.
+
+## Blueprint v1.0 Section 15 status (ORG-017)
+
+**ORG-017** ("Developer organization console … is backend-only", P2) is **frontend-owned**
+(disposition `FRONTEND_CORRECTED`). The backend APIs the console needs exist, are served by
+the Developer Platform behind the gateway (`DEVELOPER_SESSION`), and are in
+`packages/contracts/platform-developer/http/v1.openapi.json`:
+
+| Console area | Operation ids |
+|---|---|
+| Self-service organizations | `listOrganizations`, `createOrganization`, `getOrganization`, `updateOrganization`, `closeOrganization` |
+| Members | `listMembers`, `changeMemberRole`, `removeMember` |
+| Invitations | `listInvitations`, `createInvitation`, `revokeInvitation`, `acceptInvitation` |
+| Ownership transfer | `transferOwnership` |
+| Projects, scopes, environments | `listProjects`, `createProject`, `getProject`, `updateProject`, `archiveProject`, `suspendProject`, `resumeProject`, `listProjectScopes`, `grantProjectScope`, `withdrawProjectScope`, `listScopeRegistry`, `listEnvironments`, `createEnvironment`, `getEnvironment`, `suspendEnvironment`, `resumeEnvironment`, `getEnvironmentEntitlements` |
+| Service accounts | `listServiceAccounts`, `createServiceAccount`, `getServiceAccount`, `suspendServiceAccount`, `resumeServiceAccount`, `putServiceAccountLimits` |
+| Credentials | `listCredentials`, `createCredential`, `getCredential`, `rotateCredential`, `revokeCredential`, `suspendCredential`, `resumeCredential`, `putCredentialLimits`, `getCredentialPolicy`, `putCredentialPolicy` |
+| Activity, support | `listActivity`, `getSupportProfile`, `putSupportProfile` |
+
+Section 15 backend changes that the console can use (check the contract version at the
+release SHA): organization creation can no longer leave an orphaned Platform Access tenant
+(ORG-014), an organization rename propagates to the Platform Access tenant (ORG-013), and
+credential reads carry last-used and expiry-warning data (PLT-008).
+
+Still open for the console, outside Section 15:
+
+* the gateway and the Developer Platform must be activated first (PLT-005,
+  [`docs/operations/developer-platform-gateway-activation-checklist.md`](../../operations/developer-platform-gateway-activation-checklist.md));
+* the product decision on one organization switcher (ORG-001 / PLT-010) should come
+  before the console, so the web app does not show two organization models;
+* the organization view does not return `createdBy` or a technical-contact member id
+  (support contacts are in `getSupportProfile`).

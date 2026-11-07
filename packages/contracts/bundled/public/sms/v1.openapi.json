@@ -2,10 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet public API — sms",
-    "version": "1.2.0",
-    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB.",
+    "version": "1.3.0",
+    "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB. 1.3.0: x-cfmeet-required-scope (the API Gateway scope pre-check): sms.read on message / thread reads, sms.send on sending and opt-outs (Section 15, PLT-011).",
     "x-cfmeet-source-contract": "cfmeet.sms-gateway.http-api",
-    "x-cfmeet-source-version": "1.2.0"
+    "x-cfmeet-source-version": "1.3.0"
   },
   "servers": [
     {
@@ -26,6 +26,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "One message of the credential's environment (scope sms.read). Another environment's message is NOT_FOUND. Content is returned to its owner only; the remote party is masked.",
         "parameters": [
           {
@@ -83,6 +84,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "Messages of the environment, newest first (scope sms.read), optionally of one number (`numberResourceId`) or direction.",
         "parameters": [
           {
@@ -165,6 +167,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.send",
         "description": "Sends ONE message (scope sms.send, Idempotency-Key required). Validation, segmentation (CONTENT_TOO_LONG above 10 segments), the safety controls (SMS_BLOCKED with a reason, recorded; 429 RATE_LIMITED for rate windows, not recorded), Numbering's single-use SMS_SENDER grant (an arbitrary sender id is impossible; refusal = SMS_BLOCKED SENDER_NOT_AUTHORIZED; Numbering unreachable = 503 NUMBERING_UNAVAILABLE, nothing recorded), then a durable AUTHORIZED transport submitted by the dispatcher. 202 with the message; the same key replays it (200).",
         "parameters": [
           {
@@ -249,6 +252,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "Transport threads of the environment, most recent first (scope sms.read).",
         "parameters": [
           {
@@ -325,6 +329,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "The messages of one thread, newest first (scope sms.read).",
         "parameters": [
           {
@@ -404,6 +409,7 @@
             "customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.send",
         "description": "Blocks a recipient for one number or the whole environment (scope sms.send). Idempotent.",
         "requestBody": {
           "required": true,

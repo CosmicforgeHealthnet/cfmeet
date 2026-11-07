@@ -2,10 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet public API — developer-platform",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests.",
     "x-cfmeet-source-contract": "cfmeet.developer-platform.http-api",
-    "x-cfmeet-source-version": "1.5.0"
+    "x-cfmeet-source-version": "1.6.0"
   },
   "servers": [
     {
@@ -6220,6 +6220,8 @@
           "rotatedFromCredentialId",
           "supersededByCredentialId",
           "supersessionValidUntil",
+          "lastAuthenticatedAt",
+          "expiringSoon",
           "createdAt",
           "updatedAt",
           "limits"
@@ -6396,6 +6398,29 @@
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAuthenticatedAt": {
+            "description": "Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began.",
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiringSoon": {
+            "description": "Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority.",
+            "oneOf": [
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"

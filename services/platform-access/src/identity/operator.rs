@@ -70,6 +70,7 @@ text_enum!(
         CredentialResumed = "CREDENTIAL_RESUMED",
         ProductionEnvironmentActivated = "PRODUCTION_ENVIRONMENT_ACTIVATED",
         OrganizationScopeProvisioned = "ORGANIZATION_SCOPE_PROVISIONED",
+        TenantRenamed = "TENANT_RENAMED",
     }
 );
 
@@ -236,6 +237,102 @@ where
     Ok(value)
 }
 
+/// Largest page of the operator audit read.
+pub const AUDIT_PAGE_MAX: u64 = 200;
+
+/// Filters of the operator audit read (Section 15, PLT-009: `GET /internal/v1/admin/audit`).
+/// Every filter is optional and they combine with AND; `before` is the keyset position of
+/// the last row of the previous page (newest first).
+#[derive(Debug, Clone, Default)]
+pub struct AuditQuery {
+    pub tenant_id: Option<Uuid>,
+    pub target_kind: Option<AuditTargetKind>,
+    pub target_id: Option<Uuid>,
+    pub actor: Option<String>,
+    pub action: Option<OperatorAction>,
+    pub correlation_id: Option<String>,
+    pub before: Option<(DateTime<Utc>, Uuid)>,
+    pub limit: u64,
+}
+
+/// One page of the operator audit trail: rows (newest first) and the keyset position of
+/// the next page (`None`: last page).
+#[derive(Debug, Clone)]
+pub struct AuditPage {
+    pub items: Vec<Value>,
+    pub next: Option<(DateTime<Utc>, Uuid)>,
+}
+
+/// Reads the append-only operator audit trail (read-only; audit rows only ever hold
+/// opaque ids and bounded codes, so they are returned as recorded).
+pub async fn audit_trail<C: ConnectionTrait>(db: &C, q: &AuditQuery) -> PlatformResult<AuditPage> {
+    let limit = q.limit.clamp(1, AUDIT_PAGE_MAX);
+    let bad_correlation = |c: &str| {
+        !(8..=64).contains(&c.len())
+            || !c
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    };
+    if q.actor.as_deref().is_some_and(|a| !valid_operator(a))
+        || q.correlation_id.as_deref().is_some_and(bad_correlation)
+    {
+        return Err(PlatformError::Validation(
+            "the actor / correlationId filter is malformed".to_string(),
+        ));
+    }
+    let (before_at, before_id) = q
+        .before
+        .map(|(a, i)| (Some(a), Some(i)))
+        .unwrap_or((None, None));
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id, occurred_at, jsonb_build_object( \
+                 'id', id, 'actor', actor, 'correlationId', correlation_id, 'action', action, \
+                 'targetKind', target_kind, 'targetId', target_id, 'tenantId', tenant_id, \
+                 'applicationId', application_id, 'environmentId', environment_id, \
+                 'detail', detail, 'occurredAt', occurred_at) AS v \
+             FROM platform_access_audit \
+             WHERE ($1::uuid IS NULL OR tenant_id = $1) \
+               AND ($2::text IS NULL OR target_kind = $2) \
+               AND ($3::uuid IS NULL OR target_id = $3) \
+               AND ($4::text IS NULL OR actor = $4) \
+               AND ($5::text IS NULL OR action = $5) \
+               AND ($6::text IS NULL OR correlation_id = $6) \
+               AND ($7::timestamptz IS NULL OR (occurred_at, id) < ($7, $8::uuid)) \
+             ORDER BY occurred_at DESC, id DESC LIMIT $9",
+            [
+                q.tenant_id.into(),
+                q.target_kind.map(|k| k.as_str().to_string()).into(),
+                q.target_id.into(),
+                q.actor.clone().into(),
+                q.action.map(|a| a.as_str().to_string()).into(),
+                q.correlation_id.clone().into(),
+                before_at.into(),
+                before_id.into(),
+                ((limit + 1) as i64).into(),
+            ],
+        ))
+        .await?;
+    let mut items = Vec::new();
+    let mut last = None;
+    for r in rows.iter().take(limit as usize) {
+        items.push(r.try_get::<Value>("", "v")?);
+        last = Some((
+            r.try_get::<DateTime<Utc>>("", "occurred_at")?,
+            r.try_get::<Uuid>("", "id")?,
+        ));
+    }
+    Ok(AuditPage {
+        items,
+        next: if rows.len() as u64 > limit {
+            last
+        } else {
+            None
+        },
+    })
+}
+
 /// Opens the mutation's transaction, runs it, audits it and commits — all or nothing.
 macro_rules! audited {
     ($self:ident, $op:ident, |$txn:ident| $body:expr) => {{
@@ -281,6 +378,27 @@ impl PlatformService {
             )
             .scope(Some(t.id.as_uuid()), None, None)
             .detail(json!({ "status": status.as_str() }));
+            (t, entry)
+        })
+    }
+
+    /// Renames a tenant (Section 15, ORG-013): the Developer Platform propagates an
+    /// organization rename so operator, audit and consumer views show the same name.
+    pub async fn operator_rename_tenant(
+        &self,
+        op: &OperatorContext,
+        id: TenantId,
+        display_name: &str,
+    ) -> PlatformResult<TenantView> {
+        audited!(self, op, |txn| {
+            let t = self.rename_tenant_in(&txn, id, display_name).await?;
+            let entry = AuditEntry::new(
+                OperatorAction::TenantRenamed,
+                AuditTargetKind::Tenant,
+                t.id.as_uuid(),
+            )
+            .scope(Some(t.id.as_uuid()), None, None)
+            .detail(json!({ "revision": t.revision }));
             (t, entry)
         })
     }
@@ -802,9 +920,9 @@ mod tests {
 
     #[test]
     fn the_action_vocabulary_is_the_tables() {
-        // Kept in step with migrations 000003 / 000004 / 000005 (an unknown code is
-        // refused there).
-        assert_eq!(OperatorAction::ALL.len(), 24);
+        // Kept in step with migrations 000003 / 000004 / 000005 / 000006 (an unknown code
+        // is refused there).
+        assert_eq!(OperatorAction::ALL.len(), 25);
         assert_eq!(AuditTargetKind::ALL.len(), 7);
     }
 }

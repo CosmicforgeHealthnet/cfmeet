@@ -479,6 +479,8 @@ use developer_platform::{
 pub struct MemTenant {
     pub classification: String,
     pub status: String,
+    pub slug: Option<String>,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -569,9 +571,26 @@ impl MemoryPlatformAccess {
             MemTenant {
                 classification: "FIRST_PARTY".into(),
                 status: "ACTIVE".into(),
+                slug: None,
+                display_name: "First party".into(),
             },
         );
         id
+    }
+
+    /// The display name Platform Access holds for `id` (Section 15, ORG-013).
+    pub fn tenant_name(&self, id: Uuid) -> String {
+        self.tenants.lock().unwrap()[&id].display_name.clone()
+    }
+
+    /// The tenant created under `slug`, if any (Section 15, ORG-014).
+    pub fn tenant_by_slug(&self, slug: &str) -> Option<Uuid> {
+        self.tenants
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, t)| t.slug.as_deref() == Some(slug))
+            .map(|(id, _)| *id)
     }
 
     pub fn tenant_status(&self, id: Uuid) -> String {
@@ -649,7 +668,7 @@ impl MemoryPlatformAccess {
             "notBefore": c.created_at.to_rfc3339(), "expiresAt": c.expires_at.to_rfc3339(),
             "revokedAt": null, "suspendedAt": if c.suspended { json!(c.created_at.to_rfc3339()) } else { Value::Null },
             "rotatedFromCredentialId": null, "supersededByCredentialId": c.superseded_by,
-            "supersessionValidUntil": null, "verifierAlgorithm": "HMAC-SHA256", "verifierKeyVersion": 1,
+            "supersessionValidUntil": null, "lastAuthenticatedAt": null, "expiringSoon": false, "verifierAlgorithm": "HMAC-SHA256", "verifierKeyVersion": 1,
             "revision": 1, "createdAt": c.created_at.to_rfc3339(), "updatedAt": c.created_at.to_rfc3339(),
         })
     }
@@ -741,7 +760,7 @@ impl MemoryPlatformAccess {
     }
 
     fn view_tenant(id: Uuid, t: &MemTenant) -> Value {
-        json!({ "id": id, "classification": t.classification, "status": t.status })
+        json!({ "id": id, "classification": t.classification, "status": t.status, "slug": t.slug, "displayName": t.display_name })
     }
 }
 
@@ -829,15 +848,51 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             _ => 0,
         };
         match call {
-            DelegationCall::CreateTenant { .. } => {
+            DelegationCall::CreateTenant {
+                slug, display_name, ..
+            } => {
+                let mut tenants = self.tenants.lock().unwrap();
+                if tenants
+                    .values()
+                    .any(|t| t.slug.as_deref() == Some(slug.as_str()))
+                {
+                    return refused(409, "CONFLICT");
+                }
                 let id = Uuid::new_v4();
                 let t = MemTenant {
                     classification: "EXTERNAL".into(),
                     status: "ACTIVE".into(),
+                    slug: Some(slug),
+                    display_name,
                 };
                 let v = Self::view_tenant(id, &t);
-                self.tenants.lock().unwrap().insert(id, t);
+                tenants.insert(id, t);
                 Ok(Delegated::Ok(v))
+            }
+            // Platform Access's rules: EXTERNAL tenants only.
+            DelegationCall::GetTenantBySlug { slug } => {
+                let tenants = self.tenants.lock().unwrap();
+                match tenants.iter().find(|(_, t)| {
+                    t.slug.as_deref() == Some(slug.as_str()) && t.classification == "EXTERNAL"
+                }) {
+                    Some((id, t)) => Ok(Delegated::Ok(Self::view_tenant(*id, t))),
+                    None => refused(404, "NOT_FOUND"),
+                }
+            }
+            DelegationCall::RenameTenant {
+                tenant_id,
+                display_name,
+                ..
+            } => {
+                let mut tenants = self.tenants.lock().unwrap();
+                let Some(t) = tenants.get_mut(&tenant_id) else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if t.classification != "EXTERNAL" {
+                    return refused(422, "POLICY_VIOLATION");
+                }
+                t.display_name = display_name;
+                Ok(Delegated::Ok(Self::view_tenant(tenant_id, t)))
             }
             DelegationCall::GetTenant { tenant_id } => {
                 match self.tenants.lock().unwrap().get(&tenant_id) {

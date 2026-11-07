@@ -203,14 +203,14 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "kind": "openapi",
       "path": "platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service (platform-identity.provision-first-party): idempotent create-or-return, read-back and tenant suspension / resumption."
+      "description": "Internal HTTP surface of services/platform-access: GET /health, GET /ready and the service-authenticated /internal/v1 API — credential authentication, credential status, authorization evaluation, trusted context, identity change feed, import receipts, scope registry, principal resolution / registration / tombstone (Calling, Numbering), first-party principal ensure (Meeting Service, Part V H §104) and operator administration (operator console, audited). 1.4.0: Developer Platform delegation of service accounts (create / list / read / suspend / resume in non-production environments; never credentials). 1.5.0: Part VI §54 / §55 delegated credentials, suspension, scope grants, production activation and live telecom. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service (platform-identity.provision-first-party): idempotent create-or-return, read-back and tenant suspension / resumption. 1.7.0 (Blueprint Section 15): operator-only paginated read of the operator audit trail (GET /internal/v1/admin/audit, PLT-009), delegated EXTERNAL tenant rename (ORG-013) and creation-slug lookup for organization-creation reconciliation (ORG-014); credential views add lastAuthenticatedAt and expiringSoon (PLT-008)."
     },
     {
       "id": "cfmeet.numbering.common",
@@ -236,14 +236,14 @@
     },
     {
       "id": "cfmeet.numbering.internal-api",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "numbering/internal/v1.openapi.json",
       "owner": "numbering",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P)."
+      "description": "HTTP surface of services/numbering: GET /health, /ready, /openapi.json (the served contract); customer reads of the caller's own DCN assignments / history / reservations, the catalog, KYC / eligibility (F); 1.4.0 provider-neutral inventory search, countries and number types, reservations (create with Idempotency-Key, list, cancel) (H); 1.5.0 acquisitions (provisioning with eligibility re-evaluation and hold read-back) and provider route configuration (I); provider callbacks (G); and the service-authenticated internal Number Resource view (/internal/v1, number-resource.read). 1.5.0 internal route view and consumer route readiness (number-route.acknowledge). 1.6.0 ownership and assignment: assignment creation / activation on proven readiness, routing revisions, employee offboarding, same-owner transfers, organizational pools and the operator assignment history (J). 1.7.0 routing grants: inbound resolution (number-route.resolve), caller-identity / SMS-sender grants (delegated scope) and authoritative verification (number-grant.verify) (K). 1.8.0 delegated current-assignment view for Calling's caller-identity policy (L). 1.9.0 dedicated SMS destination resolver (number-sms-route.resolve); inbound-resolutions is voice only (M); 1.10.0 the SMS Gateway's sender re-check on number-assignments (Part IV O). 1.11.0 inventoryClass on voice inbound resolutions, grant verifications and current-assignment views (L closure: synthetic test interconnects). 1.12.0 lifecycle stewardship (P–X) and the relay-number import / lease / resolution API (Part P). 1.13.0 x-cfmeet-required-scope (the API Gateway scope pre-check) on the 51 customer operations whose handler requires exactly one registry scope; GET /v1/numbers/catalog/countries/{countryCode} accepts numbers.search OR numbers.read and stays upstream-checked (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.numbering.routing-grant",
@@ -522,14 +522,14 @@
     },
     {
       "id": "cfmeet.sms-gateway.http-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "sms-gateway/http/v1.openapi.json",
       "owner": "sms-gateway",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O)."
+      "description": "HTTP surface of services/sms-gateway, served at /openapi.json: health, readiness; 1.1.0 message / thread reads (sms.read) and the inbound provider callback (N); 1.2.0 sending (sms.send, Idempotency-Key), opt-outs and delivery receipts (O). 1.3.0 x-cfmeet-required-scope (the API Gateway scope pre-check): sms.read on message / thread reads, sms.send on sending and opt-outs (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.sms-gateway.internal-api",
@@ -566,14 +566,14 @@
     },
     {
       "id": "cfmeet.messaging.http-api",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "kind": "openapi",
       "path": "messaging/http/v1.openapi.json",
       "owner": "messaging",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head). 1.3.0 membership, messages, permalinks, read cursors, event replay, the MLS Delivery Service routes and blocks. 1.4.0 the realtime gateway (/v1/realtime WebSocket with single-use tickets, /v1/realtime/tickets with client tokens), client tokens and sessions, presence settings and push registrations. 1.5.0 attachment upload intents, finalization, metadata, download grants and proxied reads; legal holds. 1.6.0 MANAGED search, reports, moderation, exports, data deletion, audit. 1.7.0 beforeSequence history pagination, client-sessions/revoke-all. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.9.1: POST /v1/conversations/{id}/bans documents its actual 201 Created (was listed as 200; found by tests/authorization_matrix.rs). 1.10.0 device-to-device history transfer (/v1/messaging/history-transfers: request, list, get, sealed-history upload / download, complete, cancel; ADR 0052 AD-07) and witnessed tree heads. 1.11.0 POST /v1/conversations/{id}/attachments/{attachmentId}/thumbnail-grants (server thumbnails of MANAGED images; never PRIVATE_E2EE). 1.12.0 Part V backend closure: GET /v1/conversations/{id}/messages/{messageId}/revisions (policy-gated MANAGED revision history); PATCH message expectedEditCount; opt-in secure backups: POST /v1/messaging/backups, POST /v1/messaging/backups/{backupId}/finalize, GET /v1/messaging/backups/latest, POST /v1/messaging/backups/{backupId}/download-grants, DELETE /v1/messaging/backups/{backupId} (opaque client-encrypted objects; the server cannot decrypt). New kill switches (§134) refuse with 503 FEATURE_DISABLED KILL_SWITCH_ENGAGED; §105 device-direct REST: 53 member operations list clientToken as an alternative security requirement (the session's own principal and device only); every other operation keeps answering 401 CLIENT_TOKENS_NOT_ENABLED; GET /v1/conversations/{id}/members keyset pagination (limit, cursor)."
+      "description": "HTTP surface of services/messaging, served at /openapi.json: health, readiness and the device / key-directory API under /v1/messaging (Platform Access credential, scopes messages.send / messages.read, verified acting principal). 1.1.0 /v1/conversations (create with Idempotency-Key, list, get, lifecycle PATCH) and /v1/messaging/policy (Part V D). 1.2.0 tree heads in the device directory and transparency proofs are signed; without a configured signing key those routes answer 503 (never an unsigned head). 1.3.0 membership, messages, permalinks, read cursors, event replay, the MLS Delivery Service routes and blocks. 1.4.0 the realtime gateway (/v1/realtime WebSocket with single-use tickets, /v1/realtime/tickets with client tokens), client tokens and sessions, presence settings and push registrations. 1.5.0 attachment upload intents, finalization, metadata, download grants and proxied reads; legal holds. 1.6.0 MANAGED search, reports, moderation, exports, data deletion, audit. 1.7.0 beforeSequence history pagination, client-sessions/revoke-all. 1.8.0 Part V H SMS Bridge: message channel, bridges, disclosure, carrier transport state. 1.9.0 Part V I: member roles, bans, replies / threads, reactions, pins, unread counts, usage facts (usage.read; no prices). 1.9.1: POST /v1/conversations/{id}/bans documents its actual 201 Created (was listed as 200; found by tests/authorization_matrix.rs). 1.10.0 device-to-device history transfer (/v1/messaging/history-transfers: request, list, get, sealed-history upload / download, complete, cancel; ADR 0052 AD-07) and witnessed tree heads. 1.11.0 POST /v1/conversations/{id}/attachments/{attachmentId}/thumbnail-grants (server thumbnails of MANAGED images; never PRIVATE_E2EE). 1.12.0 Part V backend closure: GET /v1/conversations/{id}/messages/{messageId}/revisions (policy-gated MANAGED revision history); PATCH message expectedEditCount; opt-in secure backups: POST /v1/messaging/backups, POST /v1/messaging/backups/{backupId}/finalize, GET /v1/messaging/backups/latest, POST /v1/messaging/backups/{backupId}/download-grants, DELETE /v1/messaging/backups/{backupId} (opaque client-encrypted objects; the server cannot decrypt). New kill switches (§134) refuse with 503 FEATURE_DISABLED KILL_SWITCH_ENGAGED; §105 device-direct REST: 53 member operations list clientToken as an alternative security requirement (the session's own principal and device only); every other operation keeps answering 401 CLIENT_TOKENS_NOT_ENABLED; GET /v1/conversations/{id}/members keyset pagination (limit, cursor). 1.15.0: Section 13 messaging (relay parity, MANAGED session devices, inbox orderBy / mentions). 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011)."
     },
     {
       "id": "cfmeet.messaging.internal-api",
@@ -622,7 +622,7 @@
     },
     {
       "id": "cfmeet.messaging.http-api-bundled",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "kind": "openapi",
       "path": "bundled/messaging/http/v1.openapi.json",
       "owner": "messaging",
@@ -646,7 +646,7 @@
     },
     {
       "id": "cfmeet.numbering.internal-api-bundled",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "bundled/numbering/internal/v1.openapi.json",
       "owner": "numbering",
@@ -658,7 +658,7 @@
     },
     {
       "id": "cfmeet.platform-access.internal-api-bundled",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "kind": "openapi",
       "path": "bundled/platform-access/internal/v1.openapi.json",
       "owner": "platform-access",
@@ -706,7 +706,7 @@
     },
     {
       "id": "cfmeet.sms-gateway.http-api-bundled",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/sms-gateway/http/v1.openapi.json",
       "owner": "sms-gateway",
@@ -814,7 +814,7 @@
     },
     {
       "id": "cfmeet.developer-platform.http-api-bundled",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "bundled/platform-developer/http/v1.openapi.json",
       "owner": "developer-platform",
@@ -826,7 +826,7 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api-bundled",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "bundled/platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
@@ -849,14 +849,14 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes. 1.5.0 the Section 53 webhook migration operator routes (/internal/v1/operator/webhook-migration/**). 1.6.0: usage ingestion / reconciliation, operator production-access decisions, overrides, first-party grants, cost-centre usage, support profiles, forwarded /v1/usage and /v1/limits. 1.7.0: conflicting event replays refused (CONFLICTING_REPLAY) and the operator ingestion health view. 1.8.0 forwardedListUsage / forwardedGetLimits keep Calling's published /v1/usage and /v1/limits contract (§19.4)."
+      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes. 1.5.0 the Section 53 webhook migration operator routes (/internal/v1/operator/webhook-migration/**). 1.6.0: usage ingestion / reconciliation, operator production-access decisions, overrides, first-party grants, cost-centre usage, support profiles, forwarded /v1/usage and /v1/limits. 1.7.0: conflicting event replays refused (CONFLICTING_REPLAY) and the operator ingestion health view. 1.8.0 forwardedListUsage / forwardedGetLimits keep Calling's published /v1/usage and /v1/limits contract (§19.4). 1.9.0 (Blueprint Section 15, PLT-009): operator-only GET /internal/v1/operator/organizations and GET /internal/v1/operator/activity; platform-level operator commands audited."
     },
     {
       "id": "cfmeet.organizations.internal-api",
@@ -871,14 +871,14 @@
     },
     {
       "id": "cfmeet.developer-platform.control",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "json-schema",
       "path": "platform-developer/control/v1.schema.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (applications), environments, commercial plans / assignments / billing-account references, immutable activity events and effective entitlements. No identity attribute, credential, scope grant, price or payment data. 1.1.0: Section 50 service accounts (ServiceAccount, ServiceAccountList, CreateServiceAccountRequest): Platform Access machine identities read and suspended / resumed through delegation; never a credential or secret. 1.2.0: Part VI Chapters 10–13 resources (credential metadata, policies, restrictions, scope registry / grants, production access, usage facts / summaries / limits / warnings, support profiles, ingestion contract)."
+      "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (applications), environments, commercial plans / assignments / billing-account references, immutable activity events and effective entitlements. No identity attribute, credential, scope grant, price or payment data. 1.1.0: Section 50 service accounts (ServiceAccount, ServiceAccountList, CreateServiceAccountRequest): Platform Access machine identities read and suspended / resumed through delegation; never a credential or secret. 1.2.0: Part VI Chapters 10–13 resources (credential metadata, policies, restrictions, scope registry / grants, production access, usage facts / summaries / limits / warnings, support profiles, ingestion contract). 1.3.0 (Blueprint Section 15): Credential adds lastAuthenticatedAt and expiringSoon (PLT-008); OperatorOrganization(List) and OperatorActivityEvent/List for the operator read plane (PLT-009)."
     },
     {
       "id": "cfmeet.developer-platform.webhooks",
@@ -893,14 +893,14 @@
     },
     {
       "id": "cfmeet.developer-platform.http-api",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "platform-developer/http/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted. 1.1.0: Section 53 Developer Console webhook operations under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/* (subscriptions with a once-shown signing secret, secret rotation, delivery and attempt history, replay; OWNER / ADMIN / DEVELOPER manage, ANALYST reads). 1.3.0: Section 50 service accounts under /v1/environments/{environmentId}/service-accounts* (list / create / get / suspend / resume, delegated to Platform Access; OWNER / ADMIN manage, DEVELOPER reads; machine credentials need service_accounts.manage; never a credential). 1.4.0: Part VI Chapters 10–13 (credentials, scopes, production access, usage, limits, support profiles). 1.5.0: activity filters (projectId, action) and cursor pagination of credentials and production-access requests."
+      "description": "Section 50 public Developer Platform API served through the API Gateway: organizations, members, invitations, ownership transfer, projects, environments, entitlements, activity, commercial plan / assignment / billing-account references. Human console operations use the verified CF Meet session; machine credentials use Platform Access scopes where noted. 1.1.0: Section 53 Developer Console webhook operations under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/* (subscriptions with a once-shown signing secret, secret rotation, delivery and attempt history, replay; OWNER / ADMIN / DEVELOPER manage, ANALYST reads). 1.3.0: Section 50 service accounts under /v1/environments/{environmentId}/service-accounts* (list / create / get / suspend / resume, delegated to Platform Access; OWNER / ADMIN manage, DEVELOPER reads; machine credentials need service_accounts.manage; never a credential). 1.4.0: Part VI Chapters 10–13 (credentials, scopes, production access, usage, limits, support profiles). 1.5.0: activity filters (projectId, action) and cursor pagination of credentials and production-access requests. 1.6.0 (Blueprint Section 15, PLT-008): credential views add lastAuthenticatedAt and expiringSoon."
     },
     {
       "id": "cfmeet.api-gateway.common",
@@ -962,7 +962,7 @@
     },
     {
       "id": "cfmeet.messaging.public-api",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "kind": "openapi",
       "path": "bundled/public/messaging/v1.openapi.json",
       "owner": "messaging",
@@ -974,7 +974,7 @@
     },
     {
       "id": "cfmeet.numbering.public-api",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "kind": "openapi",
       "path": "bundled/public/numbering/v1.openapi.json",
       "owner": "numbering",
@@ -986,7 +986,7 @@
     },
     {
       "id": "cfmeet.sms-gateway.public-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/public/sms/v1.openapi.json",
       "owner": "sms-gateway",
@@ -998,7 +998,7 @@
     },
     {
       "id": "cfmeet.developer-platform.public-api",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "bundled/public/developer-platform/v1.openapi.json",
       "owner": "developer-platform",

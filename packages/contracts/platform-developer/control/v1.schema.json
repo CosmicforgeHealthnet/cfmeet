@@ -2060,6 +2060,8 @@
         "rotatedFromCredentialId",
         "supersededByCredentialId",
         "supersessionValidUntil",
+        "lastAuthenticatedAt",
+        "expiringSoon",
         "createdAt",
         "updatedAt",
         "limits"
@@ -2236,6 +2238,29 @@
             {
               "type": "string",
               "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastAuthenticatedAt": {
+          "description": "Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began.",
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiringSoon": {
+          "description": "Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority.",
+          "oneOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"
@@ -4072,6 +4097,185 @@
         "mismatches": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "OperatorOrganization": {
+      "description": "Section 15 (PLT-009): an organization as listed to operators (no member role; who created it and whether a rename still has to reach Platform Access).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "state",
+        "stateReason",
+        "supportEmail",
+        "createdAt",
+        "updatedAt",
+        "closedAt",
+        "version",
+        "myRole",
+        "createdBy",
+        "platformNameSyncPending"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Organization/properties/id"
+        },
+        "displayName": {
+          "$ref": "#/$defs/Organization/properties/displayName"
+        },
+        "state": {
+          "$ref": "#/$defs/Organization/properties/state"
+        },
+        "stateReason": {
+          "$ref": "#/$defs/Organization/properties/stateReason"
+        },
+        "supportEmail": {
+          "$ref": "#/$defs/Organization/properties/supportEmail"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Organization/properties/createdAt"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Organization/properties/updatedAt"
+        },
+        "closedAt": {
+          "$ref": "#/$defs/Organization/properties/closedAt"
+        },
+        "version": {
+          "$ref": "#/$defs/Organization/properties/version"
+        },
+        "myRole": {
+          "type": "null"
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "`user:<id>` (self-service) or `operator:<handle>` (first-party registration)."
+        },
+        "platformNameSyncPending": {
+          "type": "boolean"
+        }
+      }
+    },
+    "OperatorOrganizationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperatorOrganization"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorActivityEvent": {
+      "description": "Section 15 (PLT-009): one operator command — an OPERATOR event of an organization's activity (scope ORGANIZATION) or a platform-level command such as a plan publication or a usage rebuild (scope PLATFORM, organizationId null).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "organizationId",
+        "operator",
+        "action",
+        "targetType",
+        "targetId",
+        "outcome",
+        "requestId",
+        "correlationId",
+        "summary",
+        "occurredAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "scope": {
+          "enum": [
+            "ORGANIZATION",
+            "PLATFORM"
+          ]
+        },
+        "organizationId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "action": {
+          "$ref": "#/$defs/ActivityEvent/properties/action"
+        },
+        "targetType": {
+          "$ref": "#/$defs/ActivityEvent/properties/targetType"
+        },
+        "targetId": {
+          "$ref": "#/$defs/ActivityEvent/properties/targetId"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ActivityEvent/properties/outcome"
+        },
+        "requestId": {
+          "$ref": "#/$defs/ActivityEvent/properties/requestId"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/ActivityEvent/properties/correlationId"
+        },
+        "summary": {
+          "$ref": "#/$defs/ActivityEvent/properties/summary"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/ActivityEvent/properties/occurredAt"
+        }
+      }
+    },
+    "OperatorActivityList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OperatorActivityEvent"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

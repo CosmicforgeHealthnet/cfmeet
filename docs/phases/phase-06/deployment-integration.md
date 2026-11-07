@@ -13,7 +13,9 @@ gateway or the Developer Platform reach staging, the following must exist:
 3. Secrets (files, never inline): Ed25519 signing key (`cf-service-keygen generate --kid developer-platform-<env>-<n>`),
    its trust bundle granting `developer-request.forward` to `cfmeet.api-gateway` only.
 4. Platform Access trust bundle: add issuer `cfmeet.developer-platform` with
-   `platform-identity.read` only.
+   `platform-identity.read` and `platform-identity.delegate` (the delegation API added in
+   §50; corrected in Section 15 — see
+   [`docs/operations/developer-platform-gateway-activation-checklist.md`](../../operations/developer-platform-gateway-activation-checklist.md)).
 5. Network: internal only (no public route, no Nginx location). HTTPS between services
    outside local / test (enforced by `packages/service-auth`).
 6. Processes: `developer-platform` and `developer-platform-worker` (separately scalable).

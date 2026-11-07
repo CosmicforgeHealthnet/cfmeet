@@ -19,7 +19,7 @@ review #13); no change here enables or weakens it.
 
 ## Contracts
 
-`cfmeet.communications.communications-internal` 1.3.0 (+bundled), `cfmeet.communications.http-api` / `public-api` / `swagger-api` 1.2.0, `cfmeet.messaging.communications-internal` 1.2.0 (+bundled), `cfmeet.platform-access.internal-api` 1.7.0 (+bundled), `cfmeet.platform-access.identity` 1.4.0. SDKs regenerated (TS/Dart models). Meeting-service: no new operation (v2 count unchanged at 181); one description changed (`v2_revoke_my_session`). No new service-auth permission: the Platform Access mirror reuses `platform-principal.ensure` (already granted to Meeting), so no trust-bundle change.
+`cfmeet.communications.communications-internal` 1.3.0 (+bundled), `cfmeet.communications.http-api` / `public-api` / `swagger-api` 1.2.0, `cfmeet.messaging.communications-internal` 1.2.0 (+bundled), `cfmeet.platform-access.internal-api` 1.8.0 (+bundled; 1.7.0 is Section 15), `cfmeet.platform-access.identity` 1.4.0. SDKs regenerated (TS/Dart models). Meeting-service: no new operation (v2 count unchanged at 181); one description changed (`v2_revoke_my_session`). No new service-auth permission: the Platform Access mirror reuses `platform-principal.ensure` (already granted to Meeting), so no trust-bundle change.
 
 ## Database
 

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.8.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits."
+    "version": "1.9.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited."
   },
   "tags": [
     {
@@ -261,6 +261,102 @@
       }
     },
     "/internal/v1/operator/organizations": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List or search organizations",
+        "operationId": "operatorListOrganizations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 15 (PLT-009): every organization, newest first, keyset-paginated; `query` matches a display-name substring (case-insensitive, wildcards literal) or an exact organization id, `state` filters the lifecycle state. Read-only. Permission `developer-platform.administer` (operator console only) AND a named human operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "description": "Display-name substring or exact organization id.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Lifecycle state.",
+            "schema": {
+              "enum": [
+                "INVITED",
+                "ACTIVE",
+                "RESTRICTED",
+                "SUSPENDED",
+                "CLOSED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorOrganizationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "tags": [
           "Operator: organizations"
@@ -326,6 +422,109 @@
                 "$ref": "#/components/schemas/platform-developer.control.v1.RegisterFirstPartyRequest"
               }
             }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/activity": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List operator commands",
+        "operationId": "operatorListActivity",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "Section 15 (PLT-009): the operator audit trail, newest first, keyset-paginated — every OPERATOR event of organization activity (scope ORGANIZATION) and every platform-level operator command (plan publication / retirement, usage rollup rebuild, backfill, stream reset; scope PLATFORM). Read-only. Permission `developer-platform.administer` AND a named human operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "description": "Only commands about this organization.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "operator",
+            "in": "query",
+            "required": false,
+            "description": "Only commands of this operator.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Exact action, or a family prefix ending in `.`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z_.]*$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorActivityList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -3918,6 +4117,100 @@
           }
         }
       },
+      "platform-developer.control.v1.ActivityEvent.properties.action": {
+        "type": "string",
+        "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_.]*$"
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.correlationId": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.occurredAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.outcome": {
+        "enum": [
+          "SUCCEEDED",
+          "DENIED",
+          "FAILED"
+        ]
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.requestId": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.summary": {
+        "type": "object",
+        "description": "Safe change summary: opaque ids, codes and display metadata only — never secrets, credentials, contacts or E2EE material.",
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "secret"
+              ]
+            },
+            {
+              "required": [
+                "signingSecret"
+              ]
+            },
+            {
+              "required": [
+                "credential"
+              ]
+            },
+            {
+              "required": [
+                "password"
+              ]
+            },
+            {
+              "required": [
+                "token"
+              ]
+            },
+            {
+              "required": [
+                "apiKey"
+              ]
+            },
+            {
+              "required": [
+                "verifier"
+              ]
+            },
+            {
+              "required": [
+                "privateKey"
+              ]
+            },
+            {
+              "required": [
+                "phoneNumber"
+              ]
+            },
+            {
+              "required": [
+                "email"
+              ]
+            },
+            {
+              "required": [
+                "contact"
+              ]
+            }
+          ]
+        }
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.targetId": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "platform-developer.control.v1.ActivityEvent.properties.targetType": {
+        "type": "string",
+        "maxLength": 32
+      },
       "platform-developer.control.v1.AssignPlanRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -4645,6 +4938,185 @@
           }
         }
       },
+      "platform-developer.control.v1.OperatorActivityEvent": {
+        "description": "Section 15 (PLT-009): one operator command — an OPERATOR event of an organization's activity (scope ORGANIZATION) or a platform-level command such as a plan publication or a usage rebuild (scope PLATFORM, organizationId null).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "scope",
+          "organizationId",
+          "operator",
+          "action",
+          "targetType",
+          "targetId",
+          "outcome",
+          "requestId",
+          "correlationId",
+          "summary",
+          "occurredAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "scope": {
+            "enum": [
+              "ORGANIZATION",
+              "PLATFORM"
+            ]
+          },
+          "organizationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operator": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "action": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.action"
+          },
+          "targetType": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.targetType"
+          },
+          "targetId": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.targetId"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.outcome"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.requestId"
+          },
+          "correlationId": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.correlationId"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.summary"
+          },
+          "occurredAt": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ActivityEvent.properties.occurredAt"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorActivityList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorActivityEvent"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorOrganization": {
+        "description": "Section 15 (PLT-009): an organization as listed to operators (no member role; who created it and whether a rename still has to reach Platform Access).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName",
+          "state",
+          "stateReason",
+          "supportEmail",
+          "createdAt",
+          "updatedAt",
+          "closedAt",
+          "version",
+          "myRole",
+          "createdBy",
+          "platformNameSyncPending"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.id"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.displayName"
+          },
+          "state": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.state"
+          },
+          "stateReason": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.stateReason"
+          },
+          "supportEmail": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.supportEmail"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.createdAt"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.updatedAt"
+          },
+          "closedAt": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.closedAt"
+          },
+          "version": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.Organization.properties.version"
+          },
+          "myRole": {
+            "type": "null"
+          },
+          "createdBy": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "`user:<id>` (self-service) or `operator:<handle>` (first-party registration)."
+          },
+          "platformNameSyncPending": {
+            "type": "boolean"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorOrganizationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorOrganization"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "platform-developer.control.v1.OperatorScopeGrantRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -4785,6 +5257,64 @@
             "description": "Platform Access tenant classification (operator-controlled; GET of one organization only)."
           }
         }
+      },
+      "platform-developer.control.v1.Organization.properties.closedAt": {
+        "oneOf": [
+          {
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "platform-developer.control.v1.Organization.properties.createdAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "platform-developer.control.v1.Organization.properties.displayName": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "platform-developer.control.v1.Organization.properties.id": {
+        "$ref": "#/components/schemas/platform.common.v1.Uuid",
+        "description": "The organization id IS the canonical Platform Access tenant id."
+      },
+      "platform-developer.control.v1.Organization.properties.state": {
+        "$ref": "#/components/schemas/platform-developer.control.v1.OrganizationState"
+      },
+      "platform-developer.control.v1.Organization.properties.stateReason": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "platform-developer.control.v1.Organization.properties.supportEmail": {
+        "oneOf": [
+          {
+            "type": "string",
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "platform-developer.control.v1.Organization.properties.updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "platform-developer.control.v1.Organization.properties.version": {
+        "type": "integer",
+        "minimum": 1
       },
       "platform-developer.control.v1.OrganizationOverview": {
         "allOf": [

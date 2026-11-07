@@ -20,6 +20,15 @@
 //!      credentials, meeting sessions, participant tokens, anonymous): transported
 //!      verbatim to the owning service, which authenticates them. A platform credential
 //!      is NEVER forwarded to a service (refused on routes that do not take one).
+//!
+//!    End-user / device traffic (every mode above except PLATFORM_CREDENTIAL and
+//!    anonymous) is held to a per-token ceiling when
+//!    `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` is set (Section 15, PLT-012): the bucket
+//!    is a digest of the presented token (never the token), counted in the platform
+//!    quota store; over it the request is refused `429 RATE_LIMITED` with `Retry-After`
+//!    and the `x-cf-quota-window` / `x-cf-quota-level: GATEWAY_TOKEN` headers. Anonymous
+//!    requests carry nothing to key on (client addresses are never taken from spoofable
+//!    forwarding headers) and stay with the services and the edge.
 //! 5. Bounded body, per-route deadline, safe upstream errors; the owning service keeps
 //!    final resource authorization; its status, allow-listed headers and body (streamed)
 //!    are relayed.
@@ -45,7 +54,7 @@ use crate::{
         RELAYED_RESPONSE_HEADERS,
     },
     identity::{AuthenticatedCustomer, Authentication},
-    quota::{Decision, Window},
+    quota::{token_bucket, Decision, TokenDecision, Window},
     routing::{AuthMode, Lookup, Protocol, RouteMatch},
     state::AppState,
 };
@@ -236,6 +245,10 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
         Ok(m) => m,
         Err(e) => return e.into_response(),
     };
+    if let Some(refused) = token_ceiling(&state, mode, auth.as_ref(), &parts.headers).await {
+        tracing::info!(route = %route_id, mode = mode.as_str(), "per-token request ceiling exceeded");
+        return refused;
+    }
     let upgrade = is_websocket_upgrade(&parts.headers);
     if route.definition.protocol == Protocol::WebSocket {
         if !upgrade || parts.method != Method::GET {
@@ -362,6 +375,60 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
         }
     }
     response
+}
+
+/// The end-user / device token a passthrough or session request is counted under
+/// (`None`: platform credentials — metered by the platform quotas — and requests that
+/// present no token).
+pub fn rate_limited_token<'a>(
+    mode: AuthMode,
+    auth: Option<&'a Presented>,
+    headers: &'a HeaderMap,
+) -> Option<&'a str> {
+    match mode {
+        AuthMode::PlatformCredential | AuthMode::Anonymous => None,
+        AuthMode::ParticipantToken => headers
+            .get("x-participant-token")
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| !v.is_empty())
+            .or(auth.map(|a| a.token.as_str())),
+        _ => auth.map(|a| a.token.as_str()),
+    }
+}
+
+/// PLT-012: the per-token ceiling (`None`: allowed, or off).
+async fn token_ceiling(
+    state: &AppState,
+    mode: AuthMode,
+    auth: Option<&Presented>,
+    headers: &HeaderMap,
+) -> Option<Response> {
+    let per_minute = state.token_rate_limit_per_minute;
+    let engine = state.quota.as_ref().filter(|_| per_minute > 0)?;
+    let token = rate_limited_token(mode, auth, headers)?;
+    match engine
+        .check_token(mode.as_str(), &token_bucket(token), per_minute)
+        .await
+    {
+        TokenDecision::Allowed { .. } => None,
+        TokenDecision::Exceeded {
+            retry_after_seconds,
+        } => {
+            let mut r = ApiError::RateLimited {
+                retry_after_seconds,
+            }
+            .into_response();
+            r.headers_mut().insert(
+                "x-cf-quota-window",
+                HeaderValue::from_static("requests-per-minute"),
+            );
+            r.headers_mut().insert(
+                "x-cf-quota-level",
+                HeaderValue::from_static("GATEWAY_TOKEN"),
+            );
+            Some(r)
+        }
+    }
 }
 
 pub async fn authenticate(
