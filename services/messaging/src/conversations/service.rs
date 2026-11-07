@@ -1382,33 +1382,20 @@ pub async fn patch(
                 if let Some(seconds) = request.retention_seconds {
                     check_and_audit_retention(txn, &ctx, &row, seconds, now).await?;
                 }
+                // Display metadata is validated against the PERSISTED profile and applied
+                // in the transition's single version step (`conversation.updated` event).
+                // `Some(None)` clears; only a new value is validated.
+                let mut display = DisplayChange::default();
                 if request.title.is_some() || request.avatar_ref.is_some() {
-                    // Validated against the PERSISTED profile; the version bump and the
-                    // `conversation.updated` event come from the transition below.
-                    // `Some(None)` clears; only a new value is validated.
                     let (title, avatar_ref) = display_metadata(
                         row.profile(),
                         request.title.clone().flatten().as_deref(),
                         request.avatar_ref.clone().flatten().as_deref(),
                     )?;
-                    db::exec(
-                        txn,
-                        "UPDATE messaging_conversations SET \
-                           title = CASE WHEN $2 THEN $3 ELSE title END, \
-                           avatar_ref = CASE WHEN $4 THEN $5 ELSE avatar_ref END \
-                         WHERE id = $1",
-                        vec![
-                            row.id.into(),
-                            request.title.is_some().into(),
-                            title.into(),
-                            request.avatar_ref.is_some().into(),
-                            avatar_ref.into(),
-                        ],
-                    )
-                    .await
-                    .map_err(map_trigger)?;
+                    display.title = request.title.as_ref().map(|_| title);
+                    display.avatar_ref = request.avatar_ref.as_ref().map(|_| avatar_ref);
                 }
-                let changed = transition(
+                let changed = transition_with(
                     txn,
                     &ctx,
                     &row,
@@ -1416,6 +1403,7 @@ pub async fn patch(
                     request.reason.as_deref(),
                     request.expires_at,
                     request.retention_seconds,
+                    display,
                     now,
                     &request_ctx,
                 )
@@ -1649,12 +1637,51 @@ pub(crate) async fn transition<C: ConnectionTrait>(
     now: DateTime<Utc>,
     request: &RequestContext,
 ) -> Result<ConversationRow> {
+    transition_with(
+        db,
+        ctx,
+        row,
+        next,
+        reason,
+        expires_at,
+        retention_seconds,
+        DisplayChange::default(),
+        now,
+        request,
+    )
+    .await
+}
+
+/// Section 13 (MSG-007): a display-metadata change applied with a transition (one
+/// version step). `None`: unchanged; `Some(None)`: cleared.
+#[derive(Debug, Default)]
+pub(crate) struct DisplayChange {
+    pub title: Option<Option<String>>,
+    pub avatar_ref: Option<Option<String>>,
+}
+
+/// [`transition`] that may also change the display metadata in the same version step.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn transition_with<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    row: &ConversationRow,
+    next: LifecycleState,
+    reason: Option<&str>,
+    expires_at: Option<DateTime<Utc>>,
+    retention_seconds: Option<i64>,
+    display: DisplayChange,
+    now: DateTime<Utc>,
+    request: &RequestContext,
+) -> Result<ConversationRow> {
     let state_changed = next != row.state();
     let updated = db::exec(
         db,
         "UPDATE messaging_conversations SET lifecycle_state = $3, \
            lifecycle_reason = CASE WHEN $6 THEN $4 ELSE lifecycle_reason END, \
            expires_at = COALESCE($5, expires_at), retention_seconds = COALESCE($8, retention_seconds), \
+           title = CASE WHEN $9 THEN $10 ELSE title END, \
+           avatar_ref = CASE WHEN $11 THEN $12 ELSE avatar_ref END, \
            version = version + 1, updated_at = $7, \
            state_changed_at = CASE WHEN $6 THEN $7 ELSE state_changed_at END \
          WHERE id = $1 AND version = $2",
@@ -1667,6 +1694,10 @@ pub(crate) async fn transition<C: ConnectionTrait>(
             state_changed.into(),
             now.into(),
             retention_seconds.into(),
+            display.title.is_some().into(),
+            display.title.flatten().into(),
+            display.avatar_ref.is_some().into(),
+            display.avatar_ref.flatten().into(),
         ],
     )
     .await
