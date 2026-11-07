@@ -23,6 +23,7 @@ on:
       - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
+      - "infra/deployment/postgres/**"
   pull_request:
     paths:
       - "services/meeting-service/**"
@@ -32,6 +33,7 @@ on:
       - "packages/usage-facts/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
+      - "infra/deployment/postgres/**"
   workflow_dispatch:
 
 concurrency:
@@ -174,6 +176,49 @@ jobs:
           cargo run -q -p migration -- up
           cargo run -q -p migration -- reset
           cargo run -q -p migration -- up
+
+      # SEC-018 meeting-service least-privilege database roles, on throwaway databases and
+      # roles created by infra/deployment/postgres (see
+      # docs/operations/meeting-service-database-roles.md). The histories are listed once,
+      # in release order: append a new history binary to this list (an entry prefixed with
+      # '?' is optional and skipped when not built).
+      - name: Meeting-service migration histories (release order)
+        run: |
+          d="$GITHUB_WORKSPACE/services/meeting-service/target/debug"
+          echo "MEETING_SERVICE_MIGRATION_BINS=$d/migration $d/account-security-migration $d/meetings-calendar-migration $d/profile-notifications-migration $d/account-communications-migration ?$d/account-hardening-migration" >> "$GITHUB_ENV"
+
+      # New database: every history applies as the MIGRATOR role; the RUNTIME role gets
+      # data access only (DML, sequences, triggers fire) and is refused DDL.
+      - name: Meeting-service database roles (migrator applies all histories, runtime DML only)
+        working-directory: .
+        env:
+          APP_ENV: test
+        run: |
+          infra/deployment/postgres/verify-meeting-service-roles.sh \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      # Today's production shape -> the cutover SQL the owner will run (dry run, refusals,
+      # real run) -> the same certification -> rollback. Branch A: the runtime role owns
+      # everything; branch B: the service connected as the superuser, which owns everything.
+      - name: Meeting-service database role cutover and rollback rehearsal
+        working-directory: .
+        env:
+          APP_ENV: test
+        run: |
+          infra/deployment/postgres/verify-meeting-service-roles.sh --rehearse-cutover \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+          infra/deployment/postgres/verify-meeting-service-roles.sh --rehearse-cutover-from-superuser \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
+
+      # The same histories through the cross-service certification: meeting-service's
+      # roles cannot open any other service's database and vice versa.
+      - name: Service database isolation with the real meeting-service migrations
+        working-directory: .
+        env:
+          APP_ENV: test
+        run: |
+          infra/deployment/postgres/verify-service-isolation.sh \
+            --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: OpenAPI contract export is current
         run: |
