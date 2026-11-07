@@ -185,6 +185,21 @@ await for (final m in client.sms.paginate('listMessages', query: {'limit': 50}))
   (`if-match`, `if-none-match`, `accept-language`, `range`), JSON or `RawBody` bodies.
   `ApiResponse` carries `status`, decoded `body`, `requestId`, `correlationId`,
   `idempotentReplayed`, `quota` (`x-cf-quota-*`), the `idempotencyKey` and `attempts`.
+* **Generated models** (`lib/models/<domain>.dart`, by `generate.py`): one library per
+  public domain, imported with a prefix because schema names repeat across domains.
+  Each object schema is a read-only view over the decoded JSON: typed getters (required,
+  non-null properties are non-nullable), `toJson()` returning the original map (fields
+  this SDK version does not know are kept) and `create(...)` with typed named parameters
+  for request bodies; enums and other schemas are typedefs of their Dart type, unions
+  stay `Object?`.
+
+  ```dart
+  import 'package:cfmeet_platform_sdk/models/meetings.dart' as meetings;
+
+  final res = await client.meetings.call('v2MyConferences');
+  final page = meetings.AgendaResponse.fromJson(res.body! as Map<String, Object?>);
+  for (final item in page.items) print('${item.scheduledStartAt} ${item.meetingSpace.meetingCode}');
+  ```
 * **Authentication:** `CfMeetAuth.platformCredential` (Bearer `cfmk_...`, server-side
   only: refused in browser builds unless `allowPlatformCredentialInBrowser`),
   `developerSession` / `meetingSession` (Bearer), `participantToken`

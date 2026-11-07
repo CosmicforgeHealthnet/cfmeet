@@ -25,7 +25,8 @@
   "dart": {
     "package": "cfmeet_platform_sdk",
     "output": "dart/lib/src/generated/contracts.dart",
-    "operations": "dart/lib/src/generated/operations.dart"
+    "operations": "dart/lib/src/generated/operations.dart",
+    "models": "dart/lib/src/generated/models"
   },
   "paidTelecomOperations": [
     "POST /v1/calls",
