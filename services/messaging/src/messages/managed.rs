@@ -239,7 +239,7 @@ pub(crate) async fn insert_channel<C: ConnectionTrait>(
         .ok_or(Error::code(ErrorCode::InternalError))
 }
 
-async fn same_text(state: &AppState, existing: &MessageRow, text: &str) -> Result<()> {
+pub(crate) async fn same_text(state: &AppState, existing: &MessageRow, text: &str) -> Result<()> {
     match text_of(state, existing, DecryptPurpose::Idempotency).await {
         Some(t) if t == text => Ok(()),
         // A deleted / purged original cannot be compared: a retry of a deleted message
@@ -307,8 +307,16 @@ pub async fn send(
     .await?
     {
         same_text(state, &existing, content.text()).await?;
+        super::same_attachments(&state.db, &existing, &request.attachment_ids).await?;
         return Ok((200, render(state, &existing, false).await));
     }
+    let mentions = super::mentions_of(
+        &state.db,
+        conversation,
+        acting.principal_id,
+        &request.mentioned_principal_ids,
+    )
+    .await?;
     link_limit(
         state,
         ctx,
@@ -368,6 +376,7 @@ pub async fn send(
                 crate::attachments::link_to_message(txn, &conversation, row.id, acting.principal_id, &attachments)
                     .await?;
                 let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
+                super::record_mentions(txn, &row, &mentions).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;

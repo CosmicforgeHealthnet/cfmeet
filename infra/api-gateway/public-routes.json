@@ -10,7 +10,8 @@
     "CONTACT_VAULT_PRIVATE": "Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway.",
     "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family.",
     "CALENDAR_FILE_DIRECT_INGRESS": "RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API.",
-    "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations)."
+    "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations).",
+    "FIRST_PARTY_SESSION_DEVICES": "First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens."
   },
   "operations": [
     {
@@ -2419,6 +2420,13 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v2/messaging/session-tokens",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v2/messaging/devices",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_BACKEND"
@@ -2496,6 +2504,13 @@
     {
       "domain": "meetings",
       "method": "PUT",
+      "path": "/api/v2/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_BACKEND"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
       "path": "/api/v2/messaging/relay/{path}",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_BACKEND"
@@ -2967,6 +2982,20 @@
       "method": "POST",
       "path": "/v1/messaging/client-tokens",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/session-devices",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_SESSION_DEVICES"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/session-devices/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_SESSION_DEVICES"
     },
     {
       "domain": "messaging",

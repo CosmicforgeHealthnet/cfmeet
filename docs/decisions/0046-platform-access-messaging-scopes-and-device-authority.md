@@ -34,6 +34,14 @@ Status: Accepted (Part V Workstream B). Builds on ADR 0032 (Platform Access) and
    the commit-ordered identity change feed and disabled whenever the feed cannot be read;
    Platform Access unreachable is never an offline bypass (requests fail closed).
 
+## Amendment (Blueprint v1.0 Section 13)
+
+The device-association authority split (decision 3) governs MLS devices only. The
+MANAGED-realtime *session device* of ADR 0049 amendment A1 is not a Messaging device: it
+holds no public key, needs no proof of possession, is never resolved through this chain as
+a device and can never acquire PRIVATE_E2EE privileges. It exists only for FIRST_PARTY
+delegated contexts, bound to an account session the first-party relay verified.
+
 ## Evidence
 
 `services/platform-access/tests/messaging_scopes.rs` (real router + PostgreSQL): trust

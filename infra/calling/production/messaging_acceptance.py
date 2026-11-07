@@ -53,7 +53,7 @@ class MessagingJourney(Journey):
                       if method in ('get', 'post', 'put', 'patch', 'delete', 'options', 'head')]
         assert len(operations) == 80
         assert sum('x-cfmeet-native-path' in operation for operation in operations) == 71
-        assert swagger['info']['version'] == '1.15.0'
+        assert swagger['info']['version'] == '1.16.0'
         assert not any(path.startswith('/internal/') for path in swagger['paths'])
         self.report['servedSwagger'] = {'version': swagger['info']['version'], 'operations': len(operations), 'nativeBindings': 71}
         self.done('served_consumer_swagger_matches_native_backend_contract')

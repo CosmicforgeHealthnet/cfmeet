@@ -64,6 +64,61 @@ pub struct RelayRoute {
     idempotency_key: bool,
 }
 
+impl RelayRoute {
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    /// The Messaging customer path template (`/v1/...`, `{id}` / `{reaction}` holes).
+    pub fn template(&self) -> String {
+        let mut out = String::from("/v1");
+        for seg in self.path {
+            out.push('/');
+            match seg {
+                Lit(l) => out.push_str(l),
+                Id => out.push_str("{id}"),
+                Reaction => out.push_str("{reaction}"),
+            }
+        }
+        out
+    }
+
+    /// The canonical (Messaging contract) query keys forwarded for this operation.
+    pub fn query_keys(&self) -> &'static [&'static str] {
+        self.query
+    }
+
+    /// Rewrites accepted compatibility spellings to the canonical key and refuses any
+    /// key the operation does not take (and a canonical key given twice by spelling).
+    pub fn canonical_query(
+        &self,
+        query: Vec<(String, String)>,
+    ) -> ApiResult<Vec<(String, String)>> {
+        let mut out: Vec<(String, String)> = Vec::with_capacity(query.len());
+        for (k, v) in query {
+            let key = QUERY_ALIASES
+                .iter()
+                .find(|(alias, canonical)| *alias == k && self.query.contains(canonical))
+                .map(|(_, canonical)| canonical.to_string())
+                .unwrap_or(k);
+            if !self.query.contains(&key.as_str()) {
+                return Err(ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "Unsupported query parameter",
+                ));
+            }
+            if out.iter().any(|(seen, _)| *seen == key) {
+                return Err(ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "A query parameter was given more than once",
+                ));
+            }
+            out.push((key, v));
+        }
+        Ok(out)
+    }
+}
+
 const fn r(
     method: Method,
     path: &'static [Seg],
@@ -79,12 +134,37 @@ const fn r(
 }
 
 const PAGE: &[&str] = &["limit", "cursor"];
-const MESSAGES: &[&str] = &["afterSequence", "beforeSequence", "limit"];
+/// `GET v1/conversations`: the Messaging contract's filters, keyset page and ordering.
+const CONVERSATIONS: &[&str] = &[
+    "lifecycleState",
+    "contextClass",
+    "limit",
+    "cursor",
+    "orderBy",
+];
+const MESSAGES: &[&str] = &["afterSequence", "beforeSequence", "limit", "threadRootId"];
+/// `GET v1/conversations/{id}/events`: Messaging's canonical replay cursor is `after`.
+const EVENTS: &[&str] = &["after", "limit"];
+
+/// Compatibility spellings the relay accepts and rewrites to Messaging's canonical query
+/// key before forwarding (MSG-001: early web builds sent the WebSocket frame's
+/// `afterEventSequence` on the REST replay). Only the canonical key is ever forwarded.
+pub const QUERY_ALIASES: &[(&str, &str)] = &[("afterEventSequence", "after")];
+
+/// Every HTTP method the allowlist uses; `routes::v2` mounts exactly these on
+/// `/api/v2/messaging/relay/*path` (a unit test keeps the two in step).
+pub const RELAY_METHODS: &[Method] = &[
+    Method::GET,
+    Method::POST,
+    Method::PUT,
+    Method::PATCH,
+    Method::DELETE,
+];
 
 /// The end-user operations of `cfmeet.messaging.http-api` the CF Meet client may use.
 pub static ROUTES: &[RelayRoute] = &[
     // Conversations, membership, messages, read state.
-    r(Method::GET, &[Lit("conversations")], PAGE, false),
+    r(Method::GET, &[Lit("conversations")], CONVERSATIONS, false),
     r(Method::POST, &[Lit("conversations")], &[], true),
     r(Method::GET, &[Lit("conversations"), Id], &[], false),
     r(
@@ -102,7 +182,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::DELETE,
         &[Lit("conversations"), Id, Lit("members"), Id],
-        &[],
+        &["reason"],
         false,
     ),
     r(
@@ -126,7 +206,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::DELETE,
         &[Lit("conversations"), Id, Lit("messages"), Id],
-        &[],
+        &["scope"],
         false,
     ),
     r(
@@ -144,7 +224,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("events")],
-        &["afterEventSequence", "limit"],
+        EVENTS,
         false,
     ),
     // The MLS Delivery Service (ciphertext, commits, Welcomes, KeyPackage claims).
@@ -629,21 +709,13 @@ impl UnifiedMessaging {
                 "This Messaging operation is not available to CF Meet clients",
             ));
         };
-        for (k, _) in &req.query {
-            if !route.query.contains(&k.as_str()) {
-                return Err(ApiError::domain(
-                    ErrorCode::ValidationError,
-                    "Unsupported query parameter",
-                ));
-            }
-        }
+        let canonical = route.canonical_query(req.query)?;
         let principal = self.principal_for_user(user_id).await?;
         let acting = Acting {
             principal_id: principal,
             kind: PrincipalKind::NativeCfUser,
         };
-        let query: Vec<(&str, &str)> = req
-            .query
+        let query: Vec<(&str, &str)> = canonical
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
@@ -928,6 +1000,118 @@ mod tests {
             assert!(route_for(&m, &p).is_none(), "{m} {p}");
         }
     }
+    /// MSG-001/002/003: every relayed operation takes exactly the query keys of the
+    /// Messaging consumer contract (walked from the bundled contract, so a contract change
+    /// fails here until the allowlist follows), and every allowlisted operation exists in
+    /// that contract.
+    #[test]
+    fn every_relayed_operation_takes_exactly_the_messaging_contract_query() {
+        use std::collections::BTreeSet;
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../../../packages/contracts/bundled/messaging/http/v1.openapi.json"
+        ))
+        .unwrap();
+        let params = |v: &Value| -> Vec<String> {
+            v.as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|p| {
+                    let p = match p.get("$ref").and_then(Value::as_str) {
+                        Some(r) => {
+                            &contract["components"]["parameters"][r.rsplit('/').next().unwrap()]
+                        }
+                        None => p,
+                    };
+                    (p["in"] == "query").then(|| p["name"].as_str().unwrap().to_string())
+                })
+                .collect()
+        };
+        let mut matched = BTreeSet::new();
+        for (path, item) in contract["paths"].as_object().unwrap() {
+            for (method, op) in item.as_object().unwrap() {
+                let m = match method.as_str() {
+                    "get" => Method::GET,
+                    "post" => Method::POST,
+                    "put" => Method::PUT,
+                    "patch" => Method::PATCH,
+                    "delete" => Method::DELETE,
+                    _ => continue,
+                };
+                let concrete = path
+                    .trim_start_matches('/')
+                    .split('/')
+                    .map(|p| match p {
+                        "{reaction}" => ":thumbsup:",
+                        p if p.starts_with('{') => C,
+                        p => p,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let Some(route) = route_for(&m, &concrete) else {
+                    continue;
+                };
+                let mut want: BTreeSet<String> = params(&op["parameters"]).into_iter().collect();
+                want.extend(params(&item["parameters"]));
+                let have: BTreeSet<String> =
+                    route.query_keys().iter().map(|k| k.to_string()).collect();
+                assert_eq!(have, want, "{m} {path}: relay query allowlist differs");
+                matched.insert((m.to_string(), route.template()));
+            }
+        }
+        for r in ROUTES {
+            assert!(
+                matched.contains(&(r.method().to_string(), r.template())),
+                "{} {} is relayed but is not a Messaging contract operation",
+                r.method(),
+                r.template()
+            );
+        }
+        // Every method the allowlist uses is mounted by the Meeting router.
+        let methods: BTreeSet<String> = ROUTES.iter().map(|r| r.method().to_string()).collect();
+        let mounted: BTreeSet<String> = RELAY_METHODS.iter().map(|m| m.to_string()).collect();
+        assert_eq!(methods, mounted);
+    }
+
+    #[test]
+    fn the_replay_cursor_is_forwarded_under_its_canonical_name() {
+        let events = route_for(&Method::GET, &format!("v1/conversations/{C}/events")).unwrap();
+        let q = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            events
+                .canonical_query(q(&[("afterEventSequence", "7"), ("limit", "50")]))
+                .unwrap(),
+            q(&[("after", "7"), ("limit", "50")])
+        );
+        assert_eq!(
+            events.canonical_query(q(&[("after", "7")])).unwrap(),
+            q(&[("after", "7")])
+        );
+        // Both spellings at once are ambiguous; unknown keys stay refused.
+        assert!(events
+            .canonical_query(q(&[("after", "7"), ("afterEventSequence", "8")]))
+            .is_err());
+        assert!(events.canonical_query(q(&[("principalId", C)])).is_err());
+        // The alias belongs to the replay route only.
+        let messages = route_for(&Method::GET, &format!("v1/conversations/{C}/messages")).unwrap();
+        assert!(messages
+            .canonical_query(q(&[("afterEventSequence", "7")]))
+            .is_err());
+        let delete = route_for(
+            &Method::DELETE,
+            &format!("v1/conversations/{C}/messages/{C}"),
+        )
+        .unwrap();
+        assert_eq!(
+            delete.canonical_query(q(&[("scope", "ME")])).unwrap(),
+            q(&[("scope", "ME")])
+        );
+    }
+
     #[test]
     fn reaction_paths_cannot_escape_the_domain_or_smuggle_a_query() {
         for value in [

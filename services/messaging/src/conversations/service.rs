@@ -84,6 +84,10 @@ pub struct ConversationRow {
     pub successor_conversation_id: Option<Uuid>,
     /// Appendix K: `Some(false)` turns read receipts off for this conversation.
     pub read_receipts: Option<bool>,
+    /// Section 13 (MSG-007): display title of a MANAGED conversation.
+    pub title: Option<String>,
+    /// Section 13 (MSG-007): opaque avatar reference of a MANAGED conversation.
+    pub avatar_ref: Option<String>,
 }
 
 impl ConversationRow {
@@ -99,7 +103,7 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
      c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
-     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts";
+     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -159,7 +163,55 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "predecessorConversationId": c.predecessor_conversation_id,
         "successorConversationId": c.successor_conversation_id,
         "readReceipts": c.read_receipts,
+        "title": c.title,
+        "avatarRef": c.avatar_ref,
     })
+}
+
+/// Section 13 (MSG-007): a MANAGED conversation's display metadata. A PRIVATE_E2EE
+/// conversation's name belongs inside its MLS group, so the server refuses to hold one.
+pub(crate) fn display_metadata(
+    profile: SecurityProfile,
+    title: Option<&str>,
+    avatar_ref: Option<&str>,
+) -> Result<(Option<String>, Option<String>)> {
+    if (title.is_some() || avatar_ref.is_some()) && profile != SecurityProfile::Managed {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "DISPLAY_METADATA_MANAGED_ONLY",
+        ));
+    }
+    let title = match title.map(str::trim) {
+        None => None,
+        Some(t)
+            if !t.is_empty() && t.chars().count() <= 120 && !t.chars().any(char::is_control) =>
+        {
+            Some(t.to_string())
+        }
+        Some(_) => {
+            return Err(Error::validation(
+                "title must be 1-120 characters without control characters",
+            ))
+        }
+    };
+    let avatar_ref = match avatar_ref {
+        None => None,
+        Some(a)
+            if (1..=256).contains(&a.len())
+                && a.as_bytes()[0].is_ascii_alphanumeric()
+                && a.bytes().all(|b| {
+                    b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'/' | b'-')
+                }) =>
+        {
+            Some(a.to_string())
+        }
+        Some(_) => {
+            return Err(Error::validation(
+                "avatarRef must be an opaque reference of 1-256 characters [A-Za-z0-9._:/-]",
+            ))
+        }
+    };
+    Ok((title, avatar_ref))
 }
 
 pub async fn load<C: ConnectionTrait>(
@@ -266,6 +318,12 @@ pub struct CreateRequest {
     /// acknowledge that the server can read its content (it is not end-to-end encrypted).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub managed_disclosure_acknowledged: bool,
+    /// Section 13 (MSG-007): display title (MANAGED only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Section 13 (MSG-007): opaque avatar reference (MANAGED only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_ref: Option<String>,
 }
 
 /// `(HTTP status, body)` of a creation, as stored for idempotent replays.
@@ -619,6 +677,11 @@ async fn create_in(
     if let Some(seconds) = request.retention_seconds {
         check_retention(&snapshot.policy, request.context_class, seconds, None)?;
     }
+    let (title, avatar_ref) = display_metadata(
+        profile,
+        request.title.as_deref(),
+        request.avatar_ref.as_deref(),
+    )?;
     let predecessor = match request.predecessor_conversation_id {
         Some(p) => {
             Some(check_predecessor(txn, ctx, acting, &request, counterpart, profile, p).await?)
@@ -639,8 +702,8 @@ async fn create_in(
            context_namespace, context_ref, context_ref_version, security_profile, protocol, ciphersuite, mls_group_id, \
            security_policy_version, lifecycle_state, policy_snapshot_id, policy_version, created_by_principal_id, \
            created_by_credential_id, owner_principal_id, direct_pair_key, created_at, updated_at, state_changed_at, expires_at, \
-           expiry_grace_seconds, retention_seconds, predecessor_conversation_id, read_receipts) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23, $24) \
+           expiry_grace_seconds, retention_seconds, predecessor_conversation_id, read_receipts, title, avatar_ref) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'ACTIVE', $14, $15, $16, $17, $16, $18, $19, $19, $19, $20, $21, $22, $23, $24, $25, $26) \
          ON CONFLICT DO NOTHING",
         vec![
             id.into(),
@@ -667,6 +730,8 @@ async fn create_in(
             request.retention_seconds.into(),
             request.predecessor_conversation_id.into(),
             request.read_receipts.into(),
+            title.into(),
+            avatar_ref.into(),
         ],
     )
     .await?;
@@ -889,11 +954,136 @@ pub struct ListQuery {
     pub limit: Option<u64>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Section 13 (MSG-007): `createdAt` (default, newest first) or `lastActivity`
+    /// (latest application message first; the inbox order).
+    #[serde(default)]
+    pub order_by: Option<String>,
 }
 
 pub(crate) fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
     URL_SAFE_NO_PAD.encode(format!("{}|{}", t.timestamp_micros(), id))
 }
+
+/// A `lastActivity` cursor (prefixed, so a cursor of the other ordering is refused).
+fn encode_activity_cursor(t: DateTime<Utc>, id: Uuid) -> String {
+    URL_SAFE_NO_PAD.encode(format!("A|{}|{}", t.timestamp_micros(), id))
+}
+
+fn decode_activity_cursor(c: &str) -> Option<(DateTime<Utc>, Uuid)> {
+    let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(c).ok()?).ok()?;
+    decode_cursor(&URL_SAFE_NO_PAD.encode(raw.strip_prefix("A|")?))
+}
+
+/// The inbox summary of one conversation for one member (Section 13, MSG-007): last
+/// activity, the last message visible to the viewer (preview text only for MANAGED and
+/// only while the message is active), unread and unread-mention counts. Returns the
+/// summary and the activity instant the `lastActivity` ordering uses.
+async fn inbox_summary(
+    state: &AppState,
+    row: &ConversationRow,
+    viewer: Uuid,
+) -> Result<(Value, DateTime<Utc>)> {
+    #[derive(FromQueryResult)]
+    struct Counts {
+        unread: i64,
+        mentions: i64,
+        visible_from: Option<i64>,
+        last_activity: Option<DateTime<Utc>>,
+    }
+    let counts: Counts = db::one(
+        &state.db,
+        "WITH me AS (SELECT visible_from_sequence AS v FROM messaging_conversation_members \
+                      WHERE conversation_id = $1 AND principal_id = $2), \
+              rc AS (SELECT COALESCE((SELECT read_sequence FROM messaging_read_cursors \
+                      WHERE conversation_id = $1 AND principal_id = $2), 0) AS r), \
+              unread AS (SELECT m.id FROM messaging_messages m, me, rc \
+                      WHERE m.conversation_id = $1 AND m.message_kind = 'APPLICATION' AND m.lifecycle = 'ACTIVE' \
+                        AND m.sender_principal_id <> $2 AND m.sequence >= me.v AND m.sequence > rc.r \
+                        AND NOT EXISTS (SELECT 1 FROM messaging_message_hidden h WHERE h.message_id = m.id AND h.principal_id = $2)) \
+         SELECT (SELECT count(*) FROM unread) AS unread, \
+                (SELECT count(*) FROM unread u JOIN messaging_message_mentions mm \
+                    ON mm.message_id = u.id AND mm.principal_id = $2) AS mentions, \
+                (SELECT v FROM me) AS visible_from, \
+                (SELECT m.created_at FROM messaging_messages m WHERE m.conversation_id = $1 \
+                    AND m.message_kind = 'APPLICATION' ORDER BY m.sequence DESC LIMIT 1) AS last_activity",
+        vec![row.id.into(), viewer.into()],
+    )
+    .await?
+    .ok_or(Error::code(ErrorCode::InternalError))?;
+    let activity = counts.last_activity.unwrap_or(row.created_at);
+    let last: Option<crate::messages::MessageRow> = db::one(
+        &state.db,
+        &format!(
+            "SELECT {} FROM messaging_messages m WHERE m.conversation_id = $1 AND m.message_kind = 'APPLICATION' \
+               AND m.sequence >= $3 \
+               AND NOT EXISTS (SELECT 1 FROM messaging_message_hidden h WHERE h.message_id = m.id AND h.principal_id = $2) \
+             ORDER BY m.sequence DESC LIMIT 1",
+            crate::messages::MESSAGE_COLUMNS
+        ),
+        vec![
+            row.id.into(),
+            viewer.into(),
+            counts.visible_from.unwrap_or(i64::MAX).into(),
+        ],
+    )
+    .await?;
+    let last_message = match last {
+        None => Value::Null,
+        Some(m) => {
+            // Never plaintext for PRIVATE_E2EE (the server has none) and never content of
+            // a tombstone; MANAGED previews are bounded.
+            let preview = if m.is_active() && m.profile() == SecurityProfile::Managed {
+                crate::messages::managed::text_of(
+                    state,
+                    &m,
+                    crate::messages::managed::DecryptPurpose::MemberRead,
+                )
+                .await
+                .map(|t| t.chars().take(INBOX_PREVIEW_CHARS).collect::<String>())
+            } else {
+                None
+            };
+            json!({
+                "messageId": m.id,
+                "sequence": m.sequence,
+                "senderPrincipalId": m.sender_principal_id,
+                "createdAt": rfc3339(m.created_at),
+                "lifecycle": m.lifecycle,
+                "securityProfile": m.security_profile,
+                "attachmentCount": if m.is_active() { m.attachment_count } else { 0 },
+                "previewText": preview,
+            })
+        }
+    };
+    Ok((
+        json!({
+            "lastActivityAt": rfc3339(activity),
+            "lastMessage": last_message,
+            "unreadCount": counts.unread,
+            "mentionCount": counts.mentions,
+        }),
+        activity,
+    ))
+}
+
+/// The `lastActivity` ordering key of one conversation (same expression as the list).
+async fn last_activity_of(state: &AppState, row: &ConversationRow) -> Result<DateTime<Utc>> {
+    #[derive(FromQueryResult)]
+    struct A {
+        created_at: DateTime<Utc>,
+    }
+    let a: Option<A> = db::one(
+        &state.db,
+        "SELECT m.created_at FROM messaging_messages m WHERE m.conversation_id = $1 \
+           AND m.message_kind = 'APPLICATION' ORDER BY m.sequence DESC LIMIT 1",
+        vec![row.id.into()],
+    )
+    .await?;
+    Ok(a.map(|a| a.created_at).unwrap_or(row.created_at))
+}
+
+/// Longest MANAGED preview in the conversation list (characters).
+pub const INBOX_PREVIEW_CHARS: usize = 140;
 
 pub(crate) fn decode_cursor(c: &str) -> Option<(DateTime<Utc>, Uuid)> {
     let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(c).ok()?).ok()?;
@@ -927,9 +1117,25 @@ pub async fn list(
             Some(ContextClass::parse(s).ok_or_else(|| Error::validation("unknown contextClass"))?)
         }
     };
+    let by_activity = match q.order_by.as_deref() {
+        None | Some("createdAt") => false,
+        Some("lastActivity") => true,
+        Some(_) => {
+            return Err(Error::validation(
+                "orderBy must be createdAt or lastActivity",
+            ))
+        }
+    };
     let cursor = match q.cursor.as_deref() {
         None => None,
-        Some(c) => Some(decode_cursor(c).ok_or_else(|| Error::validation("invalid cursor"))?),
+        Some(c) => Some(
+            if by_activity {
+                decode_activity_cursor(c)
+            } else {
+                decode_cursor(c)
+            }
+            .ok_or_else(|| Error::validation("invalid cursor"))?,
+        ),
     };
     let (cursor_t, cursor_id) = cursor
         .map(|(t, i)| (Some(t), Some(i)))
@@ -938,17 +1144,29 @@ pub async fn list(
         Reader::Member(a) => Some(a.principal_id),
         Reader::Administration => None,
     };
+    // `lastActivity`: the latest APPLICATION message (index `uq_messaging_messages_sequence`
+    // walked backwards), else the creation time; ties broken by id, newest first.
+    let (activity_join, order_key) = if by_activity {
+        (
+            " LEFT JOIN LATERAL (SELECT lm.created_at FROM messaging_messages lm \
+                 WHERE lm.conversation_id = c.id AND lm.message_kind = 'APPLICATION' \
+                 ORDER BY lm.sequence DESC LIMIT 1) la ON TRUE",
+            "COALESCE(la.created_at, c.created_at)",
+        )
+    } else {
+        ("", "c.created_at")
+    };
     let rows: Vec<ConversationRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {COLUMNS} FROM {FROM} \
+            "SELECT {COLUMNS} FROM {FROM}{activity_join} \
              WHERE c.tenant_id = $1 AND c.application_id = $2 AND c.environment_id = $3 \
                AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM messaging_conversation_members m \
                     WHERE m.conversation_id = c.id AND m.principal_id = $4 AND m.state = 'ACTIVE')) \
                AND ($5::text IS NULL OR c.lifecycle_state = $5) \
                AND ($6::text IS NULL OR c.context_class = $6) \
-               AND ($7::timestamptz IS NULL OR (c.created_at, c.id) < ($7, $8)) \
-             ORDER BY c.created_at DESC, c.id DESC LIMIT $9"
+               AND ($7::timestamptz IS NULL OR ({order_key}, c.id) < ($7, $8)) \
+             ORDER BY {order_key} DESC, c.id DESC LIMIT $9"
         ),
         vec![
             ctx.scope.tenant_id.into(),
@@ -965,15 +1183,30 @@ pub async fn list(
     .await?;
     let more = rows.len() as u64 > limit;
     let page: Vec<_> = rows.into_iter().take(limit as usize).collect();
-    let next = if more {
-        page.last().map(|r| encode_cursor(r.created_at, r.id))
-    } else {
-        None
-    };
     let mut items = Vec::with_capacity(page.len());
+    let mut last_activity = None;
     for row in &page {
-        items.push(full_view(&state.db, row).await?);
+        let mut view = full_view(&state.db, row).await?;
+        // A member's list carries its inbox summary (Section 13, MSG-007).
+        if let Some(viewer) = member {
+            let (inbox, activity) = inbox_summary(state, row, viewer).await?;
+            view["inbox"] = inbox;
+            last_activity = Some(activity);
+        }
+        items.push(view);
     }
+    let next = match (more, page.last()) {
+        (true, Some(r)) if by_activity => {
+            let activity = match (member, last_activity) {
+                (Some(_), Some(a)) => a,
+                // The administration view has no summary: read the same key directly.
+                _ => last_activity_of(state, r).await?,
+            };
+            Some(encode_activity_cursor(activity, r.id))
+        }
+        (true, Some(r)) => Some(encode_cursor(r.created_at, r.id)),
+        _ => None,
+    };
     Ok(json!({ "conversations": items, "nextCursor": next }))
 }
 
@@ -997,6 +1230,21 @@ pub struct PatchRequest {
     /// Accepted only to be refused explicitly: a profile can never change.
     #[serde(default)]
     pub security_profile: Option<Value>,
+    /// Section 13 (MSG-007): a new display title (`null` clears it). MANAGED only.
+    #[serde(default, deserialize_with = "present")]
+    pub title: Option<Option<String>>,
+    /// Section 13 (MSG-007): a new avatar reference (`null` clears it). MANAGED only.
+    #[serde(default, deserialize_with = "present")]
+    pub avatar_ref: Option<Option<String>>,
+}
+
+/// A field that is present (possibly `null`) versus absent.
+fn present<'de, D, T>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 enum PatchOutcome {
@@ -1025,9 +1273,11 @@ pub async fn patch(
     if request.lifecycle_state.is_none()
         && request.expires_at.is_none()
         && request.retention_seconds.is_none()
+        && request.title.is_none()
+        && request.avatar_ref.is_none()
     {
         return Err(Error::validation(
-            "nothing to change: lifecycleState, expiresAt or retentionSeconds is required",
+            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title or avatarRef is required",
         ));
     }
 
@@ -1132,7 +1382,20 @@ pub async fn patch(
                 if let Some(seconds) = request.retention_seconds {
                     check_and_audit_retention(txn, &ctx, &row, seconds, now).await?;
                 }
-                let changed = transition(
+                // Display metadata is validated against the PERSISTED profile and applied
+                // in the transition's single version step (`conversation.updated` event).
+                // `Some(None)` clears; only a new value is validated.
+                let mut display = DisplayChange::default();
+                if request.title.is_some() || request.avatar_ref.is_some() {
+                    let (title, avatar_ref) = display_metadata(
+                        row.profile(),
+                        request.title.clone().flatten().as_deref(),
+                        request.avatar_ref.clone().flatten().as_deref(),
+                    )?;
+                    display.title = request.title.as_ref().map(|_| title);
+                    display.avatar_ref = request.avatar_ref.as_ref().map(|_| avatar_ref);
+                }
+                let changed = transition_with(
                     txn,
                     &ctx,
                     &row,
@@ -1140,6 +1403,7 @@ pub async fn patch(
                     request.reason.as_deref(),
                     request.expires_at,
                     request.retention_seconds,
+                    display,
                     now,
                     &request_ctx,
                 )
@@ -1373,12 +1637,51 @@ pub(crate) async fn transition<C: ConnectionTrait>(
     now: DateTime<Utc>,
     request: &RequestContext,
 ) -> Result<ConversationRow> {
+    transition_with(
+        db,
+        ctx,
+        row,
+        next,
+        reason,
+        expires_at,
+        retention_seconds,
+        DisplayChange::default(),
+        now,
+        request,
+    )
+    .await
+}
+
+/// Section 13 (MSG-007): a display-metadata change applied with a transition (one
+/// version step). `None`: unchanged; `Some(None)`: cleared.
+#[derive(Debug, Default)]
+pub(crate) struct DisplayChange {
+    pub title: Option<Option<String>>,
+    pub avatar_ref: Option<Option<String>>,
+}
+
+/// [`transition`] that may also change the display metadata in the same version step.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn transition_with<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    row: &ConversationRow,
+    next: LifecycleState,
+    reason: Option<&str>,
+    expires_at: Option<DateTime<Utc>>,
+    retention_seconds: Option<i64>,
+    display: DisplayChange,
+    now: DateTime<Utc>,
+    request: &RequestContext,
+) -> Result<ConversationRow> {
     let state_changed = next != row.state();
     let updated = db::exec(
         db,
         "UPDATE messaging_conversations SET lifecycle_state = $3, \
            lifecycle_reason = CASE WHEN $6 THEN $4 ELSE lifecycle_reason END, \
            expires_at = COALESCE($5, expires_at), retention_seconds = COALESCE($8, retention_seconds), \
+           title = CASE WHEN $9 THEN $10 ELSE title END, \
+           avatar_ref = CASE WHEN $11 THEN $12 ELSE avatar_ref END, \
            version = version + 1, updated_at = $7, \
            state_changed_at = CASE WHEN $6 THEN $7 ELSE state_changed_at END \
          WHERE id = $1 AND version = $2",
@@ -1391,6 +1694,10 @@ pub(crate) async fn transition<C: ConnectionTrait>(
             state_changed.into(),
             now.into(),
             retention_seconds.into(),
+            display.title.is_some().into(),
+            display.title.flatten().into(),
+            display.avatar_ref.is_some().into(),
+            display.avatar_ref.flatten().into(),
         ],
     )
     .await

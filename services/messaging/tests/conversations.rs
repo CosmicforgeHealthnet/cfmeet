@@ -1385,3 +1385,333 @@ async fn a_profile_change_is_a_disclosed_successor_conversation_with_provenance(
         "members join the successor themselves"
     );
 }
+
+/// Blueprint Section 13 (MSG-007): the existing conversation list is the inbox — MANAGED
+/// display metadata, last activity, last visible message preview metadata, unread and
+/// mention counts, ordered by last activity with a stable keyset cursor; left
+/// conversations disappear and tombstones carry no content.
+#[tokio::test]
+async fn the_conversation_list_is_an_inbox_ordered_by_last_activity() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    h.allow_managed(&c, "GROUP").await;
+    let alice = h.principal(&c);
+    let bob = h.principal(&c);
+    let mut convs = Vec::new();
+    for title in ["Alpha", "Bravo", "Charlie"] {
+        let r = h
+            .create(
+                &c,
+                alice,
+                json!({ "contextClass": "GROUP", "securityProfile": "MANAGED", "title": title, "avatarRef": format!("avatar:{title}") }),
+                &key(),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        assert_eq!(r.json["title"], title);
+        let cid = r.json["conversationId"].as_str().unwrap().to_string();
+        let a = h
+            .post(
+                &c,
+                Some(alice),
+                &format!("/v1/conversations/{cid}/members"),
+                json!({ "principalId": bob }),
+            )
+            .await;
+        assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+        convs.push(r.json);
+        h.clock.advance(chrono::Duration::seconds(1));
+    }
+    let (alpha, bravo, charlie) = (&convs[0], &convs[1], &convs[2]);
+    let cid = |v: &Value| v["conversationId"].as_str().unwrap().to_string();
+    let send = |conv: &Value, text: &str, mentions: Value| {
+        let path = format!("/v1/conversations/{}/messages", cid(conv));
+        let body = json!({ "clientMessageId": Uuid::new_v4(), "text": text, "mentionedPrincipalIds": mentions });
+        let h = &h;
+        let c = &c;
+        async move { h.post(c, Some(alice), &path, body).await }
+    };
+    // Activity order: Alpha, then Charlie, then Bravo (mentioning Bob).
+    for (conv, text, mentions) in [
+        (alpha, "first in alpha", json!([])),
+        (charlie, "then charlie", json!([])),
+        (bravo, "bravo for @bob", json!([bob])),
+    ] {
+        h.clock.advance(chrono::Duration::seconds(5));
+        let r = send(conv, text, mentions).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    // Mentions name current members only.
+    let r = send(alpha, "who?", json!([h.principal(&c)])).await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+
+    let page = h
+        .get(
+            &c,
+            Some(bob),
+            "/v1/conversations?orderBy=lastActivity&limit=2",
+        )
+        .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ConversationPage",
+        &page.json,
+    );
+    let items = page.json["conversations"].as_array().unwrap();
+    assert_eq!(
+        items.iter().map(&cid).collect::<Vec<_>>(),
+        vec![cid(bravo), cid(charlie)]
+    );
+    let b = &items[0];
+    assert_eq!(b["title"], "Bravo");
+    assert_eq!(b["avatarRef"], "avatar:Bravo");
+    assert_eq!(b["inbox"]["unreadCount"], 1, "{b}");
+    assert_eq!(b["inbox"]["mentionCount"], 1, "{b}");
+    assert_eq!(b["inbox"]["lastMessage"]["previewText"], "bravo for @bob");
+    assert_eq!(b["inbox"]["lastMessage"]["senderPrincipalId"], json!(alice));
+    assert_eq!(items[1]["inbox"]["mentionCount"], 0);
+    let next = page.json["nextCursor"].as_str().unwrap().to_string();
+    let page2 = h
+        .get(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations?orderBy=lastActivity&limit=2&cursor={next}"),
+        )
+        .await;
+    let items2 = page2.json["conversations"].as_array().unwrap();
+    assert_eq!(
+        items2.iter().map(&cid).collect::<Vec<_>>(),
+        vec![cid(alpha)]
+    );
+    assert!(page2.json["nextCursor"].is_null());
+    // A cursor is valid only with the ordering that produced it.
+    let created = h.get(&c, Some(bob), "/v1/conversations?limit=1").await.json["nextCursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        h.get(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations?orderBy=lastActivity&cursor={created}")
+        )
+        .await
+        .code(),
+        "VALIDATION_ERROR"
+    );
+    assert_eq!(
+        h.get(&c, Some(bob), "/v1/conversations?orderBy=popularity")
+            .await
+            .code(),
+        "VALIDATION_ERROR"
+    );
+
+    // Reading clears unread and mentions.
+    let seq = b["inbox"]["lastMessage"]["sequence"].as_i64().unwrap();
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{}/read-cursor", cid(bravo)),
+            json!({ "sequence": seq }),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    // A deleted last message is a tombstone without content.
+    let last = h
+        .get(
+            &c,
+            Some(bob),
+            "/v1/conversations?orderBy=lastActivity&limit=2",
+        )
+        .await;
+    let charlie_last = last.json["conversations"][1]["inbox"]["lastMessage"]["messageId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let r = h
+        .delete(
+            &c,
+            Some(alice),
+            &format!(
+                "/v1/conversations/{}/messages/{charlie_last}?scope=EVERYONE",
+                cid(charlie)
+            ),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    // Bob leaves Alpha: it is no longer in his inbox.
+    let r = h
+        .delete(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{}/members/{bob}", cid(alpha)),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let after = h
+        .get(&c, Some(bob), "/v1/conversations?orderBy=lastActivity")
+        .await;
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/ConversationPage",
+        &after.json,
+    );
+    let items = after.json["conversations"].as_array().unwrap();
+    assert_eq!(
+        items.iter().map(&cid).collect::<Vec<_>>(),
+        vec![cid(bravo), cid(charlie)]
+    );
+    assert_eq!(items[0]["inbox"]["unreadCount"], 0);
+    assert_eq!(items[0]["inbox"]["mentionCount"], 0);
+    let tomb = &items[1]["inbox"]["lastMessage"];
+    assert_eq!(tomb["lifecycle"], "DELETED", "{tomb}");
+    assert!(tomb["previewText"].is_null(), "{tomb}");
+    assert_eq!(items[1]["inbox"]["unreadCount"], 0);
+    // The administration view has no per-member summary.
+    let admin = h
+        .get(&c, None, "/v1/conversations?orderBy=lastActivity")
+        .await;
+    assert!(admin.json["conversations"][0].get("inbox").is_none());
+
+    // The owner renames and clears display metadata (MANAGED only).
+    let current = h
+        .get(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{}", cid(bravo)),
+        )
+        .await;
+    let r = h
+        .patch_conv(
+            &c,
+            Some(alice),
+            &bravo["conversationId"],
+            json!({ "expectedVersion": current.json["version"], "title": "Bravo team" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["title"], "Bravo team");
+    assert_eq!(r.json["avatarRef"], "avatar:Bravo");
+    let r = h
+        .patch_conv(
+            &c,
+            Some(alice),
+            &bravo["conversationId"],
+            json!({ "expectedVersion": r.json["version"], "avatarRef": null }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(r.json["avatarRef"].is_null());
+    assert_eq!(r.json["title"], "Bravo team");
+    let r = h
+        .patch_conv(
+            &c,
+            Some(alice),
+            &bravo["conversationId"],
+            json!({ "expectedVersion": r.json["version"], "title": " " }),
+        )
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+}
+
+/// PRIVATE_E2EE conversations never hold a server-readable title.
+#[tokio::test]
+async fn an_encrypted_conversation_refuses_server_readable_display_metadata() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let (alice, _) = h.pair(&c).await;
+    let r = h
+        .create(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "title": "Secret plans" }),
+            &key(),
+        )
+        .await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("CONTENT_REJECTED", "DISPLAY_METADATA_MANAGED_ONLY"),
+        "{}",
+        r.text
+    );
+    let r = h
+        .create(&c, alice, json!({ "contextClass": "GROUP" }), &key())
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert!(r.json["title"].is_null());
+    let r = h
+        .patch_conv(
+            &c,
+            Some(alice),
+            &r.json["conversationId"],
+            json!({ "expectedVersion": r.json["version"], "title": "Secret plans" }),
+        )
+        .await;
+    assert_eq!(r.reason(), "DISPLAY_METADATA_MANAGED_ONLY", "{}", r.text);
+}
+
+/// MSG-019: a MANAGED retry is answered before rate limits are charged, and must repeat
+/// the original payload (text AND attachment set).
+#[tokio::test]
+async fn managed_retries_skip_rate_limits_and_must_repeat_the_payload() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let path = format!(
+        "/v1/conversations/{}/messages",
+        conv["conversationId"].as_str().unwrap()
+    );
+    let id = Uuid::new_v4();
+    let first = h
+        .post(
+            &c,
+            Some(people[0]),
+            &path,
+            json!({ "clientMessageId": id, "text": "once" }),
+        )
+        .await;
+    assert_eq!(first.status, StatusCode::CREATED, "{}", first.text);
+    let charged_sql = format!(
+        "SELECT COALESCE(sum(count), 0)::bigint FROM messaging_rate_windows WHERE window_key LIKE 'msg:%{}'",
+        people[0].simple()
+    );
+    let charged = || h.scalar(&charged_sql);
+    let before = charged().await;
+    for _ in 0..3 {
+        let r = h
+            .post(
+                &c,
+                Some(people[0]),
+                &path,
+                json!({ "clientMessageId": id, "text": "once" }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["messageId"], first.json["messageId"]);
+    }
+    assert_eq!(charged().await, before, "retries charge no rate limit");
+    let r = h
+        .post(
+            &c,
+            Some(people[0]),
+            &path,
+            json!({ "clientMessageId": id, "text": "changed" }),
+        )
+        .await;
+    assert_eq!(r.code(), "IDEMPOTENCY_KEY_REUSED", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(people[0]),
+            &path,
+            json!({ "clientMessageId": id, "text": "once", "attachmentIds": [Uuid::new_v4()] }),
+        )
+        .await;
+    assert_eq!(r.code(), "IDEMPOTENCY_KEY_REUSED", "{}", r.text);
+}

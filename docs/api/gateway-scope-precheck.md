@@ -44,6 +44,15 @@ route has no gate scope. The upstream checks it. Those routes are listed below.
 | gateway | 1 | 0 | 1 |
 | **Total** | 361 | 354 | 7 |
 
+Section 13 added two messaging credential operations, `issueSessionDeviceToken` (`POST
+/v1/messaging/session-devices`) and `revokeSessionDevices` (`POST
+/v1/messaging/session-devices/revoke`). Each handler requires exactly one scope
+unconditionally (`acting_with(…, MESSAGES_READ)` and `acting_with(…, MESSAGES_SEND)` in
+`services/messaging/src/realtime/http.rs`), so the source contract annotates them
+`messages.read` and `messages.send` (messaging http-api 1.16.0). The gateway does not route
+them (`EXCLUDED`, `FIRST_PARTY_SESSION_DEVICES`), so they are not counted above; the
+annotation applies if they are ever made public.
+
 The gate scopes match the handlers' own checks:
 
 - messaging: `require_scope`, `acting_with`, `administration` and `administrator` in

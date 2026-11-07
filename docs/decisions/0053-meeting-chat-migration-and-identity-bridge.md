@@ -71,6 +71,32 @@ end-to-end encrypted and without exposing service credentials to clients.
 * Web / mobile clients are not changed here; real-device runtime certification remains a
   Part K gate.
 
+## Amendment (Blueprint v1.0 Section 13) — superseded scope and relay parity
+
+* **Superseded scope limit (MSG-015).** The first scope limit above no longer describes the
+  code: breakout and private chat migrate under the same state machine to their own
+  MEETING conversations (`unified_messaging/scoped.rs`, `store.rs`: "used for EVERY meeting
+  chat scope"; the migration status reports `scope.migrated = MAIN_ROOM_CHAT, ANNOUNCEMENTS,
+  BREAKOUT_CHAT, PRIVATE_CHAT` and `scope.legacy = []`).
+* **Client relay parity (MSG-001/002/003).** `/api/v2/messaging/relay/{path}` relays every
+  allowlisted method including PATCH (MANAGED edit, member role, conversation update /
+  retention / title) and exactly the Messaging contract's query parameters per operation
+  (`scope`, `reason`, `threadRootId`, `lifecycleState`, `contextClass`, `orderBy`). The
+  replay cursor is forwarded as Messaging's canonical `after`; the WebSocket spelling
+  `afterEventSequence` is accepted as a compatibility alias and rewritten. A unit test
+  walks the bundled Messaging contract against the allowlist and an integration test
+  walks it through the real router.
+* **Identity bridge addition.** `POST /api/v2/messaging/session-tokens` issues
+  MANAGED-realtime session-device tokens bound to the verified account session (ADR 0049
+  amendment A1); signing out of that session revokes them.
+* **Organization conversations (integration point, not built).** Organization-scoped
+  conversations wait for the Section 7 organization scopes: Meeting will resolve the
+  caller's organization role through the Organizations Service and create conversations
+  with `context = { namespace: "organization", reference: <organization id> }` under a
+  context authority, exactly like `meeting` contexts. Until then no conversation carries
+  organization authority and the colleague directory stays the only organization-bounded
+  messaging surface.
+
 ## Consequences
 
 The journey is proven across real Platform Access and Messaging processes

@@ -32,6 +32,7 @@ pub mod hub;
 pub mod presence;
 pub mod push;
 pub mod push_adapters;
+pub mod session_devices;
 pub mod sessions;
 pub mod token;
 
@@ -54,6 +55,11 @@ pub const TICKET_PROTOCOL_PREFIX: &str = "cfmeet.ticket.";
 #[derive(Debug, Clone)]
 pub struct RealtimeSettings {
     pub token_ttl: chrono::Duration,
+    /// Blueprint Section 13 (ADR 0049 amendment A1): first-party session devices for
+    /// MANAGED realtime. Independent of (and never implying) E2EE device registration.
+    pub session_devices_enabled: bool,
+    /// Lifetime of a session-device client token (renewed through the relay).
+    pub session_device_token_ttl: chrono::Duration,
     pub ticket_ttl: chrono::Duration,
     /// Browser `Origin`s allowed to open a connection (exact match). Native clients send
     /// no Origin. Empty: browser connections are refused.
@@ -83,6 +89,8 @@ impl Default for RealtimeSettings {
     fn default() -> Self {
         Self {
             token_ttl: chrono::Duration::minutes(15),
+            session_devices_enabled: true,
+            session_device_token_ttl: chrono::Duration::minutes(5),
             ticket_ttl: chrono::Duration::seconds(30),
             allowed_origins: Vec::new(),
             require_tls: false,
