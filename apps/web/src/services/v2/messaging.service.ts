@@ -21,6 +21,9 @@ export const messagingService = {
   revokeDevice: (deviceId: string, reason: DeviceRevocationReason = "USER_REQUESTED") =>
     call<MessagingDevice>("POST", `/messaging/devices/${encodeURIComponent(deviceId)}/revoke`, { reason }),
   clientToken: (deviceId: string) => call<MessagingClientToken>("POST", "/messaging/client-tokens", { deviceId }),
+  /** MANAGED realtime without an E2EE device (ADR 0049 A1): renew with the returned session device id. */
+  sessionToken: (sessionDeviceId?: string | null) =>
+    call<unknown>("POST", "/messaging/session-tokens", sessionDeviceId ? { sessionDeviceId } : {}),
   revokeAllSessions: () => call<{ revokedSessions: number }>("POST", "/messaging/client-sessions/revoke-all"),
   devices: (principalId: string) => relay<{ devices: MessagingDevice[] }>("GET", `v1/messaging/principals/${principalId}/devices`),
   relay,
