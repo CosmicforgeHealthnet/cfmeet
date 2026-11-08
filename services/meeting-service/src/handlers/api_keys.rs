@@ -18,7 +18,7 @@ use crate::{
     },
     error::{ApiError, ApiResult},
     models::api_keys::{self, ApiKeyStatus, Entity as ApiKeys},
-    services::auth::Claims,
+    services::{auth::Claims, legacy_credentials},
     state::AppState,
     utils::now_utc,
 };
@@ -35,14 +35,6 @@ fn generate_api_key() -> String {
         .collect()
 }
 
-/// Mask API key showing only last 4 characters
-fn mask_api_key(key: &str) -> String {
-    if key.len() <= 4 {
-        return "*".repeat(key.len());
-    }
-    format!("{}...{}", "*".repeat(8), &key[key.len() - 4..])
-}
-
 /// Format API key status to string
 fn format_status(status: &ApiKeyStatus) -> String {
     match status {
@@ -55,8 +47,9 @@ fn format_status(status: &ApiKeyStatus) -> String {
 ///
 /// Generates a new API key owned by the authenticated user. The request body currently takes no
 /// fields: every key gets a usage limit of 100 requests and expires 20 days after creation. The
-/// full key value is returned only in this response (later reads show it masked), so store it now.
-/// Send it in the `Api-Key` header on endpoints that accept API-key authentication.
+/// full key value is returned only in this response and is never stored by the service (only a
+/// one-way verifier and its first eight characters are kept), so store it now; it cannot be shown
+/// again. Send it in the `Api-Key` header on endpoints that accept API-key authentication.
 #[utoipa::path(
     post,
     path = "/api/v1/api-keys",
@@ -92,10 +85,13 @@ pub async fn create_api_key(
     let raw_api_key = generate_api_key();
     let api_key_id = Uuid::new_v4();
 
+    // PLT-002: only a verifier and the lookup prefix are stored, never the key.
     let api_key = api_keys::ActiveModel {
         id: Set(api_key_id),
         user_id: Set(user_id),
-        api_key: Set(raw_api_key.clone()),
+        api_key: Set(legacy_credentials::api_key_placeholder(api_key_id)),
+        key_hash: Set(Some(legacy_credentials::api_key_hash(&raw_api_key))),
+        key_prefix: Set(legacy_credentials::api_key_prefix(&raw_api_key)),
         usage_limit: Set(DEFAULT_USAGE_LIMIT),
         used_count: Set(0),
         expires_at: Set(expires_at),
@@ -128,8 +124,8 @@ pub async fn create_api_key(
 /// List all API keys for the authenticated user
 ///
 /// Returns every API key owned by the authenticated user, both active and revoked, newest first.
-/// Key values are masked to their last four characters; usage count, usage limit, expiry and status
-/// are included. Not paginated.
+/// Key values are masked: only the first eight characters (the non-secret lookup prefix) are shown,
+/// followed by asterisks; usage count, usage limit, expiry and status are included. Not paginated.
 #[utoipa::path(
     get,
     path = "/api/v1/api-keys",
@@ -159,7 +155,7 @@ pub async fn list_api_keys(
         .into_iter()
         .map(|key| ApiKeyResponse {
             id: key.id,
-            api_key_masked: mask_api_key(&key.api_key),
+            api_key_masked: legacy_credentials::masked(&key),
             usage_limit: key.usage_limit,
             used_count: key.used_count,
             expires_at: key.expires_at.and_utc(),
@@ -177,8 +173,8 @@ pub async fn list_api_keys(
 
 /// Get a specific API key by ID
 ///
-/// Returns one API key owned by the authenticated user, with the key value masked to its last four
-/// characters, plus its usage count, usage limit, expiry and status. Returns 404 if the key does
+/// Returns one API key owned by the authenticated user, with the key value masked (only its first
+/// eight characters are shown), plus its usage count, usage limit, expiry and status. Returns 404 if the key does
 /// not exist or belongs to another user.
 #[utoipa::path(
     get,
@@ -212,7 +208,7 @@ pub async fn get_api_key(
 
     let response = ApiKeyResponse {
         id: api_key.id,
-        api_key_masked: mask_api_key(&api_key.api_key),
+        api_key_masked: legacy_credentials::masked(&api_key),
         usage_limit: api_key.usage_limit,
         used_count: api_key.used_count,
         expires_at: api_key.expires_at.and_utc(),

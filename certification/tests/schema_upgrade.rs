@@ -473,6 +473,13 @@ async fn run_case(case: &Case, bin: &std::path::Path, url: &str) -> anyhow::Resu
             refused.is_err(),
             "down must refuse once Part VI data exists"
         );
+        // The migration's own data guard refused, not the SEC-015 subcommand guard.
+        anyhow::ensure!(
+            refused
+                .as_ref()
+                .is_err_and(|e| !e.to_string().contains("SEC-015: refusing")),
+            "down was refused by the SEC-015 subcommand guard, not by the data guard"
+        );
         anyhow::ensure!(
             status(bin, url).iter().all(|(_, s)| s == "Applied"),
             "a refused down leaves the schema applied"

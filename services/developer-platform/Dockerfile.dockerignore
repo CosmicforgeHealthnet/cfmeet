@@ -1,6 +1,7 @@
 # Build-context filter for services/developer-platform/Dockerfile (context: repository root).
 *
 !packages/service-auth
+!packages/migration-guard
 !packages/usage-facts
 !packages/webhooks
 !packages/contracts/platform-developer

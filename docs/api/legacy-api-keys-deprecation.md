@@ -16,10 +16,10 @@ authority; the legacy meeting-service API keys are deprecated.
 | Authority | `services/meeting-service` (`api_keys` table, `models/api_keys.rs`) | `services/platform-access` (ADR 0032; ADR 0055 §Decision: "There is no second credential authority") |
 | Issued by | `POST /api/v1/api-keys` (user session) | Developer Platform `POST /v1/environments/{environmentId}/service-accounts/{serviceAccountId}/credentials` (`createCredential`), delegated to Platform Access |
 | Format | 64 alphanumeric characters, **no prefix** (`handlers/api_keys.rs` `generate_api_key`) | `cfmk_<sbx\|test\|live>_<24 hex public id>_<64 hex secret>` (`identity/credential_format.rs`) |
-| Storage | the key itself, plaintext, matched by equality (`middleware/api_key.rs`; PLT-002 / SEC-006 / DATA-003) | HMAC verifier only; raw secret returned once |
+| Storage | since the Sections 2–3 hardening: SHA-256 verifier + 8-character lookup prefix, constant-time comparison (`services/legacy_credentials.rs`; PLT-002 / SEC-006 / DATA-003, [hardening-sections-2-3.md](../operations/hardening-sections-2-3.md)); rows written before keep their plaintext until the documented cleanup step | HMAC verifier only; raw secret returned once |
 | Header | `Api-Key: <key>` | `Authorization: Bearer cfmk_…` at the API Gateway |
 | Scope model | none: the key acts as its owner on the two `/api/v1/api/*` routes | per-credential scopes, validated against the application's allowed scopes (`identity/scopes.rs`) |
-| Lifecycle | fixed 20-day expiry, fixed 100-request quota (non-atomic counter), revoke | expiry within organization policy, rotation with bounded overlap, revoke, suspend / resume, per-credential and per-service-account limits |
+| Lifecycle | fixed 20-day expiry, fixed 100-request quota (atomic since the Sections 2–3 hardening), revoke | expiry within organization policy, rotation with bounded overlap, revoke, suspend / resume, per-credential and per-service-account limits |
 | Ingress | direct meeting-service routes on `api.cfmeet.com`; the gateway catalogue marks all six legacy operations `EXCLUDED` / `LEGACY_DIRECT_INGRESS` (`infra/api-gateway/route-manifest.json`) | API Gateway only (`PLATFORM_CREDENTIAL` auth mode; credential routes accept only `cfmk_` values) |
 
 Why: ADR 0032 makes Platform Access the shared identity authority (tenants, applications,
@@ -92,10 +92,10 @@ The SDKs (`@cfmeet/platform-sdk`, `cfmeet_platform_sdk`) already target the gate
 * meeting-service routes `/api/v1/api-keys*` (`routes/api_keys.rs`, `handlers/api_keys.rs`,
   `dto/api_keys.rs`) and `/api/v1/api/*` (`routes/api.rs`, `api_create_meeting`,
   `api_join_meeting`);
-* `middleware/api_key.rs` (`api_key_middleware`, `combined_auth_middleware`);
-* the `api_keys` table and `api_key_status` enum, by an additive-then-drop migration pair
-  after an export (PLT-002 / DATA-003: plaintext secrets at rest — Section 16 owns the
-  hashing-or-freeze step);
+* `middleware/api_key.rs` (`api_key_middleware`; `combined_auth_middleware` was already
+  removed by the Sections 2–3 hardening, ACC-025) and `services/legacy_credentials.rs`;
+* the `api_keys` table and `api_key_status` enum, by a drop migration after an export
+  (the hashing step is done: PLT-002 / DATA-003, `account_hardening_migrations`);
 * the "API Keys" tag and `api_key_auth` security scheme from the meeting-service Swagger;
 * the six `LEGACY_DIRECT_INGRESS` catalogue rows in `infra/api-gateway/route-manifest.json`.
 

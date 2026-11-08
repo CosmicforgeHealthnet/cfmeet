@@ -228,10 +228,10 @@ docker-compose run --rm migration cargo run -- up
 docker-compose run --rm migration cargo run -- status
 
 # Rollback last migration
-docker-compose run --rm migration cargo run -- down
+docker-compose run --rm -e APP_ENV=development migration cargo run -- down
 
 # Reset database (DESTROYS ALL DATA)
-docker-compose run --rm migration cargo run -- fresh
+docker-compose run --rm -e APP_ENV=development migration cargo run -- fresh
 ```
 
 **Note**: The migration service uses the `tools` profile, so it won't start with `docker-compose up`. It only runs when explicitly called.
@@ -341,7 +341,7 @@ docker-compose run --rm migration cargo run -- status
 docker-compose run --rm migration cargo run -- up
 
 # If still failing, reset and reapply (DESTROYS DATA)
-docker-compose run --rm migration cargo run -- fresh
+docker-compose run --rm -e APP_ENV=development migration cargo run -- fresh
 ```
 
 ## Production Checklist
@@ -372,8 +372,8 @@ docker-compose stop                     # Stop without removing
 # Migrations
 docker-compose run --rm migration cargo run -- up      # Apply migrations
 docker-compose run --rm migration cargo run -- status  # Check status
-docker-compose run --rm migration cargo run -- down    # Rollback last
-docker-compose run --rm migration cargo run -- fresh   # Reset all
+docker-compose run --rm -e APP_ENV=development migration cargo run -- down    # Rollback last
+docker-compose run --rm -e APP_ENV=development migration cargo run -- fresh   # Reset all
 
 # Logs
 docker-compose logs                     # All services

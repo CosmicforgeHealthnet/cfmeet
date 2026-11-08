@@ -13,7 +13,7 @@ import urllib.request
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'calling'/'production'))
 import production as p
-from communications_release import clone, env_file
+from communications_release import clone, env_file, meeting_migration_url
 
 NAME='cfmeet-production-backend'
 
@@ -54,9 +54,10 @@ def release(image,run_id):
     immutable=json.loads(p.run('docker','image','inspect',image))[0]['Id']
     folder=p.ROOT/'account-releases'/run_id;folder.mkdir(parents=True,exist_ok=False,mode=0o700)
     p.write_private(folder/'original.private.json',json.dumps(c))
-    migration_env=env_file(folder/'migration.private.env',p.env_of(c))
+    # SEC-018: the migrator role's URL when provisioned (opt-in); the runtime one otherwise.
+    migration_env=env_file(folder/'migration.private.env',dict(p.env_of(c),DATABASE_URL=meeting_migration_url(p.env_of(c))))
     try:
-        for binary in (['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-communications-migration'] if p.env_of(c).get('CF_COMMUNICATIONS_BASE_URL') else ['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration']):
+        for binary in (['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','account-communications-migration'] if p.env_of(c).get('CF_COMMUNICATIONS_BASE_URL') else ['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration']):
             p.run('docker','run','--rm','--network','container:'+NAME,'--env-file',str(migration_env),
                 '--entrypoint','/app/'+binary,immutable,'up')
     finally:migration_env.unlink(missing_ok=True)

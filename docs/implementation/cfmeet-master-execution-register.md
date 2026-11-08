@@ -133,7 +133,7 @@ Release steps to enable (owner-gated): PA migration 000005, Organizations migrat
 
 ### Section 13 — Messaging
 
-**Verdict:** backend ENGINEERING_COMPLETE (`4c257004`, merged at `51c5903a`). [Operations record](../operations/messaging-section-13.md); ADR 0049 Amendment A1 (MANAGED realtime through session devices: realtime-only, refused on PRIVATE_E2EE, bound to the account session, ≤300 s tokens renewed through Meeting, revoked with the session; production refusal of E2EE devices unchanged). Closed: MSG-001, MSG-002, MSG-003, MSG-004, MSG-007, MSG-019. Partial: MSG-018 (contract documents ack-cursor resume; web change and receipt coalescing open), MSG-015 (touched docs fixed). Release: `MESSAGING_SESSION_DEVICES_ENABLED` is not set by the production scripts; rollback needs `messaging-migration down 1`. Meeting v2 operations 179 → 181 after merging with Section 8.
+**Verdict:** backend ENGINEERING_COMPLETE (`4c257004`, merged at `51c5903a`). [Operations record](../operations/messaging-section-13.md); ADR 0049 Amendment A1 (MANAGED realtime through session devices: realtime-only, refused on PRIVATE_E2EE, bound to the account session, ≤300 s tokens renewed through Meeting, revoked with the session; production refusal of E2EE devices unchanged). Closed: MSG-001, MSG-002, MSG-003, MSG-004, MSG-007, MSG-019. Partial: MSG-018 (contract documents ack-cursor resume; web change and receipt coalescing open), MSG-015 (touched docs fixed). Release: `MESSAGING_SESSION_DEVICES_ENABLED` is not set by the production scripts; rollback needs `CF_MIGRATION_ALLOW_DESTRUCTIVE=down messaging-migration down -n 1` (SEC-015 guard). Meeting v2 operations 179 → 181 after merging with Section 8.
 
 ### Section 15 — Developer Platform and API Gateway
 

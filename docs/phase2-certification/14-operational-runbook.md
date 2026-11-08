@@ -191,7 +191,10 @@ No destructive rollback of v2 tables.
 ## Dashboards (§83)
 
 The repository has no dashboard-as-code; the existing stack is Prometheus exposition at
-`/internal/metrics`. Panels (PromQL; `rate` windows are suggestions):
+`/internal/metrics` (example scrape configuration with the `x-internal-token` header:
+`infra/monitoring/prometheus/prometheus.example.yml`, see
+[monitoring-alerts.md](../operations/monitoring-alerts.md)). Panels (PromQL; `rate` windows
+are suggestions):
 
 | Panel | Query |
 |---|---|
@@ -216,6 +219,14 @@ The repository has no dashboard-as-code; the existing stack is Prometheus exposi
 
 Thresholds marked **APPROVAL REQUIRED** must be set by product / operations; the values
 shown are starting points for discussion, not approved SLAs.
+
+These alerts are implemented as code in `infra/monitoring/prometheus/rules/meeting-service.rules.yml`
+(label `approval: required` + annotation `threshold_status` for the APPROVAL REQUIRED rows),
+unit-tested with promtool and routed by `infra/monitoring/alertmanager/alertmanager.yml`,
+whose receivers are **not configured** (no paging yet). Rows without a metric (SQL-only
+checks) use the nearest exported signal; see
+[monitoring-alerts.md](../operations/monitoring-alerts.md) for the mapping, what cannot be
+expressed and the owner approval steps.
 
 | Severity | Condition | Starting point |
 |---|---|---|

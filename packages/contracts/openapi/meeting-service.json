@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "paths": {
     "/": {
@@ -278,7 +278,7 @@
           "Admin"
         ],
         "summary": "Update a user (admin only)",
-        "description": "Changes a user's `role` and/or `status`; omitted fields are left unchanged. An admin cannot\nchange their own role. Requires the admin role.",
+        "description": "Changes a user's `role` and/or `status`; omitted fields are left unchanged. An admin cannot\nchange their own role. Requires the admin role. Setting `status` to `active` reactivates a\ndeactivated or suspended account (ACC-026): the user signs in again (every earlier session\nstays ended) and the Platform Access principal is mirrored ACTIVE; a Communications Hub\nprofile that was deactivated stays deactivated (Hub deactivation is terminal). Every role\nor status change is\nrecorded in the account security audit (`ACCOUNT_STATUS_CHANGED`, `ACCOUNT_ROLE_CHANGED`).",
         "operationId": "update_user",
         "parameters": [
           {
@@ -339,7 +339,7 @@
           "API Keys"
         ],
         "summary": "List all API keys for the authenticated user",
-        "description": "Returns every API key owned by the authenticated user, both active and revoked, newest first.\nKey values are masked to their last four characters; usage count, usage limit, expiry and status\nare included. Not paginated.",
+        "description": "Returns every API key owned by the authenticated user, both active and revoked, newest first.\nKey values are masked: only the first eight characters (the non-secret lookup prefix) are shown,\nfollowed by asterisks; usage count, usage limit, expiry and status are included. Not paginated.",
         "operationId": "list_api_keys",
         "responses": {
           "200": {
@@ -367,7 +367,7 @@
           "API Keys"
         ],
         "summary": "Create a new API key",
-        "description": "Generates a new API key owned by the authenticated user. The request body currently takes no\nfields: every key gets a usage limit of 100 requests and expires 20 days after creation. The\nfull key value is returned only in this response (later reads show it masked), so store it now.\nSend it in the `Api-Key` header on endpoints that accept API-key authentication.",
+        "description": "Generates a new API key owned by the authenticated user. The request body currently takes no\nfields: every key gets a usage limit of 100 requests and expires 20 days after creation. The\nfull key value is returned only in this response and is never stored by the service (only a\none-way verifier and its first eight characters are kept), so store it now; it cannot be shown\nagain. Send it in the `Api-Key` header on endpoints that accept API-key authentication.",
         "operationId": "create_api_key",
         "requestBody": {
           "content": {
@@ -410,7 +410,7 @@
           "API Keys"
         ],
         "summary": "Get a specific API key by ID",
-        "description": "Returns one API key owned by the authenticated user, with the key value masked to its last four\ncharacters, plus its usage count, usage limit, expiry and status. Returns 404 if the key does\nnot exist or belongs to another user.",
+        "description": "Returns one API key owned by the authenticated user, with the key value masked (only its first\neight characters are shown), plus its usage count, usage limit, expiry and status. Returns 404 if the key does\nnot exist or belongs to another user.",
         "operationId": "get_api_key",
         "parameters": [
           {
@@ -693,7 +693,7 @@
           "Authentication"
         ],
         "summary": "Login user",
-        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account\nsession that lasts at most 30 days and can be listed and revoked from\n`/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so\ncheck `user.status` and route to verification if needed; deactivated accounts get 403. More than\n5 attempts per email within 15 minutes returns 429; a successful login resets the count.",
+        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account\nsession that lasts at most 30 days and can be listed and revoked from\n`/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so\ncheck `user.status` and route to verification if needed (unless the deployment enforces\nverification at sign-in: then such an account gets `403 EMAIL_VERIFICATION_REQUIRED` after a\ncorrect password); deactivated accounts get 403. More than\n5 attempts per email within 15 minutes returns 429; a successful login resets the count.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -2083,7 +2083,7 @@
           "Participants"
         ],
         "summary": "Kick a participant from the meeting (host only)",
-        "description": "Marks a participant as kicked, records their leave time and logs the event; they no longer\nappear in the participant list. Only the host of the participant's meeting may call this, and\nthe host cannot be kicked (409).",
+        "description": "Marks a participant as kicked, records their leave time and logs the event; they no longer\nappear in the participant list and cannot join again. The participant is also removed from the\nmedia room server-side at once; a reconnect with a media credential issued before the kick is\nremoved again. Only the host of the participant's meeting may call this, and the host cannot be\nkicked (409).",
         "operationId": "kick_participant",
         "parameters": [
           {
@@ -2272,8 +2272,19 @@
           "Users"
         ],
         "summary": "Deactivate current user's account (soft delete)",
-        "description": "Sets the user's status to Inactive. This immediately invalidates all existing\ntokens as the auth middleware checks user status on every request.\nThis operation is idempotent - calling it multiple times has the same effect.",
+        "description": "Sets the user's status to Inactive. This immediately invalidates all existing\ntokens as the auth middleware checks user status on every request.\nThis operation is idempotent - calling it multiple times has the same effect.\n\nRe-authentication (ACC-026): send `current_password`, or call this within 10 minutes of\nsigning in (a fresh sign-in session). Otherwise the answer is `403\nREAUTHENTICATION_REQUIRED` and nothing changes. Accounts without a password (Google sign-in)\nsign in again first. Both outcomes are recorded in the account security audit. An\nadministrator reverses a deactivation with `PATCH /api/v1/admin/users/{id}` (`status:\nactive`); the user then signs in again.",
         "operationId": "deactivate_account",
+        "requestBody": {
+          "description": "Optional: the current password (required unless the caller signed in recently)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivateAccountRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "description": "Account deactivated successfully",
@@ -2287,6 +2298,9 @@
           },
           "401": {
             "description": "Unauthorized - missing or invalid token"
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - wrong or missing current password and no recent sign-in"
           }
         },
         "security": [
@@ -2331,7 +2345,7 @@
           "Webhooks"
         ],
         "summary": "Register a legacy meeting webhook (deprecated: never delivered)",
-        "description": "DEPRECATED (Blueprint v1.0 Section 16, PLT-003). Stores a registration for one event type\n(`meeting_start`, `meeting_end`, `participant_join` or `participant_leave`), owned by the\nauthenticated user. **No event is ever delivered to the endpoint**: the response says so\n(`delivery: NOT_DELIVERED`, `notice`) and carries `Deprecation`, `Sunset` and\n`Link rel=\"deprecation\"` headers. Use Developer Platform webhooks\n(`/v1/environments/{environmentId}/webhooks`) for signed meeting event delivery. The\ngenerated secret is returned only here.",
+        "description": "DEPRECATED (Blueprint v1.0 Section 16, PLT-003). Stores a registration for one event type\n(`meeting_start`, `meeting_end`, `participant_join` or `participant_leave`), owned by the\nauthenticated user. **No event is ever delivered to the endpoint**: the response says so\n(`delivery: NOT_DELIVERED`, `notice`) and carries `Deprecation`, `Sunset` and\n`Link rel=\"deprecation\"` headers. Use Developer Platform webhooks\n(`/v1/environments/{environmentId}/webhooks`) for signed meeting event delivery. The\ngenerated secret is returned only here: the service keeps only a one-way fingerprint of\nit, so it can never be shown again.",
         "operationId": "create_webhook",
         "requestBody": {
           "content": {
@@ -16861,7 +16875,7 @@
         "properties": {
           "api_key_masked": {
             "type": "string",
-            "description": "Masked API key (shows last 4 characters only)"
+            "description": "Masked API key: the first 8 characters (non-secret lookup prefix) followed by asterisks"
           },
           "created_at": {
             "type": "string",
@@ -19208,6 +19222,17 @@
         },
         "additionalProperties": false
       },
+      "DeactivateAccountRequest": {
+        "type": "object",
+        "description": "Optional body of POST /api/v1/users/me/deactivate (ACC-026).",
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "description": "The account's current password. Required unless the caller signed in within the\nre-authentication window (default 10 minutes); accounts without a password (Google\nsign-in) re-authenticate by signing in again.",
+            "nullable": true
+          }
+        }
+      },
       "DenyRequest": {
         "type": "object",
         "properties": {
@@ -19471,6 +19496,8 @@
           "ORGANIZATION_POLICY_RESTRICTED",
           "ORGANIZATION_CALLING_DISABLED",
           "USERNAME_TAKEN",
+          "REAUTHENTICATION_REQUIRED",
+          "EMAIL_VERIFICATION_REQUIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -25769,7 +25796,7 @@
     },
     {
       "name": "Users",
-      "description": "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens"
+      "description": "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"
     },
     {
       "name": "Webhooks",

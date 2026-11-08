@@ -16,7 +16,7 @@ export const CONTRACTS: readonly ContractRef[] = [
   { id: "cfmeet.developer-platform.common", version: "1.4.0", kind: "json-schema", path: "platform-developer/common/v1.schema.json", lifecycle: "experimental" },
   { id: "cfmeet.api-gateway.public-api", version: "1.0.0", kind: "openapi", path: "bundled/public/aggregate/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.api-gateway.public-http-api", version: "1.1.0", kind: "openapi", path: "bundled/public/gateway/v1.openapi.json", lifecycle: "beta" },
-  { id: "cfmeet.meeting-service.public-api", version: "1.3.0", kind: "openapi", path: "bundled/public/meetings/v1.openapi.json", lifecycle: "beta" },
+  { id: "cfmeet.meeting-service.public-api", version: "1.4.0", kind: "openapi", path: "bundled/public/meetings/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.calling.public-api", version: "1.16.0", kind: "openapi", path: "bundled/public/calling/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.privacy-relay.public-api", version: "1.2.0", kind: "openapi", path: "bundled/public/privacy-relay/v1.openapi.json", lifecycle: "beta" },
   { id: "cfmeet.messaging.public-api", version: "1.16.0", kind: "openapi", path: "bundled/public/messaging/v1.openapi.json", lifecycle: "beta" },

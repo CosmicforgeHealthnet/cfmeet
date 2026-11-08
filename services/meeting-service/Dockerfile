@@ -16,6 +16,8 @@ WORKDIR /app/services/meeting-service
 COPY services/meeting-service/ ./
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/service-auth/ /app/packages/service-auth/
+# SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
+COPY packages/migration-guard/ /app/packages/migration-guard/
 COPY packages/communications-policy /app/packages/communications-policy
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts/ /app/packages/usage-facts/
@@ -26,7 +28,7 @@ COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-communications-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin account-communications-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
@@ -47,6 +49,7 @@ COPY --from=builder /app/services/meeting-service/target/release/migration ./mig
 COPY --from=builder /app/services/meeting-service/target/release/account-security-migration ./account-security-migration
 COPY --from=builder /app/services/meeting-service/target/release/meetings-calendar-migration ./meetings-calendar-migration
 COPY --from=builder /app/services/meeting-service/target/release/profile-notifications-migration ./profile-notifications-migration
+COPY --from=builder /app/services/meeting-service/target/release/account-hardening-migration ./account-hardening-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations

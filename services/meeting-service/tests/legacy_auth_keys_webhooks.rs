@@ -144,7 +144,8 @@ async fn legacy_api_keys_issue_once_mask_reads_scope_to_owner_and_revoke_once() 
     assert_eq!(v["data"]["usage_limit"], 100);
     assert_eq!(v["data"]["used_count"], 0);
 
-    // Reads never return the secret again: only the last four characters.
+    // Reads never return the secret again: only the first eight characters (the non-secret
+    // lookup prefix); the rest is masked.
     let (s, v) = app
         .get("/api/v1/api-keys", Auth::Bearer(&owner.token))
         .await;
@@ -153,7 +154,8 @@ async fn legacy_api_keys_issue_once_mask_reads_scope_to_owner_and_revoke_once() 
     assert_eq!(list.len(), 1);
     assert_eq!(uuid(&list[0]["id"]), key_id);
     let masked = list[0]["api_key_masked"].as_str().unwrap();
-    assert!(masked.ends_with(&secret[60..]), "{masked}");
+    assert!(masked.starts_with(&secret[..8]), "{masked}");
+    assert!(!masked.contains(&secret[8..]), "{masked}");
     assert!(!v.to_string().contains(&secret));
 
     let (s, v) = app

@@ -119,8 +119,10 @@ pub async fn list_participants(
 /// Kick a participant from the meeting (host only)
 ///
 /// Marks a participant as kicked, records their leave time and logs the event; they no longer
-/// appear in the participant list. Only the host of the participant's meeting may call this, and
-/// the host cannot be kicked (409).
+/// appear in the participant list and cannot join again. The participant is also removed from the
+/// media room server-side at once; a reconnect with a media credential issued before the kick is
+/// removed again. Only the host of the participant's meeting may call this, and the host cannot be
+/// kicked (409).
 #[utoipa::path(
     post,
     path = "/api/v1/participants/{participant_id}/kick",
@@ -178,6 +180,17 @@ pub async fn kick_participant(
     participant_update.leave_time = Set(Some(now));
     participant_update.update(&state.db).await?;
 
+    // SEC-009: remove the participant from the media room server-side (the v2 provider
+    // contract); the database state above is authoritative either way.
+    let media_evicted = crate::services::legacy_media::evict(
+        state.meeting.core.rtc.as_ref(),
+        meeting.id,
+        &meeting.meeting_identifier,
+        participant_id,
+        "LEGACY_KICK",
+    )
+    .await;
+
     // Log the kick event
     let session_log = session_logs::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -188,7 +201,8 @@ pub async fn kick_participant(
         metadata: Set(Some(serde_json::json!({
             "kicked": true,
             "kicked_by": user_id.to_string(),
-            "display_name": participant.display_name
+            "display_name": participant.display_name,
+            "media_evicted": media_evicted
         }))),
     };
     session_log.insert(&state.db).await?;

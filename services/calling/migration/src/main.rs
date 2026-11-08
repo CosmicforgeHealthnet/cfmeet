@@ -2,6 +2,9 @@ use sea_orm_migration::prelude::*;
 
 #[tokio::main]
 async fn main() {
+    // SEC-015: refuse down / fresh / refresh / reset outside a non-production APP_ENV
+    // unless CF_MIGRATION_ALLOW_DESTRUCTIVE names the subcommand. Runs before any .env load.
+    cf_migration_guard::enforce_from_env();
     // Same .env as the Calling service (services/calling/.env), then the current directory.
     dotenvy::from_filename("../.env").ok();
     if std::env::var("DATABASE_URL").is_err() {

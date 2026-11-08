@@ -90,7 +90,9 @@ registration and realtime only.
 
 1. Turn off the flag that enabled the change (state is preserved).
 2. Roll back the image to the previous release.
-3. Schema rollback only as a last resort, after a backup: `<service>-migration down -n 1`
+3. Schema rollback only as a last resort, after a backup:
+   `CF_MIGRATION_ALLOW_DESTRUCTIVE=down <service>-migration down -n 1` (staging is not a
+   non-production `APP_ENV`, so the SEC-015 guard requires the override)
    (Messaging 19 `down` is tested in `tests/attachments.rs`), or restore the backup into an
    empty database with `infra/deployment/backup/restore.sh`, then run the migrator for that
    release and confirm nothing is pending.

@@ -162,6 +162,8 @@ jobs:
       - name: Migration up / reset / up
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
         run: |
           set -o pipefail
           psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE cfmeet_migration_cert"

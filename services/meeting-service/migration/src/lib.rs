@@ -32,6 +32,7 @@ mod m20261106_000001_account_security;
 mod m20261107_000001_meetings_calendar;
 mod m20261108_000001_account_profile;
 mod m20261108_000002_meeting_notifications;
+mod m20261109_000001_account_hardening;
 
 pub mod phase2_backfill;
 
@@ -179,6 +180,10 @@ where
             ProfileNotificationsMigrator::migration_table_name().to_string(),
             pending_migrations::<ProfileNotificationsMigrator, _>(db).await?,
         ),
+        (
+            AccountHardeningMigrator::migration_table_name().to_string(),
+            pending_migrations::<AccountHardeningMigrator, _>(db).await?,
+        ),
     ])
 }
 
@@ -314,6 +319,30 @@ pub async fn profile_notifications_ready<C: sea_orm_migration::sea_orm::Connecti
     // DATA-011 target rule (applied ⊇ known, unknown versions fail closed); for a
     // separate history this equals the former exact-set check.
     Ok(pending_migrations::<ProfileNotificationsMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Blueprint v1.0 Sections 2–3 hardening: hashed legacy API keys and webhook secrets
+/// (PLT-002, DATA-003). A SEPARATE additive history so the previously deployed image still
+/// starts after it is applied (rollback safety).
+pub struct AccountHardeningMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountHardeningMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261109_000001_account_hardening::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("account_hardening_migrations").into_iden()
+    }
+}
+
+/// The account-hardening history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn account_hardening_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AccountHardeningMigrator, _>(db)
         .await?
         .is_empty())
 }

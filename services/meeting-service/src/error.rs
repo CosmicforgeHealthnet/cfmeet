@@ -146,6 +146,12 @@ pub enum ErrorCode {
     OrganizationCallingDisabled,
     /// Blueprint Section 9: the requested username belongs to another account.
     UsernameTaken,
+    /// Blueprint Sections 2-3 (ACC-026): the action needs the current password or a recent
+    /// sign-in.
+    ReauthenticationRequired,
+    /// Blueprint Sections 2-3 (ACC-016): the account's email address must be verified first
+    /// (only where the deployment enforces verification).
+    EmailVerificationRequired,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -254,6 +260,8 @@ impl ErrorCode {
             ErrorCode::OrganizationPolicyRestricted => "ORGANIZATION_POLICY_RESTRICTED",
             ErrorCode::OrganizationCallingDisabled => "ORGANIZATION_CALLING_DISABLED",
             ErrorCode::UsernameTaken => "USERNAME_TAKEN",
+            ErrorCode::ReauthenticationRequired => "REAUTHENTICATION_REQUIRED",
+            ErrorCode::EmailVerificationRequired => "EMAIL_VERIFICATION_REQUIRED",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -358,7 +366,9 @@ impl ErrorCode {
             | ErrorCode::InvitationRequired
             | ErrorCode::OrganizationCallingDisabled
             | ErrorCode::UsernameTaken => StatusCode::CONFLICT,
-            ErrorCode::OrganizationPolicyRestricted => StatusCode::FORBIDDEN,
+            ErrorCode::OrganizationPolicyRestricted
+            | ErrorCode::ReauthenticationRequired
+            | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR

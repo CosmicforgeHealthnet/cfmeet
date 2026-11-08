@@ -156,6 +156,10 @@ async fn template(admin: &str) -> String {
             migration::ProfileNotificationsMigrator::up(&tmpl, None)
                 .await
                 .expect("profile/notifications migrations apply");
+            // Blueprint Sections 2-3 hardening: hashed legacy API keys / webhook secrets.
+            migration::AccountHardeningMigrator::up(&tmpl, None)
+                .await
+                .expect("account hardening migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -260,6 +264,8 @@ impl Drop for TestDb {
 pub struct FakeRtc {
     pub issued: AtomicUsize,
     pub other_calls: AtomicUsize,
+    /// SEC-009: `(room, media identity, reason)` of every provider removal.
+    pub removed: std::sync::Mutex<Vec<(String, String, String)>>,
     pub fail_issue: std::sync::atomic::AtomicBool,
     pub last_permissions: std::sync::Mutex<Option<MediaPermissions>>,
 }
@@ -297,8 +303,13 @@ impl RtcProvider for FakeRtc {
             expires_at: Utc::now() + chrono::Duration::from_std(req.ttl).unwrap(),
         })
     }
-    async fn remove_participant(&self, _p: &RtcParticipantRef, _reason: &str) -> RtcResult<()> {
+    async fn remove_participant(&self, p: &RtcParticipantRef, reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
+        self.removed.lock().unwrap().push((
+            p.room_name.clone(),
+            p.media_identity.clone(),
+            reason.to_string(),
+        ));
         Ok(())
     }
     async fn update_permissions(
@@ -611,6 +622,23 @@ impl TestApp {
         notifier: Arc<backend::services::notifications::Notifier>,
     ) -> Self {
         self.state.notifier = notifier;
+        self.router = routes::create_routes(self.state.clone())
+            .route_layer(axum::middleware::from_fn(route_coverage::record));
+        self
+    }
+
+    /// Blueprint Sections 2-3 hardening: replace the account-security runtime policy (as
+    /// if read from these environment variables) and rebuild the router.
+    pub fn with_auth_env(mut self, vars: &[(&str, &str)]) -> Self {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        self.state.auth_policy = Arc::new(
+            backend::services::account_security::AuthPolicy::from_lookup(|k| {
+                vars.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+            }),
+        );
         self.router = routes::create_routes(self.state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));
         self

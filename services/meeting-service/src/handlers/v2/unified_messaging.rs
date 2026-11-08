@@ -45,8 +45,9 @@ fn integration(state: &AppState) -> ApiResult<&std::sync::Arc<UnifiedMessaging>>
     })
 }
 
-/// A verified CF Meet account whose token revocation was actually checked.
-fn verified_user(actor: &ActorContext) -> ApiResult<Uuid> {
+/// A verified CF Meet account whose token revocation was actually checked (and, where the
+/// deployment enforces it, whose email address is verified: ACC-016).
+fn verified_user(state: &AppState, actor: &ActorContext) -> ApiResult<Uuid> {
     let r = actor.require_registered()?;
     if !r.revocation_checked {
         // The login authority could not confirm the session is not revoked: fail closed.
@@ -55,6 +56,12 @@ fn verified_user(actor: &ActorContext) -> ApiResult<Uuid> {
             "Your session cannot be verified right now; retry shortly",
         ));
     }
+    state
+        .auth_policy
+        .require_verified_email_for_communications(
+            state.require_email_verification,
+            r.verified_email.as_deref(),
+        )?;
     Ok(r.user_id)
 }
 
@@ -65,7 +72,7 @@ async fn relay(
     body: Option<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let um = integration(state)?;
-    let user = verified_user(actor)?;
+    let user = verified_user(state, actor)?;
     let (status, value) = um.bridge(user, op, body).await?;
     Ok((
         StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -271,7 +278,7 @@ pub async fn session_token(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     let request: SessionTokenRequest = if body.is_empty() {
         SessionTokenRequest::default()
     } else {
@@ -338,7 +345,7 @@ pub const RELAY_MAX_BODY_BYTES: usize = 1024 * 1024;
 )]
 pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(um.me(user).await?))
 }
 
@@ -395,7 +402,7 @@ pub async fn directory(
     super::V2Query(q): super::V2Query<DirectoryQuery>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
         um.directory(user, &colleague_scope(&state, &actor).await, q.q.as_deref())
             .await?,
@@ -427,7 +434,7 @@ pub async fn resolve(
     V2Json(body): V2Json<ResolveRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
         um.resolve_colleagues(user, &colleague_scope(&state, &actor).await, &body.user_ids)
             .await?,
@@ -458,7 +465,7 @@ pub async fn principal_names(
     V2Json(body): V2Json<NamesRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
         um.name_principals(
             user,
@@ -497,7 +504,7 @@ async fn relay_operation(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     let body =
         if body.is_empty() {
             None

@@ -1041,6 +1041,9 @@ async fn deactivation_revokes_the_bridge_principal_messaging_sessions() {
     let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
         return;
     };
+    // The fixture account has no password and a pre-session token; ACC-026 re-authentication
+    // is covered by tests/account_hardening.rs, so it is switched off here.
+    let app = app.with_auth_env(&[("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH", "off")]);
     let user = app.user("deactivating").await;
     // The account uses Messaging through the bridge: Account maps it to a principal.
     let (s, v) = app

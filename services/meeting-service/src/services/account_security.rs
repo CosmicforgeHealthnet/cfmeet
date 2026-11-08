@@ -89,7 +89,41 @@ pub struct AuthPolicy {
     /// historical `pendingverification` spelling until every deployed client accepts both.
     /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
     pub status_format: AccountStatusFormat,
+    /// ACC-026: self-deactivation needs the current password or a recent sign-in
+    /// (`ACCOUNT_DEACTIVATION_REQUIRE_REAUTH`, default on).
+    pub deactivation_requires_reauth: bool,
+    /// ACC-026: how recent a sign-in counts as re-authentication
+    /// (`ACCOUNT_REAUTH_MAX_AGE_SECS`, default 600, bounded 60-3600).
+    pub reauth_max_age_secs: i64,
+    /// ACC-016 (OWNER_DECISION): where an unverified email address is refused
+    /// (`EMAIL_VERIFICATION_ENFORCEMENT`, default `off` = behaviour unchanged). Effective
+    /// only while `EMAIL_VERIFICATION_REQUIRED` is true.
+    pub email_verification_enforcement: EmailVerificationEnforcement,
 }
+
+/// ACC-016: enforcement points for unverified (pending) accounts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmailVerificationEnforcement {
+    /// No enforcement (today's behaviour): pending accounts sign in and use everything.
+    Off,
+    /// The Communications Hub relay and the Messaging bridge refuse accounts without a
+    /// verified email address (`EMAIL_VERIFICATION_REQUIRED`); meetings stay usable.
+    Communications,
+    /// As `Communications`, and password sign-in refuses pending accounts.
+    Login,
+}
+
+impl EmailVerificationEnforcement {
+    pub fn covers_communications(self) -> bool {
+        self != EmailVerificationEnforcement::Off
+    }
+    pub fn covers_login(self) -> bool {
+        self == EmailVerificationEnforcement::Login
+    }
+}
+
+/// Default and bounds of the recent-sign-in window (ACC-026).
+pub const DEFAULT_REAUTH_MAX_AGE_SECS: i64 = 600;
 
 /// Wire format of the account status on the v1 sign-in responses (ACC-022).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,12 +188,63 @@ impl AuthPolicy {
             "canonical" => AccountStatusFormat::Canonical,
             _ => AccountStatusFormat::Legacy,
         };
+        let deactivation_requires_reauth = !matches!(
+            get("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "false" | "0" | "off" | "no"
+        );
+        let reauth_max_age_secs = get("ACCOUNT_REAUTH_MAX_AGE_SECS")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(DEFAULT_REAUTH_MAX_AGE_SECS)
+            .clamp(60, 3600);
+        let email_verification_enforcement = match get("EMAIL_VERIFICATION_ENFORCEMENT")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "communications" => EmailVerificationEnforcement::Communications,
+            "login" => EmailVerificationEnforcement::Login,
+            _ => EmailVerificationEnforcement::Off,
+        };
         Self {
             google_token_delivery,
             google_browser_binding,
             client_ip_header,
             status_format,
+            deactivation_requires_reauth,
+            reauth_max_age_secs,
+            email_verification_enforcement,
         }
+    }
+
+    /// ACC-026: the token comes from a sign-in made within the re-authentication window.
+    /// Only session tokens count (their `auth_time` is the sign-in, never moved by
+    /// refresh, and the session was checked open by [`authorize_user_token`]).
+    pub fn recently_authenticated(&self, claims: &Claims, now: i64) -> bool {
+        claims.session_id().is_some()
+            && claims
+                .auth_time
+                .is_some_and(|t| t <= now + 60 && now - t <= self.reauth_max_age_secs)
+    }
+
+    /// ACC-016: refuse a communications operation for an account without a verified
+    /// email address, when the owner switched that enforcement on.
+    pub fn require_verified_email_for_communications(
+        &self,
+        require_email_verification: bool,
+        verified_email: Option<&str>,
+    ) -> ApiResult<()> {
+        if require_email_verification
+            && self.email_verification_enforcement.covers_communications()
+            && verified_email.is_none()
+        {
+            return Err(email_verification_required());
+        }
+        Ok(())
     }
 
     /// The client address from the trusted proxy header (first entry), if configured.
@@ -169,6 +254,14 @@ impl AuthPolicy {
         let first = raw.split(',').next()?.trim();
         (!first.is_empty() && first.len() <= 64).then(|| first.to_string())
     }
+}
+
+/// `403 EMAIL_VERIFICATION_REQUIRED` (ACC-016).
+pub fn email_verification_required() -> ApiError {
+    ApiError::domain(
+        crate::error::ErrorCode::EmailVerificationRequired,
+        "Verify your email address to continue",
+    )
 }
 
 impl Default for AuthPolicy {
@@ -857,6 +950,81 @@ pub async fn list_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn claims_with(auth_time: Option<i64>, sid: bool) -> Claims {
+        Claims {
+            sub: Uuid::new_v4().to_string(),
+            role: "user".into(),
+            exp: 0,
+            iat: 0,
+            auth_time,
+            typ: Some("access".into()),
+            sid: sid.then(|| Uuid::new_v4().to_string()),
+            rti: None,
+        }
+    }
+
+    #[test]
+    fn hardening_policy_defaults_are_safe_and_parse_strictly() {
+        let d = AuthPolicy::default();
+        assert!(d.deactivation_requires_reauth);
+        assert_eq!(d.reauth_max_age_secs, DEFAULT_REAUTH_MAX_AGE_SECS);
+        assert_eq!(
+            d.email_verification_enforcement,
+            EmailVerificationEnforcement::Off
+        );
+        let p = AuthPolicy::from_lookup(|k| match k {
+            "ACCOUNT_DEACTIVATION_REQUIRE_REAUTH" => Some("off".into()),
+            "ACCOUNT_REAUTH_MAX_AGE_SECS" => Some("5".into()),
+            "EMAIL_VERIFICATION_ENFORCEMENT" => Some(" Login ".into()),
+            _ => None,
+        });
+        assert!(!p.deactivation_requires_reauth);
+        assert_eq!(p.reauth_max_age_secs, 60, "clamped");
+        assert!(p.email_verification_enforcement.covers_login());
+        let unknown = AuthPolicy::from_lookup(|k| {
+            (k == "EMAIL_VERIFICATION_ENFORCEMENT").then(|| "everything".into())
+        });
+        assert_eq!(
+            unknown.email_verification_enforcement,
+            EmailVerificationEnforcement::Off
+        );
+    }
+
+    #[test]
+    fn recent_authentication_needs_a_fresh_session_token() {
+        let p = AuthPolicy::default();
+        let now = 1_900_000_000;
+        assert!(p.recently_authenticated(&claims_with(Some(now - 30), true), now));
+        assert!(!p.recently_authenticated(&claims_with(Some(now - 601), true), now));
+        assert!(!p.recently_authenticated(&claims_with(Some(now - 30), false), now));
+        assert!(!p.recently_authenticated(&claims_with(None, true), now));
+        assert!(!p.recently_authenticated(&claims_with(Some(now + 3600), true), now));
+    }
+
+    #[test]
+    fn verified_email_enforcement_is_off_unless_switched_on() {
+        let off = AuthPolicy::default();
+        assert!(off
+            .require_verified_email_for_communications(true, None)
+            .is_ok());
+        let on = AuthPolicy::from_lookup(|k| {
+            (k == "EMAIL_VERIFICATION_ENFORCEMENT").then(|| "communications".into())
+        });
+        assert!(on
+            .require_verified_email_for_communications(true, Some("a@example.test"))
+            .is_ok());
+        assert_eq!(
+            on.require_verified_email_for_communications(true, None)
+                .unwrap_err()
+                .code(),
+            Some(crate::error::ErrorCode::EmailVerificationRequired)
+        );
+        // Verification not required by the deployment: nothing to enforce.
+        assert!(on
+            .require_verified_email_for_communications(false, None)
+            .is_ok());
+    }
 
     #[test]
     fn account_status_format_is_legacy_until_switched() {

@@ -117,6 +117,22 @@ def env_file(path, values):
     p.write_private(path,'\n'.join(k+'='+v for k,v in values.items())+'\n')
     return path
 
+MEETING_MIGRATION_ENV='meeting-service-migration.private.env'
+
+def meeting_migration_url(e):
+    """SEC-018, opt-in: Meeting-service migrations run as its separate migrator role when the
+    secrets folder holds MEETING_MIGRATION_ENV (MEETING_SERVICE_MIGRATION_DATABASE_URL=...);
+    otherwise as the runtime DATABASE_URL, unchanged (docs/operations/meeting-service-database-roles.md)."""
+    f=p.SECRETS/MEETING_MIGRATION_ENV
+    if not f.exists():return e['DATABASE_URL']
+    values=dict(x.split('=',1) for x in f.read_text().splitlines() if '=' in x and not x.lstrip().startswith('#'))
+    url=values.get('MEETING_SERVICE_MIGRATION_DATABASE_URL','').strip()
+    m,r=urlsplit(url),urlsplit(e['DATABASE_URL'])
+    assert m.scheme in ('postgres','postgresql') and m.username and m.hostname,'Meeting-service migration URL is not a PostgreSQL URL'
+    assert (m.hostname,m.port,m.path)==(r.hostname,r.port,r.path),'Meeting-service migration URL must target the runtime database'
+    assert m.username!=r.username,'Meeting-service migration URL must use a role other than the runtime role'
+    return url
+
 def mount_source(c,target):
     found=[m['Source'] for m in c['Mounts'] if m['Destination']==target]
     assert len(found)==1,'Expected private service key mount missing'
@@ -204,7 +220,7 @@ def database(name):
     p.write_private(config,json.dumps(value));return value
 
 def migrate(service,sha,url,feature_only=False,network=None):
-    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-communications-migration'],
+    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','account-communications-migration'],
               'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration'],
               'communications':['communications-migration']}[service]
     # Feature-only releases apply every additive history after the base one (meeting-service:
@@ -472,7 +488,7 @@ def prod_scope():
     return value
 
 def feature_migrate(service,sha):
-    c=p.inspect(OWNERS[service]);e=p.env_of(c);url=e['DATABASE_URL']
+    c=p.inspect(OWNERS[service]);e=p.env_of(c);url=meeting_migration_url(e) if service=='meeting-service' else e['DATABASE_URL']
     network='container:'+OWNERS[service] if service=='meeting-service' else p.NET
     if service!='meeting-service':
         u=urlsplit(url);password=(p.SECRETS/(service+'-migrator.password')).read_text().strip()
