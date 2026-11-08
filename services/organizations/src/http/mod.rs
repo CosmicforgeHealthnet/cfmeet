@@ -15,6 +15,7 @@ pub mod members;
 pub mod middleware;
 pub mod migration;
 pub mod organizations;
+pub mod outbox;
 pub mod policies;
 pub mod teams;
 
@@ -169,6 +170,8 @@ pub fn app(state: AppState) -> Router {
                 .put(bindings::put_calling)
                 .delete(bindings::delete_calling),
         )
+        .route("/admin/event-delivery", get(outbox::status))
+        .route("/admin/event-delivery/replay", post(outbox::replay))
         .route(
             "/migration/import",
             post(migration::import).layer(DefaultBodyLimit::max(MAX_IMPORT_BYTES)),

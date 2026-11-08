@@ -190,7 +190,7 @@ async fn policies_are_typed_compare_and_swap_and_audited() {
         )
         .await
         .expect(200);
-    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = 'policy.updated' AND organization_id = '{org}'")).await, 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'policy.updated' AND organization_id = '{org}'")).await, 1);
     // The OWNER removes policy management from ADMINs (and cannot lose it themselves).
     let r = h
         .user(owner)
@@ -214,8 +214,8 @@ async fn policies_are_typed_compare_and_swap_and_audited() {
     );
     // Audit and outbox for every change, versioned by revision.
     assert_eq!(h.count(&format!("SELECT count(*) FROM organization_audit_events WHERE action = 'policy.updated' AND organization_id = '{org}'")).await, 2);
-    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = 'policy.updated' AND aggregate_type = 'policy' AND aggregate_version IN (1, 2) AND organization_id = '{org}'")).await, 2);
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE event_type = 'policy.updated' AND payload->'payload'->'changedKeys' ? 'features.calling'").await, 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'policy.updated' AND aggregate_type = 'policy' AND aggregate_version IN (1, 2) AND organization_id = '{org}'")).await, 2);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'policy.updated' AND payload->'payload'->'changedKeys' ? 'features.calling'").await, 1);
     // A suspended organization's policy cannot change.
     h.user(owner)
         .post(

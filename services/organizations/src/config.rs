@@ -11,16 +11,19 @@
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the receiver-authoritative trust bundle of `cfmeet.organizations` |
 //! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
-//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning | `kid` of the Organizations signing key |
-//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning | PKCS#8 PEM Ed25519 private key FILE |
+//! | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated consumers that receive organization events (today only `cfmeet.meeting-service`); empty (default): events stay PENDING in the outbox |
+//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning or event delivery | `kid` of the Organizations signing key |
+//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning or event delivery | PKCS#8 PEM Ed25519 private key FILE |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`) |
+//! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
-//! Outbound, Organizations calls only Platform Access, and only when provisioning is
-//! enabled (it then signs with its own key file; inline keys are refused regardless).
-//! With provisioning off (the default) organizations stay PENDING and the provisioning
-//! read reports it truthfully. Error messages never echo a value.
+//! Outbound, Organizations calls Platform Access when provisioning is enabled and each
+//! configured event consumer's signed ingress; both sign with its own key file (inline
+//! keys are refused regardless). With provisioning off (the default) organizations stay
+//! PENDING and the provisioning read reports it truthfully. Error messages never echo a
+//! value.
 
 use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
@@ -30,7 +33,10 @@ use cf_service_auth::{
     ServiceTokenVerifier, SharedClock, TokenTtl, TrustPolicy,
 };
 
-use crate::provisioning::{HttpPlatformScopes, PlatformScopes};
+use crate::{
+    outbox::{DisabledDispatcher, EventDispatcher, HttpEventDispatcher},
+    provisioning::{HttpPlatformScopes, PlatformScopes},
+};
 use secrecy::{ExposeSecret, SecretString};
 
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +67,27 @@ pub fn organizations_service_id() -> ServiceId {
     ServiceId::parse(services::ORGANIZATIONS).expect("canonical identity")
 }
 
+/// One organization-event consumer: its identity and internal base URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventConsumer {
+    pub destination: String,
+    pub base_url: String,
+}
+
+/// The consumers organization events may be delivered to, with the base-URL variable of
+/// each (the names the other services already use).
+pub const EVENT_CONSUMERS: &[(&str, &str)] =
+    &[(services::MEETING_SERVICE, "CF_MEETING_SERVICE_BASE_URL")];
+
+/// Outbound signing shared by provisioning and event delivery.
+#[derive(Debug, Clone)]
+pub struct SigningSettings {
+    pub key_id: KeyId,
+    pub private_key_file: PathBuf,
+    pub token_ttl: TokenTtl,
+    pub http_timeout: Duration,
+}
+
 /// Outbound service authentication for the provisioning saga.
 #[derive(Debug, Clone)]
 pub struct OutboundSettings {
@@ -81,6 +108,10 @@ pub struct OrganizationsConfig {
     pub trust_bundle_file: PathBuf,
     /// `Some` iff `ORGANIZATIONS_PROVISIONING_ENABLED=true`.
     pub provisioning: Option<OutboundSettings>,
+    /// Consumers organization events are delivered to (empty: delivery disabled).
+    pub event_consumers: Vec<EventConsumer>,
+    /// `Some` iff provisioning or event delivery is enabled.
+    pub signing: Option<SigningSettings>,
 }
 
 impl fmt::Debug for OrganizationsConfig {
@@ -92,6 +123,14 @@ impl fmt::Debug for OrganizationsConfig {
             .field("worker_interval", &self.worker_interval)
             .field("runtime_environment", &self.runtime_environment)
             .field("provisioning_enabled", &self.provisioning.is_some())
+            .field(
+                "event_destinations",
+                &self
+                    .event_consumers
+                    .iter()
+                    .map(|c| c.destination.as_str())
+                    .collect::<Vec<_>>(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -191,8 +230,34 @@ impl OrganizationsConfig {
                 ))
             }
         };
-        let provisioning = if enabled {
-            let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
+        let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
+        let mut event_consumers: Vec<EventConsumer> = Vec::new();
+        for name in get("ORGANIZATIONS_EVENT_DESTINATIONS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        {
+            let Some((destination, url_var)) =
+                EVENT_CONSUMERS.iter().find(|(d, _)| *d == name)
+            else {
+                return Err(invalid(
+                    "ORGANIZATIONS_EVENT_DESTINATIONS",
+                    "names a service that does not consume organization events",
+                ));
+            };
+            if event_consumers.iter().any(|c| c.destination == *destination) {
+                return Err(invalid(
+                    "ORGANIZATIONS_EVENT_DESTINATIONS",
+                    "names a consumer twice",
+                ));
+            }
+            event_consumers.push(EventConsumer {
+                destination: destination.to_string(),
+                base_url: required(url_var)?,
+            });
+        }
+        let signing = if enabled || !event_consumers.is_empty() {
             let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
                 .map_err(|_| invalid("CF_SERVICE_AUTH_KEY_ID", "is not a valid key id"))?;
             let token_ttl = match get("CF_SERVICE_TOKEN_TTL_SECONDS") {
@@ -208,10 +273,9 @@ impl OrganizationsConfig {
                         )
                     })?,
             };
-            Some(OutboundSettings {
+            Some(SigningSettings {
                 key_id,
                 private_key_file: PathBuf::from(required("CF_SERVICE_AUTH_PRIVATE_KEY_FILE")?),
-                platform_access_base_url: required("CF_PLATFORM_ACCESS_BASE_URL")?,
                 token_ttl,
                 http_timeout: Duration::from_millis(bounded(
                     &get,
@@ -224,6 +288,16 @@ impl OrganizationsConfig {
         } else {
             None
         };
+        let provisioning = match (&signing, enabled) {
+            (Some(s), true) => Some(OutboundSettings {
+                key_id: s.key_id.clone(),
+                private_key_file: s.private_key_file.clone(),
+                platform_access_base_url: required("CF_PLATFORM_ACCESS_BASE_URL")?,
+                token_ttl: s.token_ttl,
+                http_timeout: s.http_timeout,
+            }),
+            _ => None,
+        };
         Ok(Self {
             database_url,
             database_max_connections,
@@ -233,7 +307,52 @@ impl OrganizationsConfig {
             runtime_environment,
             trust_bundle_file,
             provisioning,
+            event_consumers,
+            signing,
         })
+    }
+
+    /// The event dispatcher: signed delivery to every configured consumer, or the
+    /// disabled dispatcher (rows stay PENDING) when none is configured. Loads the signing
+    /// key and validates every target URL; fails closed.
+    pub fn event_dispatcher(
+        &self,
+        clock: SharedClock,
+    ) -> Result<Arc<dyn EventDispatcher>, ConfigError> {
+        let Some(s) = self.signing.as_ref().filter(|_| !self.event_consumers.is_empty()) else {
+            return Ok(Arc::new(DisabledDispatcher));
+        };
+        let key = ServiceSigningKey::from_pkcs8_pem_file(s.key_id.clone(), &s.private_key_file)
+            .map_err(|e| invalid("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", e.to_string()))?;
+        let signer = Arc::new(ServiceTokenSigner::new(
+            organizations_service_id(),
+            self.runtime_environment,
+            key,
+            s.token_ttl,
+            clock,
+        ));
+        let mut targets = InternalTargets::new(self.runtime_environment);
+        for consumer in &self.event_consumers {
+            let var = EVENT_CONSUMERS
+                .iter()
+                .find(|(d, _)| *d == consumer.destination)
+                .map(|(_, v)| *v)
+                .unwrap_or("ORGANIZATIONS_EVENT_DESTINATIONS");
+            let id = ServiceId::parse(&consumer.destination)
+                .map_err(|_| invalid("ORGANIZATIONS_EVENT_DESTINATIONS", "is not a service id"))?;
+            targets
+                .insert(id, &consumer.base_url)
+                .map_err(|e| invalid(var, e.to_string()))?;
+        }
+        let client = InternalServiceClient::new(signer, targets, s.http_timeout)
+            .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
+        Ok(Arc::new(HttpEventDispatcher::new(
+            Arc::new(client),
+            self.event_consumers
+                .iter()
+                .map(|c| c.destination.clone())
+                .collect(),
+        )))
     }
 
     /// The Platform Access port of the provisioning saga (`None` when provisioning is
@@ -358,6 +477,50 @@ mod tests {
             pairs.push((var, value));
             let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
             assert!(!err.to_string().contains(value), "{var}");
+        }
+    }
+
+    #[test]
+    fn event_delivery_is_off_by_default_and_needs_a_known_consumer_url_and_key() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(cfg.event_consumers.is_empty() && cfg.signing.is_none());
+        assert!(!cfg
+            .event_dispatcher(Arc::new(cf_service_auth::SystemClock))
+            .unwrap()
+            .enabled());
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push(("ORGANIZATIONS_EVENT_DESTINATIONS", "cfmeet.meeting-service"));
+        // The consumer URL and the signing key are required.
+        assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
+        on.push(("CF_MEETING_SERVICE_BASE_URL", "https://meeting.internal:8443"));
+        assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
+        on.extend([
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            (
+                "CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+                "/run/secrets/organizations.pem",
+            ),
+        ]);
+        let cfg = OrganizationsConfig::from_lookup(lookup(&on)).unwrap();
+        assert_eq!(cfg.event_consumers.len(), 1);
+        // Event delivery alone does not enable provisioning.
+        assert!(cfg.provisioning.is_none());
+        // A missing key file fails closed when the dispatcher is built.
+        assert!(cfg
+            .event_dispatcher(Arc::new(cf_service_auth::SystemClock))
+            .is_err());
+        for value in [
+            "cfmeet.calling-unknown-consumer",
+            "cfmeet.meeting-service,cfmeet.meeting-service",
+        ] {
+            let mut pairs: Vec<_> = on
+                .iter()
+                .filter(|(k, _)| *k != "ORGANIZATIONS_EVENT_DESTINATIONS")
+                .copied()
+                .collect();
+            pairs.push(("ORGANIZATIONS_EVENT_DESTINATIONS", value));
+            let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
+            assert!(!err.to_string().contains("unknown-consumer"), "{value}");
         }
     }
 

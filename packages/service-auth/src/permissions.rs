@@ -349,6 +349,12 @@ pub enum InternalPermission {
     /// Meeting Service only; FIRST_PARTY organization tenants only.
     #[serde(rename = "calling-request.act-for-organization")]
     CallingRequestActForOrganization,
+    /// Meeting Service (final closure, organization event delivery): receive the
+    /// Organizations Service's transactional-outbox events (organization lifecycle,
+    /// memberships, ownership, policy, scope mappings; ids, roles and statuses only) at
+    /// `POST /internal/v1/organization-events`. Organizations only.
+    #[serde(rename = "meeting-organization-events.apply")]
+    MeetingOrganizationEventsApply,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -939,6 +945,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Receive a first-party organization request Meeting Service authenticated for a human member: the organization's Calling credential (id only) re-verified live with Platform Access, the acting principal signed in; FIRST_PARTY organization tenants only",
     },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingOrganizationEventsApply,
+        name: "meeting-organization-events.apply",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::ORGANIZATIONS],
+        sensitive: false,
+        description: "Deliver Organizations outbox events (organization lifecycle, memberships, ownership, policy and scope mappings; ids, roles and statuses, never email or tokens) to the Meeting Service, which applies them idempotently and in aggregate-version order; Organizations only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1031,6 +1045,7 @@ impl InternalPermission {
         InternalPermission::OrganizationMigrate,
         InternalPermission::PlatformIdentityProvisionFirstParty,
         InternalPermission::CallingRequestActForOrganization,
+        InternalPermission::MeetingOrganizationEventsApply,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1499,7 +1514,9 @@ mod tests {
                 "meeting-communications.read",
                 "meeting-communications.create",
                 "meeting-request.forward",
-                "user-session.verify"
+                "user-session.verify",
+                // Organization event delivery (Organizations only).
+                "meeting-organization-events.apply"
             ]
         );
         // The only sensitive grants the Meeting Service may hold are the Organizations
@@ -1581,8 +1598,9 @@ mod tests {
                 ),
             ]
         );
-        // Section 7 (ADR 0058): Organizations calls only Platform Access, and only to
-        // provision / verify / suspend the FIRST_PARTY scope of its organizations.
+        // Section 7 (ADR 0058): Organizations calls Platform Access only to provision /
+        // verify / suspend the FIRST_PARTY scope of its organizations; final closure: it
+        // delivers its outbox events to the Meeting Service (non-sensitive, ids only).
         let granted: Vec<_> = REGISTRY
             .iter()
             .filter(|d| d.grantable_to.contains(&services::ORGANIZATIONS))
@@ -1590,12 +1608,20 @@ mod tests {
             .collect();
         assert_eq!(
             granted,
-            [(
-                "platform-identity.provision-first-party",
-                services::PLATFORM_ACCESS,
-                &[services::ORGANIZATIONS][..],
-                true
-            )]
+            [
+                (
+                    "platform-identity.provision-first-party",
+                    services::PLATFORM_ACCESS,
+                    &[services::ORGANIZATIONS][..],
+                    true
+                ),
+                (
+                    "meeting-organization-events.apply",
+                    services::MEETING_SERVICE,
+                    &[services::ORGANIZATIONS][..],
+                    false
+                )
+            ]
         );
         // The EXTERNAL workspace delegation stays the Developer Platform's only.
         assert_eq!(
@@ -1603,6 +1629,20 @@ mod tests {
                 .definition()
                 .grantable_to,
             &[services::DEVELOPER_PLATFORM]
+        );
+    }
+
+    #[test]
+    fn organization_events_are_delivered_by_organizations_only() {
+        let d = InternalPermission::MeetingOrganizationEventsApply.definition();
+        assert_eq!(
+            (d.name, d.receiver, d.grantable_to, d.sensitive),
+            (
+                "meeting-organization-events.apply",
+                services::MEETING_SERVICE,
+                &[services::ORGANIZATIONS][..],
+                false
+            )
         );
     }
 

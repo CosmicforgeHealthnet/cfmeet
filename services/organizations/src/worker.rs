@@ -6,7 +6,8 @@
 //! 2. sweep idempotency records older than 24 hours;
 //! 3. expire PENDING invitations past `expires_at` (`invitation.expired` event + audit,
 //!    rows claimed with `FOR UPDATE SKIP LOCKED`);
-//! 4. deliver due outbox rows when a dispatcher is enabled (none is in Section 5);
+//! 4. deliver due outbox rows to the configured consumers ([`outbox::HttpEventDispatcher`];
+//!    with no consumer configured every row stays PENDING);
 //! 5. when provisioning is enabled, one pass of the Section 7 saga
 //!    ([`crate::provisioning::run_once`]: enqueue, advance, tenant-status sync,
 //!    reconciliation).
@@ -99,10 +100,19 @@ pub async fn run_once(
     let mut events_delivered = 0;
     if dispatcher.enabled() {
         let lease = Uuid::new_v4();
-        for row in outbox::claim_due(db, lease, 50).await? {
+        let destinations = dispatcher.destinations();
+        for row in outbox::claim_due(db, lease, 50, &destinations).await? {
             let outcome = dispatcher.deliver(&row.destination, &row.payload).await;
-            if outcome.is_ok() {
-                events_delivered += 1;
+            match &outcome {
+                Ok(()) => events_delivered += 1,
+                Err(e) => tracing::warn!(
+                    destination = %row.destination,
+                    event_id = %row.event_id,
+                    attempts = row.attempts,
+                    error_class = %e.class,
+                    permanent = e.permanent,
+                    "organization event delivery failed"
+                ),
             }
             outbox::settle(db, &row, lease, outcome).await?;
         }

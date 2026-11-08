@@ -254,7 +254,7 @@ async fn two_organizations_get_distinct_triples_ready_only_after_server_side_ver
     ] {
         assert_eq!(
             h.count(&format!(
-                "SELECT count(*) FROM organization_outbox WHERE event_type = '{event}'"
+                "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = '{event}'"
             ))
             .await,
             n,
@@ -337,7 +337,7 @@ async fn duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_dup
     );
     run(&h, &pa).await;
     assert_eq!(read(&h, &org).await["provisioningState"], "READY");
-    let events = h.count("SELECT count(*) FROM organization_outbox").await;
+    let events = h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await;
     // Replayed passes and operator retries of a READY organization change nothing.
     for _ in 0..3 {
         due_now(&h).await;
@@ -350,14 +350,14 @@ async fn duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_dup
     assert_eq!(pa.provision_calls.load(Ordering::SeqCst), 1);
     assert_eq!(pa.scopes.lock().unwrap().len(), 1);
     assert_eq!(
-        h.count("SELECT count(*) FROM organization_outbox").await,
+        h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await,
         events
     );
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE event_type = 'organization.provisioned'").await, 1);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'organization.provisioned'").await, 1);
     // Versions are monotonic per provisioning / scope aggregate (consumers apply by
     // aggregateVersion and ignore duplicates).
     assert_eq!(
-        h.count("SELECT count(*) FROM (SELECT aggregate_id, aggregate_version FROM organization_outbox WHERE aggregate_type IN ('provisioning', 'scope') GROUP BY 1, 2 HAVING count(*) > 1) d").await,
+        h.count("SELECT count(*) FROM (SELECT aggregate_id, aggregate_version FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND aggregate_type IN ('provisioning', 'scope') GROUP BY 1, 2 HAVING count(*) > 1) d").await,
         0
     );
     // The retry route needs organization.administer.
@@ -670,7 +670,7 @@ async fn split_brain_mappings_and_drift_are_refused_and_reported() {
     resolve(&h, &a)
         .await
         .expect_error(409, "PROVISIONING_PENDING");
-    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = 'scope.mapping_changed' AND organization_id = '{a}' AND payload->'payload'->>'mappingState' = 'FAILED'")).await, 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'scope.mapping_changed' AND organization_id = '{a}' AND payload->'payload'->>'mappingState' = 'FAILED'")).await, 1);
 }
 
 // ---------------------------------------------------------------------------------------

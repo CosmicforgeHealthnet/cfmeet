@@ -13,9 +13,8 @@ use crate::{
     validation::{LegalValues, ProfileValues},
 };
 
-/// The only outbox destination until per-consumer delivery is added (Sections 7–14): the
-/// outbox and the reconciliation read are the source of truth.
-pub const RECONCILIATION_DESTINATION: &str = "cfmeet.reconciliation";
+/// The record destination every event is written to (read by reconciliation, never sent).
+pub const RECONCILIATION_DESTINATION: &str = crate::outbox::RECONCILIATION;
 
 pub fn rfc3339(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Micros, true)
@@ -529,7 +528,8 @@ pub struct Event<'a> {
     pub payload: Value,
 }
 
-/// Records `event` for every destination (today: the reconciliation record only).
+/// Records `event` once for the reconciliation record and once per subscribed consumer
+/// ([`crate::outbox::subscribers`]), in the caller's transaction.
 pub async fn emit<C: ConnectionTrait>(
     c: &C,
     ctx: &OpContext,
@@ -551,23 +551,27 @@ pub async fn emit<C: ConnectionTrait>(
         "causationId": hop_uuid(ctx.request_id.as_deref()),
         "payload": event.payload,
     });
-    db::exec(
-        c,
-        "INSERT INTO organization_outbox (event_id, destination, organization_id, aggregate_type, aggregate_id, aggregate_version, event_type, payload, created_at, next_attempt_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
-        vec![
-            event_id.into(),
-            RECONCILIATION_DESTINATION.into(),
-            event.organization_id.into(),
-            event.aggregate_type.into(),
-            event.aggregate_id.into(),
-            event.aggregate_version.into(),
-            event.event_type.into(),
-            envelope.into(),
-            now.into(),
-        ],
-    )
-    .await?;
+    let destinations = std::iter::once(RECONCILIATION_DESTINATION)
+        .chain(crate::outbox::subscribers(event.event_type).iter().copied());
+    for destination in destinations {
+        db::exec(
+            c,
+            "INSERT INTO organization_outbox (event_id, destination, organization_id, aggregate_type, aggregate_id, aggregate_version, event_type, payload, created_at, next_attempt_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
+            vec![
+                event_id.into(),
+                destination.into(),
+                event.organization_id.into(),
+                event.aggregate_type.into(),
+                event.aggregate_id.into(),
+                event.aggregate_version.into(),
+                event.event_type.into(),
+                envelope.clone().into(),
+                now.into(),
+            ],
+        )
+        .await?;
+    }
     Ok(event_id)
 }
 

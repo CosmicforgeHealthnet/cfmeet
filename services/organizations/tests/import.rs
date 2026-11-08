@@ -94,7 +94,7 @@ async fn the_shared_vector_imports_with_ids_and_timestamps_preserved_and_reimpor
         .get(&format!("/internal/v1/organizations/{ORG_ID}"))
         .await;
     assert_eq!(view.expect(200)["viewer"]["role"], "OWNER");
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE event_type IN ('organization.created', 'membership.activated')").await, 2);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type IN ('organization.created', 'membership.activated')").await, 2);
     assert_eq!(
         h.count(
             "SELECT count(*) FROM organization_membership_history WHERE change_kind = 'IMPORTED'"
@@ -120,7 +120,7 @@ async fn the_shared_vector_imports_with_ids_and_timestamps_preserved_and_reimpor
     assert_eq!(again.expect(200)["imported"], 0);
     assert_eq!(again.json["unchanged"], 2);
     assert_eq!(again.json["conflicts"], json!([]));
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox").await, 2);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await, 2);
     assert_eq!(
         h.count("SELECT count(*) FROM organization_import_runs")
             .await,

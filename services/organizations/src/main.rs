@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use organizations::{
-    config::OrganizationsConfig, http, outbox::DisabledDispatcher, state::AppState, worker,
+    config::OrganizationsConfig, http, state::AppState, worker,
 };
 
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
@@ -28,6 +28,9 @@ async fn main() -> anyhow::Result<()> {
     let platform_scopes = config
         .platform_scopes(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("provisioning configuration error", e));
+    let dispatcher = config
+        .event_dispatcher(Arc::new(cf_service_auth::SystemClock))
+        .unwrap_or_else(|e| fatal("event delivery configuration error", e));
     if check_only {
         println!(
             "{}",
@@ -36,7 +39,8 @@ async fn main() -> anyhow::Result<()> {
                 "configuration": "valid",
                 "runtimeEnvironment": config.runtime_environment.as_str(),
                 "bindAddress": config.bind_address.to_string(),
-                "outboxDelivery": "disabled",
+                "outboxDelivery": if dispatcher.enabled() { "enabled" } else { "disabled" },
+                "eventDestinations": dispatcher.destinations(),
                 "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
             })
         );
@@ -45,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         runtime_environment = %config.runtime_environment,
         provisioning = platform_scopes.is_some(),
+        event_destinations = ?dispatcher.destinations(),
         "organizations configuration loaded"
     );
     let db = organizations::connect(config.database_url(), config.database_max_connections).await?;
@@ -53,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let provisioning_enabled = platform_scopes.is_some();
     let worker = tokio::spawn(worker::run_with(
         worker_db,
-        Arc::new(DisabledDispatcher),
+        dispatcher,
         platform_scopes,
         interval,
         organizations::shutdown_signal(),

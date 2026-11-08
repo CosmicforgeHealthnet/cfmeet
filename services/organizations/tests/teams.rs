@@ -499,7 +499,7 @@ async fn every_team_mutation_is_audited_with_an_outbox_event_and_history_is_appe
         ("team.archived", "team.archived"),
     ] {
         assert_eq!(
-            h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = '{event}' AND organization_id = '{}'", o.id)).await,
+            h.count(&format!("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = '{event}' AND organization_id = '{}'", o.id)).await,
             1,
             "{event}"
         );
@@ -511,7 +511,7 @@ async fn every_team_mutation_is_audited_with_an_outbox_event_and_history_is_appe
     }
     // Aggregate versions are monotonic per aggregate.
     assert_eq!(
-        h.count(&format!("SELECT count(*) FROM (SELECT aggregate_id, aggregate_version FROM organization_outbox WHERE aggregate_type IN ('team', 'team_member') AND organization_id = '{}' GROUP BY 1, 2 HAVING count(*) > 1) d", o.id)).await,
+        h.count(&format!("SELECT count(*) FROM (SELECT aggregate_id, aggregate_version FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND aggregate_type IN ('team', 'team_member') AND organization_id = '{}' GROUP BY 1, 2 HAVING count(*) > 1) d", o.id)).await,
         0
     );
     assert_eq!(

@@ -203,7 +203,7 @@ async fn organization_lifecycle_journey() {
         1
     );
     assert_eq!(
-        h.count("SELECT count(*) FROM organization_outbox WHERE event_type = 'invitation.expired'")
+        h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'invitation.expired'")
             .await,
         1
     );
@@ -291,7 +291,7 @@ async fn organization_lifecycle_journey() {
         .expect_error(409, "LAST_OWNER");
     assert_eq!(
         h.count(
-            "SELECT count(*) FROM organization_outbox WHERE event_type = 'membership.role_changed'"
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'membership.role_changed'"
         )
         .await,
         1
@@ -334,7 +334,7 @@ async fn organization_lifecycle_journey() {
     let new_owner = if a.status.as_u16() == 200 { bob } else { erin };
     assert_eq!(
         h.count(
-            "SELECT count(*) FROM organization_outbox WHERE event_type = 'ownership.transferred'"
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'ownership.transferred'"
         )
         .await,
         1
@@ -534,7 +534,7 @@ async fn organization_lifecycle_journey() {
         "organization.reactivated",
         "organization.archived",
     ] {
-        assert!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE event_type = '{t}' AND organization_id = '{id}'")).await >= 1, "{t}");
+        assert!(h.count(&format!("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = '{t}' AND organization_id = '{id}'")).await >= 1, "{t}");
     }
     assert_eq!(
         h.count(
@@ -551,15 +551,20 @@ async fn organization_lifecycle_journey() {
         0
     );
     assert_eq!(h.count("SELECT count(*) FROM organization_audit_events WHERE summary::text ILIKE '%example.com%'").await, 0);
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE state <> 'PENDING' OR destination <> 'cfmeet.reconciliation'").await, 0);
+    // Nothing was sent (no dispatcher ran); every event is recorded for reconciliation
+    // and fanned out only to its subscribed consumers.
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND state <> 'PENDING'").await, 0);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination NOT IN ('cfmeet.reconciliation', 'cfmeet.meeting-service')").await, 0);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox o WHERE destination = 'cfmeet.meeting-service' AND NOT EXISTS (SELECT 1 FROM organization_outbox r WHERE r.event_id = o.event_id AND r.destination = 'cfmeet.reconciliation')").await, 0);
+    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.meeting-service' AND event_type LIKE 'invitation.%'").await, 0);
     // Envelope shape.
     let env = h
-        .count("SELECT count(*) FROM organization_outbox WHERE payload ? 'eventId' AND payload ? 'aggregateVersion' AND payload->>'schemaVersion' = '1' AND payload->'actor'->>'serviceId' = 'cfmeet.meeting-service'")
+        .count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND payload ? 'eventId' AND payload ? 'aggregateVersion' AND payload->>'schemaVersion' = '1' AND payload->'actor'->>'serviceId' = 'cfmeet.meeting-service'")
         .await;
     assert_eq!(
         env,
         h.count(
-            "SELECT count(*) FROM organization_outbox WHERE payload->'actor'->>'kind' = 'USER'"
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND payload->'actor'->>'kind' = 'USER'"
         )
         .await
     );
