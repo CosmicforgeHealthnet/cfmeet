@@ -224,3 +224,19 @@ export function profileProblems(form: ProfileForm): Partial<Record<keyof Profile
   if (zone && !/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(zone)) problems.timezone = "An IANA time zone such as Europe/London.";
   return problems;
 }
+
+/** Sign-in page notice for `?reason=` (set by this app after it ended the session). */
+export function signInNotice(reason: string | null | undefined): string | null {
+  switch (reason) {
+    case "password_changed":
+      return "Your password was changed and every session was signed out. Sign in with your new password.";
+    case "signed_out_everywhere":
+      return "You signed out of every device. Sign in again to continue.";
+    case "session_ended":
+      return "Your session has ended. Sign in again to continue.";
+    case "deactivated":
+      return "Your account was deactivated.";
+    default:
+      return null;
+  }
+}

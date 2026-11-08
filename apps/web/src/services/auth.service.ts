@@ -13,7 +13,8 @@ import type {
   VerifyResetTokenRequest,
   VerifyResetTokenResponse,
 } from "@/types/auth";
-import type { GoogleExchangeRequest } from "@/types/generated/meeting-service";
+import apiV2 from "./v2/api";
+import type { AccountSessionRevokeResponse, GoogleExchangeRequest } from "@/types/generated/meeting-service";
 import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/workspace-core";
 
 /**
@@ -75,6 +76,18 @@ export const authService = {
     } finally {
       await authService.forgetLocalSession();
     }
+  },
+
+  /**
+   * "Sign out everywhere": ends every session of the account at the API
+   * (`POST /api/v2/me/sessions/revoke-all`), then this browser's state.
+   */
+  logoutEverywhere: async () => {
+    await signOutMessaging();
+    // A failure keeps this browser signed in (nothing was revoked); the caller shows it.
+    const result = (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-all")).data;
+    await authService.forgetLocalSession();
+    return result;
   },
 
   /** Browser-side sign-out only (after the API already ended the session). */

@@ -132,7 +132,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const capabilities = useQuery({
     queryKey: workspaceKeys.capabilities(workspaceId),
-    queryFn: () => workspacesService.capabilities(workspaceId),
+    queryFn: async () => {
+      try {
+        return await workspacesService.capabilities(workspaceId);
+      } catch (error) {
+        // The selected organization answered 404 (membership gone): drop its cached data,
+        // make Personal this tab's choice and re-read the workspace list.
+        if (axios.isAxiosError(error) && error.response?.status === 404 && workspaceId !== PERSONAL_WORKSPACE_ID) {
+          queryClient.removeQueries({ queryKey: [WORKSPACE_QUERY_ROOT, workspaceId] });
+          store(PERSONAL_WORKSPACE_ID);
+          void queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
+        }
+        throw error;
+      }
+    },
     staleTime: 30_000,
     refetchOnWindowFocus: true,
     retry: (count, error) =>
@@ -150,16 +163,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     previous.current = list.data.items;
   }, [list.data, queryClient]);
 
-  // The selected organization answered 404 (membership gone): back to Personal, refresh the list.
+  // The selected organization answered 404 (membership gone): back to Personal. Adjusting
+  // state during render (no effect); the cache side effects ran in the queryFn above.
   const capabilityStatus = axios.isAxiosError(capabilities.error) ? capabilities.error.response?.status : undefined;
-  useEffect(() => {
-    if (capabilityStatus === 404 && workspaceId !== PERSONAL_WORKSPACE_ID) {
-      queryClient.removeQueries({ queryKey: [WORKSPACE_QUERY_ROOT, workspaceId] });
-      setRequested(PERSONAL_WORKSPACE_ID);
-      store(PERSONAL_WORKSPACE_ID);
-      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
-    }
-  }, [capabilityStatus, workspaceId, queryClient]);
+  if (capabilityStatus === 404 && workspaceId !== PERSONAL_WORKSPACE_ID && requested !== PERSONAL_WORKSPACE_ID) {
+    setRequested(PERSONAL_WORKSPACE_ID);
+  }
 
   const selectWorkspace = useCallback(
     (id: string) => {
