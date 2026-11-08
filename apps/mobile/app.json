@@ -29,8 +29,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -53,8 +52,6 @@
       ]
     ],
     "extra": {
-      "apiUrl": "http://10.209.6.52:8080/api/v1",
-      "socketUrl": "http://10.209.6.52:8080",
       "router": {}
     }
   }

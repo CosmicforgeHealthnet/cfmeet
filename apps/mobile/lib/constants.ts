@@ -1,15 +1,31 @@
 import Constants from "expo-constants";
+import { resolveApiUrl } from "@/lib/config/api-url";
 
-const extra = Constants.expoConfig?.extra;
+const extra = Constants.expoConfig?.extra as { apiUrl?: string } | undefined;
 
-export const API_URL = extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL || "https://api.cfmeet.com/api/v1";
-export const SOCKET_URL = extra?.socketUrl || "https://api.cfmeet.com";
+// FE-006: the build environment decides the API host; release builds refuse cleartext
+// HTTP to non-loopback hosts and fall back to the HTTPS production default.
+const resolvedApi = resolveApiUrl({
+  envUrl: process.env.EXPO_PUBLIC_API_URL,
+  extraUrl: extra?.apiUrl,
+  isDev: __DEV__,
+});
+
+if (resolvedApi.rejected) {
+  console.warn(
+    `Ignoring API URL ${resolvedApi.rejected.url}: ${resolvedApi.rejected.reason}. Using ${resolvedApi.apiUrl}.`
+  );
+}
+
+export const API_URL = resolvedApi.apiUrl;
+export const API_V2_URL = resolvedApi.apiV2Url;
 
 export const STORAGE_KEYS = {
   ACCESS_TOKEN: "access_token",
   REFRESH_TOKEN: "refresh_token",
   USER_INFO: "user_info",
   REMEMBER_ME: "remember_me",
+  PARTICIPANT_CREDENTIAL: "participant_credential",
 } as const;
 
 export const QUERY_KEYS = {

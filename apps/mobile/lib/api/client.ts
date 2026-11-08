@@ -1,7 +1,15 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
-import { API_URL } from "@/lib/constants";
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
+import { API_URL, API_V2_URL } from "@/lib/constants";
 import { tokenStorage, clearAllStorage } from "@/lib/storage/secure-store";
+import {
+  participantCredentialStore,
+  conferenceIdFromPath,
+} from "@/lib/storage/participant-credential";
+import { decodeApiError, type ApiError } from "@/lib/api/errors";
 import { router } from "expo-router";
+
+export { toApiRequestError, ApiRequestError } from "@/lib/api/errors";
+export type { ApiError, ApiErrorKind } from "@/lib/api/errors";
 
 interface RefreshTokenResponse {
   access_token: string;
@@ -12,6 +20,8 @@ interface QueueItem {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 }
+
+type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _bearer?: boolean };
 
 let isRefreshing = false;
 let failedQueue: QueueItem[] = [];
@@ -27,168 +37,121 @@ const processQueue = (error: Error | null, token: string | null = null): void =>
   failedQueue = [];
 };
 
-export const api = axios.create({
-  baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
-});
+const create = (baseURL: string) =>
+  axios.create({
+    baseURL,
+    headers: { "Content-Type": "application/json" },
+    timeout: 30000,
+  });
 
-export const publicApi = axios.create({
-  baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
-});
+/** v1 (auth, users) with the account bearer token. */
+export const api = create(API_URL);
+/** v1 without credentials (sign-in, sign-up, password reset). */
+export const publicApi = create(API_URL);
+/**
+ * v2 meeting API. Sends the account bearer token when signed in; otherwise, on calls scoped
+ * to the conference the guest joined, the participant credential (`X-Participant-Token`).
+ */
+export const apiV2 = create(API_V2_URL);
+/** v2 without credentials. */
+export const publicApiV2 = create(API_V2_URL);
 
-const V2_BASE_URL = API_URL.replace("/api/v1", "/api/v2");
+const attachCredentials = (instance: AxiosInstance, participantScoped: boolean) => {
+  instance.interceptors.request.use(
+    async (config: InternalAxiosRequestConfig) => {
+      const retriable = config as RetriableConfig;
+      const token = await tokenStorage.getAccessToken();
+      if (token && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+        retriable._bearer = true;
+      } else if (participantScoped && config.headers) {
+        // The backend never mixes identities: a bearer token wins, so the participant
+        // credential is only sent by callers without an account, and only to the
+        // conference it was issued for.
+        const conferenceId = conferenceIdFromPath(config.url);
+        const credential = conferenceId
+          ? await participantCredentialStore.getFor(conferenceId)
+          : null;
+        if (credential) {
+          config.headers["X-Participant-Token"] = credential;
+        }
+      }
+      return config;
+    },
+    (error: AxiosError) => Promise.reject(error)
+  );
 
-export const apiV2 = axios.create({
-  baseURL: V2_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
-});
+  instance.interceptors.response.use(
+    (response) => response,
+    async (error: AxiosError) => {
+      const originalRequest = error.config as RetriableConfig | undefined;
 
-export const publicApiV2 = axios.create({
-  baseURL: V2_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
-});
+      if (!originalRequest) {
+        return Promise.reject(error);
+      }
 
-const applyInterceptors = (instance: typeof api) => {
-instance.interceptors.request.use(
-  async (config: InternalAxiosRequestConfig) => {
-    const token = await tokenStorage.getAccessToken();
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error: AxiosError) => {
-    return Promise.reject(error);
-  }
-);
+      const isAuthEndpoint = originalRequest.url?.includes("/auth/");
 
-instance.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & {
-      _retry?: boolean;
-    };
-
-    if (!originalRequest) {
-      return Promise.reject(error);
-    }
-
-    const isAuthEndpoint = originalRequest.url?.includes("/auth/");
-
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
+      // Only an account session can be refreshed. A guest (participant credential or
+      // anonymous) 401 is returned to the caller instead of bouncing to the login screen.
+      if (
+        error.response?.status === 401 &&
+        !originalRequest._retry &&
+        !isAuthEndpoint &&
+        originalRequest._bearer
+      ) {
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then((token) => {
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${token}`;
             }
             return instance(originalRequest);
-          })
-          .catch((err) => {
-            return Promise.reject(err);
           });
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const refreshToken = await tokenStorage.getRefreshToken();
-
-        if (!refreshToken) {
-          throw new Error("No refresh token available");
         }
 
-        const response = await publicApi.post<RefreshTokenResponse>("/auth/refresh", {
-          refresh_token: refreshToken,
-        });
+        originalRequest._retry = true;
+        isRefreshing = true;
 
-        const { access_token, refresh_token } = response.data;
-        await tokenStorage.setTokens(access_token, refresh_token);
+        try {
+          const refreshToken = await tokenStorage.getRefreshToken();
 
-        processQueue(null, access_token);
+          if (!refreshToken) {
+            throw new Error("No refresh token available");
+          }
 
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          const response = await publicApi.post<RefreshTokenResponse>("/auth/refresh", {
+            refresh_token: refreshToken,
+          });
+
+          const { access_token, refresh_token } = response.data;
+          await tokenStorage.setTokens(access_token, refresh_token);
+
+          processQueue(null, access_token);
+
+          if (originalRequest.headers) {
+            originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          }
+
+          return instance(originalRequest);
+        } catch (refreshError) {
+          processQueue(refreshError as Error, null);
+          await clearAllStorage();
+          router.replace("/login");
+          return Promise.reject(error);
+        } finally {
+          isRefreshing = false;
         }
-
-        return instance(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError as Error, null);
-        await clearAllStorage();
-        router.replace("/login");
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
+
+      return Promise.reject(error);
     }
-
-    return Promise.reject(error);
-  }
-);
+  );
 };
 
-applyInterceptors(api);
-applyInterceptors(apiV2);
+attachCredentials(api, false);
+attachCredentials(apiV2, true);
 
-export interface ApiError {
-  message: string;
-  status: number;
-  errors?: Record<string, string[]>;
-}
-
-const getStatusMessage = (status: number): string => {
-  switch (status) {
-    case 400:
-      return "Invalid request. Please check your input.";
-    case 401:
-      return "Invalid email or password.";
-    case 403:
-      return "You don't have permission to perform this action.";
-    case 404:
-      return "The requested resource was not found.";
-    case 429:
-      return "Too many requests. Please wait a moment and try again.";
-    case 500:
-      return "Server error. Please try again later.";
-    case 502:
-    case 503:
-    case 504:
-      return "Service temporarily unavailable. Please try again later.";
-    default:
-      return "An error occurred. Please try again.";
-  }
-};
-
-export const getApiError = (error: unknown): ApiError => {
-  if (axios.isAxiosError(error)) {
-    const axiosError = error as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
-    const status = axiosError.response?.status || 500;
-    const serverMessage = axiosError.response?.data?.message;
-
-    return {
-      message: serverMessage || getStatusMessage(status),
-      status,
-      errors: axiosError.response?.data?.errors,
-    };
-  }
-  return {
-    message: "An unexpected error occurred",
-    status: 500,
-  };
-};
+/** Decode any API failure (v2 error envelope, legacy shapes, network errors). */
+export const getApiError = (error: unknown): ApiError => decodeApiError(error);
