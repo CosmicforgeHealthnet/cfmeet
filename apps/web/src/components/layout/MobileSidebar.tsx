@@ -5,13 +5,13 @@ import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Menu, X } from "lucide-react";
-import { dashboardNavigation } from "@/lib/dashboard-navigation";
+import { useDashboardNavigation } from "@/lib/use-dashboard-navigation";
 import ProfileMenu from "./ProfileMenu";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-const menu = dashboardNavigation;
-
 export default function MobileSidebar() {
+  const menu = useDashboardNavigation();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -112,6 +112,7 @@ export default function MobileSidebar() {
 
           {/* Bottom Section */}
           <div className="pb-8 px-5 space-y-4">
+            <WorkspaceSwitcher expanded={true} />
             <ThemeToggle />
             <ProfileMenu expanded={true} mobile={true} />
           </div>

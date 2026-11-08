@@ -6,6 +6,7 @@ import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
 import MobileSidebar from "./MobileSidebar";
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
 
 const subscribeToHydration = () => () => {};
 const getHydrated = () => true;
@@ -46,16 +47,18 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Desktop sidebar */}
-      <div className="hidden md:block">
-        <AppSidebar />
+    <WorkspaceProvider>
+      <div className="flex h-screen bg-background overflow-hidden">
+        {/* Desktop sidebar */}
+        <div className="hidden md:block">
+          <AppSidebar />
+        </div>
+
+        <main className="flex-1 bg-background overflow-y-auto">{children}</main>
+
+        {/* Mobile slide-in sidebar */}
+        <MobileSidebar />
       </div>
-
-      <main className="flex-1 bg-background overflow-y-auto">{children}</main>
-
-      {/* Mobile slide-in sidebar */}
-      <MobileSidebar />
-    </div>
+    </WorkspaceProvider>
   );
 }
