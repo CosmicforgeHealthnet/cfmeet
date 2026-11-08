@@ -8,7 +8,10 @@ import { Video, Copy, Check, Plus, Loader2 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { useCreateInstantMeeting, useSpaces } from "@/hooks/v2/useSpaces";
 import type { MeetingSpaceResponse } from "@/types/v2";
-import { formatDateForDisplay } from "@/utils/timezone";
+import SpaceSchedule from "@/components/meetings/SpaceSchedule";
+import UpcomingMeetings from "@/components/meetings/UpcomingMeetings";
+import { useMeetingCapabilities } from "@/hooks/v2/useCalendar";
+import { viewerTimeZone } from "@/lib/meeting-time";
 import { getErrorMessage } from "@/utils/error";
 import JoinMeetingInput from "@/components/layout/JoinMeetingInput";
 
@@ -18,14 +21,17 @@ export default function DashboardContent() {
   const [instantMeetingError, setInstantMeetingError] = useState("");
   const { data: spacesData, isLoading, error: spacesError } = useSpaces();
   const spaces = (spacesData?.items ?? []).filter((space) => space.status === "ACTIVE");
+  const capabilities = useMeetingCapabilities();
+  const canCreate = capabilities.canCreatePersonal || capabilities.canCreateOrganization;
 
   const handleInstantMeeting = async () => {
     if (createInstantMeeting.isPending) return;
 
     setInstantMeetingError("");
     try {
-      const { meetingSpace } = await createInstantMeeting.mutateAsync({});
-      router.push(`/${encodeURIComponent(meetingSpace.meetingCode)}`);
+      // The live room is keyed by the conference id (FE-017); the code stays the share link.
+      const { conference } = await createInstantMeeting.mutateAsync({ timezone: viewerTimeZone() });
+      router.push(`/conferences/${encodeURIComponent(conference.id)}`);
     } catch (error) {
       setInstantMeetingError(
         getErrorMessage(error, "Could not start an instant meeting."),
@@ -36,7 +42,7 @@ export default function DashboardContent() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 md:px-10 md:py-10 font-inter overflow-hidden">
       <div className="mt-8 grid gap-4 sm:mt-14 sm:grid-cols-2 md:mt-20 md:gap-6">
-        <Link
+        {canCreate ? <Link
           href="/dashboard/meetings/new"
           className="group flex min-h-[220px] w-full min-w-0 flex-col items-center justify-center gap-4 rounded-2xl border border-border bg-card p-5 text-center transition-all duration-200 hover:border-primary/60 hover:bg-muted/30"
         >
@@ -44,14 +50,14 @@ export default function DashboardContent() {
             <Video className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
           </div>
           <div className="space-y-2">
-            <span className="block text-center text-lg font-semibold tracking-tight text-foreground sm:text-xl">Create meeting space</span>
+            <span className="block text-center text-lg font-semibold tracking-tight text-foreground sm:text-xl">Schedule a meeting</span>
             <span className="block max-w-xs text-center text-xs leading-relaxed text-muted-foreground sm:text-sm">
-              Set up reusable meeting details, access policies, members, and recurrence.
+              Choose a date and time, access policy, members and recurrence.
             </span>
           </div>
-        </Link>
+        </Link> : null}
 
-        <button
+        {capabilities.canCreatePersonal ? <button
           type="button"
           onClick={() => void handleInstantMeeting()}
           disabled={createInstantMeeting.isPending}
@@ -73,7 +79,7 @@ export default function DashboardContent() {
               Start a live meeting now and invite others with its meeting link.
             </span>
           </div>
-        </button>
+        </button> : null}
       </div>
 
       {instantMeetingError && (
@@ -90,6 +96,8 @@ export default function DashboardContent() {
           buttonClassName="h-10 sm:h-11 px-5 sm:px-8"
         />
       </div>
+
+      <UpcomingMeetings />
 
       {/* Meeting Spaces section */}
       <div className="mt-10 sm:mt-14 md:mt-20 px-0 sm:px-4 md:px-20">
@@ -180,11 +188,9 @@ function SpaceCard({ space }: { space: MeetingSpaceResponse }) {
         <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
           {space.meetingType?.replace("_", " ")}
         </p>
-        {space.createdAt && (
-          <p className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-none">
-            {formatDateForDisplay(space.createdAt)}
-          </p>
-        )}
+        <div className="text-muted-foreground font-normal text-[11px] sm:text-[12px] leading-tight">
+          <SpaceSchedule space={space} compact />
+        </div>
       </div>
 
       <div className="flex justify-between items-end">

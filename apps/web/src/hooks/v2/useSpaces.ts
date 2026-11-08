@@ -105,7 +105,8 @@ export function useCreateSpace() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: CreateMeetingSpaceRequest) => spacesService.create(data),
+    /** `idempotencyKey`: one UUID per user action, so a retried submit returns the same space. */
+    mutationFn: ({ data, idempotencyKey }: { data: CreateMeetingSpaceRequest; idempotencyKey?: string }) => spacesService.create(data, idempotencyKey),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: spaceKeys.lists() });
     },
