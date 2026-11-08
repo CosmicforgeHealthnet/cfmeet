@@ -71,7 +71,7 @@ export default function SettingsContent() {
           )}
         >
           <Key className="w-4 h-4" />
-          API Keys
+          Legacy API Keys
         </button>
         <button
           onClick={() => setActiveTab("webhooks")}
@@ -83,7 +83,7 @@ export default function SettingsContent() {
           )}
         >
           <Webhook className="w-4 h-4" />
-          Webhooks
+          Legacy Webhooks
         </button>
       </div>
 
