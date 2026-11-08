@@ -1,143 +1,91 @@
-import { useState, useRef, useEffect } from "react";
-import { View, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform } from "react-native";
+/** In-meeting chat on the v2 conference chat (MSG-012). */
+import { useState } from "react";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
-import { Avatar } from "@/components/ui/avatar";
-import { Loading } from "@/components/shared/loading";
-import { useRoom } from "../providers/room-provider";
-import { useChat, useSendMessage } from "../hooks/use-chat";
-import { useToast } from "@/components/ui/toast";
-import type { ChatMessage } from "@/features/meetings/types";
+import { useColors } from "@/hooks/useColors";
+import { useConferenceChat } from "@/features/room/hooks";
+import { decodeApiError } from "@/lib/api/errors";
+import { clock } from "@/lib/meeting/agenda";
+import { deviceTimeZone } from "@/lib/time/zoned";
 
-export function ChatPanel() {
-  const [message, setMessage] = useState("");
-  const flatListRef = useRef<FlatList<ChatMessage>>(null);
-  const { joinData } = useRoom();
-  const meetingId = joinData?.id ?? "";
-  const currentParticipantId = joinData?.participant_id;
+export function ChatPanel({
+  conferenceId,
+  participantId,
+  canSend,
+}: {
+  conferenceId: string;
+  participantId: string;
+  canSend: boolean;
+}) {
+  const colors = useColors();
+  const { query, send } = useConferenceChat(conferenceId, true);
+  const [text, setText] = useState("");
+  const tz = deviceTimeZone();
+  const messages = query.data ?? [];
 
-  const { data, isLoading } = useChat(meetingId);
-  const sendMessage = useSendMessage(meetingId);
-  const { toast } = useToast();
-
-  const messages = data?.messages ?? [];
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }
-  }, [messages.length]);
-
-  const handleSend = () => {
-    const trimmedMessage = message.trim();
-    if (!trimmedMessage) return;
-
-    sendMessage.mutate(trimmedMessage, {
-      onSuccess: () => {
-        setMessage("");
-      },
-      onError: (error) => {
-        toast(error.message, "destructive");
-      },
-    });
+  const submit = () => {
+    const body = text.trim();
+    if (!body) return;
+    send.mutate(body, { onSuccess: () => setText("") });
   };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
-
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
-    const isCurrentUser = item.participant_id === currentParticipantId;
-
-    return (
-      <View
-        className={`mb-3 max-w-[85%] ${
-          isCurrentUser ? "ml-auto items-end" : "mr-auto items-start"
-        }`}
-      >
-        {!isCurrentUser && (
-          <View className="mb-1 flex-row items-center gap-2">
-            <Avatar fallback={item.display_name} size="sm" />
-            <Text className="text-xs text-muted-foreground">
-              {item.display_name}
-            </Text>
-          </View>
-        )}
-        <View
-          className={`rounded-2xl px-4 py-2 ${
-            isCurrentUser ? "bg-primary" : "bg-muted"
-          }`}
-        >
-          <Text
-            className={isCurrentUser ? "text-primary-foreground" : "text-foreground"}
-          >
-            {item.message}
-          </Text>
-        </View>
-        <Text className="mt-1 text-xs text-muted-foreground">
-          {formatTime(item.created_at)}
-        </Text>
-      </View>
-    );
-  };
-
-  if (isLoading) {
-    return <Loading message="Loading chat..." />;
-  }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      className="flex-1"
-      keyboardVerticalOffset={100}
-    >
-      <View className="flex-1">
-        {messages.length === 0 ? (
-          <View className="flex-1 items-center justify-center">
-            <Text className="text-muted-foreground">No messages yet</Text>
-            <Text className="mt-1 text-sm text-muted-foreground">
-              Start the conversation!
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            showsVerticalScrollIndicator={false}
-            contentContainerClassName="py-4"
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          />
-        )}
-      </View>
-
-      <View className="flex-row items-center gap-2 border-t border-border py-3">
+    <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {query.isError ? (
+        <Text variant="destructive" size="sm" className="p-4">
+          {decodeApiError(query.error).message}
+        </Text>
+      ) : null}
+      <FlatList
+        data={messages}
+        keyExtractor={(m) => m.id}
+        contentContainerStyle={{ padding: 16, gap: 10 }}
+        ListEmptyComponent={
+          <Text variant="muted" className="text-center mt-8">
+            No messages yet.
+          </Text>
+        }
+        renderItem={({ item }) => {
+          const mine = item.senderParticipantId === participantId;
+          return (
+            <View className={mine ? "items-end" : "items-start"}>
+              <Text variant="muted" size="xs">
+                {mine ? "You" : item.senderDisplayName} · {clock(Date.parse(item.createdAt), tz)}
+                {item.kind !== "MESSAGE" ? " · announcement" : ""}
+              </Text>
+              <View
+                className={`mt-1 max-w-[85%] rounded-2xl px-3 py-2 ${mine ? "bg-primary" : "bg-muted dark:bg-muted-dark"}`}
+              >
+                <Text className={mine ? "text-white" : ""}>{item.deleted ? "Message removed" : (item.body ?? "")}</Text>
+              </View>
+            </View>
+          );
+        }}
+      />
+      {send.isError ? (
+        <Text variant="destructive" size="sm" className="px-4">
+          {decodeApiError(send.error).message}
+        </Text>
+      ) : null}
+      <View className="flex-row items-center gap-2 border-t border-border dark:border-border-dark p-3">
         <TextInput
-          value={message}
-          onChangeText={setMessage}
-          placeholder="Type a message..."
-          placeholderTextColor="hsl(215.4 16.3% 46.9%)"
-          className="flex-1 rounded-full border border-input bg-background px-4 py-2.5 text-foreground"
-          returnKeyType="send"
-          onSubmitEditing={handleSend}
-          multiline
-          maxLength={500}
+          value={text}
+          onChangeText={setText}
+          editable={canSend}
+          placeholder={canSend ? "Message everyone" : "Chat is not available to you"}
+          placeholderTextColor={colors.mutedForeground}
+          maxLength={4000}
+          className="flex-1 rounded-xl border border-border dark:border-border-dark px-3 py-2 text-foreground dark:text-foreground-dark"
+          onSubmitEditing={submit}
         />
         <Pressable
-          onPress={handleSend}
-          disabled={!message.trim() || sendMessage.isPending}
-          className={`h-10 w-10 items-center justify-center rounded-full ${
-            message.trim() ? "bg-primary" : "bg-muted"
-          }`}
+          accessibilityLabel="Send message"
+          onPress={submit}
+          disabled={!canSend || send.isPending}
+          className="p-2"
         >
-          <Text className={message.trim() ? "text-primary-foreground" : "text-muted-foreground"}>
-            ➤
-          </Text>
+          <Ionicons name="send" size={22} color={colors.primary} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>

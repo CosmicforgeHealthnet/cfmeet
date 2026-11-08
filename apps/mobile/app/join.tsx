@@ -1,56 +1,63 @@
-import { useState } from "react";
+/**
+ * Join by meeting code or link — signed in or as a guest. Deep links:
+ * `cfmeet://join?code=<code>[&invitation=<token>]`.
+ */
+import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { KeyboardAwareView } from "@/components/layout/keyboard-aware-view";
 import { Text } from "@/components/ui/text";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useOpenMeeting } from "@/features/meetings/open-meeting";
+import { useAuthStore } from "@/store/auth.store";
 
 export default function JoinScreen() {
-  const [meetingCode, setMeetingCode] = useState("");
+  const params = useLocalSearchParams<{ code?: string; invitation?: string }>();
+  const { isAuthenticated } = useAuthStore();
+  const [code, setCode] = useState(params.code ?? "");
+  const { open, pending, error } = useOpenMeeting();
+  const autoOpened = useRef(false);
 
-  const handleJoin = () => {
-    if (!meetingCode.trim()) return;
-
-    router.push({
-      pathname: "/(room)/[id]",
-      params: { id: meetingCode.trim() },
-    });
-  };
+  useEffect(() => {
+    if (params.code && !autoOpened.current) {
+      autoOpened.current = true;
+      void open(params.code, params.invitation);
+    }
+  }, [params.code, params.invitation, open]);
 
   return (
     <KeyboardAwareView contentClassName="justify-center px-6 py-8">
       <View className="mb-8 items-center">
-        <Text className="text-3xl font-bold text-foreground">Join Meeting</Text>
-        <Text className="mt-2 text-center text-muted-foreground">
-          Enter a meeting code to join
+        <Text className="text-3xl font-bold">Join a meeting</Text>
+        <Text variant="muted" className="mt-2 text-center">
+          Enter the meeting code or paste the meeting link.
         </Text>
       </View>
-
       <View className="gap-4">
         <Input
-          label="Meeting Code"
-          placeholder="Enter meeting code"
-          value={meetingCode}
-          onChangeText={setMeetingCode}
+          label="Meeting code or link"
+          placeholder="abc-defg-hij"
+          value={code}
+          onChangeText={setCode}
           autoCapitalize="none"
+          autoCorrect={false}
           returnKeyType="go"
-          onSubmitEditing={handleJoin}
+          onSubmitEditing={() => void open(code, params.invitation)}
+          error={error ?? undefined}
         />
-
         <Button
-          onPress={handleJoin}
-          disabled={!meetingCode.trim()}
-          className="mt-4"
           size="lg"
+          className="mt-2"
+          isLoading={pending}
+          disabled={!code.trim()}
+          onPress={() => void open(code, params.invitation)}
         >
-          Join
+          Continue
         </Button>
-
         <Button
           variant="ghost"
-          onPress={() => router.back()}
-          className="mt-2"
+          onPress={() => (router.canGoBack() ? router.back() : router.replace(isAuthenticated ? "/(tabs)" : "/login"))}
         >
           Cancel
         </Button>

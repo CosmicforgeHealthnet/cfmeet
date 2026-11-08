@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, ScrollView, Pressable, Modal } from "react-native";
+import { View, ScrollView, Pressable, Modal, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,6 +11,8 @@ import { useTheme } from "@/providers/theme-provider";
 import { useAuthStore } from "@/store/auth.store";
 import { useLogout } from "@/features/auth/hooks/use-logout";
 import { useColors } from "@/hooks/useColors";
+import { SUPPORT_LINKS } from "@/lib/constants";
+import { useProfile } from "@/features/account/hooks";
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -93,6 +95,7 @@ function LogoutModal({ visible, onClose, onConfirm, isLoading }: LogoutModalProp
 
 export default function SettingsScreen() {
   const { user } = useAuthStore();
+  const profile = useProfile();
   const { theme, setTheme } = useTheme();
   const logout = useLogout();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -128,16 +131,13 @@ export default function SettingsScreen() {
         <View className="p-6">
           <Card className="mb-6">
             <View className="flex-row items-center gap-4">
-              <Avatar fallback={user?.username ?? "U"} size="lg" />
+              <Avatar fallback={profile.data?.effectiveDisplayName ?? user?.username ?? "U"} size="lg" />
               <View className="flex-1">
                 <Text className="text-lg font-bold text-foreground dark:text-foreground-dark">
-                  {user?.username}
+                  {profile.data?.effectiveDisplayName ?? user?.username}
                 </Text>
-                <Text className="text-muted-foreground dark:text-muted-foreground-dark">{user?.email}</Text>
-              </View>
-              <View className="bg-accent dark:bg-accent-dark px-3 py-1 rounded-full">
-                <Text className="text-xs font-semibold text-primary dark:text-primary-dark capitalize">
-                  {user?.role ?? "user"}
+                <Text className="text-muted-foreground dark:text-muted-foreground-dark">
+                  {profile.data?.email ?? user?.email}
                 </Text>
               </View>
             </View>
@@ -161,27 +161,76 @@ export default function SettingsScreen() {
             </Text>
             <SettingsItem
               icon="person-outline"
-              label="Edit Profile"
+              label="Profile"
               onPress={() => router.push("/(settings)/edit-profile")}
             />
             <View className="border-t border-border dark:border-border-dark" />
             <SettingsItem
+              icon="shield-checkmark-outline"
+              label="Security & sessions"
+              onPress={() => router.push("/(settings)/security")}
+            />
+            <View className="border-t border-border dark:border-border-dark" />
+            <SettingsItem
               icon="lock-closed-outline"
-              label="Change Password"
+              label="Change password"
               onPress={() => router.push("/(settings)/change-password")}
             />
           </Card>
 
           <Card className="mb-6">
             <Text className="mb-2 text-sm font-bold text-muted-foreground dark:text-muted-foreground-dark uppercase tracking-wider">
-              Support
+              Organizations
             </Text>
-            <SettingsItem icon="help-circle-outline" label="Help Center" />
+            <SettingsItem
+              icon="business-outline"
+              label="My organizations"
+              onPress={() => router.push("/(settings)/organizations")}
+            />
             <View className="border-t border-border dark:border-border-dark" />
-            <SettingsItem icon="document-text-outline" label="Terms of Service" />
-            <View className="border-t border-border dark:border-border-dark" />
-            <SettingsItem icon="shield-checkmark-outline" label="Privacy Policy" />
+            <SettingsItem
+              icon="mail-open-outline"
+              label="Accept an invitation"
+              onPress={() => router.push("/(settings)/invitation")}
+            />
           </Card>
+
+          <Card className="mb-6">
+            <Text className="mb-2 text-sm font-bold text-muted-foreground dark:text-muted-foreground-dark uppercase tracking-wider">
+              Communication
+            </Text>
+            <SettingsItem
+              icon="notifications-outline"
+              label="Calls, chats & notifications"
+              value="Status"
+              onPress={() => router.push("/(settings)/communication")}
+            />
+          </Card>
+
+          {(SUPPORT_LINKS.help || SUPPORT_LINKS.terms || SUPPORT_LINKS.privacy) && (
+            <Card className="mb-6">
+              <Text className="mb-2 text-sm font-bold text-muted-foreground dark:text-muted-foreground-dark uppercase tracking-wider">
+                Support
+              </Text>
+              {SUPPORT_LINKS.help && (
+                <SettingsItem icon="help-circle-outline" label="Help Center" onPress={() => void Linking.openURL(SUPPORT_LINKS.help!)} />
+              )}
+              {SUPPORT_LINKS.terms && (
+                <SettingsItem
+                  icon="document-text-outline"
+                  label="Terms of Service"
+                  onPress={() => void Linking.openURL(SUPPORT_LINKS.terms!)}
+                />
+              )}
+              {SUPPORT_LINKS.privacy && (
+                <SettingsItem
+                  icon="shield-outline"
+                  label="Privacy Policy"
+                  onPress={() => void Linking.openURL(SUPPORT_LINKS.privacy!)}
+                />
+              )}
+            </Card>
+          )}
 
           <Card className="mb-6 bg-destructive/10 dark:bg-destructive-dark/10 border-destructive/20 dark:border-destructive-dark/20">
             <Text className="mb-2 text-sm font-bold text-destructive dark:text-destructive-dark uppercase tracking-wider">

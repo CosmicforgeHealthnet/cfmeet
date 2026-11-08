@@ -3,42 +3,49 @@ import { router } from "expo-router";
 import { authApi } from "../api/auth.api";
 import { tokenStorage, userStorage } from "@/lib/storage/secure-store";
 import { useAuthStore } from "@/store/auth.store";
-import { getApiError } from "@/lib/api/client";
-import type { LoginRequest, LoginResponse } from "../types";
+import { decodeApiError, ApiRequestError } from "@/lib/api/errors";
+import { routeAfterSignIn } from "@/lib/auth/account-status";
+import type { LoginResponse } from "@/lib/api/generated/meeting-service";
+import type { LoginRequest } from "../types";
 
+/**
+ * Email + password sign-in (ACC-012): nothing about the request, the response or the tokens is
+ * logged; tokens go only to SecureStore. Unverified accounts (either status spelling, or a
+ * `403 EMAIL_VERIFICATION_REQUIRED` when the deployment enforces verification) are routed to
+ * the verification screen with the email the user typed — the login body has no email.
+ */
 export function useLogin() {
   const { setUser, setIsAuthenticated } = useAuthStore();
 
   return useMutation({
     mutationFn: async (data: LoginRequest): Promise<LoginResponse> => {
-      console.log("=== LOGIN REQUEST ===");
-      console.log("Data:", JSON.stringify(data, null, 2));
+      let response: LoginResponse;
       try {
-        const response = await authApi.login(data);
-        console.log("=== LOGIN SUCCESS ===");
-        console.log("Response:", JSON.stringify(response, null, 2));
-        return response;
+        response = await authApi.login({ email: data.email.trim(), password: data.password });
       } catch (error) {
-        console.log("=== LOGIN ERROR ===");
-        console.log("Error:", error);
-        const apiError = getApiError(error);
-        console.log("API Error:", JSON.stringify(apiError, null, 2));
-        throw new Error(apiError.message);
+        const decoded = decodeApiError(error);
+        if (decoded.kind === "verification_required") {
+          router.replace({ pathname: "/verify", params: { email: data.email.trim().toLowerCase() } });
+        }
+        throw new ApiRequestError(decoded);
       }
+      if (routeAfterSignIn(response.user.status, data.email).kind === "blocked") {
+        // Nothing is stored for an inactive or suspended account.
+        throw new Error("This account is not active. Contact support to restore access.");
+      }
+      return response;
     },
     onSuccess: async (response, variables) => {
+      const next = routeAfterSignIn(response.user.status, variables.email);
       await tokenStorage.setTokens(response.access_token, response.refresh_token);
-      await userStorage.setUserInfo(response.user);
+      const user = { ...response.user, email: variables.email.trim().toLowerCase() };
+      await userStorage.setUserInfo(user);
       await userStorage.setRememberMe(variables.remember_me ?? false);
-
-      setUser(response.user);
+      setUser(user);
       setIsAuthenticated(true);
 
-      if (response.user.status === "pending") {
-        router.replace({
-          pathname: "/verify",
-          params: { email: response.user.email },
-        });
+      if (next.kind === "verify") {
+        router.replace({ pathname: "/verify", params: { email: next.email } });
       } else {
         router.replace("/(tabs)");
       }

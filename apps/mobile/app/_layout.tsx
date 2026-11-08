@@ -1,4 +1,5 @@
 import "../global.css";
+import { registerGlobals } from "@livekit/react-native";
 
 import { useEffect, useState, useCallback } from "react";
 import { View } from "react-native";
@@ -11,6 +12,10 @@ import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { useAuthStore } from "@/store/auth.store";
+
+// LiveKit's WebRTC globals must exist before any room is created (requires a development
+// build: the native WebRTC module is not part of Expo Go).
+registerGlobals();
 
 // Keep splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -29,8 +34,7 @@ function RootLayoutNav() {
           await new Promise(resolve => setTimeout(resolve, 500));
           setAppIsReady(true);
         }
-      } catch (e) {
-        console.warn(e);
+      } catch {
         setAppIsReady(true);
       }
     }
@@ -56,7 +60,10 @@ function RootLayoutNav() {
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="(room)" />
+        <Stack.Screen name="(room)" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="(meetings)" />
+        <Stack.Screen name="(settings)" />
+        <Stack.Screen name="(chats)" />
         <Stack.Screen name="join" />
       </Stack>
     </View>

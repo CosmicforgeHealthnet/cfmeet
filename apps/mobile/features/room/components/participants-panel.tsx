@@ -1,162 +1,128 @@
-import { View, FlatList, Pressable } from "react-native";
+/** Participants and (for admitting roles) the waiting room, from Meeting Service v2. */
+import { Alert, Pressable, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
-import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loading } from "@/components/shared/loading";
-import { useRoom } from "../providers/room-provider";
-import {
-  useParticipants,
-  useWaitingParticipants,
-  useAdmitParticipant,
-  useDenyParticipant,
-  useAdmitAllParticipants,
-} from "../hooks/use-participants";
-import { useToast } from "@/components/ui/toast";
-import type { Participant, WaitingParticipant } from "@/features/meetings/types";
+import { useColors } from "@/hooks/useColors";
+import { useAdmission, useHands, useParticipants, useWaitingRoom } from "@/features/room/hooks";
+import { decodeApiError } from "@/lib/api/errors";
+import { mayTarget, meetingAllows, roleLabel } from "@/lib/meeting/authority";
+import type { Role } from "@/lib/api/generated/meeting-service";
 
-export function ParticipantsPanel() {
-  const { joinData } = useRoom();
-  const meetingId = joinData?.id ?? "";
-  const isHost = joinData?.role === "host";
-  const currentParticipantId = joinData?.participant_id;
+export function ParticipantsPanel({
+  conferenceId,
+  participantId,
+  role,
+}: {
+  conferenceId: string;
+  participantId: string;
+  role: Role | undefined;
+}) {
+  const colors = useColors();
+  const canAdmit = meetingAllows(role, "participant.admit");
+  const participants = useParticipants(conferenceId);
+  const waiting = useWaitingRoom(conferenceId, canAdmit);
+  const hands = useHands(conferenceId, true);
+  const { admit, deny, remove, muteAudio } = useAdmission(conferenceId);
+  const raised = new Set((hands.query.data?.hands ?? []).map((h) => h.participantId));
 
-  const { data: participantsData, isLoading: isLoadingParticipants } = useParticipants(meetingId);
-  const { data: waitingData, isLoading: isLoadingWaiting } = useWaitingParticipants(meetingId, isHost);
-
-  const { toast, success } = useToast();
-  const admitParticipant = useAdmitParticipant(meetingId);
-  const denyParticipant = useDenyParticipant(meetingId);
-  const admitAll = useAdmitAllParticipants(meetingId);
-
-  const handleAdmit = (id: string) => {
-    admitParticipant.mutate(id, {
-      onSuccess: () => success("Participant admitted"),
-      onError: (error) => toast(error.message, "destructive"),
-    });
-  };
-
-  const handleDeny = (id: string) => {
-    denyParticipant.mutate(id, {
-      onSuccess: () => success("Participant denied"),
-      onError: (error) => toast(error.message, "destructive"),
-    });
-  };
-
-  const handleAdmitAll = () => {
-    if (!waitingData?.waiting) return;
-    const ids = waitingData.waiting.map((p) => p.id);
-    admitAll.mutate(ids, {
-      onSuccess: () => success("All participants admitted"),
-      onError: (error) => toast(error.message, "destructive"),
-    });
-  };
-
-  const renderParticipant = ({ item }: { item: Participant }) => {
-    const isCurrentUser = item.id === currentParticipantId;
-
-    return (
-      <View className="flex-row items-center justify-between py-3">
-        <View className="flex-row items-center gap-3">
-          <Avatar fallback={item.display_name} size="default" />
-          <View>
-            <Text className="font-semibold text-foreground dark:text-foreground-dark">
-              {item.display_name}
-              {isCurrentUser && " (You)"}
-            </Text>
-            {item.role === "host" && (
-              <Text className="text-xs text-primary dark:text-primary-dark">Host</Text>
-            )}
-          </View>
-        </View>
-        <View className="flex-row gap-3">
-          <Ionicons
-            name={item.is_audio_enabled ? "mic" : "mic-off"}
-            size={18}
-            color={item.is_audio_enabled ? "#22c55e" : "#737373"}
-          />
-          <Ionicons
-            name={item.is_video_enabled ? "videocam" : "videocam-off"}
-            size={18}
-            color={item.is_video_enabled ? "#22c55e" : "#737373"}
-          />
-        </View>
-      </View>
-    );
-  };
-
-  const renderWaitingParticipant = ({ item }: { item: WaitingParticipant }) => (
-    <View className="flex-row items-center justify-between py-3">
-      <View className="flex-row items-center gap-3">
-        <Avatar fallback={item.display_name} size="default" />
-        <Text className="font-semibold text-foreground dark:text-foreground-dark">{item.display_name}</Text>
-      </View>
-      <View className="flex-row gap-2">
-        <Pressable
-          onPress={() => handleAdmit(item.id)}
-          disabled={admitParticipant.isPending}
-          className="rounded-lg bg-success dark:bg-success-dark px-3 py-1.5"
-        >
-          <Text className="text-sm font-bold text-white">Admit</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => handleDeny(item.id)}
-          disabled={denyParticipant.isPending}
-          className="rounded-lg bg-destructive dark:bg-destructive-dark px-3 py-1.5"
-        >
-          <Text className="text-sm font-bold text-white">Deny</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-
-  if (isLoadingParticipants) {
-    return <Loading message="Loading participants..." />;
-  }
-
-  const participants = participantsData?.participants ?? [];
-  const waitingParticipants = waitingData?.waiting ?? [];
+  const onError = (e: unknown) => Alert.alert("Action failed", decodeApiError(e).message);
+  const admitted = (participants.data ?? []).filter((p) => p.admissionState === "ADMITTED");
+  const waitingList = waiting.data?.participants ?? [];
 
   return (
-    <View className="flex-1">
-      {isHost && waitingParticipants.length > 0 && (
-        <View className="mb-4">
-          <View className="mb-2 flex-row items-center justify-between">
-            <View className="flex-row items-center gap-2">
-              <Text className="font-bold text-foreground dark:text-foreground-dark">Waiting Room</Text>
-              <Badge variant="secondary">{waitingParticipants.length.toString()}</Badge>
-            </View>
-            <Button
-              variant="outline"
-              size="sm"
-              onPress={handleAdmitAll}
-              isLoading={admitAll.isPending}
-            >
-              Admit All
-            </Button>
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
+      {canAdmit && (
+        <View>
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="font-bold">Waiting room ({waitingList.length})</Text>
+            {waitingList.length > 1 && (
+              <Button size="sm" variant="outline" onPress={() => admit.mutate("all", { onError })}>
+                Admit all
+              </Button>
+            )}
           </View>
-          <FlatList
-            data={waitingParticipants}
-            keyExtractor={(item) => item.id}
-            renderItem={renderWaitingParticipant}
-            scrollEnabled={false}
-          />
+          {waiting.isError ? (
+            <Text variant="muted" size="sm">
+              {decodeApiError(waiting.error).message}
+            </Text>
+          ) : waitingList.length === 0 ? (
+            <Text variant="muted" size="sm">
+              Nobody is waiting.
+            </Text>
+          ) : (
+            waitingList.map((p) => (
+              <View key={p.id} className="flex-row items-center justify-between py-2">
+                <Text className="flex-1" numberOfLines={1}>
+                  {p.displayName}
+                  {p.identityType === "GUEST" ? " (guest)" : ""}
+                </Text>
+                <View className="flex-row gap-2">
+                  <Button size="sm" onPress={() => admit.mutate([p.id], { onError })}>
+                    Admit
+                  </Button>
+                  <Button size="sm" variant="outline" onPress={() => deny.mutate([p.id], { onError })}>
+                    Deny
+                  </Button>
+                </View>
+              </View>
+            ))
+          )}
         </View>
       )}
-
-      <View className="flex-1">
-        <View className="mb-2 flex-row items-center gap-2">
-          <Text className="font-bold text-foreground dark:text-foreground-dark">Participants</Text>
-          <Badge variant="secondary">{participants.length.toString()}</Badge>
-        </View>
-        <FlatList
-          data={participants}
-          keyExtractor={(item) => item.id}
-          renderItem={renderParticipant}
-          showsVerticalScrollIndicator={false}
-        />
+      <View>
+        <Text className="font-bold mb-2">In the meeting ({admitted.length})</Text>
+        {participants.isError ? (
+          <Text variant="muted" size="sm">
+            {decodeApiError(participants.error).message}
+          </Text>
+        ) : null}
+        {admitted.map((p) => {
+          const self = p.id === participantId;
+          const canAct = mayTarget(role, p.role, self);
+          return (
+            <View
+              key={p.id}
+              className="flex-row items-center justify-between py-2 border-b border-border dark:border-border-dark"
+            >
+              <View className="flex-1">
+                <Text numberOfLines={1}>
+                  {p.displayName}
+                  {self ? " (you)" : ""}
+                </Text>
+                <Text variant="muted" size="xs">
+                  {roleLabel(p.role)}
+                  {raised.has(p.id) ? " · hand raised" : ""}
+                </Text>
+              </View>
+              {raised.has(p.id) && <Ionicons name="hand-left" size={16} color={colors.warning} />}
+              {canAct && meetingAllows(role, "participant.mute") && (
+                <Pressable
+                  accessibilityLabel={`Mute ${p.displayName}`}
+                  className="p-2"
+                  onPress={() => muteAudio.mutate(p.id, { onError })}
+                >
+                  <Ionicons name="mic-off-outline" size={18} color={colors.foreground} />
+                </Pressable>
+              )}
+              {canAct && meetingAllows(role, "participant.remove") && (
+                <Pressable
+                  accessibilityLabel={`Remove ${p.displayName}`}
+                  className="p-2"
+                  onPress={() =>
+                    Alert.alert("Remove participant", `Remove ${p.displayName} from the meeting?`, [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "Remove", style: "destructive", onPress: () => remove.mutate(p.id, { onError }) },
+                    ])
+                  }
+                >
+                  <Ionicons name="person-remove-outline" size={18} color={colors.destructive} />
+                </Pressable>
+              )}
+            </View>
+          );
+        })}
       </View>
-    </View>
+    </ScrollView>
   );
 }
