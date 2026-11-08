@@ -7,7 +7,8 @@
 // seeds the accounts and passes them here:
 //
 //   E2E_WEB_PORT    the port `next start` listens on (the build baked the service URLs)
-//   E2E_USERS       {"alice":{"token","name"},"bob":{...},"mallory":{...}}
+//   E2E_USERS       {"alice":{"id","email","password","name"},"bob":{...},"mallory":{...}}
+//   E2E_API_URL     the account API (`/api/v1`) the build targets, for the password login
 //   E2E_SECRET      a unique phrase: it must never appear outside the devices
 //   E2E_EVIDENCE    where to write the step log (JSON)
 //
@@ -26,6 +27,7 @@ import { chromium } from "playwright";
 const PORT = Number(process.env.E2E_WEB_PORT ?? 3100);
 const BASE = `http://127.0.0.1:${PORT}`;
 const USERS = JSON.parse(process.env.E2E_USERS ?? "{}");
+const API = (process.env.E2E_API_URL ?? "http://127.0.0.1:18080/api/v1").replace(/\/+$/, "");
 const SECRET = process.env.E2E_SECRET ?? `secret-${Date.now()}`;
 const EVIDENCE = process.env.E2E_EVIDENCE;
 const T = 60_000;
@@ -59,12 +61,32 @@ after(async () => {
   if (server) process.kill(-server.pid, "SIGTERM");
 });
 
+/**
+ * Signs a browser context in as the web app's login page does (ACC-019): a password login
+ * with the account authority, then the app's own `POST /api/session` stores the refresh
+ * token in its httpOnly cookie. The access token stays out of the browser: the app mints
+ * its in-memory token through `/api/session/refresh` on load. One login per context, so
+ * no two contexts share a single-use refresh token.
+ */
+async function signIn(ctx, who) {
+  const login = await fetch(`${API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email: USERS[who].email, password: USERS[who].password }),
+  });
+  const body = await login.json().catch(() => null);
+  assert.equal(login.status, 200, `password login for ${who}: ${JSON.stringify(body)}`);
+  assert.ok(body?.refresh_token, `the login for ${who} returned a refresh token`);
+  const session = await ctx.request.post(`${BASE}/api/session`, {
+    headers: { "X-CF-Session": "1", Origin: BASE },
+    data: { refresh_token: body.refresh_token, remember: false },
+  });
+  assert.equal(session.status(), 200, `session cookie for ${who}: ${await session.text()}`);
+}
+
 async function open(who, { route } = {}) {
   const ctx = await browser.newContext({ acceptDownloads: true });
-  await ctx.addCookies([
-    { name: "access_token", value: USERS[who].token, url: BASE },
-    { name: "refresh_token", value: "not-a-refresh-token", url: BASE },
-  ]);
+  await signIn(ctx, who);
   // What the login flow stores for a signed-in account (the dashboard requires it).
   await ctx.addInitScript((u) => {
     if (!localStorage.getItem("cosmic_user_info")) localStorage.setItem("cosmic_user_info", JSON.stringify(u));
@@ -347,9 +369,13 @@ async function journey() {
   await tampered.ctx.close();
   step("tampered crypto module refused", {});
 
-  // ---- 14. An expired / invalid login reaches no Messaging data.
+  // ---- 14. An expired / invalid login reaches no Messaging data: a session cookie the
+  //          account authority refuses ends the session and sends the browser to sign in.
   const expired = await browser.newContext();
-  await expired.addCookies([{ name: "access_token", value: "invalid.token.value", url: BASE }]);
+  await expired.addCookies([
+    { name: "cfm_session", value: "session", domain: "127.0.0.1", path: "/" },
+    { name: "cfm_rt", value: "invalid.token.value", domain: "127.0.0.1", path: "/api/session" },
+  ]);
   const ep = await expired.newPage();
   await ep.goto(`${BASE}/dashboard/messages`, { waitUntil: "load" });
   await ep.waitForURL(/\/login/, { timeout: T });
