@@ -47,6 +47,14 @@ test("messaging and storage origins: HTTPS, or loopback HTTP only; origin, never
   assert.ok(!insecure.includes("msg.example.com") && !insecure.includes("javascript"), insecure);
 });
 
+test("Developer Portal gateway origin: HTTPS origin only, no WebSocket form", () => {
+  const nonce = "EEEEEEEEEEEEEEEEEEEEEEEE";
+  const c = directive(buildCsp({ nonce, dev: false, developerApiUrl: "https://api.cfmeet.com/gw" }), "connect-src");
+  assert.ok(c.includes("https://api.cfmeet.com") && !c.includes("/gw") && !c.includes("wss://api.cfmeet.com"), c);
+  const insecure = directive(buildCsp({ nonce, dev: false, developerApiUrl: "http://api.example.com" }), "connect-src");
+  assert.ok(!insecure.includes("api.example.com"), insecure);
+});
+
 test("development adds only what next dev needs; plain HTTP is not upgraded", () => {
   const csp = buildCsp({ nonce: "BBBBBBBBBBBBBBBBBBBBBBBB", dev: true });
   assert.ok(directive(csp, "script-src").includes("'unsafe-eval'"));

@@ -22,6 +22,10 @@ export function proxy(request: NextRequest) {
     extraConnectSrc: process.env.CSP_EXTRA_CONNECT_SRC,
     messagingUrl: process.env.NEXT_PUBLIC_MESSAGING_URL,
     storageUrl: process.env.NEXT_PUBLIC_MESSAGING_STORAGE_URL,
+    developerApiUrl:
+      process.env.NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED === "true"
+        ? process.env.NEXT_PUBLIC_DEVELOPER_API_BASE_URL
+        : undefined,
   });
   const headers = new Headers(request.headers);
   headers.set("x-nonce", nonce);

@@ -28,6 +28,8 @@ export type CspOptions = {
   messagingUrl?: string;
   /** Object storage origin of signed attachment uploads / downloads. */
   storageUrl?: string;
+  /** Public API Gateway origin used by the Developer Portal (NEXT_PUBLIC_DEVELOPER_API_BASE_URL). */
+  developerApiUrl?: string;
 };
 
 /** Trusted Types policy names the app and Next.js are allowed to create. */
@@ -73,6 +75,7 @@ export function buildCsp(o: CspOptions): string {
       serviceOrigins(o.callingUrl, true),
       serviceOrigins(o.messagingUrl, true),
       serviceOrigins(o.storageUrl, false),
+      serviceOrigins(o.developerApiUrl, false),
     )
     .concat((o.extraConnectSrc ?? "").split(/\s+/).filter((s) => /^(https|wss):\/\//.test(s)))
     .filter((s): s is string => Boolean(s));
