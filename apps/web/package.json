@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "contracts:generate": "node scripts/generate-contract-types.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.19",

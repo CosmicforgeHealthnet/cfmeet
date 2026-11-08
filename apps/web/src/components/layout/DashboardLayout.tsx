@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
 import MobileSidebar from "./MobileSidebar";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { useSessionWatch } from "@/lib/auth/use-session-watch";
 
 const subscribeToHydration = () => () => {};
 const getHydrated = () => true;
@@ -20,6 +21,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const { data: user, isLoading, error } = useProfile();
   const mounted = useSyncExternalStore(subscribeToHydration, getHydrated, getServerHydrated);
+  useSessionWatch();
 
   useEffect(() => {
     // If not loading and no user (either error like 401 Guest, or just no session), redirect
