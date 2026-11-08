@@ -19,8 +19,9 @@ import OrganizationMembers from "./OrganizationMembers";
 import OrganizationInvitations from "./OrganizationInvitations";
 import OrganizationSettings from "./OrganizationSettings";
 import OrganizationAudit from "./OrganizationAudit";
+import { ORGANIZATION_CALLING_CAPABILITY, OrganizationCallingPanel } from "@/components/calling/OrganizationCallingAdmin";
 
-type Tab = "overview" | "members" | "invitations" | "settings" | "audit";
+type Tab = "overview" | "members" | "invitations" | "settings" | "audit" | "calling";
 
 const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) => boolean }> = [
   { id: "overview", label: "Overview", visible: (s) => s.overview },
@@ -52,7 +53,9 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
 
   const data = org.data;
   const sections = organizationSections(data);
-  const tabs = TABS.filter((t) => t.visible(sections));
+  // Enterprise calling administration (Section 12 relay): only with calling.enterprise.manage.
+  const callingAdmin = data.viewer?.status === "ACTIVE" && Array.isArray(data.viewer.capabilities) && data.viewer.capabilities.includes(ORGANIZATION_CALLING_CAPABILITY);
+  const tabs = [...TABS.filter((t) => t.visible(sections)), ...(callingAdmin ? [{ id: "calling" as Tab, label: "Calling", visible: () => true }] : [])];
   const active = tabs.some((t) => t.id === tab) ? tab : "overview";
 
   return (
@@ -93,6 +96,7 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
       {active === "invitations" && <OrganizationInvitations org={data} />}
       {active === "settings" && <OrganizationSettings org={data} />}
       {active === "audit" && <OrganizationAudit organizationId={data.id} />}
+      {active === "calling" && <OrganizationCallingPanel organizationId={data.id} name={data.name} embedded />}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import CallingEnterpriseHome from "@/components/calling/CallingEnterpriseHome";
 import CallingResourcePage from "@/components/calling/CallingResourcePage";
 import CallingSettingsPage from "@/components/calling/CallingSettingsPage";
 import CallsContent from "@/components/calling/CallsContent";
+import OrganizationCallingAdmin from "@/components/calling/OrganizationCallingAdmin";
 import UsageDashboard from "@/components/calling/UsageDashboard";
 import { Button } from "@/components/ui/button";
 import { callingResourceRoutes } from "@/lib/calling/resource-routes";
@@ -94,6 +95,7 @@ export default async function CallingSubPage({ params }: { params: Promise<{ seg
   if (route === "settings") return <CallingSettingsPage />;
   if (route === "usage") return <main className="mx-auto max-w-6xl p-4 md:p-6"><UsageDashboard /></main>;
   if (route === "enterprise") return <EnterpriseLanding />;
+  if (route === "organization") return <OrganizationCallingAdmin />;
   if (route === "privacy") return <ResourceLanding title="Privacy Relay" description="Manage authorized communication contexts, relay sessions, and protected contacts." links={[
     { label: "Communication contexts", href: "/calling/privacy/contexts" },
     { label: "Relay sessions", href: "/calling/privacy/sessions" },

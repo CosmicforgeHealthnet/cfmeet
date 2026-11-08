@@ -1,10 +1,14 @@
-import { callingFailure, CallingHttpError } from "@/lib/calling/server";
+import { callingBase, callingFailure, CallingHttpError } from "@/lib/calling/server";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ path: string[] }> };
 const uuid = "[0-9a-fA-F-]{36}";
 
-/** Same-origin HTTP transport; Calling remains the signaling-token authority. */
+/**
+ * Same-origin HTTP transport; Calling remains the signaling-token authority. The upstream
+ * origin passes the same production guard as the platform adapter (https only, CAL-020), so
+ * an endpoint credential is never sent over plain HTTP on misconfiguration.
+ */
 async function handle(request: Request, context: Context) {
   try {
     const { path } = await context.params;
@@ -21,8 +25,8 @@ async function handle(request: Request, context: Context) {
     if (key) headers.set("Idempotency-Key", key);
     const body = command ? await request.text() : undefined;
     if (body && body.length > 4096) throw new CallingHttpError(413, "VALIDATION_ERROR", "Request too large.");
-    const base = process.env.CALLING_API_URL || process.env.NEXT_PUBLIC_CALLING_API_URL || "http://localhost:8090";
-    const upstream = await fetch(`${base.replace(/\/$/, "")}/${route}${new URL(request.url).search}`, {
+    const base = callingBase();
+    const upstream = await fetch(`${base}/${route}${new URL(request.url).search}`, {
       method: request.method, headers, body, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(20_000),
     });
     const responseHeaders = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });

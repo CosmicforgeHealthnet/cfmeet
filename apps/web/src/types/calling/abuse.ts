@@ -1,35 +1,32 @@
 /**
- * Safety & Abuse types for the Calling API.
- * Handles abuse reporting for unwanted or abusive calls.
+ * Abuse reports. Mirrors services/calling/src/calls/app/abuse_reports.rs (the served contract
+ * types the body as a free object): a bounded category and an optional bounded comment CODE,
+ * never free text. The adapter injects the reporter principal (CAL-005); the reported principal
+ * is derived by Calling.
  */
 
 import type { Uuid } from "./common";
 
-/** Category of abuse being reported */
-export type AbuseCategory =
-  | "HARASSMENT"
-  | "SPAM"
-  | "SCAM"
-  | "THREAT"
-  | "INAPPROPRIATE_CONTENT"
-  | "IMPERSONATION"
-  | "OTHER";
+export type AbuseCategory = "UNWANTED" | "HARASSMENT" | "SPAM" | "FRAUD_SUSPECTED" | "OTHER";
 
-/** Status of an abuse report */
-export type AbuseReportStatus = "SUBMITTED" | "UNDER_REVIEW" | "RESOLVED";
-
-/** Request body for creating an abuse report */
 export interface CreateAbuseReportRequest {
   category: AbuseCategory;
-  description?: string;
-  evidenceIds?: Uuid[];
+  commentCode?: string;
 }
 
-/** Result of submitting an abuse report */
-export interface AbuseReportResult {
-  reportId: Uuid;
+export interface AbuseReport {
+  abuseReportId: Uuid;
   callId: Uuid;
+  principalId: Uuid;
+  reportedPrincipalId: Uuid | null;
   category: AbuseCategory;
-  status: AbuseReportStatus;
-  submittedAt: string;
+  commentCode: string | null;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  version: number;
+}
+
+export interface AbuseReportList {
+  items: AbuseReport[];
 }
