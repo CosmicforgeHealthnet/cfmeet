@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { userService } from "@/services/user.service";
+import { accountService } from "@/services/account.service";
 import type { UpdateProfileRequest } from "@/types/user";
 import { AxiosError } from "axios";
 import { ApiErrorResponse } from "@/types/auth";
@@ -45,9 +46,10 @@ export function useUpdateProfile() {
   });
 }
 
+/** ACC-026: `currentPassword` for password accounts (null: rely on a recent sign-in). */
 export function useDeactivateAccount() {
   return useMutation({
-    mutationFn: () => userService.deactivateAccount(),
+    mutationFn: (currentPassword: string | null) => accountService.deactivate(currentPassword),
     onError: (error: AxiosError<ApiErrorResponse>) => {
       console.error(
         "Deactivation error:",
