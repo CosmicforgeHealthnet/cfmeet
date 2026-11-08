@@ -25,12 +25,21 @@ const id = "11111111-1111-4111-8111-111111111111";
 function client({ token = "login-token", expired = false, refreshFails = false } = {}) {
   const requests = [];
   let refreshes = 0;
-  const cookieStore = {
-    getAccessToken: () => token, getRefreshToken: () => "refresh-token",
-    setTokens: (access) => { token = access; },
+  // The in-memory account session (ACC-019): refresh is single-flight inside it.
+  let inflight = null;
+  const accountSession = {
+    getAccessToken: async () => token,
+    peekAccessToken: () => token,
+    refreshAccessToken: () => inflight ??= (async () => {
+      refreshes++;
+      await new Promise((resolve) => setImmediate(resolve));
+      if (refreshFails) throw new Error("Refresh refused");
+      token = "new-login";
+      return token;
+    })().finally(() => { inflight = null; }),
   };
   const http = load("../src/services/v2/messaging-http.ts", {
-    "@/store": { cookieStore }, "@/lib/messaging/errors": errors, "@/lib/messaging/urls": urls,
+    "@/lib/auth/session": { accountSession }, "@/lib/messaging/errors": errors, "@/lib/messaging/urls": urls,
     axios: {
       isAxiosError: axios.isAxiosError,
       create: (config) => axios.create({ ...config, adapter: async (request) => {
