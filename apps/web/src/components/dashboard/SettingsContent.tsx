@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { userService } from "@/services/user.service";
+import { accountService } from "@/services/account.service";
 import { UserProfile } from "@/types/user";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -170,11 +171,13 @@ function ProfileSettings() {
   };
 
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
+  // ACC-026: password accounts re-confirm; Google-only accounts rely on a recent sign-in.
+  const [deactivatePassword, setDeactivatePassword] = useState("");
 
   const handleDeactivate = async () => {
     try {
       setDeactivating(true);
-      await userService.deactivateAccount();
+      await accountService.deactivate(deactivatePassword.trim() ? deactivatePassword : null);
       // Clear data and redirect
       storageStore.clearUser();
       router.push("/login");
@@ -301,6 +304,17 @@ function ProfileSettings() {
                   accessing your account.
                 </DialogDescription>
               </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="deactivate-password">Current password</Label>
+                <Input
+                  id="deactivate-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={deactivatePassword}
+                  onChange={(e) => setDeactivatePassword(e.target.value)}
+                  placeholder="Leave empty if you signed in with Google recently"
+                />
+              </div>
               <DialogFooter>
                 <Button
                   variant="outline"
@@ -383,7 +397,7 @@ function SecuritySettings() {
 
     try {
       setUpdating(true);
-      await userService.changePassword({
+      await accountService.changePassword({
         current_password: currentPassword,
         new_password: newPassword,
         confirm_password: confirmPassword,

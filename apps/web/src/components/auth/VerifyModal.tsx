@@ -13,7 +13,7 @@ import AuthHeader from "./AuthHeader";
 import { useVerifyEmail } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
-import { cookieStore, storageStore } from "@/store";
+import { authService } from "@/services/auth.service";
 
 function maskEmail(email: string) {
   const [local, domain] = email.split("@");
@@ -75,8 +75,7 @@ const VerifyModal = ({
       {
         onSuccess: () => {
           // Clear any stored tokens so user can login fresh after verification
-          cookieStore.clearTokens();
-          storageStore.clearUser();
+          void authService.forgetLocalSession();
           router.push("/login");
         },
         onError: (err) => {

@@ -1,7 +1,10 @@
 import api from "./api";
 import type { UserProfile, UpdateProfileRequest } from "@/types/user";
-import type { MessageResponse, ChangePasswordRequest, ChangePasswordResponse } from "@/types/auth";
 
+/**
+ * Legacy v1 `/users/me` reads used by the dashboard shell. Profile editing, sessions,
+ * password change and deactivation live in account.service.ts (v2 profile, ACC-026).
+ */
 export const userService = {
   getProfile: async () => {
     const response = await api.get<UserProfile>("/users/me");
@@ -10,16 +13,6 @@ export const userService = {
 
   updateProfile: async (data: UpdateProfileRequest) => {
     const response = await api.patch<UserProfile>("/users/me", data);
-    return response.data;
-  },
-
-  deactivateAccount: async () => {
-    const response = await api.post<MessageResponse>("/users/me/deactivate");
-    return response.data;
-  },
-
-  changePassword: async (data: ChangePasswordRequest) => {
-    const response = await api.post<ChangePasswordResponse>("/auth/change-password", data);
     return response.data;
   },
 };
