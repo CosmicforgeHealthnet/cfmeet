@@ -161,9 +161,9 @@ test("a device's previous conference credential cannot accompany another occurre
       requests.push(request); return { status: 200, statusText: "OK", headers: {}, config: request, data: {} };
     } }) },
     "@/store": {
-      cookieStore: { getAccessToken: () => null },
       storageStore: { getParticipantToken: () => "conference-a-token", getV2JoinData: () => ({ conference: { id: "a" } }) },
     },
+    "@/lib/auth/axios-session": { attachAccountSession: () => {} },
   }).default;
   await api.post("/conferences/a/leave", { participantSessionId: "session-a" });
   await api.post("/conferences/b/join", { displayName: "Guest" });

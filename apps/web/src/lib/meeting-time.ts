@@ -9,7 +9,7 @@
  *    (02:30 -> 03:30 EDT); a repeated local time (fall back) occurs at the first instant;
  *  - lists and dashboards show the scheduled start, never the space `createdAt`.
  */
-import type { ConferenceStatus, ConferenceSummary } from "@/types/v2";
+import type { ConferenceStatus, ConferenceSummary } from "../types/generated/meeting-service";
 
 const LOCAL = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
@@ -127,4 +127,58 @@ export function zonedDateRange(fromDate: string, throughDate: string, timeZone: 
     result.to = zonedLocalToUtc(`${next.toISOString().slice(0, 10)}T00:00`, timeZone);
   }
   return result;
+}
+
+export type LocalTimeKind = "ok" | "nonexistent" | "ambiguous";
+
+/**
+ * Whether a wall time exists once in a zone: `nonexistent` in a spring-forward gap (it will
+ * occur at the shifted instant), `ambiguous` in a fall-back overlap (the first instant is
+ * used). A recurring series cannot *start* at either (backend VALIDATION_ERROR).
+ */
+export function localTimeKind(local: string, timeZone: string): LocalTimeKind {
+  const instant = zonedLocalToUtc(local, timeZone);
+  if (utcToZonedLocal(instant, timeZone) !== local.slice(0, 16)) return "nonexistent";
+  const t = Date.parse(instant);
+  // A repeated wall time maps back to itself from a later instant (up to 3 h later).
+  for (const shift of [30, 60, 120, 180]) {
+    if (utcToZonedLocal(new Date(t + shift * 60_000).toISOString(), timeZone) === local.slice(0, 16)) return "ambiguous";
+  }
+  return "ok";
+}
+
+/** Backend rule: a scheduled start more than 5 minutes in the past is rejected. */
+export const PAST_START_TOLERANCE_MS = 5 * 60_000;
+export const MAX_OCCURRENCE_MS = 24 * 60 * 60_000;
+
+/**
+ * `datetime-local` start/end typed in the *meeting* timezone → the request body of
+ * `POST /meeting-spaces/{id}/conferences` or `POST /conferences/{id}/reschedule`.
+ * End is optional (start-only occurrence; on reschedule an omitted end keeps the duration).
+ */
+export function occurrenceWindowInZone(startLocal: string, endLocal: string | undefined | null, timeZone: string, now = Date.now()) {
+  const scheduledStartAt = zonedLocalToUtc(startLocal, timeZone);
+  const start = Date.parse(scheduledStartAt);
+  if (start < now) throw new Error("Choose a start time in the future.");
+  if (!endLocal) return { scheduledStartAt } as { scheduledStartAt: string; scheduledEndAt?: string };
+  const scheduledEndAt = zonedLocalToUtc(endLocal, timeZone);
+  const end = Date.parse(scheduledEndAt);
+  if (end <= start) throw new Error("The end must be after the start.");
+  if (end - start > MAX_OCCURRENCE_MS) throw new Error("An occurrence can last at most 24 hours.");
+  return { scheduledStartAt, scheduledEndAt };
+}
+
+/** Short zone label, e.g. "EST" / "GMT+1", for a zone at an instant. */
+export function zoneAbbreviation(timeZone: string, iso: string = new Date().toISOString()): string {
+  const part = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(new Date(iso)).find(p => p.type === "timeZoneName");
+  return part?.value ?? timeZone;
+}
+
+/** A start and optional end in the meeting zone, with the viewer's equivalent when it differs. */
+export function scheduleWindowLabel(startIso: string, endIso: string | null | undefined, meetingZone: string | null | undefined, viewerZone = viewerTimeZone()) {
+  const start = dualZoneLabel(startIso, meetingZone ?? undefined, viewerZone);
+  const endTime = endIso ? formatTimeInZone(endIso, start.zone) : null;
+  const sameDay = endIso ? utcToZonedLocal(endIso, start.zone).slice(0, 10) === utcToZonedLocal(startIso, start.zone).slice(0, 10) : true;
+  const primary = endIso ? `${start.primary} – ${sameDay ? endTime : formatInZone(endIso, start.zone)}` : start.primary;
+  return { primary, secondary: start.secondary, zone: start.zone };
 }
