@@ -5,9 +5,9 @@
  * send a contact request. The token is a secret: kept in memory, never logged or stored, and
  * an expired / revoked / used invite looks exactly like an unknown one (neutral NOT_FOUND).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,15 +18,10 @@ import { inviteTokenFromPayload } from "@/lib/communications/comms-core";
 
 export default function ConnectInvite({ token }: { token: string }) {
   const valid = inviteTokenFromPayload(token);
-  const resolve = useMutation({ mutationFn: (t: string) => hub.resolveInvite(t), retry: false });
+  // One idempotency key per page view: a re-render or refetch replays the same resolution.
+  const [key] = useState(() => crypto.randomUUID());
+  const resolve = useQuery({ queryKey: ["communications", "invite", key], queryFn: () => hub.resolveInvite(valid!, key), enabled: !!valid, retry: false, staleTime: Infinity, gcTime: 0 });
   const request = useMutation({ mutationFn: (cfMeetId: string) => hub.requestContact(cfMeetId), retry: false });
-  const [started, setStarted] = useState(false);
-  useEffect(() => {
-    if (valid && !started) {
-      setStarted(true);
-      resolve.mutate(valid);
-    }
-  }, [valid, started, resolve]);
   const unauthenticated = (resolve.error as { status?: number } | null)?.status === 401;
   const profile = resolve.data;
   return (
@@ -34,7 +29,7 @@ export default function ConnectInvite({ token }: { token: string }) {
       <div className="w-full max-w-md space-y-4 rounded-2xl bg-background p-8 shadow-lg">
         <h1 className="text-xl font-bold">Connect on CF Meet</h1>
         {!valid ? <p role="alert" className="text-sm text-destructive">This invite link is not valid.</p> : null}
-        {resolve.isPending ? <p className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</p> : null}
+        {valid && resolve.isPending ? <p className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</p> : null}
         {unauthenticated ? (
           <p className="text-sm">Sign in to connect. <Link className="text-primary underline" href="/login">Sign in</Link>, then open this link again.</p>
         ) : resolve.error ? (

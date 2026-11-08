@@ -3,14 +3,18 @@
  * import it directly.
  */
 export class CommunicationsApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    public readonly detail: string | null,
-    public readonly retryAfterSeconds: number | null,
-  ) {
+  readonly status: number;
+  readonly code: string;
+  readonly detail: string | null;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(status: number, code: string, detail: string | null, retryAfterSeconds: number | null) {
     super(detail ?? code);
     this.name = "CommunicationsApiError";
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

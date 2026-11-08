@@ -68,10 +68,12 @@ export class MessageOutbox {
   private items: OutboxItem[] = [];
   private readonly listeners = new Set<() => void>();
 
-  constructor(
-    private readonly storage: OutboxStorage | null,
-    private readonly now: () => number = () => Date.now(),
-  ) {
+  private readonly storage: OutboxStorage | null;
+  private readonly now: () => number;
+
+  constructor(storage: OutboxStorage | null, now: () => number = () => Date.now()) {
+    this.storage = storage;
+    this.now = now;
     this.items = this.read();
   }
 

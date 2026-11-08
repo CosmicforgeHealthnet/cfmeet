@@ -98,7 +98,7 @@ export const communicationsService = {
 
   // ---- discovery and invites
   resolvePublicId: (cfMeetId: string) => call<PublicProfile>("POST", "/discovery/public-id/resolve", { cfMeetId }),
-  resolveInvite: (token: string) => call<PublicProfile>("POST", "/discovery/invites/resolve", { token, purpose: "CONNECT" }),
+  resolveInvite: (token: string, idempotencyKey?: string) => call<PublicProfile>("POST", "/discovery/invites/resolve", { token, purpose: "CONNECT" }, idempotencyKey),
   createInvite: (expiresInSeconds: number, maxUses: number) => call<Invite>("POST", "/invites", { purpose: "CONNECT", expiresInSeconds, maxUses }),
   invites: (cursor?: string | null) => call<Page<InviteMetadata>>("GET", `/invites${q({ limit: 50, cursor })}`),
   revokeInvite: (inviteId: string) => call<{ inviteId: string; revoked: true }>("DELETE", `/invites/${seg(inviteId)}`),
