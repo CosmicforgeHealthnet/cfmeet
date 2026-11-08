@@ -2467,3 +2467,277 @@ async fn w_load_inbound_resolution_relay_lease_contention_and_usage_ingestion() 
         1000
     );
 }
+
+/// SEC-020 tenant-isolation sweep: every customer mutation and read keyed by another
+/// scope's assignment or pool id is NOT_FOUND (no existence oracle) over HTTP, and the
+/// owner's records are left exactly as they were.
+#[tokio::test]
+async fn http_cross_tenant_assignment_and_pool_operations_are_not_found_and_change_nothing() {
+    let Some(h) = Harness::with_platform_access().await else {
+        return;
+    };
+    let Some(t) = build(h, StewardshipSettings::default()).await else {
+        return;
+    };
+    let pa = t.h.pa.clone().unwrap();
+    let all = [
+        "numbers.search",
+        "numbers.read",
+        "numbers.manage",
+        "numbers.assign",
+        "numbers.kyc.read",
+    ];
+    let alice = pa.customer("SANDBOX", &all, &all).await;
+    let bob = pa.customer("SANDBOX", &all, &all).await;
+    let s = OwnerScope {
+        tenant_id: alice.tenant_id,
+        application_id: alice.application_id,
+        environment_id: alice.environment_id,
+        environment_kind: EnvironmentKind::Sandbox,
+        service_account_id: alice.service_account_id,
+    };
+    let (_number, a) = t.active(&s).await;
+    let aid = a.id;
+    let call = |token: String,
+                method: Method,
+                path: String,
+                body: Option<Value>,
+                headers: Vec<(&'static str, String)>| {
+        let h = &t.h;
+        async move {
+            let hs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            h.customer_with(&token, method, &path, body, &hs).await
+        }
+    };
+    // Alice's organizational number joins her pool.
+    let pool = call(
+        alice.secret.clone(),
+        Method::POST,
+        "/v1/numbers/pools".into(),
+        Some(json!({ "name": "Alice pool" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(pool.status, StatusCode::CREATED, "{:?}", pool.body);
+    let pid = pool.body["poolId"].as_str().unwrap().to_string();
+    let joined = call(
+        alice.secret.clone(),
+        Method::POST,
+        format!("/v1/numbers/pools/{pid}/members"),
+        Some(json!({ "assignmentId": aid })),
+        vec![],
+    )
+    .await;
+    assert_eq!(joined.status, StatusCode::CREATED, "{:?}", joined.body);
+    let before = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{aid}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(before.status, StatusCode::OK, "{:?}", before.body);
+    let routing = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{aid}/routing"),
+        None,
+        vec![],
+    )
+    .await;
+    let revision = routing.body["routingRevision"].as_i64().unwrap();
+
+    // Bob's own pool, to try to pull Alice's assignment into it.
+    let bobs_pool = call(
+        bob.secret.clone(),
+        Method::POST,
+        "/v1/numbers/pools".into(),
+        Some(json!({ "name": "Bob pool" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        bobs_pool.status,
+        StatusCode::CREATED,
+        "{:?}",
+        bobs_pool.body
+    );
+    let bpid = bobs_pool.body["poolId"].as_str().unwrap().to_string();
+
+    let none =
+        json!({ "voice": { "kind": "NONE", "ref": null }, "sms": { "kind": "NONE", "ref": null } });
+    let idem = |k: &str| vec![("idempotency-key", format!("sec020-{k}-0001"))];
+    type Attempt = (Method, String, Option<Value>, Vec<(&'static str, String)>);
+    let attempts: Vec<Attempt> = vec![
+        (
+            Method::GET,
+            format!("/v1/numbers/assignments/{aid}/capabilities"),
+            None,
+            vec![],
+        ),
+        (
+            Method::GET,
+            format!("/v1/numbers/assignments/{aid}/quarantine"),
+            None,
+            vec![],
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/assignments/{aid}/routing"),
+            Some(json!({ "expectedRoutingRevision": revision, "routing": none.clone() })),
+            vec![],
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/assignments/{aid}/offboarding"),
+            Some(json!({ "expectedRoutingRevision": revision })),
+            vec![],
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/assignments/{aid}/transfer"),
+            Some(
+                json!({ "ownershipClass": "ORGANIZATION", "routing": none.clone(), "expectedRoutingRevision": revision }),
+            ),
+            idem("xfer"),
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/assignments/{aid}/release"),
+            Some(json!({ "reasonCode": "CUSTOMER_RELEASE", "policy": "POOL_RETURN" })),
+            idem("release"),
+        ),
+        (
+            Method::GET,
+            format!("/v1/numbers/pools/{pid}"),
+            None,
+            vec![],
+        ),
+        (
+            Method::DELETE,
+            format!("/v1/numbers/pools/{pid}/members/{aid}"),
+            None,
+            vec![],
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/pools/{pid}/members"),
+            Some(json!({ "assignmentId": aid })),
+            vec![],
+        ),
+        (
+            Method::POST,
+            format!("/v1/numbers/pools/{bpid}/members"),
+            Some(json!({ "assignmentId": aid })),
+            vec![],
+        ),
+    ];
+    for (method, path, body, headers) in attempts {
+        let r = call(
+            bob.secret.clone(),
+            method.clone(),
+            path.clone(),
+            body,
+            headers,
+        )
+        .await;
+        assert_eq!(
+            (r.status, r.code()),
+            (StatusCode::NOT_FOUND, "NOT_FOUND"),
+            "{method} {path}: {:?}",
+            r.body
+        );
+    }
+
+    // Nothing of Alice's changed.
+    let after = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{aid}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(after.body, before.body);
+    let routing_after = call(
+        alice.secret.clone(),
+        Method::GET,
+        format!("/v1/numbers/assignments/{aid}/routing"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(routing_after.body["routingRevision"], json!(revision));
+    for table in ["number_suspensions", "number_release_requests"] {
+        assert_eq!(
+            t.h.scalar(&format!(
+                "SELECT count(*) FROM {table} WHERE assignment_id = '{aid}'"
+            ))
+            .await,
+            0,
+            "{table}"
+        );
+    }
+    assert_eq!(
+        t.h.scalar(&format!(
+            "SELECT count(*) FROM number_pool_members WHERE assignment_id = '{aid}' \
+               AND pool_id = '{pid}' AND removed_at IS NULL"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        t.h.scalar(&format!(
+            "SELECT count(*) FROM number_pool_members WHERE pool_id = '{bpid}'"
+        ))
+        .await,
+        0
+    );
+
+    // Once Alice suspends it, Bob can neither read nor lift her suspension.
+    let suspended = call(
+        alice.secret.clone(),
+        Method::POST,
+        format!("/v1/numbers/assignments/{aid}/suspend"),
+        Some(json!({ "reasonCode": "CUSTOMER_REQUEST" })),
+        vec![],
+    )
+    .await;
+    assert_eq!(suspended.status, StatusCode::OK, "{:?}", suspended.body);
+    t.drain().await;
+    let suspension = format!("/v1/numbers/assignments/{aid}/suspension");
+    let held = call(
+        alice.secret.clone(),
+        Method::GET,
+        suspension.clone(),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(held.status, StatusCode::OK, "{:?}", held.body);
+    for (method, path) in [
+        (Method::GET, suspension.clone()),
+        (
+            Method::POST,
+            format!("/v1/numbers/assignments/{aid}/restore"),
+        ),
+    ] {
+        let r = call(
+            bob.secret.clone(),
+            method.clone(),
+            path.clone(),
+            None,
+            vec![],
+        )
+        .await;
+        assert_eq!(
+            (r.status, r.code()),
+            (StatusCode::NOT_FOUND, "NOT_FOUND"),
+            "{method} {path}: {:?}",
+            r.body
+        );
+    }
+    let still = call(alice.secret.clone(), Method::GET, suspension, None, vec![]).await;
+    assert_eq!(still.body, held.body);
+}

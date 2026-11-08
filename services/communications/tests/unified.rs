@@ -1842,3 +1842,384 @@ async fn meeting_cards_reach_members_who_activate_later() {
     assert_eq!(again["data"].as_array().unwrap().len(), 1);
     h.close().await;
 }
+
+/// Rows of `data` in a list answer.
+fn rows_of(v: &Value) -> usize {
+    v["data"].as_array().unwrap().len()
+}
+
+/// SEC-020: every owner-scoped item id (saved message, list, list member, contact alias,
+/// device, conversation) is unknown to another profile of the same tenant: reads and
+/// mutations by id are `NotFound` (indistinguishable from missing), list reads show none of
+/// the owner's rows, and the owner's rows are unchanged afterwards.
+#[tokio::test]
+async fn another_profile_cannot_read_or_mutate_owner_scoped_items_by_id() {
+    let h = Harness::new().await;
+    let (a, b, mallory) = (user(&h).await, user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let ab = contact_id(&h, &a.profile, &b.profile).await;
+    let (sa, sm) = (h.delegated(&a.account), h.delegated(&mallory.account));
+    let conv = conversation(&h, "DIRECT", &[&a, &b], 10);
+    let m = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .conversations
+        .get_mut(&conv)
+        .unwrap()
+        .messages
+        .insert(m, (8, "VISIBLE".into()));
+    let saved = h
+        .state
+        .save_message(
+            &sa,
+            &a.profile,
+            json!({"conversationId":conv,"messageId":m}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let saved = Uuid::parse_str(saved["savedId"].as_str().unwrap()).unwrap();
+    let created = h
+        .state
+        .create_list(&a.profile, json!({"name":"Family"}), Uuid::new_v4())
+        .await
+        .unwrap();
+    let list = Uuid::parse_str(created["listId"].as_str().unwrap()).unwrap();
+    h.state
+        .set_list_member(&a.profile, list, ab, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    h.state
+        .set_favorite(&a.profile, ab, true, json!({}), Uuid::new_v4())
+        .await
+        .unwrap();
+    let chat_device = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat_device, (a.profile.principal_id, "ACTIVE".into()));
+    let linked = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":chat_device}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    let device = Uuid::parse_str(linked["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let before_list = h
+        .state
+        .get_list(&a.profile, list, 10, Uuid::nil())
+        .await
+        .unwrap();
+
+    // Mallory addresses A's ids directly.
+    let mp = &mallory.profile;
+    not_found(h.state.delete_saved(mp, saved, Uuid::new_v4()).await);
+    not_found(h.state.get_list(mp, list, 10, Uuid::nil()).await);
+    not_found(
+        h.state
+            .patch_list(
+                mp,
+                list,
+                json!({"expectedVersion":before_list["version"],"name":"Pwned"}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .delete_list(
+                mp,
+                list,
+                json!({"expectedVersion":before_list["version"]}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .set_list_member(mp, list, ab, false, Uuid::new_v4())
+            .await,
+    );
+    not_found(h.state.contact_view(mp, ab).await);
+    not_found(h.state.remove_contact(mp, ab, Uuid::new_v4()).await);
+    not_found(
+        h.state
+            .set_favorite(mp, ab, false, json!({}), Uuid::new_v4())
+            .await,
+    );
+    not_found(h.state.common_groups(&sm, mp, ab).await);
+    not_found(
+        h.state
+            .call_contact(
+                &sm,
+                mp,
+                ab,
+                json!({"kind":"VOICE","clientRequestId":Uuid::new_v4(),"endpointId":endpoint(&h,&mallory)}),
+            )
+            .await,
+    );
+    not_found(h.state.device_sync_state(mp, device, None).await);
+    not_found(
+        h.state
+            .device_sync_state(
+                mp,
+                device,
+                Some((json!({"acknowledgedPosition":0}), Uuid::new_v4())),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .device_push(&sm, mp, device, None, Uuid::new_v4())
+            .await,
+    );
+    not_found(
+        h.state
+            .revoke_device(
+                &sm,
+                mp,
+                device,
+                json!({"reason":"COMPROMISED"}),
+                Uuid::new_v4(),
+                None,
+            )
+            .await,
+    );
+    // Conversation-scoped reads and writes need a live membership (asked of Messaging).
+    not_found(h.state.put_conversation_preferences(&sm, mp, conv, json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":null,"mediaAutoDownload":"NEVER"}), Uuid::new_v4()).await);
+    not_found(h.state.conversation_media(&sm, mp, conv, 30, None).await);
+    not_found(h.state.conversation_shared_groups(&sm, mp, conv).await);
+    not_found(
+        h.state
+            .conversation_meetings(&sm, mp, conv, 30, Uuid::nil())
+            .await,
+    );
+    not_found(h.state.timeline(&sm, mp, conv, &q(&[])).await);
+
+    // Mallory's own collections show none of A's rows.
+    assert_eq!(
+        rows_of(&h.state.list_saved(&sm, mp, 30, Uuid::nil()).await.unwrap()),
+        0
+    );
+    assert_eq!(rows_of(&h.state.list_lists(mp).await.unwrap()), 0);
+    assert_eq!(rows_of(&h.state.list_favorites(mp).await.unwrap()), 0);
+    assert_eq!(rows_of(&h.state.list_devices(mp).await.unwrap()), 0);
+    assert_eq!(
+        rows_of(&h.state.list_contacts(mp, 30, Uuid::nil()).await.unwrap()),
+        0
+    );
+
+    // A's rows are exactly as they were.
+    assert_eq!(
+        rows_of(
+            &h.state
+                .list_saved(&sa, &a.profile, 30, Uuid::nil())
+                .await
+                .unwrap()
+        ),
+        1
+    );
+    assert_eq!(
+        h.state
+            .get_list(&a.profile, list, 10, Uuid::nil())
+            .await
+            .unwrap(),
+        before_list
+    );
+    assert_eq!(
+        rows_of(&h.state.list_favorites(&a.profile).await.unwrap()),
+        1
+    );
+    assert_eq!(
+        h.state.contact_view(&a.profile, ab).await.unwrap()["relationship"],
+        "CONNECTED"
+    );
+    let devices = h.state.list_devices(&a.profile).await.unwrap();
+    assert_eq!(
+        (
+            devices["data"][0]["deviceId"].clone(),
+            devices["data"][0]["state"].clone()
+        ),
+        (json!(device), json!("ACTIVE"))
+    );
+    assert!(h.world.read().unwrap().revoked_devices.is_empty());
+    h.close().await;
+}
+
+async fn count_for(h: &Harness, sql: &str, profile: Uuid) -> i64 {
+    let v: Value = one(&h.state.store.db, sql, vec![profile.into()])
+        .await
+        .unwrap()
+        .unwrap();
+    v["n"].as_i64().unwrap()
+}
+
+/// SEC-020: the signed delegated scope (tenant / application / environment) is the only
+/// source of the tenant. A profile, an owner service or the operator acting under another
+/// tenant's scope finds no profile of this tenant and changes nothing of it; the same
+/// requests under the right scope do apply (the negatives are not vacuous).
+#[tokio::test]
+async fn another_tenant_scope_reaches_no_profile_and_applies_nothing() {
+    use cf_service_auth::{
+        ApplicationEnvironmentKind, DelegatedPlatformContext, DelegatedPrincipalKind,
+    };
+    const HOLDS: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_operator_holds WHERE profile_id=$1 AND active";
+    const BLOCKS: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_block_bridge WHERE blocker_profile_id=$1";
+    const ACTIVE: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_devices WHERE profile_id=$1 AND state='ACTIVE'";
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let sa = h.delegated(&a.account);
+    let chat_device = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat_device, (a.profile.principal_id, "ACTIVE".into()));
+    h.state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":chat_device}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    let other = DelegatedPlatformContext::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        ApplicationEnvironmentKind::Test,
+        Uuid::new_v4(),
+    );
+    let x_account = h.account();
+    let x_scope = other
+        .clone()
+        .with_initiating_principal(x_account.principal_id, DelegatedPrincipalKind::NativeCfUser);
+    let x = h.state.ensure_profile(&x_scope, &x_account).await.unwrap();
+    assert_ne!(x.scope(), a.profile.scope());
+    let a_id = h.public_id(&a.profile).await;
+
+    // A user of the other tenant cannot discover or request A, directly or over dispatch.
+    not_found(
+        h.state
+            .send_request(&x_scope, &x, json!({"cfMeetId":a_id}), Uuid::new_v4())
+            .await,
+    );
+    let dispatch = |path: String| {
+        serde_json::to_value(Dispatch {
+            method: "GET".into(),
+            path,
+            query: Default::default(),
+            body: None,
+            idempotency_key: None,
+            account: x_account.clone(),
+        })
+        .unwrap()
+    };
+    let route = "/internal/v1/communications/dispatch";
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            route,
+            dispatch(format!("profiles/{a_id}")),
+            x_scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 404);
+    let (status, body) = h
+        .http(
+            &h.account_signer,
+            route,
+            dispatch("contacts".into()),
+            x_scope.clone(),
+        )
+        .await;
+    assert_eq!((status.as_u16(), rows_of(&body)), (200, 0));
+
+    // Owner-service policy reads under the other scope know neither principal.
+    let call = check(Action::DirectCall, &a.profile, &b.profile);
+    assert!(h.state.check_policy(&h.scope, &call).await.unwrap().allowed);
+    let (status, body) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/policy/check",
+            serde_json::to_value(&call).unwrap(),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(
+        (status.as_u16(), body["allowed"].clone()),
+        (200, json!(false))
+    );
+    let (status, _) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/principals/resolve",
+            json!({"actorPrincipalId":x.principal_id,"cfMeetId":a_id}),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 404);
+
+    // Owner events and the operator hold under the other scope change nothing here.
+    let devices = "/internal/v1/communications/events/devices";
+    let revoke = json!({"eventId":Uuid::new_v4(),"eventType":"device.revoked","resourceId":chat_device,"sourceVersion":1,"principalId":a.profile.principal_id});
+    let (status, body) = h
+        .http(&h.calling_signer, devices, revoke, other.clone())
+        .await;
+    assert_eq!((status.as_u16(), body["rows"].clone()), (200, json!(0)));
+    let (status, body) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/block-events",
+            json!({"eventId":Uuid::new_v4(),"actorPrincipalId":a.profile.principal_id,"targetPrincipalId":b.profile.principal_id,"sourceVersion":1,"blocked":true}),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(
+        (status.as_u16(), body["applied"].clone()),
+        (200, json!(false))
+    );
+    let suspend = "/internal/v1/communications/admin/suspend";
+    let hold = json!({"cfMeetId":a_id,"active":true,"reason":"ABUSE"});
+    let (status, _) = h
+        .http(&h.operator, suspend, hold.clone(), other.clone())
+        .await;
+    assert_eq!(status.as_u16(), 404);
+    let id = a.profile.id;
+    assert_eq!(
+        (
+            count_for(&h, HOLDS, id).await,
+            count_for(&h, BLOCKS, id).await,
+            count_for(&h, ACTIVE, id).await
+        ),
+        (0, 0, 1)
+    );
+    assert!(h.state.check_policy(&h.scope, &call).await.unwrap().allowed);
+
+    // The same owner event and hold under the right scope do apply.
+    let revoke = json!({"eventId":Uuid::new_v4(),"eventType":"device.revoked","resourceId":chat_device,"sourceVersion":1,"principalId":a.profile.principal_id});
+    let (status, body) = h
+        .http(&h.calling_signer, devices, revoke, h.scope.clone())
+        .await;
+    assert_eq!((status.as_u16(), body["rows"].clone()), (200, json!(1)));
+    let (status, _) = h.http(&h.operator, suspend, hold, h.scope.clone()).await;
+    assert_eq!(status.as_u16(), 200);
+    assert_eq!(
+        (
+            count_for(&h, HOLDS, id).await,
+            count_for(&h, ACTIVE, id).await
+        ),
+        (1, 0)
+    );
+    h.close().await;
+}

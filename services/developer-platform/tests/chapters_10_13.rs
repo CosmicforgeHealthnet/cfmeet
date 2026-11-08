@@ -1975,3 +1975,232 @@ async fn a_full_producer_batch_fits_the_usage_ingestion_body_limit() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     assert_eq!(r.json["recorded"], cf_usage_facts::MAX_BATCH, "{}", r.json);
 }
+
+/// SEC-020 tenant-isolation sweep: a signed-in member of ANOTHER organization addresses
+/// every organization-, project-, environment-, credential- and production-request-scoped
+/// customer route of tenant A by id. Each answer is the same NOT_FOUND as a missing id
+/// (no existence hint), nothing is delegated to Platform Access, no activity is written
+/// and A's resources are unchanged.
+#[tokio::test]
+async fn a_member_of_another_organization_reaches_no_resource_of_this_one() {
+    let Some(c) = Control::new().await else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@acme.example");
+    let (org, project, env) = sandbox(&c, &owner).await;
+    grant(&c, &owner, project, "calls.read").await;
+    let sa = service_account(&c, As::User(&owner), env, "backend").await;
+    let created = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{env}/service-accounts/{sa}/credentials"),
+            Some(json!({ "scopes": ["calls.read"], "label": "ci" })),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.json);
+    let cred = id(&created.json["credential"]);
+    let inv = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/organizations/{org}/invitations"),
+            Some(json!({ "email": "dev@acme.example", "role": "DEVELOPER" })),
+        )
+        .await;
+    assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.json);
+    let inv = id(&inv.json);
+    let rid = id(&submit(&c, As::User(&owner), project, &["SMS"]).await);
+    let members = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/organizations/{org}/members"),
+            None,
+        )
+        .await;
+    let owner_member = id(&members.json["items"][0]);
+
+    // The stranger is a fully set-up member of their own organization.
+    let (stranger, _) = c.sessions.sign_in("stranger@globex.example");
+    let (own_org, _, _) = sandbox(&c, &stranger).await;
+    let listed = c
+        .req(As::User(&stranger), Method::GET, "/v1/organizations", None)
+        .await;
+    assert_eq!(listed.status, StatusCode::OK, "{}", listed.json);
+    let text = listed.json.to_string();
+    assert!(text.contains(&own_org.to_string()), "{text}");
+    assert!(
+        !text.contains(&org.to_string()),
+        "foreign organization listed"
+    );
+
+    let views = [
+        format!("/v1/organizations/{org}"),
+        format!("/v1/projects/{project}"),
+        format!("/v1/environments/{env}"),
+        format!("/v1/environments/{env}/credentials/{cred}"),
+        format!("/v1/production-access-requests/{rid}"),
+        format!("/v1/organizations/{org}/invitations"),
+        format!("/v1/organizations/{org}/members"),
+    ];
+    let mut before = Vec::new();
+    for path in &views {
+        let r = c.req(As::User(&owner), Method::GET, path, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.json);
+        before.push(r.json);
+    }
+    let activity =
+        format!("SELECT count(*) FROM devplat_activity_events WHERE tenant_id = '{org}'");
+    let activity_before = c.count(&activity).await;
+    let delegated_before = c.pa.audit.lock().unwrap().len();
+
+    let o = format!("/v1/organizations/{org}");
+    let p = format!("/v1/projects/{project}");
+    let e = format!("/v1/environments/{env}");
+    let r = format!("/v1/production-access-requests/{rid}");
+    let limit = json!({ "apiRequestsPerMinute": 1 });
+    let patch = json!({ "expectedVersion": 1, "displayName": "pwn" });
+    let invite = json!({ "email": "x@globex.example", "role": "OWNER" });
+    let policy = json!({ "maxLifetimeDays": 1, "maxRotationOverlapMinutes": 0 });
+    let attempts: Vec<(Method, String, Option<Value>)> = vec![
+        // Organization (path id -> `control::authorize`).
+        (Method::PATCH, o.clone(), Some(patch)),
+        (Method::POST, format!("{o}/close"), None),
+        (Method::DELETE, format!("{o}/members/{owner_member}"), None),
+        (
+            Method::POST,
+            format!("{o}/ownership-transfer"),
+            Some(json!({ "memberId": owner_member })),
+        ),
+        (Method::GET, format!("{o}/invitations"), None),
+        (Method::POST, format!("{o}/invitations"), Some(invite)),
+        (Method::POST, format!("{o}/invitations/{inv}/revoke"), None),
+        (Method::GET, format!("{o}/projects"), None),
+        (
+            Method::POST,
+            format!("{o}/projects"),
+            Some(json!({ "displayName": "pwn" })),
+        ),
+        (Method::GET, format!("{o}/commercial"), None),
+        (Method::GET, format!("{o}/plan-assignments"), None),
+        (
+            Method::PUT,
+            format!("{o}/billing-account"),
+            Some(json!({ "classification": "RETAIL" })),
+        ),
+        (Method::GET, format!("{o}/credential-policy"), None),
+        (Method::PUT, format!("{o}/credential-policy"), Some(policy)),
+        (Method::GET, format!("{o}/support-profile"), None),
+        (Method::PUT, format!("{o}/support-profile"), Some(json!({}))),
+        // Project (project id -> its tenant -> `control::authorize`).
+        (Method::POST, format!("{p}/archive"), None),
+        (Method::POST, format!("{p}/suspend"), None),
+        (Method::POST, format!("{p}/resume"), None),
+        (Method::GET, format!("{p}/scopes"), None),
+        (
+            Method::POST,
+            format!("{p}/scopes"),
+            Some(json!({ "scope": "calls.write" })),
+        ),
+        (Method::DELETE, format!("{p}/scopes/calls.read"), None),
+        (Method::GET, format!("{p}/environments"), None),
+        (
+            Method::POST,
+            format!("{p}/environments"),
+            Some(json!({ "kind": "TEST" })),
+        ),
+        (Method::GET, format!("{p}/production-access"), None),
+        (Method::GET, format!("{p}/production-access-requests"), None),
+        (
+            Method::POST,
+            format!("{p}/production-access-requests"),
+            Some(json!({ "capabilities": ["MEETINGS"] })),
+        ),
+        // Production-access request by id (row -> its tenant).
+        (Method::GET, r.clone(), None),
+        (Method::POST, format!("{r}/cancel"), None),
+        (Method::POST, format!("{r}/activate"), None),
+        // Environment (environment id -> its tenant -> `control::authorize`).
+        (Method::GET, e.clone(), None),
+        (Method::POST, format!("{e}/suspend"), None),
+        (Method::POST, format!("{e}/resume"), None),
+        (Method::GET, format!("{e}/entitlements"), None),
+        (Method::GET, format!("{e}/limits"), None),
+        (Method::GET, format!("{e}/usage"), None),
+        (Method::GET, format!("{e}/usage/facts"), None),
+        (Method::GET, format!("{e}/usage/export"), None),
+        (Method::GET, format!("{e}/usage/warnings"), None),
+        (Method::GET, format!("{e}/service-accounts"), None),
+        (
+            Method::POST,
+            format!("{e}/service-accounts"),
+            Some(json!({ "name": "pwn" })),
+        ),
+        (
+            Method::PUT,
+            format!("{e}/service-accounts/{sa}/limits"),
+            Some(limit.clone()),
+        ),
+        // Credentials (environment id -> its tenant; credential in environment at PA).
+        (
+            Method::GET,
+            format!("{e}/service-accounts/{sa}/credentials"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("{e}/service-accounts/{sa}/credentials"),
+            Some(json!({ "scopes": ["calls.read"] })),
+        ),
+        (Method::GET, format!("{e}/credentials/{cred}"), None),
+        (
+            Method::POST,
+            format!("{e}/credentials/{cred}/rotate"),
+            Some(json!({})),
+        ),
+        (Method::POST, format!("{e}/credentials/{cred}/revoke"), None),
+        (
+            Method::POST,
+            format!("{e}/credentials/{cred}/suspend"),
+            None,
+        ),
+        (Method::POST, format!("{e}/credentials/{cred}/resume"), None),
+        (
+            Method::PUT,
+            format!("{e}/credentials/{cred}/limits"),
+            Some(limit),
+        ),
+    ];
+    for (method, path, body) in attempts {
+        let res = c
+            .req(As::User(&stranger), method.clone(), &path, body)
+            .await;
+        assert_eq!(
+            res.status,
+            StatusCode::NOT_FOUND,
+            "{method} {path}: {}",
+            res.json
+        );
+        assert_eq!(res.json["error"]["code"], "NOT_FOUND", "{method} {path}");
+    }
+
+    // Nothing reached Platform Access, nothing was recorded, nothing changed.
+    assert_eq!(
+        c.pa.audit.lock().unwrap().len(),
+        delegated_before,
+        "a foreign mutation was delegated"
+    );
+    assert_eq!(c.count(&activity).await, activity_before);
+    for (path, was) in views.iter().zip(before) {
+        let now = c.req(As::User(&owner), Method::GET, path, None).await;
+        assert_eq!(now.json, was, "{path} changed");
+    }
+    let mem = c.pa.credentials.lock().unwrap()[&cred].clone();
+    assert!(!mem.revoked && !mem.suspended && mem.superseded_by.is_none());
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_quota_restrictions")
+            .await,
+        0
+    );
+}

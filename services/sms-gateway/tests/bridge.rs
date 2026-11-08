@@ -284,3 +284,97 @@ async fn inbound_sms_of_a_bridged_party_reach_messaging_durably() {
         .unwrap();
     assert_eq!(h.scalar("SELECT count(*) FROM sms_bridge_deliveries WHERE status = 'PENDING' AND last_error = 'NOT_CONFIGURED'").await, 1);
 }
+
+/// SEC-020: another environment's delegated context can neither close a bridge binding
+/// nor read a bridged message's transport status — both are NOT_FOUND, exactly like a
+/// missing reference — and the owner's binding and message are unchanged.
+#[tokio::test]
+async fn another_environment_cannot_close_a_binding_or_read_a_bridged_message() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (_c, n, d) = setup(&h);
+    let r_ref = Uuid::new_v4();
+    let r = bind(&h, &d, &n, r_ref, PARTY).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let s = submit(&h, &d, r_ref, Uuid::new_v4(), "owner only").await;
+    assert_eq!(s.status, StatusCode::ACCEPTED, "{}", s.text);
+    let id = s.json["smsMessageId"].as_str().unwrap().to_string();
+    let status_path = format!("/internal/v1/sms-bridge/messages/{id}");
+    let before = h
+        .internal_call(
+            &h.peers.messaging,
+            Method::GET,
+            &status_path,
+            None,
+            Some(d.clone()),
+        )
+        .await;
+    assert_eq!(before.status, StatusCode::OK, "{}", before.text);
+
+    let foreign = h
+        .customer(&["sms.send", "sms.read"])
+        .context
+        .owner_scope()
+        .delegated(None);
+    for (method, path, missing) in [
+        (
+            Method::POST,
+            format!("/internal/v1/sms-bridge/bindings/{r_ref}/close"),
+            format!("/internal/v1/sms-bridge/bindings/{}/close", Uuid::new_v4()),
+        ),
+        (
+            Method::GET,
+            status_path.clone(),
+            format!("/internal/v1/sms-bridge/messages/{}", Uuid::new_v4()),
+        ),
+    ] {
+        let theirs = h
+            .internal_call(
+                &h.peers.messaging,
+                method.clone(),
+                &path,
+                None,
+                Some(foreign.clone()),
+            )
+            .await;
+        let none = h
+            .internal_call(
+                &h.peers.messaging,
+                method.clone(),
+                &missing,
+                None,
+                Some(foreign.clone()),
+            )
+            .await;
+        assert_eq!(
+            theirs.status,
+            StatusCode::NOT_FOUND,
+            "{path}: {}",
+            theirs.text
+        );
+        assert_eq!(
+            theirs.json["error"]["code"], none.json["error"]["code"],
+            "{path}"
+        );
+    }
+
+    // The owner's binding is still ACTIVE and its message status unchanged.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM sms_bridge_bindings WHERE bridge_ref = '{r_ref}' AND status = 'ACTIVE'"
+        ))
+        .await,
+        1
+    );
+    let after = h
+        .internal_call(
+            &h.peers.messaging,
+            Method::GET,
+            &status_path,
+            None,
+            Some(d.clone()),
+        )
+        .await;
+    assert_eq!(after.json, before.json);
+}
