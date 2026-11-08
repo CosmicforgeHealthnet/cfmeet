@@ -4,7 +4,8 @@ import type { UpdateProfileRequest } from "@/types/user";
 import { AxiosError } from "axios";
 import { ApiErrorResponse } from "@/types/auth";
 
-import { cookieStore, storageStore } from "@/store";
+import { storageStore } from "@/store";
+import { accountSession } from "@/lib/auth/session";
 
 export function useProfile() {
   // Only fetch profile for authenticated users (not guests)
@@ -12,7 +13,7 @@ export function useProfile() {
   const isAuthenticatedUser =
     typeof window !== "undefined" &&
     !!storageStore.getUser() &&
-    !!(cookieStore.getAccessToken() || cookieStore.getRefreshToken());
+    accountSession.hasSession();
 
   return useQuery({
     queryKey: ["user-profile"],

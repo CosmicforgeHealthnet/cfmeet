@@ -37,7 +37,7 @@ import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Maximize, Minimize, UserPlus, UserMinus, MicOff } from "lucide-react";
 import { usePublicMeeting } from "@/hooks";
-import { cookieStore, storageStore } from "@/store";
+import { storageStore } from "@/store";
 import { conferencesService } from "@/services/v2/conferences.service";
 import ConferenceControls from "./conference-controls";
 import { useQueryClient } from "@tanstack/react-query";
@@ -105,7 +105,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
     if (meetingData?.data?.status === "ended") {
       isDisconnectingRef.current = true;
       if (isGuest) {
-        cookieStore.clearTokens();
+        storageStore.clearParticipantToken();
         router.replace("/");
       } else {
         router.replace("/dashboard");
@@ -128,7 +128,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
     }
     if (isGuest) {
       // Guest: clear temporary tokens and go to home
-      cookieStore.clearTokens();
+      storageStore.clearParticipantToken();
       router.replace("/");
     } else {
       // Authenticated user/host: keep tokens and go to dashboard
