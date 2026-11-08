@@ -1,7 +1,6 @@
 # Developer Console — backend API handoff (Part VI Chapter 18)
 
-**Status: `BACKEND_API_READY` · `FRONTEND_IMPLEMENTATION_DEFERRED`.** The console UI
-(`apps/web`) is not implemented or changed by this work.
+**Status: `BACKEND_API_READY` · frontend implemented on `blueprint/s17-developer-portal` (see the last section).**
 
 ## How the console calls the backend
 
@@ -144,3 +143,21 @@ Still open for the console, outside Section 15:
   before the console, so the web app does not show two organization models;
 * the organization view does not return `createdBy` or a technical-contact member id
   (support contacts are in `getSupportProfile`).
+
+## Frontend implementation (Blueprint v1.0 Section 17, branch `blueprint/s17-developer-portal`)
+
+The console is implemented in `apps/web` under `/developers/*` (separate console layout;
+"Develop with CF Meet" entry at `/dashboard/developers`). It is off unless
+`NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED=true` and `NEXT_PUBLIC_DEVELOPER_API_BASE_URL` is a
+valid HTTPS gateway origin; otherwise it shows "Developer Platform not available" and calls
+nothing. It authenticates with the in-memory CF Meet account access token (ACC-019) as the
+session bearer; `tests/developer-portal.test.mjs` pins every operation to this contract and
+the role table to `rbac.rs`. Legacy Settings API keys / webhooks are read-only and
+deprecation-labelled (revoke / delete kept).
+
+Not in the console (recorded gaps): `putBillingAccount` (no billing engine), `putSupportProfile`,
+`putServiceAccountLimits` / `putCredentialLimits` (stricter quotas), `updateProject`,
+`getEnvironment` / `getServiceAccount` / `getCredential` single reads (lists are used),
+`listEnvironmentUsageFacts`, `listPlanAssignments`; invitation tokens are not emailed by the
+backend (the owner hands them over); the members list has no names or emails (user ids only);
+sign-in does not return to `/developers` automatically.

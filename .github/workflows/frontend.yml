@@ -10,12 +10,16 @@ on:
       - ".github/workflows/frontend.yml"
       # apps/web consumes types generated from the served contract (FE-015).
       - "packages/contracts/**"
+      # Pinned by tests/developer-portal.test.mjs (role table mirror).
+      - "services/developer-platform/src/domain/rbac.rs"
   pull_request:
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
       # apps/web consumes types generated from the served contract (FE-015).
       - "packages/contracts/**"
+      # Pinned by tests/developer-portal.test.mjs (role table mirror).
+      - "services/developer-platform/src/domain/rbac.rs"
   workflow_dispatch:
 
 concurrency:
@@ -65,6 +69,12 @@ jobs:
       # workspace context, stable error envelopes, optimistic-concurrency bodies.
       - name: Account and organization administration tests
         run: node --experimental-strip-types --test tests/organization-admin.test.mjs
+
+      # Developer Portal (Section 17 / ORG-017): operations pinned to the Developer Platform
+      # contract, session-bearer only (never cfmk_ in the browser), role table equal to
+      # services/developer-platform rbac.rs, one-time secret and navigation rules.
+      - name: Developer Portal tests
+        run: node --experimental-strip-types --test tests/developer-portal.test.mjs
 
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
