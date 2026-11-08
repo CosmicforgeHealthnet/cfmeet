@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { Inter } from "next/font/google";
 import QueryProvider from "@/providers/QueryProvider";
 import ThemeProvider from "@/providers/ThemeProvider";
+import { CallingRoot } from "@/context/CallingContext";
 import "@livekit/components-styles";
 import "@livekit/components-styles/prefabs";
 import "./globals.css";
@@ -36,7 +37,10 @@ export default async function RootLayout({
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider nonce={nonce}>
-          <QueryProvider>{children}</QueryProvider>
+          <QueryProvider>
+            {/* App-wide calling session: inert for guests; rings and keeps call media across pages (CAL-004). */}
+            <CallingRoot>{children}</CallingRoot>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>
