@@ -292,6 +292,10 @@ async function journey() {
   const after = `${SECRET} after the new device joined`;
   await send(alice.page, after);
   await shown(bob2.page, after);
+  // Device controls live behind the "Device & security settings" toggle, as for a user.
+  const settings = bob2.page.locator("[data-testid=device-settings-toggle]");
+  await settings.click();
+  assert.equal(await settings.getAttribute("aria-expanded"), "true", "device settings open");
   await bob2.page.click("[data-testid=recover-history]");
   await bob2.page.locator("[data-testid=transfer-source]").first().click({ timeout: T });
   const targetCode = (await bob2.page.locator("[data-testid=outgoing-code]").textContent({ timeout: T })).trim();
