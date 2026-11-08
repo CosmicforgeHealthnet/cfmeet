@@ -407,6 +407,110 @@ async fn recovery_and_login_answers_do_not_reveal_accounts() {
     assert_eq!(a.0, StatusCode::BAD_REQUEST, "{}", a.1);
 }
 
+/// J-01 (final closure): the POSITIVE password-recovery path. A real reset code (as mailed,
+/// read from the store the mailer reads) sets a new password; every session and token issued
+/// before the reset — session and legacy, access and refresh, v1 and v2 — is refused; the new
+/// password signs in, the old one does not; the code is single-use; a security event is kept.
+#[tokio::test]
+async fn password_reset_with_a_valid_code_ends_every_earlier_session() {
+    let app = app_with_redis!();
+    let email = format!(
+        "reset-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = password_user(&app, &email, "active").await;
+    let (session_access, session_refresh) = login(&app, &email).await;
+    let (second_access, _) = login(&app, &email).await;
+    let legacy_access = app
+        .state
+        .jwt_service
+        .generate_access_token(id, "user")
+        .unwrap();
+    assert_eq!(
+        both_ingresses(&app, &session_access).await,
+        (StatusCode::OK, StatusCode::OK)
+    );
+
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/forgot-password",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = app
+        .state
+        .redis
+        .get(&format!("otp:reset:{}", email.to_lowercase()))
+        .await
+        .unwrap()
+        .expect("a reset code was issued for mailing");
+    let new_password = "Reset!Passw0rd-long";
+    let body = |token: &str| {
+        json!({ "email": email, "token": token,
+                "new_password": new_password, "confirm_password": new_password })
+    };
+    let (s, v) = app
+        .post("/api/v1/auth/reset-password", Auth::None, body(&code))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    for token in [&session_access, &second_access, &legacy_access] {
+        assert_eq!(
+            both_ingresses(&app, token).await,
+            (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED),
+            "a token issued before the reset survived it"
+        );
+    }
+    assert_eq!(
+        refresh(&app, &session_refresh).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}' AND revoked_at IS NULL"
+        ))
+        .await,
+        0,
+        "every session closed"
+    );
+    // The old password no longer signs in; the new one does (a fresh, working session).
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/login",
+            Auth::None,
+            json!({ "email": email, "password": PASSWORD }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/login",
+            Auth::None,
+            json!({ "email": email, "password": new_password }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let fresh = v["access_token"].as_str().unwrap().to_string();
+    assert_eq!(
+        both_ingresses(&app, &fresh).await,
+        (StatusCode::OK, StatusCode::OK)
+    );
+    // Single use: the same code cannot reset again.
+    let (s, _) = app
+        .post("/api/v1/auth/reset-password", Auth::None, body(&code))
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'PASSWORD_RESET'"
+        ))
+        .await
+            >= 1
+    );
+}
+
 #[tokio::test]
 async fn registration_normalizes_email_and_refuses_case_variants() {
     let app = app_with_redis!();

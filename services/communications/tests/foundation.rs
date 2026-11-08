@@ -271,6 +271,108 @@ async fn invitation_digest_purpose_expiry_revocation_usage_and_owner_are_enforce
     not_found(h.state.resolve_invite(&h.scope,&b,json!({"token":expired["payload"].as_str().unwrap().rsplit('/').next().unwrap(),"purpose":"CONNECT"}),Uuid::new_v4()).await);
     h.close().await;
 }
+/// J-02 (final closure): the CF Meet ID QR route `GET me/qr` through the signed dispatch
+/// route the Meeting relay uses. It mints a one-time CONNECT invitation (10 minutes, one use)
+/// whose payload is disclosed exactly once (an idempotent replay never repeats it, the
+/// listing never shows it); the scanner resolves it once; a second scanner learns nothing;
+/// an owner who disabled invitations gets no QR.
+#[tokio::test]
+async fn qr_route_mints_a_one_time_connect_payload_disclosed_once() {
+    let h = Harness::new().await;
+    let owner_account = h.account();
+    let owner = h.profile(&owner_account).await;
+    let scanner = h.profile(&h.account()).await;
+    let late = h.profile(&h.account()).await;
+    let path = "/internal/v1/communications/dispatch";
+    let qr = |key: Uuid| {
+        serde_json::to_value(Dispatch {
+            method: "GET".into(),
+            path: "me/qr".into(),
+            query: Default::default(),
+            body: None,
+            idempotency_key: Some(key),
+            account: owner_account.clone(),
+        })
+        .unwrap()
+    };
+    let key = Uuid::new_v4();
+    let (s, v) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(key),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(
+        (
+            v["purpose"].as_str(),
+            v["maxUses"].as_i64(),
+            v["secretReturned"].as_bool()
+        ),
+        (Some("CONNECT"), Some(1), Some(true))
+    );
+    let payload = v["payload"].as_str().expect("QR payload").to_string();
+    let token = payload.rsplit('/').next().unwrap().to_string();
+    assert!(payload.contains("/connect/"), "{payload}");
+    let expires = chrono::DateTime::parse_from_rfc3339(v["expiresAt"].as_str().unwrap()).unwrap();
+    let ttl = (expires.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+    assert!((590..=600).contains(&ttl), "ten-minute QR, got {ttl}s");
+    // Replay of the same request: same invitation, the secret is not disclosed again.
+    let (s, replay) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(key),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(replay["inviteId"], v["inviteId"]);
+    assert!(replay.get("payload").is_none(), "{replay}");
+    let list = h.state.list_invites(&owner, 10, Uuid::nil()).await.unwrap();
+    assert!(!list.to_string().contains(&token));
+    // The scanner resolves it once; a later scanner learns nothing (one use).
+    let resolve = json!({ "token": token, "purpose": "CONNECT" });
+    let profile = h
+        .state
+        .resolve_invite(&h.scope, &scanner, resolve.clone(), Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(profile["relationship"], "NONE");
+    assert!(
+        profile.get("principalId").is_none(),
+        "no internal id leaks to the scanner"
+    );
+    not_found(
+        h.state
+            .resolve_invite(&h.scope, &late, resolve, Uuid::new_v4())
+            .await,
+    );
+    // Invitations disabled by the owner: no QR is minted.
+    h.state
+        .set_privacy(
+            &owner,
+            json!({ "expectedVersion": 1, "privacy": Privacy {
+                invitation_permissions: communications::model::InvitationPermission::Disabled,
+                ..Privacy::default()
+            } }),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let (s, v) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(Uuid::new_v4()),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 403, "{v}");
+    h.close().await;
+}
 #[tokio::test]
 async fn concurrent_acceptance_is_unique_and_never_grants_pending_or_foreign_requests() {
     let h = Harness::new().await;
