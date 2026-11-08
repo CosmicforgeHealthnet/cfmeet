@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
 import { spacePermissions, spaceUpdate, type SpaceFormValues } from "@/lib/meeting-spaces";
 import { getErrorMessage } from "@/utils/error";
+import { TimeZoneField } from "@/components/meetings/ScheduleFields";
 import type { MeetingSpaceResponse } from "@/types/v2";
 
 function EditSpaceForm({ space, reload }: { space: MeetingSpaceResponse; reload: () => void }) {
@@ -29,15 +30,16 @@ function EditSpaceForm({ space, reload }: { space: MeetingSpaceResponse; reload:
     try { await update.mutateAsync(spaceUpdate(reviewed, values)); router.push("/dashboard/meetings"); }
     catch (cause) { setError(getErrorMessage(cause, "Could not update the meeting space.")); }
   }}>
-    <p className="text-sm text-muted-foreground">Edit reusable meeting settings. Conference dates and live-call status are managed separately.</p>
+    <p className="text-sm text-muted-foreground">Edit reusable meeting settings{reviewed.organizationId ? " of this organization meeting" : ""}. Dates are changed per occurrence or series on the space page and in the calendar.</p>
     {changed ? <div role="alert" className="rounded-xl border border-border bg-muted p-3 text-sm">This space changed while you were editing. Reload its settings before saving. <Button type="button" size="sm" variant="outline" onClick={reload}>Reload settings</Button></div> : null}
     <div className="space-y-2"><Label htmlFor="space-title">Title</Label><Input id="space-title" value={values.title} maxLength={255} required onChange={(e) => set("title", e.target.value)} /></div>
     <div className="space-y-2"><Label htmlFor="space-description">Description</Label><Input id="space-description" value={values.description} onChange={(e) => set("description", e.target.value)} /></div>
     <div className="space-y-2"><Label htmlFor="space-type">Meeting type</Label><select id="space-type" className="h-10 w-full rounded-md border border-input bg-background px-3" value={values.meetingType} onChange={(e) => set("meetingType", e.target.value as SpaceFormValues["meetingType"])}>{["STANDARD", "HEALTHCARE", "WEBINAR", "TOWN_HALL", "TRAINING"].map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></div>
-    <div className="space-y-2"><Label htmlFor="space-timezone">Timezone</Label><Input id="space-timezone" value={values.timezone} required placeholder="Africa/Lagos" onChange={(e) => set("timezone", e.target.value)} /></div>
+    <div className="space-y-2"><TimeZoneField id="space-timezone" value={values.timezone} onChange={(zone) => set("timezone", zone)} /><p className="text-xs text-muted-foreground">Changing the timezone keeps a recurring series at the same wall-clock time in the new zone.</p></div>
     <div className="space-y-2"><Label htmlFor="space-access">Who can request admission?</Label><select id="space-access" className="h-10 w-full rounded-md border border-input bg-background px-3" value={values.accessPolicy} onChange={(e) => set("accessPolicy", e.target.value as SpaceFormValues["accessPolicy"])}>
       <option value="PUBLIC">Public</option><option value="PUBLIC_PASSCODE">Public with passcode</option><option value="AUTHENTICATED">Signed-in users</option><option value="INVITE_ONLY">Members and valid invitations</option>
-      {!["PUBLIC", "PUBLIC_PASSCODE", "AUTHENTICATED", "INVITE_ONLY"].includes(reviewed.accessPolicy) ? <option value={reviewed.accessPolicy}>{reviewed.accessPolicy.replaceAll("_", " ")}</option> : null}
+      {reviewed.organizationId ? <option value="ORGANIZATION_ONLY">Organization members only</option> : null}
+      {!["PUBLIC", "PUBLIC_PASSCODE", "AUTHENTICATED", "INVITE_ONLY", ...(reviewed.organizationId ? ["ORGANIZATION_ONLY"] : [])].includes(reviewed.accessPolicy) ? <option value={reviewed.accessPolicy}>{reviewed.accessPolicy.replaceAll("_", " ")}</option> : null}
     </select><p className="text-xs text-muted-foreground">A meeting link identifies this space. It does not grant membership or a host role.</p></div>
     <div className="space-y-2"><Label htmlFor="space-passcode">New passcode</Label><Input id="space-passcode" type="password" autoComplete="new-password" value={values.passcode} maxLength={64} placeholder={space.requiresPasscode ? "Leave blank to keep the existing passcode" : "Optional unless passcode access is selected"} onChange={(e) => set("passcode", e.target.value)} /></div>
     {space.requiresPasscode ? <label className="flex items-center gap-2 text-sm"><Checkbox checked={values.clearPasscode} onCheckedChange={(checked) => set("clearPasscode", checked === true)} /> Remove existing passcode</label> : null}

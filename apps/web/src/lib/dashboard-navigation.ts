@@ -1,4 +1,4 @@
-import { Home, Video, Phone, MessageSquare, Code2, Settings, Building2 } from "lucide-react";
+import { Home, Video, CalendarDays, Phone, MessageSquare, Code2, Settings, Building2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { WorkspaceAwareNavItem } from "@/lib/workspace/workspace-core";
 
@@ -12,6 +12,7 @@ export type DashboardNavItem = WorkspaceAwareNavItem & { label: string; icon: Lu
 export const dashboardNavigation: DashboardNavItem[] = [
   { label: "Dashboard", icon: Home, href: "/dashboard" },
   { label: "Meetings", icon: Video, href: "/dashboard/meetings", feature: "meetings" },
+  { label: "Calendar", icon: CalendarDays, href: "/dashboard/calendar", feature: "meetings" },
   { label: "Organizations", icon: Building2, href: "/dashboard/organizations" },
   { label: "Calls", icon: Phone, href: "/calling", feature: "calling" },
   { label: "Messages", icon: MessageSquare, href: "/dashboard/messages", feature: "messaging" },

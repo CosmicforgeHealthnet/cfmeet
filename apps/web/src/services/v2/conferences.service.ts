@@ -17,6 +17,7 @@ import type {
   LeaveConferenceResponse,
   PreJoinResponse,
 } from "@/types/v2";
+import type { AgendaQuery, AgendaResponse } from "@/types/generated/meeting-service";
 
 export const conferencesService = {
   // -------------------------------------------------------------------------
@@ -43,13 +44,32 @@ export const conferencesService = {
   },
 
   /**
-   * Create a new conference in a meeting space
+   * Create a new conference in a meeting space. `idempotencyKey` (one UUID per user action)
+   * makes a retried submit return the same occurrence (SEC-014).
    */
-  create: async (spaceId: string, data?: CreateConferenceRequest) => {
+  create: async (spaceId: string, data?: CreateConferenceRequest, idempotencyKey?: string) => {
     const response = await apiV2.post<ConferenceResponse>(
       `/meeting-spaces/${encodeURIComponent(spaceId)}/conferences`,
       data ?? {},
+      idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
     );
+    return response.data;
+  },
+
+  /**
+   * The caller's agenda across meeting spaces: `GET /me/conferences` (one page; follow
+   * `nextCursor` with the same filters). `organizationId` scopes it to one organization.
+   */
+  agenda: async (query: AgendaQuery) => {
+    // Empty filters are omitted; the cursor is passed back unchanged (opaque).
+    const params = Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+    const response = await apiV2.get<AgendaResponse>("/me/conferences", { params });
+    return response.data;
+  },
+
+  /** One occurrence as an iCalendar file (`text/calendar`, no-store). */
+  calendarFile: async (id: string) => {
+    const response = await apiV2.get<Blob>(`/conferences/${encodeURIComponent(id)}/calendar.ics`, { responseType: "blob", headers: { Accept: "text/calendar" } });
     return response.data;
   },
 

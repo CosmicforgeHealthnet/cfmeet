@@ -22,6 +22,7 @@ import {
   useWithdrawConsent,
 } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
+import { artifactAccessible, artifactDetailRows, artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
 import type {
   ArtifactType,
   GenerateReportRequest,
@@ -38,7 +39,6 @@ const reportOptions: { value: ReportType; label: string }[] = [
   { value: "ATTENDANCE_REPORT", label: "Attendance report" },
   { value: "POLL_REPORT", label: "Poll report" },
   { value: "CHAT_EXPORT", label: "Chat export" },
-  { value: "INTELLIGENCE_OUTPUT", label: "Intelligence output" },
 ];
 
 const consentLabels: Record<ConsentKind, string> = {
@@ -194,22 +194,23 @@ export default function ConferenceArtifactsPanel({
             {items.map(item => (
               <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
                 <div className="min-w-0">
-                  <p className="break-all text-sm font-medium">{item.filename || item.artifactType.replaceAll("_", " ")}</p>
+                  <p className="break-all text-sm font-medium">{artifactDisplayName(item)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {item.status} · {new Date(item.createdAt).toLocaleString()}
-                    {item.sizeBytes != null ? ` · ${Math.round(item.sizeBytes / 1024)} KB` : ""}
+                    {artifactStateLabel(item)}
+                    {formatDurationMs(item.durationMs) ? ` · ${formatDurationMs(item.durationMs)}` : ""}
+                    {formatBytes(item.sizeBytes) ? ` · ${formatBytes(item.sizeBytes)}` : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant="outline" onClick={() => setSelectedArtifactId(item.id)}>
                     Details
                   </Button>
-                  {canRead && item.status === "READY" && (
+                  {canRead && artifactAccessible(item) && (
                     <Button type="button" size="sm" variant="outline" disabled={access.isPending} onClick={() => void mintAccess(item.id)}>
                       Get secure link
                     </Button>
                   )}
-                  {canDelete && item.status !== "DELETED" && (
+                  {canDelete && item.status !== "DELETED" && !item.deletionPending && (
                     <ActionDialog
                       label="Delete"
                       destructive
@@ -237,10 +238,7 @@ export default function ConferenceArtifactsPanel({
                   <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedArtifactId("")}>Close</Button>
                 </div>
                 <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-                  <dt className="text-muted-foreground">ID</dt><dd className="break-all font-mono">{selectedArtifact.data.id}</dd>
-                  <dt className="text-muted-foreground">Type / status</dt><dd>{selectedArtifact.data.artifactType} · {selectedArtifact.data.status}</dd>
-                  <dt className="text-muted-foreground">MIME type</dt><dd>{selectedArtifact.data.mimeType || "Not available"}</dd>
-                  <dt className="text-muted-foreground">Ready at</dt><dd>{selectedArtifact.data.readyAt ? new Date(selectedArtifact.data.readyAt).toLocaleString() : "Not ready"}</dd>
+                  {artifactDetailRows(selectedArtifact.data).map(([label, value]) => <div key={label} className="contents"><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd></div>)}
                 </dl>
               </>
             )}

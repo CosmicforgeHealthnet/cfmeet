@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useSpaces } from "@/hooks/v2/useSpaces";
+import { useMeetingCapabilities } from "@/hooks/v2/useCalendar";
 import type { MeetingSpaceResponse, SpaceStatus, AccessPolicy } from "@/types/v2";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +19,7 @@ import {
   Shield,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { formatShortDateForDisplay } from "@/utils/timezone";
+import SpaceSchedule from "@/components/meetings/SpaceSchedule";
 import MeetingSpaceActions from "./MeetingSpaceActions";
 
 const STATUS_FILTERS: { label: string; value: SpaceStatus | "all" }[] = [
@@ -43,6 +44,8 @@ export default function MeetingsContent() {
   const [page, setPage] = useState(1);
 
   const { data, isLoading, isError, refetch } = useSpaces();
+  const capabilities = useMeetingCapabilities();
+  const canCreate = capabilities.canCreatePersonal || capabilities.canCreateOrganization;
 
   // Filter and paginate client-side
   const filteredSpaces = useMemo(() => {
@@ -69,7 +72,7 @@ export default function MeetingsContent() {
             Reusable meeting settings for spaces you own or belong to. A space is separate from its live conferences.
           </p>
         </div>
-        <div className="flex items-center gap-3"><Button onClick={() => router.push("/dashboard/meetings/new")}>Create meeting space</Button><span className="text-sm text-muted-foreground">
+        <div className="flex items-center gap-3"><Button variant="outline" onClick={() => router.push("/dashboard/calendar")}>Calendar</Button>{canCreate && <Button onClick={() => router.push("/dashboard/meetings/new")}>Create meeting space</Button>}<span className="text-sm text-muted-foreground">
           {filteredSpaces.length} space{filteredSpaces.length !== 1 ? "s" : ""}{" "}
           {statusFilter !== "all" ? `(${statusFilter.toLowerCase()})` : "total"}
         </span></div>
@@ -117,12 +120,12 @@ export default function MeetingsContent() {
               ? `No ${statusFilter.toLowerCase()} meeting spaces to show.`
               : "You haven't created any meeting spaces yet."}
           </p>
-          <Button
+          {canCreate && <Button
             className="mt-4"
             onClick={() => router.push("/dashboard/meetings/new")}
           >
             Create Meeting Space
-          </Button>
+          </Button>}
         </div>
       ) : (
         <>
@@ -247,10 +250,11 @@ function SpaceCard({
                 Up to {space.interactiveCapacity} participants
               </span>
             )}
-            {space.createdAt && (
+            <SpaceSchedule space={space} />
+            {space.organizationId && (
               <span className="flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5" />
-                {formatShortDateForDisplay(space.createdAt)}
+                <Shield className="w-3.5 h-3.5" />
+                Organization meeting
               </span>
             )}
           </div>

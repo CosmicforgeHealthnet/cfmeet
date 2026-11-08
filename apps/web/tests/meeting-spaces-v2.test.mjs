@@ -29,7 +29,12 @@ function client(login = "login-token") {
       requests.push(request);
       return { status: 200, statusText: "OK", headers: {}, config: request, data: space };
     } }) },
-    "@/store": { cookieStore: { getAccessToken: () => login }, storageStore: { getParticipantToken: () => "old-conference-participant-token" } },
+    "@/store": { storageStore: { getParticipantToken: () => "old-conference-participant-token" } },
+    // The in-memory account session (ACC-019) attaches the bearer token.
+    "@/lib/auth/axios-session": { attachAccountSession: (instance) => instance.interceptors.request.use((config) => {
+      if (login) config.headers.Authorization = `Bearer ${login}`;
+      return config;
+    }) },
   });
   return { requests, api: api.default, service: load("../src/services/v2/spaces.service.ts", { "./api": api }).spacesService };
 }

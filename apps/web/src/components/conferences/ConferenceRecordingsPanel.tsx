@@ -1,5 +1,6 @@
 "use client";
 
+import { artifactDisplayName, artifactStateLabel, formatBytes, formatDurationMs } from "@/lib/artifact-display";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
@@ -144,10 +145,11 @@ export default function ConferenceRecordingsPanel({
           {recordings.data.recordings.map(recording => (
             <article key={recording.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3">
               <div>
-                <p className="text-sm font-medium">{recording.filename || "Conference recording"}</p>
+                <p className="text-sm font-medium">{artifactDisplayName(recording)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {recording.status.replaceAll("_", " ")} · {new Date(recording.createdAt).toLocaleString()}
-                  {recording.sizeBytes != null ? ` · ${Math.round(recording.sizeBytes / 1024)} KB` : ""}
+                  {artifactStateLabel(recording)}
+                  {formatDurationMs(recording.durationMs) ? ` · ${formatDurationMs(recording.durationMs)}` : ""}
+                  {formatBytes(recording.sizeBytes) ? ` · ${formatBytes(recording.sizeBytes)}` : ""}
                 </p>
               </div>
             </article>

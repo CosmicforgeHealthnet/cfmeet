@@ -85,6 +85,17 @@ jobs:
           node --test tests/calling-adapter.test.mjs tests/calling-origin.test.mjs tests/calling-contract.test.mjs
           node --experimental-strip-types --test tests/calling-logic.test.mjs
 
+      # Section 17 meetings + calendar: meeting-zone time conversion (America/New_York,
+      # Europe/Rome, Africa/Lagos, DST gap/overlap), agenda ranges and opaque-cursor
+      # pagination, occurrence controls, artefact fields (FE-007), the pre-join contract
+      # (FE-001) and the v2-only conference-keyed room (FE-014 / MTG-019 / FE-017).
+      - name: Meetings, calendar and pre-join tests
+        run: |
+          node --experimental-strip-types --test tests/meetings-calendar.test.mjs
+          node --experimental-strip-types --test tests/prejoin-room.test.mjs
+          node --experimental-strip-types --test tests/scheduling-v2.test.mjs
+          node --experimental-strip-types --test tests/meeting-spaces-v2.test.mjs
+
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
       - name: CSP builder and XSS-sink guard
