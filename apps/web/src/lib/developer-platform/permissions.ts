@@ -144,3 +144,27 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   ANALYST: "Read-only usage, limits, delivery history and activity.",
   BILLING: "Billing-account reference, commercial plan visibility and usage export.",
 };
+
+/**
+ * Member-row controls (display only; the server decides): owners change roles, remove
+ * members and transfer ownership; anyone may leave (self-removal). The last owner cannot
+ * leave or be demoted (server answers 409 LAST_OWNER), so it is not offered.
+ */
+export function memberActions(
+  workspace: { myRole: Role | null; state: OrganizationState } | null | undefined,
+  member: { userId: string; role: Role; status: string },
+  viewerUserId: string | null | undefined,
+  ownerCount: number,
+): { changeRole: boolean; remove: boolean; leave: boolean; transferTo: boolean } {
+  const none = { changeRole: false, remove: false, leave: false, transferTo: false };
+  if (!workspace || member.status !== "ACTIVE") return none;
+  const self = Boolean(viewerUserId) && member.userId === viewerUserId;
+  const lastOwner = member.role === "OWNER" && ownerCount <= 1;
+  const manage = can(workspace, "MembersManage");
+  return {
+    changeRole: manage && !lastOwner,
+    remove: manage && !self && !lastOwner,
+    leave: self && !lastOwner && statePermits(workspace.state, "MembersManage"),
+    transferTo: can(workspace, "OwnershipTransfer") && !self && member.role !== "OWNER",
+  };
+}

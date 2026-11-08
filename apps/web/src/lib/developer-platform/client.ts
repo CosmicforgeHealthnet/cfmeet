@@ -258,8 +258,12 @@ export type DeveloperResult<T> = { data: T; requestId: string | null; replayed: 
 export type DeveloperClientOptions = {
   /** The gateway origin, or null when the Developer Platform is not configured here. */
   baseUrl: string | null;
-  /** The current CF Meet session bearer (null when signed out / expired). */
-  getSession: () => string | null | undefined;
+  /**
+   * The current CF Meet session bearer (null when signed out / expired). In the app this
+   * is the in-memory account access token (src/lib/auth/session.ts, ACC-019); the
+   * Developer Platform verifies it through the Meeting Service session bridge.
+   */
+  getSession: () => string | null | undefined | Promise<string | null | undefined>;
   /** Refreshes the CF Meet session through the existing sign-in flow; returns the new bearer. */
   refreshSession?: () => Promise<string | null | undefined>;
   fetchImpl?: typeof fetch;
@@ -272,7 +276,7 @@ export function createDeveloperClient(options: DeveloperClientOptions) {
   const doFetch = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
 
   async function session(forceRefresh: boolean): Promise<string> {
-    let token = forceRefresh ? null : options.getSession();
+    let token = forceRefresh ? null : await options.getSession();
     if (!token && options.refreshSession) token = await options.refreshSession().catch(() => null);
     return assertSessionBearer(token);
   }

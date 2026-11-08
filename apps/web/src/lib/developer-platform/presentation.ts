@@ -38,6 +38,7 @@ const CONFLICT_CODES: Record<string, string> = {
   ALREADY_MEMBER: "That person is already a member of this developer workspace.",
   INVITATION_PENDING: "An invitation for that email is already pending.",
   INVITATION_INVALID: "This invitation token is invalid, expired, revoked or already used.",
+  SELF_APPROVAL_FORBIDDEN: "A reviewer may not decide a request of an organization they belong to.",
   INVITATION_EMAIL_MISMATCH: "This invitation was issued to a different email address than your CF Meet account.",
   IDEMPOTENCY_KEY_REUSED: "This request was already submitted with different details. Start again.",
   CONFLICTING_REPLAY: "This request was already submitted with different details. Start again.",
@@ -62,15 +63,29 @@ export function describeError(error: unknown): ErrorView {
       action: "retry",
     };
   }
+  if (e.code === "SESSION_UNAVAILABLE") {
+    return { title: "Sign-in service unavailable", detail: "Your CF Meet session could not be checked. Try again.", requestId: null, action: "retry" };
+  }
   if (e.code === "MACHINE_CREDENTIAL_REFUSED") {
     return { title: "Machine credential refused", detail: e.message ?? "", requestId: null, action: "none" };
   }
   const code = e.code ?? "";
+  // Specific contract codes first: several are not on the status their family suggests
+  // (INVITATION_INVALID is 404, INVITATION_EMAIL_MISMATCH / PRODUCTION_ACCESS_REQUIRED are
+  // 403, OPERATOR_REQUIRED / CONFLICTING_REPLAY are 400, CAPABILITY_UNAVAILABLE is 503).
+  if (STATE_CODES[code]) return { title: "Workspace state", detail: STATE_CODES[code], requestId, action: "none" };
+  if (CONFLICT_CODES[code]) {
+    return {
+      title: e.status === 409 ? "Conflict" : e.status === 422 ? "Not allowed by policy" : "Not possible",
+      detail: CONFLICT_CODES[code],
+      requestId,
+      action: code === "VERSION_CONFLICT" ? "reload" : "none",
+    };
+  }
   switch (e.status) {
     case 401:
       return { title: "Sign in again", detail: "Your CF Meet session has expired or is not valid for the Developer Platform.", requestId, action: "signin" };
     case 403:
-      if (STATE_CODES[code]) return { title: "Workspace state", detail: STATE_CODES[code], requestId, action: "none" };
       return {
         title: "Not allowed",
         detail: "Your developer workspace role does not allow this action. Roles are checked on every request.",
@@ -83,9 +98,9 @@ export function describeError(error: unknown): ErrorView {
     case 422:
       return {
         title: e.status === 409 ? "Conflict" : "Not allowed by policy",
-        detail: CONFLICT_CODES[code] ?? STATE_CODES[code] ?? e.message ?? "",
+        detail: e.message ?? "",
         requestId,
-        action: code === "VERSION_CONFLICT" ? "reload" : "none",
+        action: "none",
       };
     case 429: {
       const wait = e.retryAfterSeconds;
@@ -103,7 +118,10 @@ export function describeError(error: unknown): ErrorView {
     case 504:
       return {
         title: "Temporarily unavailable",
-        detail: code === "SERVICE_UNAVAILABLE" ? "A required service is unavailable. Try again later." : e.message ?? "Try again later.",
+        detail:
+          code === "SERVICE_UNAVAILABLE"
+            ? "A required service (for example the sign-in session bridge or Platform Access) is unavailable. Try again later."
+            : e.message ?? "Try again later.",
         requestId,
         action: "retry",
       };
@@ -185,4 +203,128 @@ export function credentialActions(credential: Credential): { rotate: boolean; su
 /** `YYYY-MM-DD` (UTC) `days` before `now`, for usage ranges. */
 export function isoDay(now: number, daysBack = 0): string {
   return new Date(now - daysBack * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Tone of a lifecycle / delivery status word, for badges. */
+export function statusTone(status: string | null | undefined): Badge["tone"] {
+  switch (status) {
+    case "ACTIVE":
+    case "SUCCEEDED":
+    case "LIVE":
+    case "APPROVED":
+    case "ACCEPTED":
+      return "ok";
+    case "PENDING":
+    case "DELIVERING":
+    case "RETRY_SCHEDULED":
+    case "INVITED":
+    case "RESTRICTED":
+    case "SUSPENDED":
+    case "DISABLED":
+    case "PRODUCTION_REQUESTED":
+    case "UNDER_REVIEW":
+    case "ROTATION_OVERLAP":
+    case "NOT_YET_VALID":
+    case "WARNING":
+      return "warn";
+    case "FAILED":
+    case "REVOKED":
+    case "CLOSED":
+    case "DELETED":
+    case "REJECTED":
+    case "EXPIRED":
+    case "EXHAUSTED":
+    case "DENIED":
+      return "bad";
+    default:
+      return "muted";
+  }
+}
+
+/** What a delivery status means for the integrator (SHADOW: recorded, never sent). */
+export const DELIVERY_STATUS_HELP: Record<string, string> = {
+  PENDING: "Queued for delivery.",
+  DELIVERING: "Being delivered now.",
+  RETRY_SCHEDULED: "The endpoint failed; another attempt is scheduled.",
+  SUCCEEDED: "The endpoint answered 2xx.",
+  FAILED: "All attempts failed (dead-lettered). It can be replayed.",
+  CANCELLED: "Cancelled (the subscription was disabled or deleted).",
+  SHADOW: "Recorded in shadow mode: this deployment does not send webhooks yet, so nothing was sent.",
+};
+
+/** A replay creates a new delivery of the same event to the same subscription, which must be ACTIVE. */
+export function canReplayDelivery(webhookStatus: string | null | undefined, delivery: { status: string }): boolean {
+  return webhookStatus === "ACTIVE" && delivery.status !== "PENDING" && delivery.status !== "DELIVERING";
+}
+
+/** Truthful commercial wording: plans are entitlement records, no billing engine exists. */
+export const BILLING_NOT_AVAILABLE =
+  "Billing and payments are not available yet: CF Meet does not issue invoices, take payment methods or charge for usage from this console. " +
+  "Plans below are entitlement records assigned by CF Meet; usage figures are metering for limits and reporting only.";
+
+/** Formats a quantity with its usage unit (no currency: there is no rating or pricing). */
+export function formatQuantity(quantity: number, unit: string): string {
+  const n = Number.isFinite(quantity) ? quantity : 0;
+  const text = Math.abs(n) >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : String(Math.round(n * 100) / 100);
+  return `${text} ${unit.toLowerCase().replace(/_/g, " ")}`;
+}
+
+/** A limit's fill ratio clamped to 0..1 (null when the ceiling or current value is unknown). */
+export function limitRatio(current: number | null | undefined, ceiling: number | null | undefined): number | null {
+  if (current == null || ceiling == null || !Number.isFinite(current) || !Number.isFinite(ceiling) || ceiling <= 0) return null;
+  return Math.min(1, Math.max(0, current / ceiling));
+}
+
+/** `YYYY-MM-DD HH:MM UTC`, or an em dash. */
+export function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "—";
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return "—";
+  return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** Validates an RFC 3339 expiry chosen in a `datetime-local` input; returns ISO or null. */
+export function expiryFromLocalInput(value: string, now: number = Date.now()): { ok: true; iso: string | null } | { ok: false; reason: string } {
+  if (!value) return { ok: true, iso: null };
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return { ok: false, reason: "Enter a valid date and time." };
+  if (at <= now) return { ok: false, reason: "The expiry must be in the future." };
+  return { ok: true, iso: new Date(at).toISOString() };
+}
+
+/**
+ * A webhook endpoint the console accepts before asking the server, which applies the
+ * authoritative SSRF policy (packages/webhooks/src/endpoint.rs: https only unless the
+ * deployment allows http for local development, no private networks). Plain http is let
+ * through only for a loopback host so a local stack can still be exercised.
+ */
+export function validateWebhookUrl(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return "Enter a full https:// URL.";
+  }
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return "Webhook endpoints must use HTTPS.";
+  if (url.username || url.password) return "Do not put credentials in the endpoint URL.";
+  return null;
+}
+
+/**
+ * A documentation link from the public discovery document, resolved against the gateway
+ * origin. Only http(s) results are returned (no `javascript:` / `data:` links); plain http
+ * only for a loopback gateway.
+ */
+export function safeDocumentUrl(value: string | null | undefined, baseUrl: string): string | null {
+  if (!value) return null;
+  let url: URL;
+  try {
+    url = new URL(value, `${baseUrl.replace(/\/+$/, "")}/`);
+  } catch {
+    return null;
+  }
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol === "https:" || (url.protocol === "http:" && loopback)) return url.toString();
+  return null;
 }

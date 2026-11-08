@@ -8,12 +8,18 @@ on:
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
+      # Pinned by tests/developer-portal.test.mjs.
+      - "packages/contracts/platform-developer/**"
+      - "services/developer-platform/src/domain/rbac.rs"
       # Once apps/web consumes generated types from packages/contracts, add:
       # - "packages/contracts/**"
   pull_request:
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
+      # Pinned by tests/developer-portal.test.mjs.
+      - "packages/contracts/platform-developer/**"
+      - "services/developer-platform/src/domain/rbac.rs"
       # Once apps/web consumes generated types from packages/contracts, add:
       # - "packages/contracts/**"
   workflow_dispatch:
@@ -50,6 +56,12 @@ jobs:
       # through Meeting Service's verified-login bridge, never an internal credential.
       - name: Messaging client session bridge tests
         run: node --experimental-strip-types --test tests/messaging-session.test.mjs
+
+      # Developer Portal (Section 17 / ORG-017): operations pinned to the Developer Platform
+      # contract, session-bearer only (never cfmk_ in the browser), role table equal to
+      # services/developer-platform rbac.rs, one-time secret and navigation rules.
+      - name: Developer Portal tests
+        run: node --experimental-strip-types --test tests/developer-portal.test.mjs
 
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
