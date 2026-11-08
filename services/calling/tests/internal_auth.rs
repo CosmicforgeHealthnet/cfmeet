@@ -378,17 +378,24 @@ async fn service_tokens_never_reach_logs_or_responses() {
         .1
         .clone();
     let signature = token.rsplit('.').next().unwrap().to_string();
-    // Enter the capture dispatcher on every async poll. A thread-local guard
-    // held across await can lose events when the runtime resumes another task.
-    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good)
-        .with_subscriber(dispatcher.clone())
-        .await;
     let mut bad = good.clone();
     for (k, v) in bad.iter_mut() {
         if k == "x-cf-service-authorization" {
             *v = format!("{}x", v);
         }
     }
+    // Other tests in this binary hit the same rejection log concurrently with no
+    // subscriber. If that first registration races with Dispatch::new, tracing can
+    // cache "nobody listens" for the callsite and drop our event. Register the
+    // callsite before capturing, then rebuild the interest cache with the capture
+    // dispatcher live.
+    let _warm = call(&h, Method::GET, "/internal/v1/test/caller", &bad).await;
+    tracing::callsite::rebuild_interest_cache();
+    // Enter the capture dispatcher on every async poll. A thread-local guard
+    // held across await can lose events when the runtime resumes another task.
+    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good)
+        .with_subscriber(dispatcher.clone())
+        .await;
     let rejected = call(&h, Method::GET, "/internal/v1/test/caller", &bad)
         .with_subscriber(dispatcher)
         .await;
