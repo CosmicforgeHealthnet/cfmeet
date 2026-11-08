@@ -697,8 +697,10 @@ impl AppCallService {
         if call.current_state != CallState::Answered {
             return Ok(false);
         }
-        if super::public::is_public(self.db(), call.id).await? {
-            // Public-network Calls connect on Telephony's bridge + leg evidence.
+        if super::public::is_network_executed(self.db(), call.id).await? {
+            // Public-network Calls, and enterprise SIP device Calls bridged to application
+            // media, connect on Telephony's bridge + leg evidence. This is also the
+            // trigger when the answerer's media joins AFTER that evidence arrived.
             return self.try_confirm_public_connected(call.id).await;
         }
         let evidence = {
