@@ -24,7 +24,8 @@ import { useMediaStream } from "@/hooks/useMediaStream";
 import { MicVisualizer } from "@/components/ui/mic-visualizer";
 import { useProfile } from "@/hooks";
 import { useResolveSpace, useJoinConference } from "@/hooks/v2";
-import { storageStore, cookieStore } from "@/store";
+import { storageStore } from "@/store";
+import { accountSession } from "@/lib/auth/session";
 import type { JoinMeetingData } from "@/types/meeting";
 
 interface MediaPreferences {
@@ -266,7 +267,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
       conference_role: v2Response.participant.role,
       permissions: v2Response.permissions,
       media_context: v2Response.mediaContext,
-      is_guest: !cookieStore.getAccessToken(),
+      is_guest: !accountSession.hasSession(),
       join_token: rtcCredential,
       livekit_url: v2Response.rtc.url,
       room_name: v2Response.conference.id,
@@ -524,7 +525,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
             />
             {(preJoin.data?.requiresPasscode || resolveData.meetingSpace.requiresPasscode) && <Input aria-label="Meeting passcode" type="password" placeholder="Meeting passcode" value={passcode} onChange={e => setPasscode(e.target.value)} />}
             {preJoin.data?.requiresInvitation && <Input aria-label="Invitation token" placeholder="Invitation token" value={invitationToken} onChange={e => setInvitationToken(e.target.value)} />}
-            {preJoin.data?.requiresAuth && !cookieStore.getAccessToken() && <p className="text-sm text-muted-foreground">Sign in to join this conference.</p>}
+            {preJoin.data?.requiresAuth && !accountSession.hasSession() && <p className="text-sm text-muted-foreground">Sign in to join this conference.</p>}
             {preJoin.data?.waitingRoomEnabled && <p className="text-sm text-muted-foreground">This conference uses a waiting room. A host may need to admit you before you can join.</p>}
             {preJoin.isError && <p role="alert" className="text-sm text-destructive">Could not load admission requirements. <button type="button" className="underline" onClick={() => void preJoin.refetch()}>Retry</button></p>}
             {consentRequirements.map(item => <label key={item.consentType} className="flex items-start gap-2 text-sm"><Checkbox checked={!!consents[item.consentType]} onCheckedChange={value => setConsents(current => ({ ...current, [item.consentType]: value === true }))} /><span>{item.description || item.consentType.replaceAll("_", " ")}{item.required ? " (required)" : " (optional)"}</span></label>)}
@@ -611,7 +612,7 @@ export default function PreJoinScreen({ roomId, onJoin, initialInvitationToken =
                 size="lg"
                 className="w-full max-w-xs"
                 onClick={handleJoin}
-                disabled={joinMutation.isPending || preJoin.isLoading || preJoin.isError || !resolveData.conference || (!!preJoin.data?.requiresAuth && !cookieStore.getAccessToken()) || consentRequirements.some(item => item.required && !consents[item.consentType])}
+                disabled={joinMutation.isPending || preJoin.isLoading || preJoin.isError || !resolveData.conference || (!!preJoin.data?.requiresAuth && !accountSession.hasSession()) || consentRequirements.some(item => item.required && !consents[item.consentType])}
               >
                 {joinMutation.isPending ? "Joining..." : "Join Meeting"}
               </Button>
