@@ -128,6 +128,24 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     // policy and the effective organization constraints, read with the acting user.
     ("GET", "/internal/v1/organizations/{}/roles/capabilities"),
     ("GET", "/internal/v1/organizations/{}/policies/effective"),
+    // Blueprint Section 17 (organization administration in the web app): the Section 6
+    // teams, team members and the organization policy (compare-and-swap), relayed with
+    // the acting user; Organizations enforces organization.teams.manage /
+    // organization.policies.manage and every team-role rule.
+    ("GET", "/internal/v1/organizations/{}/teams"),
+    ("POST", "/internal/v1/organizations/{}/teams"),
+    ("GET", "/internal/v1/organizations/{}/teams/{}"),
+    ("PATCH", "/internal/v1/organizations/{}/teams/{}"),
+    ("POST", "/internal/v1/organizations/{}/teams/{}/archive"),
+    ("GET", "/internal/v1/organizations/{}/teams/{}/members"),
+    ("POST", "/internal/v1/organizations/{}/teams/{}/members"),
+    ("PATCH", "/internal/v1/organizations/{}/teams/{}/members/{}"),
+    (
+        "POST",
+        "/internal/v1/organizations/{}/teams/{}/members/{}/remove",
+    ),
+    ("GET", "/internal/v1/organizations/{}/policies"),
+    ("PATCH", "/internal/v1/organizations/{}/policies"),
     // Blueprint Section 12 follow-up (per-organization Enterprise Calling): the verified
     // technical scope and the organization's Calling service binding, read with the
     // acting user (membership required).
@@ -1419,6 +1437,10 @@ pub fn relayed_error(reply: &Reply) -> ApiError {
         Some("IDEMPOTENCY_CONFLICT") => Some(ErrorCode::IdempotencyConflict),
         Some("PROVISIONING_PENDING") => Some(ErrorCode::ProvisioningPending),
         Some("PAYLOAD_TOO_LARGE") => Some(ErrorCode::RequestTooLarge),
+        Some("POLICY_RESTRICTED") => Some(ErrorCode::OrganizationPolicyRestricted),
+        Some("TEAM_NOT_FOUND") => Some(ErrorCode::TeamNotFound),
+        Some("TEAM_ARCHIVED") => Some(ErrorCode::TeamArchived),
+        Some("TEAM_NAME_TAKEN") => Some(ErrorCode::TeamNameTaken),
         Some("RATE_LIMITED") => {
             return ApiError::rate_limited(
                 reply
@@ -1631,6 +1653,26 @@ mod tests {
                 Method::GET,
                 format!("/internal/v1/organizations/{id}/policies/effective"),
             ),
+            (
+                Method::GET,
+                format!("/internal/v1/organizations/{id}/policies"),
+            ),
+            (
+                Method::PATCH,
+                format!("/internal/v1/organizations/{id}/policies"),
+            ),
+            (
+                Method::POST,
+                format!("/internal/v1/organizations/{id}/teams"),
+            ),
+            (
+                Method::PATCH,
+                format!("/internal/v1/organizations/{id}/teams/{other}/members/{other}"),
+            ),
+            (
+                Method::POST,
+                format!("/internal/v1/organizations/{id}/teams/{other}/members/{other}/remove"),
+            ),
         ] {
             assert!(is_allowlisted(&m, &p), "{m} {p}");
         }
@@ -1645,14 +1687,19 @@ mod tests {
                 "/internal/v1/organizations/authorization/evaluate".to_string(),
             ),
             (Method::DELETE, format!("/internal/v1/organizations/{id}")),
-            // Policy reads / writes stay outside the relay (only the effective read).
+            // Team deletion does not exist; removal is the `/remove` command.
             (
-                Method::GET,
-                format!("/internal/v1/organizations/{id}/policies"),
+                Method::DELETE,
+                format!("/internal/v1/organizations/{id}/teams/{other}/members/{other}"),
             ),
             (
-                Method::PATCH,
+                Method::PUT,
                 format!("/internal/v1/organizations/{id}/policies"),
+            ),
+            // Operator provisioning and service bindings stay outside the relay.
+            (
+                Method::POST,
+                format!("/internal/v1/admin/organizations/{id}/provisioning/retry"),
             ),
             (
                 Method::GET,

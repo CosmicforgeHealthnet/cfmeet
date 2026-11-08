@@ -44,7 +44,11 @@ pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
             HeaderName::from_static("x-client-kind"),
             HeaderName::from_static("idempotency-key"),
         ])
-        .expose_headers([HeaderName::from_static("x-request-id")])
+        .expose_headers([
+            HeaderName::from_static("x-request-id"),
+            // ORG-006: the member list's next-page cursor.
+            HeaderName::from_static("x-next-cursor"),
+        ])
         .allow_credentials(true)
 }
 
