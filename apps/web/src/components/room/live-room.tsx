@@ -31,17 +31,16 @@ import type { SidebarPanel } from "./sidebar";
 import { useMediaDeviceSelect } from "@livekit/components-react";
 import Sidebar from "@/components/room/sidebar";
 import FooterControls from "@/components/room/footer-controls";
-import { ChatProvider } from "@/components/room/ChatProvider";
-import type { JoinMeetingData } from "@/types/meeting";
+import type { RoomJoinData } from "@/lib/prejoin";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Maximize, Minimize, UserPlus, UserMinus, MicOff } from "lucide-react";
-import { usePublicMeeting } from "@/hooks";
 import { storageStore } from "@/store";
 import { conferencesService } from "@/services/v2/conferences.service";
 import ConferenceControls from "./conference-controls";
 import { useQueryClient } from "@tanstack/react-query";
 import RealtimeRoomSync from "./RealtimeRoomSync";
+import { participantKeys } from "@/hooks/v2/useParticipants";
 import { ReactionOverlay } from "./RoomEngagementControls";
 
 // Notification type for participant events
@@ -73,10 +72,16 @@ function getParticipantColor(identity: string): string {
 // ...
 
 interface LiveRoomProps {
-  joinData: JoinMeetingData;
+  joinData: RoomJoinData;
   initialVideo?: boolean;
   initialAudio?: boolean;
 }
+
+/**
+ * The live room of one conference (FE-017: keyed by the conference id). Media is LiveKit with
+ * the backend-issued credential; chat, presence and controls use v2 conference endpoints only
+ * (FE-014 / MTG-019: no legacy v1 meeting, chat or media writes).
+ */
 export default function LiveRoom({ joinData, initialVideo = true, initialAudio = true }: LiveRoomProps) {
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -84,59 +89,40 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
   const isRefreshingCredentialRef = useRef(false);
   const sessionClosed = useRef(false);
   const queryClient = useQueryClient();
+  const conference = useConference(joinData.conferenceId);
   const closeSession = useCallback(async () => {
-    if (!joinData.conference_id || sessionClosed.current) return;
-    await conferencesService.leave(joinData.conference_id, { participantSessionId: joinData.participant_session_id });
+    if (sessionClosed.current) return;
+    await conferencesService.leave(joinData.conferenceId, { participantSessionId: joinData.participantSessionId });
     sessionClosed.current = true;
     await queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] });
-  }, [joinData.conference_id, joinData.participant_session_id, queryClient]);
+  }, [joinData.conferenceId, joinData.participantSessionId, queryClient]);
 
-  // Guest detection: backend only returns access_token for guests
-  // Authenticated users (host or logged-in participants) don't receive tokens in join response
-  const isGuest = joinData.is_guest ?? !!joinData.access_token;
-
-  // Poll meeting status to auto-redirect if meeting ends
-  // We use usePublicMeeting because useMeeting requires authentication,
-  // which would fail for guest users.
-  const { data: meetingData } = usePublicMeeting(joinData.conference_id ? "" : joinData.room_name);
-
-  useEffect(() => {
-    if (isDisconnectingRef.current) return;
-    if (meetingData?.data?.status === "ended") {
-      isDisconnectingRef.current = true;
-      if (isGuest) {
-        storageStore.clearParticipantToken();
-        router.replace("/");
-      } else {
-        router.replace("/dashboard");
-      }
-    }
-  }, [meetingData, router, isGuest]);
+  const leaveTo = joinData.isGuest ? "/" : "/dashboard";
 
   const handleDisconnect = useCallback(async () => {
     if (isDisconnectingRef.current) return;
     isDisconnectingRef.current = true;
-    if (joinData.conference_id) {
-      try {
-        await closeSession();
-      } finally {
-        storageStore.clearParticipantToken();
-        storageStore.clearV2JoinData();
-        router.replace(isGuest ? "/" : "/dashboard");
-      }
-      return;
-    }
-    if (isGuest) {
-      // Guest: clear temporary tokens and go to home
+    try {
+      await closeSession();
+    } finally {
       storageStore.clearParticipantToken();
-      router.replace("/");
-    } else {
-      // Authenticated user/host: keep tokens and go to dashboard
-      router.replace("/dashboard");
+      storageStore.clearV2JoinData();
+      router.replace(leaveTo);
     }
-  }, [router, isGuest, joinData.conference_id, closeSession]);
+  }, [router, leaveTo, closeSession]);
 
-  if (!joinData.join_token) {
+  // The conference ended for everyone (v2 status): leave the room.
+  const status = conference.data?.status;
+  useEffect(() => {
+    if (isDisconnectingRef.current || !status || !["ENDED", "CANCELLED", "FAILED"].includes(status)) return;
+    isDisconnectingRef.current = true;
+    sessionClosed.current = true;
+    storageStore.clearParticipantToken();
+    storageStore.clearV2JoinData();
+    router.replace(leaveTo);
+  }, [status, router, leaveTo]);
+
+  if (!joinData.rtcToken) {
     return (
       <div className="flex items-center justify-center h-screen">
         <p>Invalid Join Token</p>
@@ -149,8 +135,8 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
       <LiveKitRoom
         video={initialVideo && (joinData.permissions?.videoPublish ?? true)}
         audio={initialAudio && (joinData.permissions?.audioPublish ?? true)}
-        token={joinData.join_token}
-        serverUrl={joinData.livekit_url}
+        token={joinData.rtcToken}
+        serverUrl={joinData.rtcUrl}
         data-lk-theme="default"
         style={{ height: "100vh" }}
         onDisconnected={() => {
@@ -159,15 +145,8 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
           }
         }}
       >
-        {joinData.conference_id && <RealtimeRoomSync conferenceId={joinData.conference_id} />}
-        {joinData.conference_id ? <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} /> : <ChatProvider meetingId={joinData.meeting_id} participantId={joinData.participant_id}>
-          <RoomContent
-            joinData={joinData}
-            isSidebarOpen={isSidebarOpen}
-            setIsSidebarOpen={setIsSidebarOpen}
-            onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }}
-          />
-        </ChatProvider>}
+        <RealtimeRoomSync conferenceId={joinData.conferenceId} />
+        <RoomContent joinData={joinData} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} onLeave={closeSession} onCredentialRefreshStateChange={value => { isRefreshingCredentialRef.current = value; }} />
         <RoomAudioRenderer />
       </LiveKitRoom>
     </LayoutContextProvider>
@@ -176,7 +155,7 @@ export default function LiveRoom({ joinData, initialVideo = true, initialAudio =
 
 // Room content with participant notifications
 interface RoomContentProps {
-  joinData: JoinMeetingData;
+  joinData: RoomJoinData;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
   onLeave?: () => Promise<void>;
@@ -206,7 +185,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
       setNotifications((prev) => [...prev, notification]);
 
       // Invalidate participants query to refresh the list
-      queryClient.invalidateQueries({ queryKey: ["participants", joinData.meeting_id] });
+      queryClient.invalidateQueries({ queryKey: participantKeys.list(joinData.conferenceId) });
 
       // Auto-remove notification after 3 seconds
       setTimeout(() => {
@@ -224,7 +203,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
       setNotifications((prev) => [...prev, notification]);
 
       // Invalidate participants query to refresh the list
-      queryClient.invalidateQueries({ queryKey: ["participants", joinData.meeting_id] });
+      queryClient.invalidateQueries({ queryKey: participantKeys.list(joinData.conferenceId) });
 
       // Auto-remove notification after 3 seconds
       setTimeout(() => {
@@ -239,7 +218,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
       room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
     };
-  }, [room, queryClient, joinData.meeting_id]);
+  }, [room, queryClient, joinData.conferenceId]);
 
   return (
     <>
@@ -279,11 +258,9 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
           <FooterControls
             onOpenPanel={openPanel}
             sidebarPanel={sidebarPanel}
-            moreControls={joinData.conference_id ? <ConferenceControls id={joinData.conference_id} role={joinData.conference_role} sessionId={joinData.participant_session_id} initialMediaContext={joinData.media_context} onCredentialRefreshStateChange={onCredentialRefreshStateChange} tools={<RoomTools conferenceId={joinData.conference_id} onOpenPanel={openPanel} />} /> : undefined}
+            moreControls={<ConferenceControls id={joinData.conferenceId} role={joinData.conferenceRole} sessionId={joinData.participantSessionId} initialMediaContext={joinData.mediaContext} onCredentialRefreshStateChange={onCredentialRefreshStateChange} tools={<RoomTools conferenceId={joinData.conferenceId} onOpenPanel={openPanel} />} />}
             isSidebarOpen={isSidebarOpen}
-            meetingId={joinData.meeting_id}
-            participantId={joinData.participant_id}
-            conferenceId={joinData.conference_id}
+            conferenceId={joinData.conferenceId}
             permissions={joinData.permissions}
             onLeave={onLeave}
           />
@@ -295,10 +272,8 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
             <Sidebar
               key={sidebarPanel}
               initialPanel={sidebarPanel}
-              meetingId={joinData.meeting_id}
-              conferenceId={joinData.conference_id}
-              isHost={joinData.role === "host"}
-              participantId={joinData.participant_id}
+              conferenceId={joinData.conferenceId}
+              participantId={joinData.participantId}
               onClose={() => setIsSidebarOpen(false)}
             />
           </aside>

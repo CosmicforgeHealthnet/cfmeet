@@ -21,15 +21,13 @@ import { ActionDialog, Field } from "@/components/meeting-spaces/ManagementUI";
 export type SidebarPanel = "people" | "chat" | "breakouts" | "polls" | "qa" | "recordings";
 interface SidebarProps {
  initialPanel?: SidebarPanel;
-  conferenceId?: string;
-  meetingId?: string;
-  isHost: boolean;
+  conferenceId: string;
   participantId: string;
   onClose: () => void;
 }
 
-export default function Sidebar({ conferenceId, meetingId, participantId, onClose, initialPanel = "people" }: SidebarProps) {
-  const id = conferenceId || meetingId || "";
+export default function Sidebar({ conferenceId, participantId, onClose, initialPanel = "people" }: SidebarProps) {
+  const id = conferenceId;
   const [activePanel, setActivePanel] = useState<SidebarPanel>(initialPanel);
   const me = useCurrentParticipant(id);
   const conference = useConference(id);
