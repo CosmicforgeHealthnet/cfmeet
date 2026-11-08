@@ -61,6 +61,33 @@ function StatusBar({ engine }: { engine: MessagingEngine }) {
   );
 }
 
+// A history request from another device must be seen where the user is, not behind the
+// collapsed settings toggle: the comparison code is the only check against a rogue device.
+function IncomingTransfers({ engine }: { engine: MessagingEngine }) {
+  const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const [error, setError] = useState<string | null>(null);
+  if (s.phase !== "ready" || s.incomingTransfers.length === 0) return null;
+  const run = async (action: () => Promise<unknown>) => {
+    setError(null);
+    try { await action(); } catch (cause) { setError(messagingErrorMessage(cause)); }
+  };
+  return (
+    <section className="space-y-2" aria-label="History requests from your other devices">
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {s.incomingTransfers.map((t) => (
+        <div key={t.transferId} className="space-y-2 rounded-xl border border-border bg-card p-3" data-testid="incoming-transfer">
+          <p className="text-sm">Another of your devices asks for your message history. Continue only if it shows this code:</p>
+          <p className="font-mono text-lg tracking-widest" data-testid="incoming-code">{t.comparisonCode}</p>
+          <div className="flex gap-2">
+            <Button data-testid="approve-transfer" onClick={() => void run(() => engine.approveTransfer(t.transferId))}>Codes match — send history</Button>
+            <Button variant="outline" data-testid="decline-transfer" onClick={() => void run(() => engine.declineTransfer(t.transferId))}>Decline</Button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [recovering, setRecovering] = useState(false);
@@ -102,16 +129,6 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-      {s.incomingTransfers.map((t) => (
-        <div key={t.transferId} className="space-y-2 rounded-xl border border-border p-3" data-testid="incoming-transfer">
-          <p className="text-sm">Another of your devices asks for your message history. Continue only if it shows this code:</p>
-          <p className="font-mono text-lg tracking-widest" data-testid="incoming-code">{t.comparisonCode}</p>
-          <div className="flex gap-2">
-            <Button data-testid="approve-transfer" onClick={() => void run(() => engine.approveTransfer(t.transferId))}>Codes match — send history</Button>
-            <Button variant="outline" onClick={() => void run(() => engine.declineTransfer(t.transferId))}>Decline</Button>
-          </div>
-        </div>
-      ))}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
@@ -408,6 +425,7 @@ export default function MessagesContent() {
         </div>
         <StatusBar engine={engine} />
       </header>
+      <IncomingTransfers engine={engine} />
       {s.phase !== "loading" && s.phase !== "ready" ? (
         <section className="rounded-xl border border-border bg-card px-4 py-3" aria-label="Secure messaging setup">
           <p className="mb-2 text-sm font-medium">Finish setting up secure messaging</p>
@@ -505,10 +523,11 @@ export default function MessagesContent() {
           </ul>
           {s.phase === "ready" ? (
             <div className="border-t border-border p-3">
-              <button type="button" className="w-full text-left text-xs text-muted-foreground hover:text-foreground" onClick={() => setSecurityOpen(!securityOpen)} aria-expanded={securityOpen}>
+              <button type="button" className="w-full text-left text-xs text-muted-foreground hover:text-foreground" onClick={() => setSecurityOpen(!securityOpen)} aria-expanded={securityOpen} aria-controls="device-security-settings" data-testid="device-settings-toggle">
                 {securityOpen ? "Hide device & security settings" : "Device & security settings"}
               </button>
-              {securityOpen ? <div className="mt-3 space-y-3"><DevicePanel engine={engine} /><MessagingDevicesPanel engine={engine} /></div> : null}
+              {/* Stays mounted while collapsed so a history transfer in progress keeps its state. */}
+              <div id="device-security-settings" className="mt-3 space-y-3" hidden={!securityOpen}><DevicePanel engine={engine} /><MessagingDevicesPanel engine={engine} /></div>
             </div>
           ) : null}
         </aside>

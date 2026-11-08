@@ -3,6 +3,7 @@
 *
 !packages/communications-policy
 !packages/service-auth
+!packages/migration-guard
 !packages/usage-facts
 !packages/object-storage
 !packages/webhooks

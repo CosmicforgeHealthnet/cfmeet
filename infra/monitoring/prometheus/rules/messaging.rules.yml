@@ -1,0 +1,95 @@
+# Prometheus alerting rules for services/messaging (SEC-016).
+#
+# Source of the policy: docs/architecture/messaging-operations-runbook.md §8 (dead
+# letters) and §9 (incidents and signals). Every metric below is a scrape-time gauge
+# rendered by services/messaging/src/metrics.rs on the separate metrics listener
+# (MESSAGING_METRICS_ADDRESS, GET /metrics). The gauges are computed from PostgreSQL at
+# scrape time, so they disappear while the database is unreachable; MessagingMetricsUnavailable
+# covers the scrape itself. Several instances read the same database, hence max().
+#
+# Label policy: see meeting-service.rules.yml and docs/operations/monitoring-alerts.md.
+# Job name: `up{job="messaging"}` assumes the scrape job is named messaging.
+
+groups:
+  - name: messaging.alerts
+    rules:
+      - alert: MessagingOutboxDeadLetters
+        expr: |
+          max(messaging_outbox_events{status="DEAD_LETTER"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: messaging
+        annotations:
+          summary: "Messaging outbox holds dead letters"
+          description: "Mirrors the OUTBOX_DEAD_LETTER incident category (raised on any dead letter). Fix the cause, then replay with messaging-admin dead-letters replay --kind outbox."
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#8-dead-letters-136"
+
+      - alert: MessagingObjectDeletionDeadLetters
+        expr: |
+          max(messaging_object_deletions{status="DEAD"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: messaging
+        annotations:
+          summary: "Messaging object deletions dead-lettered"
+          description: "Mirrors the ATTACHMENT_DELETE_DEAD_LETTER incident category (HIGH): attachment bytes that should be deleted are still stored. Replay with messaging-admin dead-letters replay --kind object-deletion after fixing storage."
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#8-dead-letters-136"
+
+      - alert: MessagingRetentionBacklog
+        expr: |
+          max(messaging_purge_lag_seconds) > 3600
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: messaging
+        annotations:
+          summary: "Due message purges waiting more than 1 hour"
+          description: "Same threshold as the RETENTION_BACKLOG incident (RETENTION_BACKLOG_THRESHOLD = 1 h in services/messaging/src/compliance/retention.rs)."
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
+      - alert: MessagingOutboxLagHigh
+        expr: |
+          max(messaging_outbox_oldest_pending_seconds) > 600
+        for: 10m
+        labels:
+          severity: warning
+          approval: required
+          service: messaging
+        annotations:
+          summary: "Oldest pending messaging outbox event older than 10 minutes"
+          description: "Committed events are not being published (relay stopped or downstream refusing)."
+          threshold_status: "APPROVAL REQUIRED: messaging-operations-runbook.md §9 lists the lag gauge without a threshold; 10 min (borrowed from the meeting-service outbox rule) is a repository placeholder"
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
+      - alert: MessagingWebhookRelayLagHigh
+        expr: |
+          max(messaging_webhook_relay_oldest_pending_seconds) > 600
+        for: 10m
+        labels:
+          severity: warning
+          approval: required
+          service: messaging
+        annotations:
+          summary: "Oldest pending webhook relay row older than 10 minutes"
+          description: "Inbound provider webhooks are waiting; relay rows dead-letter on permanent refusal (WEBHOOK_RELAY_DEAD_LETTER)."
+          threshold_status: "APPROVAL REQUIRED: messaging-operations-runbook.md §9 lists the lag gauge without a threshold; 10 min is a repository placeholder"
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
+      - alert: MessagingMetricsUnavailable
+        expr: |
+          up{job="messaging"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: required
+          service: messaging
+        annotations:
+          summary: "Messaging metrics listener unreachable for 5 minutes"
+          description: "Without a scrape every messaging alert above is silent. Check the process and MESSAGING_METRICS_ADDRESS."
+          threshold_status: "APPROVAL REQUIRED: no runbook threshold; 5 min is a repository placeholder"
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"

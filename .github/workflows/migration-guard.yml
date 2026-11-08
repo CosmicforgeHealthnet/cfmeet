@@ -1,0 +1,51 @@
+name: Migration guard package
+
+# packages/migration-guard (cf-migration-guard, SEC-015): the standard-library-only guard
+# every service migration binary calls first, so destructive sea-orm CLI subcommands
+# (down, fresh, refresh, reset) refuse outside a non-production APP_ENV unless
+# CF_MIGRATION_ALLOW_DESTRUCTIVE names the subcommand. The per-service workflows assert
+# the wiring of each built binary (scripts/migrations/assert_destructive_guard.sh, and the
+# Meeting Service migration crate's tests/destructive_guard.rs).
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/migration-guard/**"
+      - ".github/workflows/migration-guard.yml"
+  pull_request:
+    paths:
+      - "packages/migration-guard/**"
+      - ".github/workflows/migration-guard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/migration-guard
+
+jobs:
+  test:
+    name: fmt / clippy / test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --locked

@@ -29,11 +29,12 @@ cargo run -- up
 # Check migration status
 cargo run -- status
 
-# Rollback last migration
-cargo run -- down
+# Rollback last migration. down / fresh / refresh / reset refuse unless APP_ENV is
+# dev, development, local, test or ci in the shell (SEC-015; .env is not consulted).
+APP_ENV=development cargo run -- down
 
 # Rollback all and reapply (DESTROYS DATA)
-cargo run -- fresh
+APP_ENV=development cargo run -- fresh
 
 # Apply specific number of migrations
 cargo run -- up -n 1
@@ -214,7 +215,7 @@ manager
 
 ```bash
 cargo run -- status  # Check what's applied
-cargo run -- fresh   # Reset (destroys data)
+APP_ENV=development cargo run -- fresh   # Reset (destroys data)
 ```
 
 ### "could not connect to database"

@@ -16,6 +16,15 @@ pub struct UserMeResponse {
     pub created_at: String, // ISO 8601 formatted
 }
 
+/// Optional body of POST /api/v1/users/me/deactivate (ACC-026).
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct DeactivateAccountRequest {
+    /// The account's current password. Required unless the caller signed in within the
+    /// re-authentication window (default 10 minutes); accounts without a password (Google
+    /// sign-in) re-authenticate by signing in again.
+    pub current_password: Option<String>,
+}
+
 /// Request for PATCH /api/v1/users/me
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateMeRequest {

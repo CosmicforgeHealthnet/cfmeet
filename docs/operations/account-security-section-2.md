@@ -55,4 +55,5 @@ If the result is zero, a later contract migration may add `CREATE UNIQUE INDEX .
 * MFA and account deletion/export (ACC-011, ACC-013): owner decision D-6.
 * Device-level Hub/Calling/Messaging fan-out for a single session (ACC-008, ACC-010): Section 14.
 * Web/mobile token storage and the callback page change (ACC-019, ACC-012, FE-011 client half): Section 17 handoff.
-* Legacy plaintext API keys (PLT-002/DATA-003): Section 16 retirement, with a hashing/freeze step.
+* Legacy plaintext API keys (PLT-002/DATA-003): hashed by the Sections 2–3 hardening ([hardening-sections-2-3.md](hardening-sections-2-3.md)); retirement stays Section 16.
+* Deactivation re-authentication, reactivation audit, email-verification enforcement points, legacy media eviction, migration CLI guard, database roles and alert rules: [hardening-sections-2-3.md](hardening-sections-2-3.md).

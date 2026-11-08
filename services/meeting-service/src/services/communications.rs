@@ -234,6 +234,29 @@ async fn relay(
     if !user.revocation_checked {
         return Err(unavailable());
     }
+    // ACC-016 (owner decision, off by default): unverified accounts stay out of the Hub.
+    // Answered in the Communications error envelope so the code survives
+    // `public_error_envelope` (which maps foreign 403s to PERMISSION_DENIED).
+    if state
+        .auth_policy
+        .require_verified_email_for_communications(
+            state.require_email_verification,
+            user.verified_email.as_deref(),
+        )
+        .is_err()
+    {
+        let mut response = (
+            StatusCode::FORBIDDEN,
+            Json(json!({"schemaVersion":1,"error":{
+                "code":"EMAIL_VERIFICATION_REQUIRED",
+                "message":"Verify your email address to use communications"}})),
+        )
+            .into_response();
+        response
+            .headers_mut()
+            .insert("cache-control", HeaderValue::from_static("no-store"));
+        return Ok(response);
+    }
     let bridge = state.communications.as_ref().ok_or_else(unavailable)?;
     if !matches!(
         method,

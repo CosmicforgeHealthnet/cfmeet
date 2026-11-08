@@ -203,6 +203,8 @@ impl PersonalStack {
                 db::migrate(&self.bin.join("meetings-calendar-migration"), &owner)?;
                 // Blueprint Sections 9/11: the profile/notifications history is required at startup.
                 db::migrate(&self.bin.join("profile-notifications-migration"), &owner)?;
+                // Blueprint Sections 2-3 hardening: hashed legacy secrets, required at startup.
+                db::migrate(&self.bin.join("account-hardening-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {

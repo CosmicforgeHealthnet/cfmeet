@@ -396,7 +396,7 @@ curl -X GET https://api.cfmeet.com/api/v1/api-keys \
   "data": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
-      "api_key_masked": "********...AB",
+      "api_key_masked": "Ab3dE9xQ********",
       "usage_limit": 10000,
       "used_count": 42,
       "expires_at": "2027-01-01T00:00:00Z",

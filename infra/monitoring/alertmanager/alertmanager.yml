@@ -1,0 +1,66 @@
+# Alertmanager routing for CF Meet alerts (SEC-016).
+#
+# PAGING IS NOT CONFIGURED. Every receiver below is deliberately empty (no integration),
+# so a routed alert is accepted and dropped. The owner must choose a paging / ticketing
+# product and supply its credentials through the secret store; nothing secret is ever
+# committed here (scripts/monitoring/check_alert_rules.py rejects URLs and literal keys,
+# tokens or passwords in this file, comments included).
+#
+# To enable a receiver: mount the credential as a file from the secret store and add the
+# integration under the receiver, using a *_file field so the value never appears in
+# YAML. The commented templates show the shape with obvious placeholders only.
+#
+# Validated in CI with amtool check-config (.github/workflows/service-boundaries.yml).
+# Not deployed: running Alertmanager is an owner decision (docs/operations/monitoring-alerts.md).
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: unconfigured-default
+  group_by: [alertname, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: unconfigured-pager
+      repeat_interval: 1h
+    - matchers: ['severity="warning"']
+      receiver: unconfigured-ticket
+    - matchers: ['severity="info"']
+      receiver: unconfigured-info
+      repeat_interval: 24h
+
+# A critical alert silences the warning and info notifications of the same alert name and
+# service while it fires.
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity=~"warning|info"']
+    equal: [alertname, service]
+  - source_matchers: ['severity="warning"']
+    target_matchers: ['severity="info"']
+    equal: [alertname, service]
+
+receivers:
+  # Fallback for anything without a severity label (should not happen: the rule checker
+  # requires one).
+  - name: unconfigured-default
+
+  # CRITICAL: page the on-call engineer. NOT CONFIGURED.
+  - name: unconfigured-pager
+    # pagerduty_configs:
+    #   - routing_key_file: <SECRET_STORE_MOUNT>/<PAGER_INTEGRATION_KEY_FILE>
+    #     send_resolved: true
+
+  # WARNING: open a ticket / post to the operations channel. NOT CONFIGURED.
+  - name: unconfigured-ticket
+    # webhook_configs:
+    #   - url_file: <SECRET_STORE_MOUNT>/<TICKET_WEBHOOK_URL_FILE>
+    #     send_resolved: true
+
+  # INFO: low-priority channel or no notification at all. NOT CONFIGURED.
+  - name: unconfigured-info
+    # email_configs:
+    #   - to: <OPERATIONS_MAILBOX>
+    #     auth_password_file: <SECRET_STORE_MOUNT>/<SMTP_PASSWORD_FILE>

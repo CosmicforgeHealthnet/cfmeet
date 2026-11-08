@@ -32,7 +32,7 @@ pub struct CreateApiKeyResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ApiKeyResponse {
     pub id: Uuid,
-    /// Masked API key (shows last 4 characters only)
+    /// Masked API key: the first 8 characters (non-secret lookup prefix) followed by asterisks
     pub api_key_masked: String,
     pub usage_limit: i32,
     pub used_count: i32,
