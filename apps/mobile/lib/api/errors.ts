@@ -14,6 +14,8 @@
 export type ApiErrorKind =
   | "invalid_credentials"
   | "auth_expired"
+  | "auth_required"
+  | "verification_required"
   | "forbidden"
   | "validation"
   | "not_found"
@@ -64,7 +66,7 @@ export class ApiRequestError extends Error implements ApiError {
 interface HttpErrorLike {
   isAxiosError?: boolean;
   message?: string;
-  config?: { url?: string };
+  config?: { url?: string; headers?: Record<string, unknown> };
   response?: { status?: number; data?: unknown };
 }
 
@@ -113,16 +115,25 @@ function isSignInRequest(url: string | undefined): boolean {
   return !!url && SIGN_IN_PATHS.some((p) => url.includes(p));
 }
 
-function classify(status: number, code: string | undefined, url: string | undefined): ApiErrorKind {
+export function classify(
+  status: number,
+  code: string | undefined,
+  url: string | undefined,
+  hadBearer = true
+): ApiErrorKind {
   if (status === 0) return "network";
   if (code === "RATE_LIMITED" || code === "TOO_MANY_REQUESTS" || code === "QUALITY_RATE_LIMITED" || status === 429) {
     return "rate_limited";
   }
+  if (code === "EMAIL_VERIFICATION_REQUIRED") return "verification_required";
+  // A 401 that names a passcode problem is an input error, not an expired session.
+  if (code && VALIDATION_CODES.has(code)) return "validation";
   if (status === 401 || (code && AUTH_CODES.has(code))) {
-    return isSignInRequest(url) ? "invalid_credentials" : "auth_expired";
+    if (isSignInRequest(url)) return "invalid_credentials";
+    // Only a request that carried an account token can have an "expired session".
+    return hadBearer ? "auth_expired" : "auth_required";
   }
   if (status === 403 || (code && FORBIDDEN_CODES.has(code))) return "forbidden";
-  if (code && VALIDATION_CODES.has(code)) return "validation";
   if (status === 400 || status === 422) return "validation";
   if (status === 404) return "not_found";
   if (status === 409) return "conflict";
@@ -133,6 +144,8 @@ function classify(status: number, code: string | undefined, url: string | undefi
 const KIND_MESSAGES: Record<ApiErrorKind, string> = {
   invalid_credentials: "Invalid email or password.",
   auth_expired: "Your session has expired. Please sign in again.",
+  auth_required: "Sign in, or join the meeting again, to continue.",
+  verification_required: "Verify your email address to continue.",
   forbidden: "You don't have permission to perform this action.",
   validation: "Invalid request. Please check your input.",
   not_found: "The requested resource was not found.",
@@ -173,6 +186,17 @@ export function decodeErrorBody(data: unknown): {
   };
 }
 
+/** Whether the failed request carried an account bearer token (never returns the token). */
+function requestHadBearer(headers: Record<string, unknown> | undefined): boolean {
+  if (!headers) return false;
+  const getter = (headers as { get?: unknown }).get;
+  const value =
+    typeof getter === "function"
+      ? (getter as (name: string) => unknown).call(headers, "Authorization")
+      : headers.Authorization ?? headers.authorization;
+  return typeof value === "string" && value.startsWith("Bearer ");
+}
+
 /** Decode any thrown value into an {@link ApiError}. */
 export function decodeApiError(error: unknown): ApiError {
   if (error instanceof ApiRequestError) return error;
@@ -184,11 +208,13 @@ export function decodeApiError(error: unknown): ApiError {
     }
     const status = typeof response.status === "number" ? response.status : 0;
     const body = decodeErrorBody(response.data);
-    const kind = classify(status || 500, body.code, http.config?.url);
+    const kind = classify(status || 500, body.code, http.config?.url, requestHadBearer(http.config?.headers));
     // A stale/expired session always gets the friendly sign-in-again text; elsewhere the
     // server's message is safe to show (the contract forbids secrets, SQL or paths in it).
     const message =
-      kind === "auth_expired" ? KIND_MESSAGES.auth_expired : body.message ?? KIND_MESSAGES[kind];
+      kind === "auth_expired" || kind === "auth_required"
+        ? KIND_MESSAGES[kind]
+        : body.message ?? KIND_MESSAGES[kind];
     return {
       message,
       status: status || 500,

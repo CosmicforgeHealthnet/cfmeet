@@ -36,13 +36,40 @@ export interface ResolvedApiUrl {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "10.0.2.2"]);
 
-function parse(url: string): URL | null {
-  try {
-    return new URL(url);
-  } catch {
-    return null;
-  }
+interface ParsedUrl {
+  protocol: string;
+  username: string;
+  password: string;
+  hostname: string;
+  host: string;
+  pathname: string;
 }
+
+/**
+ * Minimal absolute-URL parser. React Native's built-in `URL` does not implement the component
+ * getters (`protocol`, `hostname`, …) on every engine version, so a security decision must not
+ * depend on it.
+ */
+export function parseAbsoluteUrl(url: string): ParsedUrl | null {
+  const match =
+    /^([a-z][a-z0-9+.-]*:)\/\/(?:([^:@/?#]*)(?::([^@/?#]*))?@)?(\[[^\]]+\]|[^:/?#@]+)(?::(\d+))?([^?#]*)(?:[?#].*)?$/i.exec(
+      url.trim()
+    );
+  if (!match) return null;
+  const [, protocol, username = "", password = "", rawHost, port, pathname] = match;
+  if (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) return null;
+  const hostname = rawHost.toLowerCase();
+  return {
+    protocol: protocol.toLowerCase(),
+    username,
+    password,
+    hostname,
+    host: port ? `${hostname}:${port}` : hostname,
+    pathname: pathname || "/",
+  };
+}
+
+const parse = parseAbsoluteUrl;
 
 /** True for loopback hosts (including the Android emulator's host alias 10.0.2.2). */
 export function isLoopbackHost(hostname: string): boolean {
