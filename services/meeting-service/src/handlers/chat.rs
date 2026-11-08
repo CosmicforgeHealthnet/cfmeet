@@ -162,14 +162,19 @@ pub async fn send_message(
         ));
     }
 
-    // Verify the authenticated user owns this participant record
-    // (either they have the same user_id or they are a guest participant created by them)
-    if let Some(participant_user_id) = participant.user_id {
-        if participant_user_id != user_id {
-            return Err(ApiError::Forbidden(
-                "You can only send messages as yourself".to_string(),
-            ));
-        }
+    // The caller must BE this participant (SEC-020): a registered participant through its
+    // own account token, a guest participant (no user_id) only through its own
+    // server-signed guest token, whose subject is the participant id. Anyone else —
+    // another account, the host, or a guest of this or another meeting — is refused.
+    let is_guest_token = claims.role == "guest";
+    let acts_as_self = match participant.user_id {
+        Some(participant_user_id) => !is_guest_token && participant_user_id == user_id,
+        None => is_guest_token && participant.id == user_id,
+    };
+    if !acts_as_self {
+        return Err(ApiError::Forbidden(
+            "You can only send messages as yourself".to_string(),
+        ));
     }
 
     let now = now_utc();

@@ -119,6 +119,198 @@ async fn a_member_of_one_organization_cannot_see_or_change_another() {
 }
 
 #[tokio::test]
+async fn teams_policies_and_role_reads_of_another_organization_are_unreachable() {
+    // SEC-020: the Section 6 routes (teams, team members, policies, the role matrix) under
+    // the two-organization rule: a member of A reaches nothing of B, B's child ids are
+    // unknown under A's path, and B is unchanged.
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let alice = Uuid::new_v4();
+    let bob = Uuid::new_v4();
+    let carol = Uuid::new_v4();
+    let a_id = s(&h.create_org(alice, "sec-alpha").await["id"]);
+    let b_id = s(&h.create_org(bob, "sec-bravo").await["id"]);
+    let carol_m = s(&h.add_member(&b_id, bob, carol, "MEMBER").await["id"]);
+    async fn team(h: &Harness, org: &str, actor: Uuid, name: &str) -> String {
+        let path = format!("/internal/v1/organizations/{org}/teams");
+        s(&h.user(actor)
+            .post(&path, json!({ "name": name }))
+            .await
+            .expect(201)["id"])
+    }
+    let a_team = team(&h, &a_id, alice, "Alpha team").await;
+    let b_team = team(&h, &b_id, bob, "Bravo team").await;
+    let b_tm = s(&h
+        .user(bob)
+        .post(
+            &format!("/internal/v1/organizations/{b_id}/teams/{b_team}/members"),
+            json!({ "membershipId": carol_m, "role": "TEAM_MEMBER" }),
+        )
+        .await
+        .expect(201)["id"]);
+
+    // Alice against B's organization path: non-enumerating 404 everywhere.
+    let base = format!("/internal/v1/organizations/{b_id}");
+    let teams = format!("{base}/teams/{b_team}");
+    let checks: Vec<(Method, String, Option<Value>)> = vec![
+        (Method::GET, format!("{base}/policies"), None),
+        (
+            Method::PATCH,
+            format!("{base}/policies"),
+            Some(json!({ "expectedRevision": 0, "policy": { "features": { "calling": false } } })),
+        ),
+        (Method::GET, format!("{base}/policies/effective"), None),
+        (Method::GET, format!("{base}/roles/capabilities"), None),
+        (Method::GET, format!("{base}/teams"), None),
+        (
+            Method::POST,
+            format!("{base}/teams"),
+            Some(json!({ "name": "Injected" })),
+        ),
+        (Method::GET, teams.clone(), None),
+        (
+            Method::PATCH,
+            teams.clone(),
+            Some(json!({ "expectedVersion": 1, "name": "Pwned" })),
+        ),
+        (Method::POST, format!("{teams}/archive"), Some(json!({}))),
+        (Method::GET, format!("{teams}/members"), None),
+        (
+            Method::POST,
+            format!("{teams}/members"),
+            Some(json!({ "userId": alice, "role": "TEAM_MEMBER" })),
+        ),
+        (
+            Method::PATCH,
+            format!("{teams}/members/{b_tm}"),
+            Some(json!({ "expectedVersion": 1, "role": "TEAM_MANAGER" })),
+        ),
+        (
+            Method::POST,
+            format!("{teams}/members/{b_tm}/remove"),
+            Some(json!({})),
+        ),
+    ];
+    for (method, path, body) in checks {
+        h.user(alice)
+            .send(method.clone(), &path, body)
+            .await
+            .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    }
+
+    // B's ids under Alice's own organization path are unknown there.
+    let mine = format!("/internal/v1/organizations/{a_id}/teams");
+    h.user(alice)
+        .get(&format!("{mine}/{b_team}"))
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+    h.user(alice)
+        .patch(
+            &format!("{mine}/{b_team}"),
+            json!({ "expectedVersion": 1, "name": "Pwned" }),
+        )
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+    h.user(alice)
+        .post(&format!("{mine}/{b_team}/archive"), json!({}))
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+    h.user(alice)
+        .get(&format!("{mine}/{b_team}/members"))
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+    // Another organization's membership (or user) cannot be placed in A's team.
+    h.user(alice)
+        .post(
+            &format!("{mine}/{a_team}/members"),
+            json!({ "membershipId": carol_m, "role": "TEAM_MEMBER" }),
+        )
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    h.user(alice)
+        .post(
+            &format!("{mine}/{a_team}/members"),
+            json!({ "userId": carol, "role": "TEAM_MEMBER" }),
+        )
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    // B's team member is not addressable through A's team.
+    h.user(alice)
+        .patch(
+            &format!("{mine}/{a_team}/members/{b_tm}"),
+            json!({ "expectedVersion": 1, "role": "TEAM_MANAGER" }),
+        )
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+    h.user(alice)
+        .post(&format!("{mine}/{a_team}/members/{b_tm}/remove"), json!({}))
+        .await
+        .expect_error(404, "TEAM_NOT_FOUND");
+
+    // The acting user cannot borrow another user's membership through the service reads.
+    h.user(alice)
+        .post(
+            "/internal/v1/organizations/scopes/resolve",
+            json!({ "organizationId": b_id, "userId": bob }),
+        )
+        .await
+        .expect_error(403, "PERMISSION_DENIED");
+    h.user(alice)
+        .post(
+            "/internal/v1/organizations/memberships/resolve",
+            json!({ "userId": bob }),
+        )
+        .await
+        .expect_error(403, "PERMISSION_DENIED");
+    h.user(alice)
+        .post(
+            "/internal/v1/organizations/authorization/evaluate",
+            json!({ "userId": bob, "organizationId": b_id, "capability": "organization.read" }),
+        )
+        .await
+        .expect_error(403, "PERMISSION_DENIED");
+    // Without a borrowed subject the actor is still only a non-member of B.
+    h.user(alice)
+        .post(
+            "/internal/v1/organizations/scopes/resolve",
+            json!({ "organizationId": b_id }),
+        )
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    let own = h
+        .user(alice)
+        .post(
+            "/internal/v1/organizations/memberships/resolve",
+            json!({ "userId": alice }),
+        )
+        .await;
+    let own = own.expect(200)["memberships"].as_array().unwrap().clone();
+    assert_eq!(own.len(), 1);
+    assert_eq!(own[0]["organizationId"], json!(a_id));
+
+    // Nothing of B changed.
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM organization_teams WHERE organization_id = '{b_id}'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_teams WHERE id = '{b_team}' AND name = 'Bravo team' AND status = 'ACTIVE' AND version = 1")).await, 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_team_members WHERE team_id = '{b_team}' AND status = 'ACTIVE'")).await, 1);
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_team_members WHERE id = '{b_tm}' AND role = 'TEAM_MEMBER' AND version = 1")).await, 1);
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM organization_team_members WHERE team_id = '{a_team}'"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(h.count(&format!("SELECT count(*) FROM organization_policies WHERE organization_id = '{b_id}' AND revision > 0")).await, 0);
+}
+
+#[tokio::test]
 async fn internal_authentication_refuses_replays_forged_actors_and_unknown_keys() {
     let Some(h) = Harness::new().await else {
         return;

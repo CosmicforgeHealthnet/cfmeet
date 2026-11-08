@@ -554,3 +554,87 @@ async fn capabilities_report_managed_messaging_apart_from_e2ee_readiness() {
     assert_eq!(managed.json["securityReady"], false);
     assert_eq!(managed.json["available"], false);
 }
+
+/// SEC-020: the Hub's relationship reads (`blocks/check`, `common-groups`) answer from
+/// the SIGNED governed scope only — principals of another environment named in the body
+/// have no block and no group in common there — and the relationship / event routes
+/// signed for an environment Communications does not govern are NOT_FOUND and write
+/// nothing.
+#[tokio::test]
+async fn relationship_reads_and_events_never_cross_environments() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    // The Communications inbox and revocation tables have their own migration history
+    // (`CommunicationsMigrator`); without them the "nothing was written" check below
+    // would hold trivially.
+    use messaging_migration::MigratorTrait as _;
+    messaging_migration::CommunicationsMigrator::up(h.conn(), None)
+        .await
+        .unwrap();
+    let c = h.first_party(true);
+    let other = h.first_party(true);
+    // Each environment: a GROUP of two and a block between them.
+    let mut pairs = Vec::new();
+    for customer in [&c, &other] {
+        let (_, people) = h.managed_group(customer, 2).await;
+        let r = h
+            .post(
+                customer,
+                Some(people[0]),
+                "/v1/messaging/blocks",
+                json!({ "principalId": people[1] }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        pairs.push((people[0], people[1]));
+    }
+    let ((ca, cb), (oa, ob)) = (pairs[0], pairs[1]);
+    govern(&mut h, &c);
+    let pair = |a: Uuid, b: Uuid| json!({ "actorPrincipalId": a, "targetPrincipalId": b });
+
+    // The governed scope sees its own relationship ...
+    let r = hub(&h, &c, ca, "blocks/check", pair(ca, cb)).await;
+    assert_eq!(r.json["blocked"], true, "{}", r.text);
+    let r = hub(&h, &c, ca, "common-groups", pair(ca, cb)).await;
+    assert_eq!(
+        r.json["groups"].as_array().map(Vec::len),
+        Some(1),
+        "{}",
+        r.text
+    );
+    // ... and nothing of the other environment's principals.
+    let r = hub(&h, &c, ca, "blocks/check", pair(oa, ob)).await;
+    assert_eq!(
+        (r.status, &r.json["blocked"]),
+        (StatusCode::OK, &json!(false)),
+        "{}",
+        r.text
+    );
+    let r = hub(&h, &c, ca, "common-groups", pair(oa, ob)).await;
+    assert_eq!(
+        (r.status, &r.json["groups"]),
+        (StatusCode::OK, &json!([])),
+        "{}",
+        r.text
+    );
+
+    // Signed for the environment Communications does not govern: NOT_FOUND, no write.
+    let event = json!({ "schemaVersion": 1, "eventId": Uuid::new_v4(), "aggregateId": Uuid::new_v4(),
+        "version": 1, "type": "communications.isolation", "data": { "principalId": ob, "credentialsNotBefore": 1 } });
+    for (route, body) in [
+        ("blocks/check", pair(oa, ob)),
+        ("common-groups", pair(oa, ob)),
+        ("events", event),
+    ] {
+        let r = hub(&h, &other, oa, route, body).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{route}: {}", r.text);
+    }
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_communication_inbox")
+            .await
+            + h.scalar("SELECT count(*) FROM messaging_communication_revocations")
+                .await,
+        0
+    );
+}

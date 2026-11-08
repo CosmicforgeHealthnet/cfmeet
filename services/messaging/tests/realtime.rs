@@ -1451,3 +1451,60 @@ async fn session_devices_answer_feature_disabled_when_switched_off() {
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
 }
+
+/// SEC-020: a session device is bound to its environment. Another tenant's first-party
+/// relay — even knowing the device id AND the account-session reference — cannot renew
+/// it (NOT_FOUND, like an unknown device) and its revocation by that reference ends
+/// nothing of this tenant's.
+#[tokio::test]
+async fn session_devices_never_cross_tenants() {
+    let Some(rt) = Rt::with_state(test_settings(), |s| s.devices.enabled = false).await else {
+        return;
+    };
+    let h = &rt.h;
+    let a = h.first_party(true);
+    let b = h.first_party(true);
+    let alice = h.principal(&a);
+    let mallory = h.principal(&b);
+    let binding = session_ref(0xd1);
+    let r = session_device(h, &a, alice, &binding, json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let device = uuid(&r.json["deviceId"]);
+    let active_sql = format!(
+        "SELECT count(*) FROM messaging_session_devices WHERE id = '{device}' AND status = 'ACTIVE'"
+    );
+
+    let r = session_device(
+        h,
+        &b,
+        mallory,
+        &binding,
+        json!({ "sessionDeviceId": device }),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::NOT_FOUND, "NOT_FOUND"),
+        "{}",
+        r.text
+    );
+    assert!(!r.text.contains(&device.to_string()), "{}", r.text);
+    let r = h
+        .post(
+            &b,
+            Some(mallory),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": binding }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["revokedSessionDevices"], 0, "{}", r.text);
+    assert_eq!(
+        h.scalar(&active_sql).await,
+        1,
+        "another tenant ended this session device"
+    );
+    // The owner's own renewal still works (the refusal above was scope, not validation).
+    let r = session_device(h, &a, alice, &binding, json!({ "sessionDeviceId": device })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+}

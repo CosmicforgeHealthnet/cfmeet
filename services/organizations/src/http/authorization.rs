@@ -28,6 +28,17 @@ use crate::{
     store,
 };
 
+/// SEC-020: a relayed acting user (only ever honoured from `organization.act-for-user`
+/// callers) may ask these reads about themselves only; a differing body `userId` is refused
+/// before any lookup, so the body can never substitute another user's membership for the
+/// actor's. Service reads without an actor keep naming the subject in the body.
+fn subject_is_actor(caller: &Caller, subject: Uuid) -> Result<(), ApiError> {
+    match caller.acting_user {
+        Some(actor) if actor != subject => Err(ApiError::new(ErrorCode::PermissionDenied)),
+        _ => Ok(()),
+    }
+}
+
 #[derive(Debug, FromQueryResult)]
 struct TeamContextRow {
     membership_id: Uuid,
@@ -92,6 +103,7 @@ pub async fn resolve(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationRead)?;
     let (req, _): (ResolveBody, Value) = parse(&body)?;
+    subject_is_actor(&caller, req.user_id)?;
     if req
         .organization_ids
         .as_ref()
@@ -170,6 +182,7 @@ pub async fn evaluate(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationRead)?;
     let (req, _): (EvaluateBody, Value) = parse(&body)?;
+    subject_is_actor(&caller, req.user_id)?;
     let capability = Capability::parse(&req.capability)
         .ok_or_else(|| ApiError::validation("capability is not a known capability"))?;
     let org = store::org(&state.db, req.organization_id, false).await?;
@@ -297,6 +310,9 @@ pub async fn resolve_scope(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationRead)?;
     let (req, _): (ScopeResolveBody, Value) = parse(&body)?;
+    if let Some(user) = req.user_id {
+        subject_is_actor(&caller, user)?;
+    }
     let capability = req
         .capability
         .as_deref()

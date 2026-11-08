@@ -129,7 +129,9 @@ fn format_datetime(dt: chrono::NaiveDateTime) -> String {
         ("bearer_auth" = [])
     )
 )]
-#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
+#[deprecated(
+    note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)"
+)]
 pub async fn create_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,
@@ -258,7 +260,9 @@ pub async fn list_webhooks(
         ("bearer_auth" = [])
     )
 )]
-#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
+#[deprecated(
+    note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)"
+)]
 pub async fn update_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,
@@ -327,7 +331,9 @@ pub async fn update_webhook(
         ("bearer_auth" = [])
     )
 )]
-#[deprecated(note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)")]
+#[deprecated(
+    note = "legacy meeting webhooks are never delivered; use Developer Platform webhooks (PLT-003)"
+)]
 pub async fn delete_webhook(
     State(state): State<AppState>,
     Extension(auth_context): Extension<AuthContext>,

@@ -815,3 +815,143 @@ async fn every_leg_state_pair_agrees_between_the_rust_graph_and_the_database() {
     // Both directions are exercised: allowed and refused pairs exist.
     assert!(table.iter().any(|(_, _, ok)| *ok) && table.iter().any(|(_, _, ok)| !*ok));
 }
+
+/// SEC-020: every internal leg / bridge / status route — not only originate — refuses a
+/// caller that is not Calling (another platform service, an untrusted signer, a customer
+/// key, no credential) before any lookup, and an existing leg is left untouched.
+#[tokio::test]
+async fn every_leg_bridge_and_status_route_refuses_callers_other_than_calling() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (leg, _) = h.originate().await;
+    let status_before = h.leg_status(leg).await;
+    let commands_before = h.scalar("SELECT count(*) FROM telephony_commands").await;
+    let bridges_before = h.scalar("SELECT count(*) FROM telephony_bridges").await;
+    let control = |key: &str| {
+        json!({
+            "schemaVersion": "1",
+            "commandId": Uuid::new_v4(),
+            "idempotencyKey": format!("sec020-{key}"),
+            "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+            "reason": "TEST",
+        })
+    };
+    let bridge = Uuid::new_v4();
+    let routes: Vec<(Method, String, Option<serde_json::Value>)> = vec![
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/terminate"),
+            Some(control("t")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/hold"),
+            Some(control("h")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/resume"),
+            Some(control("r")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/answer"),
+            Some(control("a")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/prompt"),
+            Some(control("p")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/capture"),
+            Some(control("c")),
+        ),
+        (
+            Method::POST,
+            format!("/internal/v1/legs/{leg}/capture-stop"),
+            Some(control("s")),
+        ),
+        (Method::GET, format!("/internal/v1/legs/{leg}"), None),
+        (
+            Method::POST,
+            "/internal/v1/bridges".to_string(),
+            Some(json!({
+                "schemaVersion": "1",
+                "commandId": Uuid::new_v4(),
+                "idempotencyKey": "sec020-bridge",
+                "correlationId": cf_service_auth::CorrelationId::generate().as_str(),
+                "callId": Uuid::new_v4(),
+                "kind": "APPLICATION_MEDIA",
+                "telephonyLegIds": [leg],
+            })),
+        ),
+        (Method::GET, format!("/internal/v1/bridges/{bridge}"), None),
+        (
+            Method::DELETE,
+            format!("/internal/v1/bridges/{bridge}"),
+            None,
+        ),
+        (
+            Method::GET,
+            "/internal/v1/routes/availability?country=NG&capability=VOICE_OUTBOUND".to_string(),
+            None,
+        ),
+        (Method::GET, "/internal/v1/readiness".to_string(), None),
+    ];
+    for (method, path, body) in routes {
+        for (who, signer) in [
+            ("privacy-relay", &h.ids.privacy_relay),
+            ("untrusted", &h.ids.untrusted),
+        ] {
+            let r = h
+                .send_as(
+                    signer,
+                    method.clone(),
+                    &path,
+                    Some(&h.consumer),
+                    body.clone(),
+                )
+                .await;
+            assert_eq!(
+                (r.status, r.code()),
+                (StatusCode::UNAUTHORIZED, "INTERNAL_AUTHENTICATION_FAILED"),
+                "{who} {method} {path}: {}",
+                r.text
+            );
+        }
+        let customer = h
+            .raw(
+                Request::builder().method(method.clone()).uri(&path).header(
+                    "authorization",
+                    "Bearer cfmk_live_0123456789abcdef0123456789abcdef",
+                ),
+                body.clone(),
+            )
+            .await;
+        assert_eq!(
+            customer.status,
+            StatusCode::UNAUTHORIZED,
+            "customer {method} {path}"
+        );
+        let anonymous = h
+            .raw(Request::builder().method(method.clone()).uri(&path), body)
+            .await;
+        assert_eq!(
+            anonymous.status,
+            StatusCode::UNAUTHORIZED,
+            "anonymous {method} {path}"
+        );
+    }
+    assert_eq!(h.leg_status(leg).await, status_before);
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM telephony_commands").await,
+        commands_before
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM telephony_bridges").await,
+        bridges_before
+    );
+}

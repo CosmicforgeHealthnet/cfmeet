@@ -186,3 +186,63 @@ async fn lists_are_keyset_paginated_and_filtered() {
         );
     }
 }
+
+/// SEC-020: the lifecycle transitions not exercised above (resume a context; suspend and
+/// resume a session) are the same 404 for a foreign tenant, application or environment as
+/// for a missing id, and leave the owner's rows untouched.
+#[tokio::test]
+async fn foreign_resume_and_session_suspension_look_nonexistent_and_change_nothing() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let owner = Consumer::new(Kind::Production);
+    let [a, b] = principals(2).try_into().unwrap();
+    let ctx = h.bidirectional(&owner, &[a, b]).await;
+    let id = ctx["contextId"].as_str().unwrap().to_string();
+    let sid = h.app_session(&owner, &id).await["relaySessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let session_before = h.get(&format!("/internal/v1/sessions/{sid}"), &owner).await;
+    assert_eq!(session_before.status, StatusCode::OK);
+    let missing = uuid::Uuid::new_v4().to_string();
+    let other_tenant = Consumer::new(Kind::Production);
+    let other_app = Consumer {
+        application_id: uuid::Uuid::new_v4(),
+        ..owner.clone()
+    };
+    let other_env = owner.sibling_environment();
+    for (who, foreign) in [
+        ("tenant", &other_tenant),
+        ("application", &other_app),
+        ("environment", &other_env),
+    ] {
+        for (template, key) in [
+            ("/internal/v1/contexts/{c}/resume", "r1"),
+            ("/internal/v1/sessions/{s}/suspend", "r2"),
+            ("/internal/v1/sessions/{s}/resume", "r3"),
+        ] {
+            let body = json!({ "idempotencyKey": key, "request": { "expectedVersion": 1 } });
+            let real = template.replace("{c}", &id).replace("{s}", &sid);
+            let fake = template.replace("{c}", &missing).replace("{s}", &missing);
+            let theirs = h
+                .call(Method::POST, &real, foreign, Some(body.clone()))
+                .await;
+            let none = h.call(Method::POST, &fake, foreign, Some(body)).await;
+            assert_eq!(theirs.status, StatusCode::NOT_FOUND, "{who} {template}");
+            assert_eq!(
+                theirs.normalized_error(),
+                none.normalized_error(),
+                "{who} {template}"
+            );
+        }
+    }
+    let mine = h.get(&format!("/internal/v1/contexts/{id}"), &owner).await;
+    assert_eq!(
+        (mine.json["version"].as_i64(), mine.json["status"].as_str()),
+        (Some(1), Some("ACTIVE"))
+    );
+    let session_after = h.get(&format!("/internal/v1/sessions/{sid}"), &owner).await;
+    assert_eq!(session_after.json, session_before.json);
+    assert_eq!(h.reason(&owner, &sid, a, &[b]).await, "AUTHORIZED");
+}

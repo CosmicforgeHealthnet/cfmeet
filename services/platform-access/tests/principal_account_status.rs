@@ -127,3 +127,38 @@ async fn account_status_is_mirrored_idempotently_and_reversibly() {
         );
     }
 }
+
+/// SEC-020: the mirror finds the principal ONLY inside the signed delegated environment;
+/// another first-party scope naming the same external reference cannot change it.
+#[tokio::test]
+async fn another_scope_never_mirrors_this_scopes_principal() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let mine = h
+        .consumer("cfmeet", "FIRST_PARTY", &["messages.send"])
+        .await;
+    let theirs = h
+        .consumer("cfmeet-other", "FIRST_PARTY", &["messages.send"])
+        .await;
+    let reference = "cfmeet-user:9a7b3c";
+    let ensured = h
+        .call(
+            &h.peers.meeting,
+            Method::POST,
+            "/internal/v1/principals/ensure",
+            Some(json!({ "kind": "NATIVE_CF_USER", "externalReference": reference })),
+            Some(mine.delegated("TEST")),
+            None,
+        )
+        .await;
+    assert_eq!(ensured.status, StatusCode::OK, "{}", ensured.body);
+    let foreign = mirror(&h, &theirs, reference, "SUSPENDED").await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND, "{}", foreign.body);
+    assert_eq!(foreign.code(), "NOT_FOUND");
+    // Still ACTIVE in its own scope (mirroring ACTIVE changes nothing).
+    let own = mirror(&h, &mine, reference, "ACTIVE").await;
+    assert_eq!(own.status, StatusCode::OK, "{}", own.body);
+    assert_eq!(own.body["changed"], false, "{}", own.body);
+    assert_eq!(own.body["principal"]["status"], "ACTIVE");
+}
