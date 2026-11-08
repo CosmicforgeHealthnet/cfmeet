@@ -6,7 +6,7 @@ mod common;
 
 use std::{
     io::Write,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use axum::http::{Method, StatusCode};
@@ -16,7 +16,6 @@ use cf_service_auth::{
 };
 use common::{scalar_i64, secret_part, Harness, TestResponse};
 use serde_json::{json, Value};
-use tracing::instrument::WithSubscriber;
 use tracing_subscriber::{fmt::MakeWriter, layer::SubscriberExt};
 
 fn signed_headers(
@@ -355,21 +354,37 @@ impl<'a> MakeWriter<'a> for Capture {
     }
 }
 
-#[tokio::test]
-async fn service_tokens_never_reach_logs_or_responses() {
-    let Some(h) = Harness::new().await else {
-        return;
-    };
-    let capture = Capture::default();
-    let dispatcher = tracing::Dispatch::new(
-        tracing_subscriber::registry().with(
+/// One process-wide capture subscriber for this test binary.
+///
+/// A scoped dispatcher (`Dispatch::new` + `with_subscriber`) is not reliable here:
+/// while it is the only live dispatcher, tracing-core resolves callsite interest
+/// against the *registering thread's* default. Tests running on other threads that
+/// reach the same `warn!` first cache `Interest::never` for it, and any
+/// `rebuild_interest_cache()` from outside the scope sets the global max level to
+/// OFF. A global default is seen by every thread, so interest stays consistent.
+fn global_log_capture() -> &'static Capture {
+    static CAPTURE: OnceLock<Capture> = OnceLock::new();
+    CAPTURE.get_or_init(|| {
+        let capture = Capture::default();
+        let subscriber = tracing_subscriber::registry().with(
             tracing_subscriber::fmt::layer()
                 .json()
                 .with_current_span(true)
                 .with_span_list(true)
                 .with_writer(capture.clone()),
-        ),
-    );
+        );
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("no other global subscriber in the internal_auth test binary");
+        capture
+    })
+}
+
+#[tokio::test]
+async fn service_tokens_never_reach_logs_or_responses() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let capture = global_log_capture();
     let good = to_calling(&h.peers.telephony);
     let token = good
         .iter()
@@ -384,27 +399,26 @@ async fn service_tokens_never_reach_logs_or_responses() {
             *v = format!("{}x", v);
         }
     }
-    // Other tests in this binary hit the same rejection log concurrently with no
-    // subscriber. If that first registration races with Dispatch::new, tracing can
-    // cache "nobody listens" for the callsite and drop our event. Register the
-    // callsite before capturing, then rebuild the interest cache with the capture
-    // dispatcher live.
-    let _warm = call(&h, Method::GET, "/internal/v1/test/caller", &bad).await;
-    tracing::callsite::rebuild_interest_cache();
-    // Enter the capture dispatcher on every async poll. A thread-local guard
-    // held across await can lose events when the runtime resumes another task.
-    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good)
-        .with_subscriber(dispatcher.clone())
-        .await;
-    let rejected = call(&h, Method::GET, "/internal/v1/test/caller", &bad)
-        .with_subscriber(dispatcher)
-        .await;
+    let bad_request_id = bad
+        .iter()
+        .find(|(k, _)| k == "x-cf-request-id")
+        .unwrap()
+        .1
+        .clone();
+    let ok = call(&h, Method::GET, "/internal/v1/test/caller", &good).await;
+    let rejected = call(&h, Method::GET, "/internal/v1/test/caller", &bad).await;
     assert_eq!(rejected.status, StatusCode::UNAUTHORIZED);
 
+    // The buffer holds every test's logs; find the line for this rejected request.
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
-    assert!(logs.contains("internal service authentication rejected"));
+    let line = logs
+        .lines()
+        .find(|l| {
+            l.contains("internal service authentication rejected") && l.contains(&bad_request_id)
+        })
+        .expect("the rejection is logged with the presented request id");
     assert!(
-        logs.contains("telephony-test-1"),
+        line.contains("telephony-test-1"),
         "kid is safe operator telemetry"
     );
     for haystack in [&logs, &ok.text, &rejected.text] {
