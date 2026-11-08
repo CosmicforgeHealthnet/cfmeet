@@ -1,6 +1,6 @@
 # Section 18: journey certification matrix (J-01 to J-22)
 
-Baseline: `staging` = `8d7b99a3`. Its code is the same as `6105347d`: `git diff 6105347d 8d7b99a3` changes only `docs/implementation/*`. Runs on `6105347d` therefore count as evidence for this tree. Every test name below was checked with grep in the source. Each one was also found as `test <name> ... ok` in the log of the run cited (job name given). No cited test printed `SKIPPED` in that run, except where this document says so.
+Baseline: `staging` = `ccb7caa9` (Section 17 web account, mobile, Developer Portal, web calling and web meetings merged; Unified Messaging browser journey and Enterprise SIP connect race fixed). Every run below is on that exact SHA (push matrix, plus dispatched Communications Hub, backup drill and Phase 2 certification). The first edition of this matrix used `8d7b99a3`; every citation was re-read in the new logs: each named test appears as `test <name> ... ok`, no cited run printed `SKIPPED` except where stated. The SEC-020 isolation tests listed at the end ran on `blueprint/s18-certification` and on the merged tree `blueprint/s18-integration`.
 
 Verdict rules used:
 - **PASS**: the blueprint's minimum backend proof runs in CI on real owner processes or a real owner DB, with no fake standing in for another service.
@@ -15,50 +15,50 @@ Browser, mobile and physical-device parts belong to Section 17 and are listed as
 
 | Workflow (file) | Job(s) used | Run | SHA | Result |
 |---|---|---|---|---|
-| Part VI cross-service certification (`certification.yml`) | `journeys (real processes, real service auth, Postgres, Redis)`; `SDK parity (TypeScript + Dart against the real stack)` | 42467223759 | 8d7b99a3 | success (27 journeys ok, 0 SKIPPED; SDK parity TS 18/18 and Dart 18/18, 0 skipped) |
-| Communications Hub foundation (`communications-hub.yml`) | `hub`; `real-services` (runs `personal_communications` with `--features personal-communications-e2e`) | 42448888276 | 6105347d | success (path-filtered; not triggered on 8d7b99a3) |
-| Communications end-to-end journeys (`communications-e2e.yml`) | `SMS + voice journeys (real processes, SIP edge, LiveKit)` | 42467223929 | 8d7b99a3 | success |
-| Unified Messaging integration journeys (`unified-messaging-e2e.yml`) | `Meeting ↔ Messaging ↔ Platform Access (real processes)`; `Web Messaging client in Chromium (real services)`; `Privacy Relay / SMS Gateway / Calling ↔ Messaging (real processes)` | 42467223754 | 8d7b99a3 | success |
-| Enterprise calling certification (`enterprise-calling-certification.yml`) | `Enterprise SIP (Calling + Telephony + Asterisk + SIPp)`; `Enterprise races and burst invariants (5 repetitions)` | 42467223863 | 8d7b99a3 | **failure**: SIP job only (see J-12). Same workflow passed on c3056355 (42448983409) and 6105347d (42448888316) |
-| Calling RTC certification (`calling-rtc-certification.yml`) | `real LiveKit certification` | 42467223733 | 8d7b99a3 | success; **RTC Egress capture SKIPPED** (`CALLING_RTC_CERT_EGRESS_*` not configured) |
-| Meeting service (`backend.yml`) | `test / v2 operation coverage`; `build / migration smoke / OpenAPI` | 42467223708 | 8d7b99a3 | success |
-| Organizations service (`organizations.yml`) | `test (PostgreSQL)` | 42467223643 | 8d7b99a3 | success |
-| Calling service (`calling.yml`) | `test (PostgreSQL)` | 42467223773 | 8d7b99a3 | success |
-| Messaging (`messaging.yml`) | `service test (PostgreSQL, Redis, MinIO, ClamAV, real Platform Access)` | 42467223790 | 8d7b99a3 | success |
-| Contracts and service auth (`contracts.yml`) | `contracts validate`; `Swagger UI renders every bundle (Chromium, schema host blocked)` | 42467223730 | 8d7b99a3 | success |
-| Service boundaries (`service-boundaries.yml`) | `service boundary guard` | 42467223771 | 8d7b99a3 | success |
-| API Gateway service (`api-gateway.yml`) | `integration (real Platform Access + Developer Platform)` | 42467223725 | 8d7b99a3 | success |
-| Telephony (`telephony.yml`) | `test (PostgreSQL)` | 42467223746 | 8d7b99a3 | success |
-| SMS Gateway (`sms-gateway.yml`) | tests | 42467223709 | 8d7b99a3 | success |
-| Backup and restore drill (`backup-restore-drill.yml`) | `backup → encrypt → off-host copy → decrypt → restore → verify` | 42448888278 | 6105347d | success (path-filtered) |
-| Phase 2 backend certification (`phase2-backend-certification.yml`) | `Real LiveKit + WebRTC + Egress + S3 certification`; full suite | 42448888408 | 6105347d | success (path-filtered) |
+| Part VI cross-service certification (`certification.yml`) | `journeys (real processes, real service auth, Postgres, Redis)`; `SDK parity (TypeScript + Dart against the real stack)` | 42513828488 | ccb7caa9 | success (journey suites 31 tests ok, 0 FAILED, 0 SKIPPED; SDK parity TS 18/18 and Dart 18/18, 0 skipped) |
+| Communications Hub foundation (`communications-hub.yml`) | `hub`; `real-services` (runs `personal_communications` with `--features personal-communications-e2e`) | 42513840523 | ccb7caa9 | success (dispatched) |
+| Communications end-to-end journeys (`communications-e2e.yml`) | `SMS + voice journeys (real processes, SIP edge, LiveKit)` | 42513828469 | ccb7caa9 | success |
+| Unified Messaging integration journeys (`unified-messaging-e2e.yml`) | `Meeting ↔ Messaging ↔ Platform Access (real processes)`; `Web Messaging client in Chromium (real services)`; `Privacy Relay / SMS Gateway / Calling ↔ Messaging (real processes)` | 42513828468 | ccb7caa9 | success |
+| Enterprise calling certification (`enterprise-calling-certification.yml`) | `Enterprise SIP (Calling + Telephony + Asterisk + SIPp)`; `Enterprise races and burst invariants (5 repetitions)` | 42513828419, 42513822078 | ccb7caa9 | success, both jobs, twice; all six SIP scenarios certified in each (was failing on 8d7b99a3 and 964362de; root cause fixed, see J-12) |
+| Calling RTC certification (`calling-rtc-certification.yml`) | `real LiveKit certification` | 42513828388 | ccb7caa9 | success; **RTC Egress capture SKIPPED** (`CALLING_RTC_CERT_EGRESS_*` not configured) |
+| Meeting service (`backend.yml`) | `test / v2 operation coverage`; `build / migration smoke / OpenAPI` | 42513828422 | ccb7caa9 | success |
+| Organizations service (`organizations.yml`) | `test (PostgreSQL)` | 42513828522 | ccb7caa9 | success |
+| Calling service (`calling.yml`) | `test (PostgreSQL)` | 42513828525 | ccb7caa9 | success |
+| Messaging (`messaging.yml`) | `service test (PostgreSQL, Redis, MinIO, ClamAV, real Platform Access)` | 42513828427 | ccb7caa9 | success |
+| Contracts and service auth (`contracts.yml`) | `contracts validate`; `Swagger UI renders every bundle (Chromium, schema host blocked)` | 42513828418 | ccb7caa9 | success |
+| Service boundaries (`service-boundaries.yml`) | `service boundary guard` | 42513828465 | ccb7caa9 | success |
+| API Gateway service (`api-gateway.yml`) | `integration (real Platform Access + Developer Platform)` | 42513828369 | ccb7caa9 | success |
+| Telephony (`telephony.yml`) | `test (PostgreSQL)` | 42513828484 | ccb7caa9 | success |
+| SMS Gateway (`sms-gateway.yml`) | tests | 42513828350 | ccb7caa9 | success |
+| Backup and restore drill (`backup-restore-drill.yml`) | `backup → encrypt → off-host copy → decrypt → restore → verify` | 42513835668 | ccb7caa9 | success (dispatched) |
+| Phase 2 backend certification (`phase2-backend-certification.yml`) | `Real LiveKit + WebRTC + Egress + S3 certification`; full suite | 42513837876 | ccb7caa9 | success (dispatched) |
 
 ## Summary
 
 | J | Title | Verdict | Primary tests | Workflow / run | Planned |
 |---|---|---|---|---|---|
-| J-01 | Personal account: register, verify, Google, refresh, recovery, revocation | PARTIAL | `meeting-service/tests/account_security.rs::*`, `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services` | Meeting 42467223708; Hub 42448888276 | — |
-| J-02 | Contacts via CF Meet ID / QR, consent, block, no phone leak | PARTIAL | `personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services` | Hub 42448888276 | — |
-| J-03 | Verified phone | EXTERNAL_BLOCKED | `meeting-service/tests/profile_notifications.rs::s9_profile_reads_updates_clears_and_validates` | Meeting 42467223708; Hub 42448888276 | — |
-| J-04 | Create organization + owner, one UUID, createdAt/By, truthful provisioning | PARTIAL | `organizations/tests/journey.rs::organization_lifecycle_journey`, `certification/tests/organizations_provisioning.rs::organizations_provision_first_party_scopes_through_the_real_platform_access` | Orgs 42467223643; Part VI 42467223759 | yes |
-| J-05 | Invite + accept, email-bound, workspace list | PARTIAL | `journey.rs::organization_lifecycle_journey`, `organizations_authority.rs::s8_authoritative_workspaces_role_status_and_isolation_matrix` (fake Orgs) | Orgs 42467223643; Meeting 42467223708 | yes |
-| J-06 | Two organizations, overlapping users, isolation, roles, teams | PARTIAL | `organizations/tests/authorization.rs::a_member_of_one_organization_cannot_see_or_change_another`, `policies.rs::the_role_resource_matrix_holds_for_every_status_and_organization`, `teams.rs::*` | Orgs 42467223643 | yes |
-| J-07 | Organization meeting space + calendar | PARTIAL | `meeting-service/tests/meetings_calendar.rs::cal01..cal16`, `recurrence_exceptions.rs::*`, `profile_notifications.rs::s11_*` | Meeting 42467223708 | — |
-| J-08 | Guest healthcare consent / pre-join | PARTIAL | `collab_api.rs::prejoin_consent_and_display_name`, `profiles_h.rs::h_e2e_15_healthcare_waiting_room_default` | Meeting 42467223708 | — |
-| J-09 | Personal direct/group messaging, replay after offline | PASS (backend) | `personal_communications.rs::native_contacts_exchange_opaque_mls_messages_and_block_alternate_devices` | Hub 42448888276 | — |
+| J-01 | Personal account: register, verify, Google, refresh, recovery, revocation | PARTIAL | `meeting-service/tests/account_security.rs::*`, `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services` | Meeting 42513828422; Hub 42513840523 | — |
+| J-02 | Contacts via CF Meet ID / QR, consent, block, no phone leak | PARTIAL | `personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services` | Hub 42513840523 | — |
+| J-03 | Verified phone | EXTERNAL_BLOCKED | `meeting-service/tests/profile_notifications.rs::s9_profile_reads_updates_clears_and_validates` | Meeting 42513828422; Hub 42513840523 | — |
+| J-04 | Create organization + owner, one UUID, createdAt/By, truthful provisioning | PARTIAL | `organizations/tests/journey.rs::organization_lifecycle_journey`, `certification/tests/organizations_provisioning.rs::organizations_provision_first_party_scopes_through_the_real_platform_access` | Orgs 42513828522; Part VI 42513828488 | yes |
+| J-05 | Invite + accept, email-bound, workspace list | PARTIAL | `journey.rs::organization_lifecycle_journey`, `organizations_authority.rs::s8_authoritative_workspaces_role_status_and_isolation_matrix` (fake Orgs) | Orgs 42513828522; Meeting 42513828422 | yes |
+| J-06 | Two organizations, overlapping users, isolation, roles, teams | PARTIAL | `organizations/tests/authorization.rs::a_member_of_one_organization_cannot_see_or_change_another`, `policies.rs::the_role_resource_matrix_holds_for_every_status_and_organization`, `teams.rs::*` | Orgs 42513828522 | yes |
+| J-07 | Organization meeting space + calendar | PARTIAL | `meeting-service/tests/meetings_calendar.rs::cal01..cal16`, `recurrence_exceptions.rs::*`, `profile_notifications.rs::s11_*` | Meeting 42513828422 | — |
+| J-08 | Guest healthcare consent / pre-join | PARTIAL | `collab_api.rs::prejoin_consent_and_display_name`, `profiles_h.rs::h_e2e_15_healthcare_waiting_room_default` | Meeting 42513828422 | — |
+| J-09 | Personal direct/group messaging, replay after offline | PASS (backend) | `personal_communications.rs::native_contacts_exchange_opaque_mls_messages_and_block_alternate_devices` | Hub 42513840523 | — |
 | J-10 | Organization messaging + offboarding realtime revocation | NOT_COVERED | — | — | — |
-| J-11 | Personal voice/video: ring, answer, media, hold, end, history | PARTIAL | `calling/tests/rtc_certification.rs::real_livekit_certification`, `app_control.rs::hold_and_resume_are_enforced_at_the_provider`, `call_history.rs::*` | RTC 42467223733; Calling 42467223773 | — |
-| J-12 | Organization enterprise calling, two scopes, actor audit, recording consent | PARTIAL | `calling/tests/organization_forwarding.rs::*`, `organizations_authority.rs::s12_organization_calling_*` (fake Orgs), `enterprise_recording.rs::consent_is_each_participants_own_and_bound_to_the_call` | Calling 42467223773; Meeting 42467223708; Enterprise 42467223863 (**failure, intermittent**) | — |
-| J-13 | Device / session compromise | PASS (backend) | `personal_communications.rs::hub_facades_device_sessions_and_revocation_fan_out_across_real_owners`, `account_security.rs::*`, `session_bridge.rs::*` | Hub 42448888276; Meeting 42467223708 | — |
-| J-14 | Organization suspension / recovery across Meetings, Calling, Messaging, Hub | PARTIAL | `organizations_provisioning.rs::organizations_provision_first_party_scopes_through_the_real_platform_access`, `organizations_authority.rs::s12_*` (fake Orgs) | Part VI 42467223759; Meeting 42467223708 | yes |
-| J-15 | Developer API customer journey | PASS | `certification/tests/journeys.rs::external_developer_sandbox_journey`, `chapters_10_13.rs::external_onboarding_to_production_journey`, `journeys.rs::production_approval_journey` | Part VI 42467223759 | — |
-| J-16 | Gateway negative scope / tenant tests | PASS | `journeys.rs::tenant_isolation_journey`, `journeys.rs::first_party_product_journey`, `journeys.rs::credential_revocation_journey` | Part VI 42467223759 | — |
-| J-17 | Migration shadow / cutover / rollback | PARTIAL | `organizations/tests/import.rs::*`, `organizations_authority.rs::s4_shadow_mode_answers_from_legacy_and_counts_mismatches` (fake Orgs), `certification/tests/usage_migration.rs::usage_migration_rehearsal_journey` | Orgs 42467223643; Part VI 42467223759 | yes |
-| J-18 | Encrypted backup + isolated restore of every service DB | PARTIAL | `infra/deployment/backup/tests/ci-drill.sh` | Backup drill 42448888278 | — |
-| J-19 | Duplicate events, outage recovery, idempotent sagas, outbox replay, dead letter | PARTIAL | `webhooks.rs::webhook_failure_and_replay_journey`, `messaging/tests/cross_service_e2e.rs::*`, `communications/tests/foundation.rs::durable_outbox_leases_deliver_concurrently_and_dead_events_replay_by_scoped_operator` | Part VI; Unified 42467223754; Hub 42448888276 | possibly |
-| J-20 | Client contract + Swagger parity | PASS (backend) | `meeting-service/tests/openapi_contract.rs::*`, contracts validate, Swagger render, SDK parity | Contracts 42467223730; Part VI 42467223759 | — |
-| J-21 | E2EE gate fails closed | PASS | `messaging/src/config/mod.rs::tests::e2ee_device_operations_need_an_explicit_decision_in_staging_and_never_run_in_production`, `messaging/tests/devices.rs::e2ee_device_operations_can_be_disabled_by_deployment` | Messaging 42467223790 | — |
-| J-22 | Push / phone / PSTN reported truthfully | EXTERNAL_BLOCKED | `messaging/tests/communications_owner.rs::push_status_reports_not_configured_and_never_echoes_the_handle`, `sms-gateway/tests/outbound.rs::sending_needs_sms_send_and_a_configured_provider`, `telephony/tests/real_interconnect_certification.rs::real_lawful_interconnect_certification` | Messaging 42467223790; SMS 42467223709; Telephony 42467223746; Hub 42448888276 | — |
+| J-11 | Personal voice/video: ring, answer, media, hold, end, history | PARTIAL | `calling/tests/rtc_certification.rs::real_livekit_certification`, `app_control.rs::hold_and_resume_are_enforced_at_the_provider`, `call_history.rs::*` | RTC 42513828388; Calling 42513828525 | — |
+| J-12 | Organization enterprise calling, two scopes, actor audit, recording consent | PARTIAL | `calling/tests/organization_forwarding.rs::*`, `organizations_authority.rs::s12_organization_calling_*` (fake Orgs), `enterprise_recording.rs::consent_is_each_participants_own_and_bound_to_the_call` | Calling 42513828525; Meeting 42513828422; Enterprise 42467223863 (**failure, intermittent**) | — |
+| J-13 | Device / session compromise | PASS (backend) | `personal_communications.rs::hub_facades_device_sessions_and_revocation_fan_out_across_real_owners`, `account_security.rs::*`, `session_bridge.rs::*` | Hub 42513840523; Meeting 42513828422 | — |
+| J-14 | Organization suspension / recovery across Meetings, Calling, Messaging, Hub | PARTIAL | `organizations_provisioning.rs::organizations_provision_first_party_scopes_through_the_real_platform_access`, `organizations_authority.rs::s12_*` (fake Orgs) | Part VI 42513828488; Meeting 42513828422 | yes |
+| J-15 | Developer API customer journey | PASS | `certification/tests/journeys.rs::external_developer_sandbox_journey`, `chapters_10_13.rs::external_onboarding_to_production_journey`, `journeys.rs::production_approval_journey` | Part VI 42513828488 | — |
+| J-16 | Gateway negative scope / tenant tests | PASS | `journeys.rs::tenant_isolation_journey`, `journeys.rs::first_party_product_journey`, `journeys.rs::credential_revocation_journey` | Part VI 42513828488 | — |
+| J-17 | Migration shadow / cutover / rollback | PARTIAL | `organizations/tests/import.rs::*`, `organizations_authority.rs::s4_shadow_mode_answers_from_legacy_and_counts_mismatches` (fake Orgs), `certification/tests/usage_migration.rs::usage_migration_rehearsal_journey` | Orgs 42513828522; Part VI 42513828488 | yes |
+| J-18 | Encrypted backup + isolated restore of every service DB | PARTIAL | `infra/deployment/backup/tests/ci-drill.sh` | Backup drill 42513835668 | — |
+| J-19 | Duplicate events, outage recovery, idempotent sagas, outbox replay, dead letter | PARTIAL | `webhooks.rs::webhook_failure_and_replay_journey`, `messaging/tests/cross_service_e2e.rs::*`, `communications/tests/foundation.rs::durable_outbox_leases_deliver_concurrently_and_dead_events_replay_by_scoped_operator` | Part VI; Unified 42513828468; Hub 42513840523 | possibly |
+| J-20 | Client contract + Swagger parity | PASS (backend) | `meeting-service/tests/openapi_contract.rs::*`, contracts validate, Swagger render, SDK parity | Contracts 42513828418; Part VI 42513828488 | — |
+| J-21 | E2EE gate fails closed | PASS | `messaging/src/config/mod.rs::tests::e2ee_device_operations_need_an_explicit_decision_in_staging_and_never_run_in_production`, `messaging/tests/devices.rs::e2ee_device_operations_can_be_disabled_by_deployment` | Messaging 42513828427 | — |
+| J-22 | Push / phone / PSTN reported truthfully | EXTERNAL_BLOCKED | `messaging/tests/communications_owner.rs::push_status_reports_not_configured_and_never_echoes_the_handle`, `sms-gateway/tests/outbound.rs::sending_needs_sms_send_and_a_configured_provider`, `telephony/tests/real_interconnect_certification.rs::real_lawful_interconnect_certification` | Messaging 42513828427; SMS 42513828350; Telephony 42513828484; Hub 42513840523 | — |
 
 Paths in the table are relative to `services/` unless they start with `certification/` or `infra/`.
 
@@ -81,7 +81,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/meeting-service/tests/profile_notifications.rs::s9_profile_reads_updates_clears_and_validates`
   - `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services`, which covers real register, login, refresh, logout and durable logout
   - Every Part VI journey also registers, verifies the email (OTP read from Redis) and logs in through the real Meeting Service (`certification/src/provision.rs`).
-- **Workflow & run**: Meeting 42467223708 (`test / v2 operation coverage`); Hub 42448888276 (`real-services`); Part VI 42467223759.
+- **Workflow & run**: Meeting 42513828422 (`test / v2 operation coverage`); Hub 42513840523 (`real-services`); Part VI 42513828488.
 - **Proves**
   - Typed tokens, refresh rotation, and refresh reuse ending the whole session.
   - A password change revokes every token on both the v1 and v2 ingresses.
@@ -107,7 +107,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `::blocking_and_domain_blocks_are_immediate_and_unblocking_never_reconnects`
     - `::public_id_rotation_invalidates_old_identity_and_invitations_without_remapping`
     - `::concurrent_lazy_activation_keeps_one_stable_account_and_principal_without_phone`
-- **Workflow & run**: Hub 42448888276 (`real-services`, `hub`).
+- **Workflow & run**: Hub 42513840523 (`real-services`, `hub`).
 - **Proves** (real Account, PA, Hub, Calling and Messaging processes)
   - Invite resolution returns the CF Meet ID with `relationship: NONE`, and no `principalId` or `email`.
   - Contacts, aliases and common groups work.
@@ -123,7 +123,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
 - **Tests**
   - `services/meeting-service/tests/profile_notifications.rs::s9_profile_reads_updates_clears_and_validates`: asserts `phoneVerification.status == "PROVIDER_BLOCKED"` and `required == false`.
   - `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services`: the Hub asserts `phoneVerification.status == "DEFERRED"`.
-- **Workflow & run**: Meeting 42467223708; Hub 42448888276.
+- **Workflow & run**: Meeting 42513828422; Hub 42513840523.
 - **Proves**: phone verification is never required and is reported as unavailable. No SMS provider is configured.
 - **Blueprint minimum**: phone verification correctly labelled `PROVIDER_BLOCKED` while no provider exists.
 - **Gap**
@@ -140,7 +140,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/organizations/tests/provisioning.rs::two_organizations_get_distinct_triples_ready_only_after_server_side_verification`
   - `certification/tests/organizations_provisioning.rs::organizations_provision_first_party_scopes_through_the_real_platform_access`
   - `services/meeting-service/tests/organizations_authority.rs::s4_every_first_party_route_relays_in_authoritative_mode` (fake Organizations)
-- **Workflow & run**: Orgs 42467223643 (`test (PostgreSQL)`); Part VI 42467223759 (`journeys`); Meeting 42467223708.
+- **Workflow & run**: Orgs 42513828522 (`test (PostgreSQL)`); Part VI 42513828488 (`journeys`); Meeting 42513828422.
 - **Proves**
   - The Organizations router, with real service tokens and its own DB, creates the organization and its owner with `createdBy`.
   - Provisioning stays PENDING while disabled and is reported truthfully.
@@ -158,7 +158,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/meeting-service/tests/organizations_authority.rs::s4_member_facades_relay_existing_members_and_require_invitations`
   - `organizations_authority.rs::s8_authoritative_workspaces_role_status_and_isolation_matrix`
   - `organizations_authority.rs::s11_organization_invitation_email_from_the_authoritative_answer` (all three Meeting tests use a fake Organizations)
-- **Workflow & run**: Orgs 42467223643; Meeting 42467223708.
+- **Workflow & run**: Orgs 42513828522; Meeting 42513828422.
 - **Proves**: email-bound, single-use, hashed invitations in the Organizations owner. The Meeting workspace list and invitation email are built from Organizations-shaped answers.
 - **Blueprint minimum**: invite → accept by the invited account → workspace list shows the organization, across real Meeting and Organizations.
 - **Gap**: no real-process composition. Invite and accept UI is Section 17.
@@ -175,7 +175,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `teams.rs::team_roles_never_self_escalate_and_follow_the_organization_role`
   - `services/meeting-service/tests/organizations_authority.rs::s8_authoritative_workspaces_role_status_and_isolation_matrix` (fake Organizations)
   - `services/meeting-service/tests/meetings_calendar.rs::cal03_organization_filter_member_vs_outsider`
-- **Workflow & run**: Orgs 42467223643; Meeting 42467223708.
+- **Workflow & run**: Orgs 42513828522; Meeting 42513828422.
 - **Proves**: the role × status × two-organization matrix, cross-org read and write denial, and team isolation inside the Organizations owner.
 - **Blueprint minimum**: the same user holds different roles in two organizations, and is denied cross-org on every consumer (Meetings, Calling, workspaces) in real processes.
 - **Gap**: consumer enforcement is proven only against a fake Organizations.
@@ -197,7 +197,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/meeting-service/tests/recurrence_exceptions.rs::rx01_far_future_exceptions_applied_by_scheduler_across_dst`
   - `services/meeting-service/tests/profile_notifications.rs::s11_reminders_once_per_start_respect_preferences_and_retry_on_unknown_preferences` and `::s11_reschedule_and_cancel_notices_are_durable_once_and_exclude_the_actor`
   - `services/meeting-service/tests/organizations_authority.rs::s12_organization_meeting_creation_follows_the_capabilities_read` (fake Organizations)
-- **Workflow & run**: Meeting 42467223708.
+- **Workflow & run**: Meeting 42513828422.
 - **Proves**: calendar, time-zone, DST, recurrence, reschedule, ICS and reminder rules in the owner service against real Postgres. Organization-policy gating of space creation is tested against a fake Organizations.
 - **Blueprint minimum**: an organization space created under real organization authority, then the full calendar chain.
 - **Gap**
@@ -217,7 +217,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `::h_f05_healthcare_adapter_unavailable_fails_closed`
   - `services/meeting-service/tests/recording_g.rs::g_e2e_06_missing_consent_blocks_provider_start`
   - `services/meeting-service/tests/livekit_certification.rs::real_livekit_m_waiting_subscription_ban` (real LiveKit)
-- **Workflow & run**: Meeting 42467223708; Phase 2 42448888408 (`Real LiveKit + WebRTC + Egress + S3 certification`).
+- **Workflow & run**: Meeting 42513828422; Phase 2 42513837876 (`Real LiveKit + WebRTC + Egress + S3 certification`).
 - **Proves**
   - Pre-join refuses with `CONSENT_REQUIRED` until consent is given.
   - Healthcare forces a waiting room, scopes the guest token, and fails closed when the clinical adapter is down.
@@ -235,7 +235,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `certification/tests/personal_communications.rs::native_contacts_exchange_opaque_mls_messages_and_block_alternate_devices`. Evidence line: `encrypted-storage=PASS client-decryption=PASS replay=PASS block=PASS revocation=PASS`.
   - `services/meeting-service/tests/unified_messaging_e2e.rs::meeting_chat_migrates_to_unified_messaging_across_real_services`
   - `services/messaging/tests/outbox.rs::concurrent_publishers_deliver_each_event_once`
-- **Workflow & run**: Hub 42448888276 (`real-services`); Unified 42467223754.
+- **Workflow & run**: Hub 42513840523 (`real-services`); Unified 42513828468.
 - **Proves**
   - Real MLS clients exchange opaque messages through five real processes (Account, PA, Hub, Calling, Messaging).
   - An offline member catches up on history in order (line 378). Group resolution works (line 459).
@@ -243,7 +243,8 @@ Paths in the table are relative to `services/` unless they start with `certifica
 - **Blueprint minimum**: direct and group messaging, with replay after offline.
 - **Gap**
   - The journey runs in the TEST runtime only. Production activation of PRIVATE_E2EE devices is refused by design until external cryptographic certification (J-21).
-  - The workflow is path-filtered and was last run on 6105347d (code-identical).
+  - Ran on ccb7caa9 (dispatched, 42513840523).
+  - The shipped web client now passes the real-service Chromium journey on staging (Unified Messaging 42513828468, all 15 steps); mobile parity is still Section 17.
   - Web and mobile clients are Section 17.
 - **Verdict: PASS (backend)**. Production activation depends on J-21.
 
@@ -266,7 +267,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/calling/tests/app_ringing.rs::revoked_endpoints_stop_ringing_and_lose_signaling`
   - `services/calling/tests/call_history.rs::history_is_paginated_scoped_and_strict` and `::one_answered_device_answers_for_the_logical_participant`
   - `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services` (markers `voice_call_policy, video_call_policy`) and `::hub_facades_device_sessions_and_revocation_fan_out_across_real_owners` (marker `hub_call_launch`)
-- **Workflow & run**: RTC 42467223733; Calling 42467223773; Hub 42448888276.
+- **Workflow & run**: RTC 42513828388; Calling 42513828525; Hub 42513840523.
 - **Proves**: real media for voice and video, hold enforced at the provider, and end. History works in the owner DB. A personal call launched from the Hub reaches real Calling, but is then cancelled with no media.
 - **Blueprint minimum**: one personal call goes ring → answer → media → hold → end → history.
 - **Gap**
@@ -291,18 +292,16 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/calling/tests/enterprise_recording.rs::consent_is_each_participants_own_and_bound_to_the_call`
   - `services/calling/tests/rtc_certification.rs::real_livekit_certification`: enterprise extension, ring group, queue and transfer with real media.
   - `services/calling/tests/enterprise_sip_certification.rs::enterprise_sip_ivr_certification`
-- **Workflow & run**: Calling 42467223773; Meeting 42467223708; RTC 42467223733; Enterprise 42467223863 = **failure**.
-  - On 42467223863, `enterprise_sip_ivr_certification` panicked at `tests/enterprise_sip_certification.rs:1522`: "the Call is CONNECTED (bridged) did not happen".
-  - The same workflow passed on c3056355 (42448983409) and 6105347d (42448888316), and 8d7b99a3 is docs-only, so the failure is intermittent.
-  - It is **recurring**: the same assertion at line 1522 also failed on 22da1aac (42425119285), and a rerun on that SHA passed (42425123331).
+- **Workflow & run**: Calling 42513828525; Meeting 42513828422; RTC 42513828388; Enterprise 42513828419 and 42513822078 = success (all IVR, voicemail and recording scenarios certified in both).
+  - Earlier flake, now root-caused: `enterprise_sip_ivr_certification` failed intermittently at `tests/enterprise_sip_certification.rs:1522` ("the Call is CONNECTED (bridged) did not happen": 8d7b99a3 42467223863, 964362de 42505776423, 22da1aac 42425119285).
+  - Cause: a desk phone's Call connects only on Telephony bridge evidence, but the session-join trigger sent only Calls with public parties there; when the member's media joined after the bridge, the Call stayed ANSWERED. Fixed in `e9950455` (`is_network_executed`), regression test `enterprise_operations.rs`; 5/5 green since (integration 42509226561, 42509350963, 42509356212; staging 42513828419, 42513822078).
 - **Proves**: Calling acts in the organization scope only behind its flag and only for FIRST_PARTY `org-` tenants. The audit records `actorPrincipalId`. Recording consent belongs to each participant.
 - **Blueprint minimum**: two organizations with isolated enterprise scopes in real processes, actor audit, and recording consent with captured media.
 - **Gap**
   - Two-scope isolation is never run across real Meeting, Organizations, PA and Calling.
   - Both flags are off by default, and the per-organization credential and grant are owner release steps.
-  - RTC Egress capture was SKIPPED on 42467223733, so recording media is not captured on the staging CI. `cfmeet-rtc-capture-certification.yml` runs only on `main` (last run 41400582781, 2026-11-02, success).
-  - The SIP IVR certification is flaky.
-- **Verdict: PARTIAL**. The SIP flake needs a root-cause ticket (backend Section 18).
+  - RTC Egress capture was SKIPPED on 42513828388, so recording media is not captured on the staging CI. `cfmeet-rtc-capture-certification.yml` runs only on `main` (last run 41400582781, 2026-11-02, success).
+- **Verdict: PARTIAL** (two-scope real-process isolation, flags and captured recording media remain; the SIP flake is fixed).
 
 ## J-13: Device / session compromise
 
@@ -313,7 +312,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/meeting-service/tests/session_bridge.rs::the_bridge_enforces_token_type_and_the_revocation_epoch`
   - `services/communications/tests/unified.rs::devices_are_bound_to_the_account_session_that_linked_them`
   - `services/messaging/tests/notification_authorization.rs::revoking_all_sessions_disables_push_without_deleting_device_identity`
-- **Workflow & run**: Hub 42448888276; Meeting 42467223708; Messaging 42467223790.
+- **Workflow & run**: Hub 42513840523; Meeting 42513828422; Messaging 42513828427.
 - **Proves** (real processes)
   - Ending a sign-in revokes its device at Calling (`ACCOUNT_SESSION_ENDED`).
   - Revoking a device ends its sign-in.
@@ -333,7 +332,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/organizations/tests/journey.rs::organization_lifecycle_journey` (suspend, reactivate, archive)
   - `services/meeting-service/tests/organizations_authority.rs::s12_admission_and_admit_follow_the_organization_meetings_feature` (fake Organizations)
   - `services/meeting-service/tests/organization_domain_access.rs::org02_inactive_membership_or_organization_is_denied_on_reconnect`
-- **Workflow & run**: Part VI 42467223759; Orgs 42467223643; Meeting 42467223708.
+- **Workflow & run**: Part VI 42513828488; Orgs 42513828522; Meeting 42513828422.
 - **Proves**: suspension reaches PA and stops scope resolution in real processes. Meeting refuses with `ORGANIZATION_SUSPENDED` against a fake Organizations, including on reconnect.
 - **Blueprint minimum**: suspend the organization; Meetings, Calling, Messaging and the Hub all refuse; recovery restores access.
 - **Gap**
@@ -350,7 +349,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `certification/tests/webhooks.rs::external_developer_signed_webhook_journey`
   - `certification/tests/meetings_platform.rs::sandbox_credential_runs_environment_meetings_through_the_gateway`
   - `certification/tests/service_accounts.rs::service_account_delegation_journey`
-- **Workflow & run**: Part VI 42467223759 (`journeys`, all ok, not skipped).
+- **Workflow & run**: Part VI 42513828488 (`journeys`, all ok, not skipped).
 - **Proves**: signup → sandbox → credential → API calls through the real gateway → production approval → webhooks. Ten real service processes take part, with Ed25519 service auth.
 - **Blueprint minimum**: the same chain.
 - **Gap**
@@ -369,7 +368,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `::websocket_gateway_journey`
   - `certification/tests/webhooks.rs::webhook_ssrf_policy_journey`
   - API Gateway `integration (real Platform Access + Developer Platform)`
-- **Workflow & run**: Part VI 42467223759; API Gateway 42467223725.
+- **Workflow & run**: Part VI 42513828488; API Gateway 42513828369.
 - **Proves**: cross-tenant access is denied, missing scopes are refused, revoked credentials are refused, and internal routes are unreachable.
 - **Blueprint minimum**: the same, negative tests only.
 - **Gap**: none in the backend.
@@ -392,7 +391,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `certification/tests/rollout_rehearsal.rs::rollout_and_independent_rollback_rehearsal`
     - `certification/tests/schema_upgrade.rs::part_vi_migrations_upgrade_a_pre_part_vi_schema_without_data_loss`
     - `services/numbering/tests/relay_cutover_e2e.rs::relay_numbers_move_to_numbering_leases_with_identical_routing_and_a_safe_rollback`
-- **Workflow & run**: Orgs 42467223643; Meeting 42467223708; Part VI 42467223759; Comms e2e 42467223929.
+- **Workflow & run**: Orgs 42513828522; Meeting 42513828422; Part VI 42513828488; Comms e2e 42513828469.
 - **Proves**
   - The Organizations import keeps IDs and timestamps, uses a shared checksum vector, reports differing rows without overwriting them, and refuses split-brain mappings.
   - Meeting shadow mode counts mismatches (against a fake).
@@ -408,7 +407,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
 - **Tests**: `infra/deployment/backup/tests/ci-drill.sh` (with `tests/unit.sh`). Service DR suites:
   - `services/messaging/tests/disaster_recovery.rs::a_restore_keeps_attachments_never_resubmits_sms_and_cannot_recover_e2ee_without_device_state`
   - DR suites for calling, privacy-relay, telephony and sms-gateway (`*/tests/disaster_recovery.rs`)
-- **Workflow & run**: Backup drill 42448888278 (6105347d).
+- **Workflow & run**: Backup drill 42513835668 (ccb7caa9).
 - **Proves**
   - All 11 active catalog databases complete age encryption → off-host copy → identical copy check → decrypt → isolated restore with `RESTORE_DRILL=PASS`. The 11 are meeting-service, communications, developer-platform, platform-access, calling, messaging, numbering, privacy-relay, telephony, sms-gateway and organizations.
   - No plaintext dump is left anywhere.
@@ -436,7 +435,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `::duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_duplicate_events`
     - `::platform_access_unavailable_backs_off_then_fails_and_an_operator_retry_recovers`
     - `::partial_platform_access_success_with_a_local_failure_resumes_with_the_same_triple`
-- **Workflow & run**: Part VI 42467223759; Unified 42467223754 (`Privacy Relay / SMS Gateway / Calling ↔ Messaging`); Hub 42448888276; Messaging 42467223790; Orgs 42467223643.
+- **Workflow & run**: Part VI 42513828488; Unified 42513828468 (`Privacy Relay / SMS Gateway / Calling ↔ Messaging`); Hub 42513840523; Messaging 42513828427; Orgs 42513828522.
 - **Proves**: webhook replay and dead-letter handling, outage recovery without loss or duplication across real Messaging, SMS Gateway and Privacy Relay processes, Hub outbox replay of dead events, and idempotent provisioning (against an in-memory PA).
 - **Blueprint minimum**: the same, including organization events.
 - **Gap**
@@ -455,10 +454,10 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - Contracts `contracts validate` and `Swagger UI renders every bundle (Chromium, schema host blocked)`
   - Service boundaries `service boundary guard` (gateway upstream check, INV-001)
   - Part VI `SDK parity`: TS 18 passed, 0 skipped; Dart "+18 All tests passed"
-- **Workflow & run**: Contracts 42467223730; Meeting 42467223708 (`build / migration smoke / OpenAPI`); Boundaries 42467223771; Part VI 42467223759.
+- **Workflow & run**: Contracts 42513828418; Meeting 42513828422 (`build / migration smoke / OpenAPI`); Boundaries 42513828465; Part VI 42513828488.
 - **Proves**: code and contract are identical, bundles render, and both SDKs pass every parity scenario against the real stack.
 - **Gap**
-  - In the standalone SDK workflows (42467223777, 42467223745) real-stack parity prints `SKIPPED: CFMEET_STACK_ENV is not set`. That is expected because the Part VI job covers it.
+  - In the standalone SDK workflows (42513828440, 42513828453) real-stack parity prints `SKIPPED: CFMEET_STACK_ENV is not set`. That is expected because the Part VI job covers it.
   - Web/mobile adoption of the SDKs (FE-015, report-only parity scan) is Section 17.
 - **Verdict: PASS (backend)**.
 
@@ -470,7 +469,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
   - `services/messaging/tests/realtime.rs::session_devices_are_refused_every_e2ee_privilege`
   - `services/messaging/tests/communications_owner.rs::capabilities_report_managed_messaging_apart_from_e2ee_readiness`
   - `certification/tests/personal_communications.rs::personal_identity_contacts_and_authoritative_policy_across_real_services`: Hub `messaging.securityReady=false`, `available=false`.
-- **Workflow & run**: Messaging 42467223790; Hub 42448888276.
+- **Workflow & run**: Messaging 42513828427; Hub 42513840523.
 - **Proves**: production cannot enable E2EE devices, session devices can never gain E2EE privileges, and readiness is reported truthfully.
 - **Gap**: external cryptographic certification (E2EE review #13) is needed before activation. That is a release gate, not a test gap.
 - **Verdict: PASS**.
@@ -485,8 +484,8 @@ Paths in the table are relative to `services/` unless they start with `certifica
     - `services/telephony/tests/real_interconnect_certification.rs::real_lawful_interconnect_certification` logs "NOT RUN — REAL LAWFUL TELECOM INTERCONNECT CERTIFICATION BLOCKED". It reports `ok` without asserting anything about a carrier.
     - `telephony` `config::tests::the_synthetic_test_interconnect_is_refused_outside_local_and_test`
     - `services/calling/tests/public_app_to_phone.rs` (`PUBLIC_ROUTE_UNAVAILABLE`)
-- **Workflow & run**: Messaging 42467223790; Hub 42448888276; SMS 42467223709; Telephony 42467223746; Calling 42467223773.
-- **Proves**: without credentials every provider is reported `NOT_CONFIGURED`, `PROVIDER_UNAVAILABLE` or `BLOCKED`, and deterministic or synthetic providers are refused outside local and test. SMS/voice journeys run only on deterministic adapters (Comms e2e 42467223929).
+- **Workflow & run**: Messaging 42513828427; Hub 42513840523; SMS 42513828350; Telephony 42513828484; Calling 42513828525.
+- **Proves**: without credentials every provider is reported `NOT_CONFIGURED`, `PROVIDER_UNAVAILABLE` or `BLOCKED`, and deterministic or synthetic providers are refused outside local and test. SMS/voice journeys run only on deterministic adapters (Comms e2e 42513828469).
 - **Gap**
   - APNs/FCM/Web Push credentials, an SMS provider, and a lawful interconnect with a test line are all missing.
   - The phone label is inconsistent (J-03).
@@ -516,7 +515,7 @@ Paths in the table are relative to `services/` unless they start with `certifica
 | 6 | `GET /api/v2/communications/me/qr` has no test | J-02 | backend Section 18 |
 | 7 | Phone label mismatch: Hub `DEFERRED` vs Account `PROVIDER_BLOCKED` | J-03, J-22 | backend Section 18 / owner decision on the canonical label |
 | 8 | One personal Hub-launched call through answer → media → hold → end → history | J-11 | backend Section 18 |
-| 9 | `enterprise_sip_ivr_certification` intermittently fails at line 1522 (8d7b99a3 42467223863; 22da1aac 42425119285) | J-12 | backend Section 18 (root-cause the flake) |
+| 9 | ~~`enterprise_sip_ivr_certification` intermittently fails at line 1522~~ CLOSED: root cause fixed in `e9950455`, 5/5 green | J-12 | done (root-cause the flake) |
 | 10 | RTC Egress capture SKIPPED on staging CI; capture certification runs only on `main` | J-12 | backend/infra Section 18 (provide Egress config to staging CI) |
 | 11 | Per-organization calling: flags, credentials, grants, binding | J-12 | owner release step |
 | 12 | Backup drill uses synthetic schemas for 9 of 11 DBs; off-host target and age key custody not chosen | J-18 | backend Section 18 (real-schema fixtures) + owner (target/keys) |
@@ -528,3 +527,21 @@ Paths in the table are relative to `services/` unless they start with `certifica
 | 18 | Gateway/DP deployment over internal TLS (PLT-005) | J-15 | owner |
 
 Workflow note: `personal_communications.rs` (feature `personal-communications-e2e`) is run by **`communications-hub.yml` job `real-services`**, not by `communications-e2e.yml`. The latter runs `services/numbering` tests `communications_e2e` and `relay_cutover_e2e`. `certification.yml` runs `cargo test` without the feature, so it never compiles `personal_communications`. `communications-hub.yml` is path-filtered and was last run on staging at 6105347d.
+
+## SEC-020 cross-tenant isolation tests (added in Section 18)
+
+New negative tests on owner processes and real databases; each must find another tenant, environment, organization or profile unable to read, change or learn of a resource. Two fixes came with them: Meeting chat accepts a message only from the participant itself (guest participants only through their own guest token), and Organizations refuses relayed reads whose body `userId` differs from the acting user.
+
+| Service | Tests |
+|---|---|
+| Calling | `api_authorization_matrix.rs`: another tenant reaches no id-addressed operation, listings never show the owner's resources |
+| Communications Hub | `unified.rs`: another profile / tenant scope reaches no owner-scoped item or profile |
+| Developer Platform | `chapters_10_13.rs`: a member of another organization reaches no resource of this one |
+| Meeting | `tenant_isolation.rs` (SEC-020 single-id, machine, organization-admin and legacy v1 routes), `communications_meetings.rs` |
+| Messaging | `communications_owner.rs`, `integrations.rs`, `realtime.rs`, `sms_bridge.rs`: relationships, meeting sync, delegated mirror, context authority, session devices and inbound SMS never cross environments |
+| Numbering | `lifecycle_stewardship.rs`: cross-tenant assignment and pool operations are NOT_FOUND and change nothing |
+| Organizations | `authorization.rs`: teams, policies and role reads of another organization are unreachable |
+| Platform Access | `credential_delegation.rs`, `principal_account_status.rs` |
+| Privacy Relay, SMS Gateway, Telephony | `isolation.rs`, `bridge.rs`, `telephony_core.rs` |
+
+Runs on `blueprint/s18-certification` (`86c05ecf`; Messaging at `361585a2` after its harness applied the Communications migrations): Calling, Communications Hub, Communications e2e, Developer Platform, Meeting, Messaging, Numbering, Organizations, Platform Access, Privacy Relay, SMS Gateway, Telephony — all success. Full matrix on the merged tree: see the execution register.
