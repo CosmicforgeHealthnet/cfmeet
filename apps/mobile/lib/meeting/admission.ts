@@ -135,3 +135,50 @@ export function waitingPollDelayMs(consecutiveFailures: number): number {
 export function isFatalPollFailure(status: number): boolean {
   return status === 401 || status === 403 || status === 404 || status === 410;
 }
+
+export interface AdmissionPollDeps {
+  /** `GET /conferences/{id}/participants/me` (read-only). */
+  fetchMe: () => Promise<Pick<ParticipantResponse, "admissionState" | "denialMessage">>;
+  /** Waits `ms` (or resolves early when aborted). */
+  sleep: (ms: number) => Promise<void>;
+  /** HTTP status of a failure (0 for network errors). */
+  statusOf: (error: unknown) => number;
+  isAborted: () => boolean;
+  /** Called after every poll (UI progress / diagnostics; never receives credentials). */
+  onPoll?: (info: { attempt: number; consecutiveFailures: number }) => void;
+}
+
+export type AdmissionPollResult =
+  | { kind: "admitted" }
+  | { kind: "refused"; reason: string }
+  | { kind: "failed"; status: number }
+  | { kind: "aborted" };
+
+/**
+ * Waits in the waiting room by polling the read-only participant state (FE-005). It never
+ * re-POSTs join; the caller does exactly one `POST /join` after `admitted` to obtain media.
+ */
+export async function pollAdmission(deps: AdmissionPollDeps): Promise<AdmissionPollResult> {
+  let failures = 0;
+  let attempt = 0;
+  for (;;) {
+    await deps.sleep(waitingPollDelayMs(failures));
+    if (deps.isAborted()) return { kind: "aborted" };
+    attempt += 1;
+    try {
+      const me = await deps.fetchMe();
+      failures = 0;
+      deps.onPoll?.({ attempt, consecutiveFailures: failures });
+      if (deps.isAborted()) return { kind: "aborted" };
+      const step = nextWaitingStep(me);
+      if (step.kind === "admitted") return { kind: "admitted" };
+      if (step.kind === "refused") return { kind: "refused", reason: step.reason };
+    } catch (error) {
+      if (deps.isAborted()) return { kind: "aborted" };
+      const status = deps.statusOf(error);
+      if (isFatalPollFailure(status)) return { kind: "failed", status };
+      failures += 1;
+      deps.onPoll?.({ attempt, consecutiveFailures: failures });
+    }
+  }
+}

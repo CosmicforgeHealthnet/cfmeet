@@ -62,6 +62,7 @@ export const ROUTES = {
   acceptOrganizationInvitation: r("POST", "v2", () => "/organization-invitations/accept"),
   declineOrganizationInvitation: r("POST", "v2", () => "/organization-invitations/decline"),
   leaveOrganization: r("POST", "v2", (orgId: string) => `/organizations/${seg(orgId)}/members/me/leave`),
+  organizationMembers: r("GET", "v2", (orgId: string) => `/organizations/${seg(orgId)}/members`),
 
   // ---- Meeting spaces ----------------------------------------------------------------------
   listSpaces: r("GET", "v2", () => "/meeting-spaces"),
@@ -118,6 +119,20 @@ export const ROUTES = {
     (id: string, messageId: string) => `${conf(id)}/messages/${seg(messageId)}`
   ),
 
+  // ---- Unified Messaging (Meeting Service first-party bridge; MANAGED conversations only) ----
+  messagingMe: r("GET", "v2", () => "/messaging/me"),
+  messagingDirectory: r("GET", "v2", () => "/messaging/directory"),
+  messagingResolve: r("POST", "v2", () => "/messaging/directory/resolve"),
+  messagingNames: r("POST", "v2", () => "/messaging/principals/names"),
+  /**
+   * The relay's `{path}` is a multi-segment Messaging client path (`v1/conversations/…`) that
+   * the caller builds with lib/messaging/relay-paths.ts (allowlisted, ids validated, segments
+   * encoded there), so it is not encoded again here.
+   */
+  relayGet: r("GET", "v2", (relayPath: string) => `/messaging/relay/${relayPath}`),
+  relayPost: r("POST", "v2", (relayPath: string) => `/messaging/relay/${relayPath}`),
+  relayPut: r("PUT", "v2", (relayPath: string) => `/messaging/relay/${relayPath}`),
+
   // ---- Engagement ----------------------------------------------------------------------------
   sendReaction: r("POST", "v2", (id: string) => `${conf(id)}/reactions`),
   raisedHands: r("GET", "v2", (id: string) => `${conf(id)}/hand-raise`),
@@ -156,5 +171,9 @@ export type RouteName = keyof typeof ROUTES;
 export function routeTemplate(route: { version: ApiVersion; path: (...args: string[]) => string }): string {
   const marker = "\u0000";
   const args = new Array(route.path.length).fill(marker);
-  return `/api/${route.version}${route.path(...args)}`.split(encodeURIComponent(marker)).join("{}");
+  return `/api/${route.version}${route.path(...args)}`
+    .split(encodeURIComponent(marker))
+    .join("{}")
+    .split(marker)
+    .join("{}");
 }
