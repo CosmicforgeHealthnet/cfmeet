@@ -13,15 +13,15 @@ import { useLogin } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
 import { authService } from "@/services/auth.service";
-import { cookieStore } from "@/store";
+import { accountSession } from "@/lib/auth/session";
+import { normalizeAccountStatus } from "@/lib/account/account-core";
 
 const LoginModal = () => {
   const router = useRouter();
   const login = useLogin();
 
   useEffect(() => {
-    const token = cookieStore.getAccessToken();
-    if (token) {
+    if (accountSession.hasSession()) {
       router.push("/dashboard");
     }
   }, [router]);
@@ -69,11 +69,13 @@ const LoginModal = () => {
       {
         onSuccess: (response) => {
           // Check user status and redirect accordingly
-          if (response.user.status === "pendingverification") {
+          // ACC-022: legacy (`pendingverification`) and canonical (`pending_verification`) spellings.
+          const status = normalizeAccountStatus(response.user.status);
+          if (status === "pending_verification") {
             router.push(
               `/verify?email=${encodeURIComponent(trimmedForm.email)}`,
             );
-          } else if (response.user.status === "active") {
+          } else if (status === "active") {
             router.push("/dashboard");
           } else {
             // Handle other statuses (e.g., inactive)

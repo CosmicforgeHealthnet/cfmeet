@@ -5,13 +5,13 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { useRouter, usePathname } from "next/navigation";
 import { ChevronRight, ChevronLeft } from "lucide-react";
-import { dashboardNavigation } from "@/lib/dashboard-navigation";
+import { useDashboardNavigation } from "@/lib/use-dashboard-navigation";
 import ProfileMenu from "./ProfileMenu";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-const menu = dashboardNavigation;
-
 export default function AppSidebar() {
+  const menu = useDashboardNavigation();
   const router = useRouter();
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
@@ -108,6 +108,7 @@ export default function AppSidebar() {
           expanded ? "px-4" : "px-0 flex flex-col items-center",
         )}
       >
+        <WorkspaceSwitcher expanded={expanded} />
         <ThemeToggle />
         <ProfileMenu expanded={expanded} />
       </div>
