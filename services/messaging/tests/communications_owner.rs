@@ -565,6 +565,13 @@ async fn relationship_reads_and_events_never_cross_environments() {
     let Some(mut h) = Harness::new().await else {
         return;
     };
+    // The Communications inbox and revocation tables have their own migration history
+    // (`CommunicationsMigrator`); without them the "nothing was written" check below
+    // would hold trivially.
+    use messaging_migration::MigratorTrait as _;
+    messaging_migration::CommunicationsMigrator::up(h.conn(), None)
+        .await
+        .unwrap();
     let c = h.first_party(true);
     let other = h.first_party(true);
     // Each environment: a GROUP of two and a block between them.
