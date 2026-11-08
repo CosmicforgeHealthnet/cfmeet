@@ -66,6 +66,15 @@ jobs:
       - name: Account and organization administration tests
         run: node --experimental-strip-types --test tests/organization-admin.test.mjs
 
+      # Section 17 web calling: the adapter's authorization (party control, participant-bound
+      # recording / abuse, self-service voicemail / forwarding, dev-mode and https guards),
+      # the client rules (control permissions, media reconnect state machine, credential
+      # lifetime, incoming-call presentation) and parity with the served contracts (CAL-022).
+      - name: Calling adapter, client rules and contract tests
+        run: |
+          node --test tests/calling-adapter.test.mjs tests/calling-origin.test.mjs tests/calling-contract.test.mjs
+          node --experimental-strip-types --test tests/calling-logic.test.mjs
+
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.
       - name: CSP builder and XSS-sink guard

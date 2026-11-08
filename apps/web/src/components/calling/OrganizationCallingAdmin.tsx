@@ -55,32 +55,41 @@ export default function OrganizationCallingAdmin() {
   if (!decision.granted) {
     return <Notice title="Not available in this workspace" body={capabilityReasonText(decision.reason)} />;
   }
-  return <OrganizationCallingTabs key={organizationId} organizationId={organizationId} name={workspace.workspace?.displayName ?? "Organization"} />;
+  return <OrganizationCallingPanel key={organizationId} organizationId={organizationId} name={workspace.workspace?.displayName ?? "Organization"} />;
 }
 
-function Notice({ title, body }: { title: string; body: string }) {
+function Notice({ title, body, embedded = false }: { title: string; body: string; embedded?: boolean }) {
+  const notice = <section role="status" className="rounded-2xl border border-border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mt-1 text-sm text-muted-foreground">{body}</p></section>;
+  if (embedded) return notice;
   return (
     <main className="mx-auto max-w-3xl space-y-2 p-4 md:p-6">
       <h1 className="text-2xl font-bold tracking-tight">Organization calling</h1>
-      <section role="status" className="rounded-2xl border border-border bg-card p-5"><h2 className="font-semibold">{title}</h2><p className="mt-1 text-sm text-muted-foreground">{body}</p></section>
+      {notice}
     </main>
   );
 }
 
-function OrganizationCallingTabs({ organizationId, name }: { organizationId: string; name: string }) {
+/**
+ * The organization calling administration for one organization. `embedded` renders it as a
+ * tab of the organization administration page (/dashboard/organizations/{id}); the caller
+ * gates it on `calling.enterprise.manage`, and the relay re-checks it server-side.
+ */
+export function OrganizationCallingPanel({ organizationId, name, embedded = false }: { organizationId: string; name: string; embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>("overview");
   // The effective policy doubles as the "is the relay live for this organization" probe.
   const policy = useOrganizationCalling<{ policyId: string | null; version: number; rules: Record<string, unknown> }>(organizationId, "v1/enterprise/effective-policy");
   const blocked = organizationCallingUnavailable(policy.error);
   if (policy.isPending) return <div className="p-6"><Spinner /></div>;
-  if (blocked) return <Notice title={unavailableText[blocked].title} body={unavailableText[blocked].body} />;
+  if (blocked) return <Notice embedded={embedded} title={unavailableText[blocked].title} body={unavailableText[blocked].body} />;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
-      <header className="flex items-center gap-3">
-        <Building2 className="size-6" />
-        <div><h1 className="text-2xl font-bold tracking-tight">Organization calling</h1><p className="text-sm text-muted-foreground">{name} · changes are audited with your name.</p></div>
-      </header>
+    <main className={embedded ? "space-y-5" : "mx-auto max-w-6xl space-y-5 p-4 md:p-6"}>
+      {embedded ? <p className="text-sm text-muted-foreground">Enterprise calling of {name} · access and changes are audited with your name.</p> : (
+        <header className="flex items-center gap-3">
+          <Building2 className="size-6" />
+          <div><h1 className="text-2xl font-bold tracking-tight">Organization calling</h1><p className="text-sm text-muted-foreground">{name} · access and changes are audited with your name.</p></div>
+        </header>
+      )}
       <nav aria-label="Organization calling" className="flex flex-wrap gap-2">
         {(["overview", "queues", "extensions", "recordings"] as Tab[]).map((t) => (
           <Button key={t} size="sm" variant={tab === t ? "default" : "outline"} aria-pressed={tab === t} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</Button>
