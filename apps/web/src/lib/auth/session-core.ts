@@ -60,8 +60,10 @@ export class SessionEndedError extends Error {
 /** The session service could not be reached; the session may still be valid (retry). */
 export class SessionUnavailableError extends Error {
   readonly code = "SESSION_UNAVAILABLE";
-  constructor(readonly status = 0) {
+  readonly status: number;
+  constructor(status = 0) {
     super("The sign-in service is temporarily unavailable. Try again.");
+    this.status = status;
     this.name = "SessionUnavailableError";
   }
 }
@@ -95,7 +97,13 @@ export function jwtExpiry(token: string): number | null {
   }
 }
 
-export type SessionListener = (signedIn: boolean) => void;
+/**
+ * Why the signed-in state changed: `signed_in` (establish), `signed_out` (this tab's
+ * clear()), `ended` (the refresh cookie was rejected: expired, revoked, password changed),
+ * `signed_out_elsewhere` (another tab signed out).
+ */
+export type SessionChange = "signed_in" | "signed_out" | "ended" | "signed_out_elsewhere";
+export type SessionListener = (signedIn: boolean, change: SessionChange) => void;
 
 export function createSessionManager(options: SessionManagerOptions) {
   const base = options.basePath ?? "/api/session";
@@ -114,10 +122,10 @@ export function createSessionManager(options: SessionManagerOptions) {
     redirect: "error" as const,
   });
 
-  const notify = (signedIn: boolean) => {
+  const notify = (signedIn: boolean, change: SessionChange) => {
     for (const listener of listeners) {
       try {
-        listener(signedIn);
+        listener(signedIn, change);
       } catch {
         /* a listener never breaks the session */
       }
@@ -140,7 +148,7 @@ export function createSessionManager(options: SessionManagerOptions) {
     }
     if (!response.ok) throw new SessionUnavailableError(response.status);
     accessToken = looksLikeJwt(access) ? access : null;
-    notify(true);
+    notify(true, "signed_in");
   }
 
   /** Moves pre-Section 17 JS-readable cookies into the httpOnly model once. */
@@ -172,7 +180,7 @@ export function createSessionManager(options: SessionManagerOptions) {
       }
       if (response.status === 401) {
         accessToken = null;
-        notify(false);
+        notify(false, "ended");
         throw new SessionEndedError();
       }
       if (!response.ok) throw new SessionUnavailableError(response.status);
@@ -227,12 +235,12 @@ export function createSessionManager(options: SessionManagerOptions) {
         /* the cookies expire anyway; the API session was ended by the caller */
       }
       options.legacy?.clear();
-      notify(false);
+      notify(false, "signed_out");
     },
     /** Drops the in-memory token without a network call (another tab signed out). */
     forget(): void {
       accessToken = null;
-      notify(false);
+      notify(false, "signed_out_elsewhere");
     },
     subscribe(listener: SessionListener): () => void {
       listeners.add(listener);

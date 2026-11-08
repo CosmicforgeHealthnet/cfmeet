@@ -44,7 +44,9 @@ export async function POST(request: Request) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(accountRefreshUrl(process.env.NEXT_PUBLIC_API_URL), {
+    // ACCOUNT_API_INTERNAL_URL: the API's address as seen from the web server (container
+    // networks); defaults to the public NEXT_PUBLIC_API_URL.
+    upstream = await fetch(accountRefreshUrl(process.env.ACCOUNT_API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
