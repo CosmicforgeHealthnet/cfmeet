@@ -132,6 +132,19 @@ fn every_v2_route_is_documented() {
         ("put", "/api/v2/organizations/{id}/calling/{path}"),
         ("patch", "/api/v2/organizations/{id}/calling/{path}"),
         ("delete", "/api/v2/organizations/{id}/calling/{path}"),
+        // Final closure (J-10) — organization-scope Messaging relay and realtime tokens
+        ("get", "/api/v2/organizations/{id}/messaging/relay/{path}"),
+        ("post", "/api/v2/organizations/{id}/messaging/relay/{path}"),
+        ("put", "/api/v2/organizations/{id}/messaging/relay/{path}"),
+        ("patch", "/api/v2/organizations/{id}/messaging/relay/{path}"),
+        (
+            "delete",
+            "/api/v2/organizations/{id}/messaging/relay/{path}",
+        ),
+        (
+            "post",
+            "/api/v2/organizations/{id}/messaging/session-tokens",
+        ),
         // Blueprint Section 4 — first-party organizations (Organizations Service relay)
         ("post", "/api/v2/organizations"),
         ("get", "/api/v2/organizations/{id}"),

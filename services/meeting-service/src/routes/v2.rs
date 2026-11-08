@@ -573,6 +573,20 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
                     crate::services::organization_calling::MAX_BODY_BYTES,
                 )),
         )
+        // Final closure (J-10): organization-scope Messaging relay and realtime tokens.
+        .route(
+            "/organizations/:id/messaging/relay/*path",
+            get(crate::handlers::v2::organization_messaging::messaging_get)
+                .post(crate::handlers::v2::organization_messaging::messaging_post)
+                .put(crate::handlers::v2::organization_messaging::messaging_put)
+                .patch(crate::handlers::v2::organization_messaging::messaging_patch)
+                .delete(crate::handlers::v2::organization_messaging::messaging_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
+        .route(
+            "/organizations/:id/messaging/session-tokens",
+            post(crate::handlers::v2::organization_messaging::messaging_session_token),
+        )
         .route(
             "/organizations/:id/audit-events",
             get(organizations::list_organization_audit_events),

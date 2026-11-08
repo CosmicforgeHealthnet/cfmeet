@@ -2692,6 +2692,48 @@
     },
     {
       "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/organizations/{id}/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/organizations/{id}/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/messaging/relay/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/session-tokens",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/resolve/{identifier}",
       "class": "PUBLIC_CUSTOMER"

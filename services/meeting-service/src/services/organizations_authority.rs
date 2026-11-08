@@ -684,18 +684,25 @@ pub struct ResolvedOrganizationScope {
     pub mapping_version: i64,
     /// `None` until an operator binds the organization's Calling credential.
     pub calling: Option<CallingServiceBinding>,
+    /// `None` until an operator binds the organization's Messaging service account (same
+    /// shape: ids only, re-verified by Platform Access at use).
+    pub messaging: Option<CallingServiceBinding>,
 }
 
 impl ResolvedOrganizationScope {
     /// A missing id, or a present but malformed binding, refuses the whole answer.
     pub fn from_json(v: &Value) -> Option<Self> {
-        let calling = match &v["serviceBindings"]["calling"] {
-            Value::Null => None,
-            b => Some(CallingServiceBinding {
-                service_account_id: uuid_field(b, "serviceAccountId")?,
-                credential_id: uuid_field(b, "credentialId")?,
-            }),
+        let binding = |service: &str| -> Option<Option<CallingServiceBinding>> {
+            match &v["serviceBindings"][service] {
+                Value::Null => Some(None),
+                b => Some(Some(CallingServiceBinding {
+                    service_account_id: uuid_field(b, "serviceAccountId")?,
+                    credential_id: uuid_field(b, "credentialId")?,
+                })),
+            }
         };
+        let calling = binding("calling")?;
+        let messaging = binding("messaging")?;
         Some(Self {
             organization_id: uuid_field(v, "organizationId")?,
             tenant_id: uuid_field(v, "tenantId")?,
@@ -703,6 +710,7 @@ impl ResolvedOrganizationScope {
             environment_id: uuid_field(v, "environmentId")?,
             mapping_version: v["mappingVersion"].as_i64().unwrap_or(0),
             calling,
+            messaging,
         })
     }
 }

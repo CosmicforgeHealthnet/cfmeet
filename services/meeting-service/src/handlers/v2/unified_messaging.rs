@@ -223,7 +223,7 @@ pub struct SessionTokenRequest {
 }
 
 /// The account session of the presented bearer token and that token's expiry.
-fn account_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(Uuid, i64)> {
+pub(crate) fn account_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(Uuid, i64)> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -476,7 +476,7 @@ pub async fn principal_names(
     ))
 }
 
-fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
+pub(crate) fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
     let Some(raw) = raw.filter(|r| !r.is_empty()) else {
         return Ok(vec![]);
     };

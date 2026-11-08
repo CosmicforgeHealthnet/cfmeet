@@ -609,6 +609,7 @@ fn empty_answer(organization: Uuid) -> WorkspaceCapabilities {
 pub enum OrganizationFeature {
     Meetings,
     Calling,
+    Messaging,
 }
 
 impl OrganizationFeature {
@@ -616,6 +617,7 @@ impl OrganizationFeature {
         match self {
             Self::Meetings => features.meetings,
             Self::Calling => features.calling,
+            Self::Messaging => features.messaging,
         }
     }
 
@@ -623,6 +625,7 @@ impl OrganizationFeature {
         match self {
             Self::Meetings => "Meetings are turned off by your organization",
             Self::Calling => "Calling is turned off by your organization",
+            Self::Messaging => "Messaging is turned off by your organization",
         }
     }
 }

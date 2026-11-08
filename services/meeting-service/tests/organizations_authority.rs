@@ -2627,6 +2627,7 @@ struct PeerRecord {
 struct PeerState {
     calling: ServiceTokenVerifier,
     platform_access: ServiceTokenVerifier,
+    messaging: ServiceTokenVerifier,
     records: Mutex<Vec<PeerRecord>>,
     rejected: Mutex<u32>,
     principal: Uuid,
@@ -2663,10 +2664,16 @@ async fn peer_handler(
 ) -> Response {
     let path = uri.path().to_string();
     let to_platform_access = path.starts_with("/internal/v1/principals/");
+    let to_messaging = path.starts_with("/internal/v1/delegated/");
     let (verifier, permission) = if to_platform_access {
         (
             &state.platform_access,
             InternalPermission::PlatformPrincipalEnsure,
+        )
+    } else if to_messaging {
+        (
+            &state.messaging,
+            InternalPermission::MessagingApplicationDelegate,
         )
     } else {
         (
@@ -2758,6 +2765,7 @@ impl Peers {
                 "cfmeet.platform-access",
                 "platform-principal.ensure",
             ),
+            messaging: peer_verifier(&jwk, "cfmeet.messaging", "messaging-application.delegate"),
             records: Mutex::new(vec![]),
             rejected: Mutex::new(0),
             principal: Uuid::new_v4(),
@@ -3340,4 +3348,272 @@ async fn s11_organization_invitation_email_from_the_authoritative_answer() {
     assert_eq!(s, StatusCode::CREATED, "{v}");
     assert_eq!(v["emailDelivery"], "DISABLED");
     assert!(off_mail.sent().is_empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// Final closure (J-10): organization-scope Messaging relay
+// ---------------------------------------------------------------------------------------
+
+async fn messaging_world(messaging_bound: bool) -> Option<CallingWorld> {
+    let (signer, fake) = organizations().await;
+    let peers = Peers::start(signer.public_jwk()).await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let relay = Arc::new(
+        OrganizationCalling::new(
+            signer.clone(),
+            &peers.url(),
+            &peers.url(),
+            Duration::from_secs(3),
+        )
+        .unwrap()
+        .with_messaging(&peers.url())
+        .unwrap(),
+    );
+    let app = TestApp::with(TestOptions {
+        organizations_authority: Some(live),
+        organization_calling: Some(relay),
+        ..TestOptions::default()
+    })
+    .await?;
+    let owner = app.user("org-messaging-owner").await;
+    let member = app.user("org-messaging-member").await;
+    let org = fake.add_org(
+        "closure-messaging",
+        &[(owner.id, "OWNER"), (member.id, "MEMBER")],
+    );
+    let world = CallingWorld {
+        app,
+        fake,
+        peers,
+        org,
+        owner,
+        member,
+        triple: (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()),
+        binding: (Uuid::new_v4(), Uuid::new_v4()),
+    };
+    let mut doc = world.scope_doc(false);
+    doc["serviceBindings"]["messaging"] = if messaging_bound {
+        json!({ "serviceAccountId": world.binding.0, "credentialId": world.binding.1, "version": 1 })
+    } else {
+        Value::Null
+    };
+    world.fake.script(
+        "POST",
+        "/internal/v1/organizations/scopes/resolve",
+        200,
+        doc,
+    );
+    Some(world)
+}
+
+impl CallingWorld {
+    async fn messaging(
+        &self,
+        method: Method,
+        user: &User,
+        rest: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.app
+            .call(
+                method,
+                &format!("/api/v2/organizations/{}/messaging/relay/{rest}", self.org),
+                Auth::Bearer(&user.token),
+                body,
+            )
+            .await
+    }
+
+    fn messaging_records(&self) -> Vec<PeerRecord> {
+        self.peers
+            .records()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/internal/v1/delegated/"))
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_member() {
+    if !require_test_redis() {
+        return;
+    }
+    let w = some!(messaging_world(true).await);
+    let (s, v) = w
+        .messaging(Method::GET, &w.member, "v1/conversations?limit=5", None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .messaging(
+            Method::POST,
+            &w.member,
+            "v1/conversations",
+            Some(json!({ "type": "GROUP", "title": "Ward 7" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let calls = w.messaging_records();
+    assert_eq!(
+        calls
+            .iter()
+            .map(|r| (r.method.as_str(), r.path.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("GET", "/internal/v1/delegated/v1/conversations"),
+            ("POST", "/internal/v1/delegated/v1/conversations")
+        ]
+    );
+    for r in &calls {
+        // The ORGANIZATION's triple and Messaging binding, the member's principal in it;
+        // never a customer credential and never the shared personal scope.
+        assert!(!r.authorization);
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(r.credential, None, "Messaging needs no credential");
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+    }
+    assert_eq!(calls[0].query.as_deref(), Some("limit=5"));
+    assert_eq!(calls[1].body["title"], "Ward 7");
+    // The organization scope environment is recorded for offboarding.
+    assert_eq!(
+        w.app
+            .scalar(&format!(
+                "SELECT count(*) FROM organization_scope_environments WHERE environment_id = '{}' AND organization_id = '{}' AND service_account_id = '{}'",
+                w.triple.2, w.org, w.binding.0
+            ))
+            .await,
+        1
+    );
+    // A path outside the allowlist is never forwarded.
+    let before = w.messaging_records().len();
+    let (s, v) = w
+        .messaging(Method::GET, &w.member, "v1/admin/policies", None)
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("ENDPOINT_NOT_FOUND")),
+        "{v}"
+    );
+    assert_eq!(w.messaging_records().len(), before);
+
+    // MANAGED-realtime token in the organization scope, bound to the verified session:
+    // a legacy token without an account session is refused; a session-bound sign-in gets
+    // a session device whose account-session reference is computed for the ORGANIZATION
+    // environment (Meeting's, never the client's).
+    let token_path = format!("/api/v2/organizations/{}/messaging/session-tokens", w.org);
+    let before = w.messaging_records().len();
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &token_path,
+            Auth::Bearer(&w.member.token),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(w.messaging_records().len(), before);
+    let model = <backend::models::users::Entity as sea_orm::EntityTrait>::find_by_id(w.member.id)
+        .one(&w.app.db.conn)
+        .await
+        .unwrap()
+        .unwrap();
+    let session = backend::services::account_security::start_session(
+        &w.app.state,
+        &model,
+        backend::services::account_security::AuthMethod::Password,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &token_path,
+            Auth::Bearer(&session.access_token),
+            Some(json!({ "accountSessionRef": "f".repeat(64) })),
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "the client never supplies the binding: {v}"
+    );
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &token_path,
+            Auth::Bearer(&session.access_token),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let token = w.messaging_records().pop().unwrap();
+    assert_eq!(
+        token.path,
+        "/internal/v1/delegated/v1/messaging/session-devices"
+    );
+    assert_eq!(token.environment, w.triple.2);
+    assert_eq!(
+        token.body["accountSessionRef"],
+        json!(backend::services::account_security::session_reference(
+            w.triple.2,
+            session.session_id
+        ))
+    );
+}
+
+#[tokio::test]
+async fn closure_organization_messaging_fails_closed() {
+    if !require_test_redis() {
+        return;
+    }
+    // No Messaging binding for the organization: not set up, nothing forwarded.
+    let w = some!(messaging_world(false).await);
+    let (s, v) = w
+        .messaging(Method::GET, &w.member, "v1/conversations", None)
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("FEATURE_DISABLED")),
+        "{v}"
+    );
+    assert!(w.messaging_records().is_empty());
+
+    let w = some!(messaging_world(true).await);
+    // A non-member (no organization membership) is refused before Messaging.
+    let outsider = w.app.user("org-messaging-outsider").await;
+    let (s, _) = w
+        .messaging(Method::GET, &outsider, "v1/conversations", None)
+        .await;
+    assert!(
+        s == StatusCode::NOT_FOUND || s == StatusCode::FORBIDDEN,
+        "{s}"
+    );
+    assert!(w.messaging_records().is_empty());
+    // The organization turned Messaging off: policy-restricted, nothing forwarded.
+    w.fake.set_policy(
+        w.org,
+        json!({ "revision": 2,
+                "features": { "meetings": true, "messaging": false, "calling": true },
+                "restrict": {} }),
+    );
+    let (s, v) = w
+        .messaging(Method::GET, &w.member, "v1/conversations", None)
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (
+            StatusCode::FORBIDDEN,
+            Some("ORGANIZATION_POLICY_RESTRICTED")
+        ),
+        "{v}"
+    );
+    assert!(w.messaging_records().is_empty());
 }

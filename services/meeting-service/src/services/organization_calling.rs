@@ -257,6 +257,9 @@ pub struct OrganizationCalling {
     http: reqwest::Client,
     calling: url::Url,
     platform_access: url::Url,
+    /// Organization-scope Messaging (final closure); `None` when `CF_MESSAGING_BASE_URL`
+    /// is not configured (the organization Messaging relay then answers not set up).
+    messaging: Option<url::Url>,
 }
 
 impl std::fmt::Debug for OrganizationCalling {
@@ -316,7 +319,15 @@ impl OrganizationCalling {
             http,
             calling,
             platform_access,
+            messaging: None,
         })
+    }
+
+    /// Adds organization-scope Messaging (`CF_MESSAGING_BASE_URL`).
+    pub fn with_messaging(mut self, messaging_url: &str) -> Result<Self, String> {
+        let runtime = self.signer.runtime_environment();
+        self.messaging = Some(base_url("CF_MESSAGING_BASE_URL", messaging_url, runtime)?);
+        Ok(self)
     }
 
     /// `None` in `shared` mode (the default). `organization` mode requires the
@@ -361,12 +372,20 @@ impl OrganizationCalling {
             .and_then(|v| v.trim().parse::<u64>().ok())
             .unwrap_or(10_000)
             .clamp(1_000, 30_000);
-        Ok(Some(Arc::new(Self::new(
+        let mut relay = Self::new(
             signer,
             &required("CF_CALLING_BASE_URL")?,
             &required("CF_PLATFORM_ACCESS_BASE_URL")?,
             Duration::from_millis(timeout_ms),
-        )?)))
+        )?;
+        if let Some(url) = std::env::var("CF_MESSAGING_BASE_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            relay = relay.with_messaging(&url)?;
+        }
+        Ok(Some(Arc::new(relay)))
     }
 
     /// The delegated platform context of the organization's scope.
@@ -682,6 +701,201 @@ impl OrganizationCalling {
             s => Ok((s, value)),
         }
     }
+}
+
+/// One relayed organization-scope Messaging request (allowlisted path under `v1/`).
+pub struct MessagingRequest<'a> {
+    pub organization: Uuid,
+    pub method: Method,
+    pub path: &'a str,
+    pub query: Vec<(String, String)>,
+    pub idempotency_key: Option<String>,
+    pub body: Option<Value>,
+}
+
+impl OrganizationCalling {
+    /// Gate shared by the organization Messaging operations: a verified registered
+    /// member of an ACTIVE organization whose policy allows Messaging, the organization's
+    /// verified scope with a Messaging binding, and the member's principal in it.
+    async fn messaging_scope(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+    ) -> ApiResult<(
+        url::Url,
+        ResolvedOrganizationScope,
+        CallingServiceBinding,
+        Uuid,
+        Uuid,
+    )> {
+        let user = actor.require_registered()?;
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let Some(messaging) = self.messaging.clone() else {
+            return Err(messaging_not_set_up());
+        };
+        let acting = ActingUser::of(user);
+        // Membership, organization status and policy (`features.messaging`) are decided by
+        // Organizations on every request: a removed or suspended member, or a suspended
+        // organization, is refused here before anything reaches Messaging.
+        workspaces::require_organization_capability(
+            authority,
+            &acting,
+            organization,
+            OrganizationFeature::Messaging,
+            None,
+        )
+        .await?;
+        let scope = authority
+            .resolve_scope(organization, &acting)
+            .await
+            .map_err(|e| match e {
+                AuthorityError::Refused(reply) => relayed_error(&reply),
+                AuthorityError::Unavailable(_) => unavailable(),
+            })?;
+        let Some(binding) = scope.messaging else {
+            return Err(messaging_not_set_up());
+        };
+        let principal = self
+            .principal_for(db, &scope, binding, user.user_id)
+            .await?;
+        Ok((messaging, scope, binding, principal, user.user_id))
+    }
+
+    /// Relays one allowlisted Messaging client operation in the organization's OWN scope
+    /// (the personal relay's allowlist and query rules), acting as the member's principal
+    /// in that scope. Organization conversations therefore never share storage, identity
+    /// or visibility with the member's personal conversations.
+    pub async fn messaging_relay(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        req: MessagingRequest<'_>,
+    ) -> ApiResult<(u16, Value)> {
+        let Some(route) =
+            crate::services::unified_messaging::relay::route_for(&req.method, req.path)
+        else {
+            return Err(ApiError::domain(
+                ErrorCode::EndpointNotFound,
+                "This Messaging operation is not available to CF Meet clients",
+            ));
+        };
+        let canonical = route.canonical_query(req.query)?;
+        let (messaging, scope, binding, principal, _) = self
+            .messaging_scope(db, authority, actor, req.organization)
+            .await?;
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        let body = match (&req.method, req.body) {
+            (&Method::GET | &Method::DELETE, _) => None,
+            (_, Some(b)) => Some(b),
+            (_, None) => Some(json!({})),
+        };
+        let idempotency = req
+            .idempotency_key
+            .filter(|_| route.forwards_idempotency_key());
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                req.method,
+                &format!("/internal/v1/delegated/{}", req.path),
+                &canonical,
+                idempotency.as_deref(),
+                body.as_ref(),
+                context,
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(
+                    error = why,
+                    "Messaging unavailable for an organization request"
+                );
+                messaging_unavailable()
+            })?;
+        match status {
+            401 => {
+                tracing::error!(
+                    organization_id = %req.organization,
+                    "Messaging refused the organization delegated context (binding or trust bundle)"
+                );
+                Err(messaging_unavailable())
+            }
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+
+    /// Issues (or renews) a MANAGED-realtime session-device token in the organization's
+    /// scope, bound to the caller's verified account session (the reference is computed
+    /// for the organization environment; sign-out revokes it like the personal one).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn messaging_session_token(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        account_session_id: Uuid,
+        not_after: chrono::DateTime<chrono::Utc>,
+        session_device_id: Option<Uuid>,
+        ttl_seconds: Option<i64>,
+    ) -> ApiResult<(u16, Value)> {
+        let (messaging, scope, binding, principal, _) = self
+            .messaging_scope(db, authority, actor, organization)
+            .await?;
+        let mut body = json!({
+            "accountSessionRef": crate::services::account_security::session_reference(scope.environment_id, account_session_id),
+            "notAfter": not_after.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        });
+        if let Some(d) = session_device_id {
+            body["sessionDeviceId"] = json!(d);
+        }
+        if let Some(t) = ttl_seconds {
+            body["ttlSeconds"] = json!(t);
+        }
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                Method::POST,
+                "/internal/v1/delegated/v1/messaging/session-devices",
+                &[],
+                None,
+                Some(&body),
+                context,
+            )
+            .await
+            .map_err(|_| messaging_unavailable())?;
+        match status {
+            401 => Err(messaging_unavailable()),
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+}
+
+fn messaging_unavailable() -> ApiError {
+    ApiError::domain(
+        ErrorCode::ServiceUnavailable,
+        "Messaging is temporarily unavailable; retry later",
+    )
+}
+
+fn messaging_not_set_up() -> ApiError {
+    ApiError::domain(
+        ErrorCode::FeatureDisabled,
+        "Organization Messaging is not set up for this organization yet",
+    )
 }
 
 fn calling_unavailable() -> ApiError {

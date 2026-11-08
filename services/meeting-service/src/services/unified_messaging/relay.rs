@@ -69,6 +69,11 @@ impl RelayRoute {
         &self.method
     }
 
+    /// Whether the client's `Idempotency-Key` is forwarded for this operation.
+    pub fn forwards_idempotency_key(&self) -> bool {
+        self.idempotency_key
+    }
+
     /// The Messaging customer path template (`/v1/...`, `{id}` / `{reaction}` holes).
     pub fn template(&self) -> String {
         let mut out = String::from("/v1");
