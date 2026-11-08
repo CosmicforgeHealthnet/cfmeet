@@ -3212,6 +3212,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
+  "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
   "GET /": "get_app_info",
   "GET /api/v1/admin/logs": "list_logs",
   "GET /api/v1/admin/meetings": "admin_list_meetings",
@@ -3282,6 +3283,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
+  "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
   "GET /api/v2/organizations/{id}/provisioning": "v2_get_organization_provisioning",
   "GET /api/v2/resolve/{identifier}": "v2_resolve_identifier",
   "GET /health": "health_check",
@@ -3303,6 +3305,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/organizations/{id}": "v2_update_business_organization",
   "PATCH /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_patch",
   "PATCH /api/v2/organizations/{id}/members/{userId}": "v2_update_organization_membership",
+  "PATCH /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_patch",
   "POST /api/v1/api-keys": "create_api_key",
   "POST /api/v1/api/meetings": "api_create_meeting",
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
@@ -3424,6 +3427,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/invitations": "v2_create_organization_invitation",
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
+  "POST /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_post",
+  "POST /api/v2/organizations/{id}/messaging/session-tokens": "v2_organization_messaging_session_token",
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",
   "POST /api/v2/organizations/{id}/reactivate": "v2_reactivate_business_organization",
   "POST /api/v2/organizations/{id}/suspend": "v2_suspend_business_organization",
@@ -3433,6 +3438,7 @@ export const CONTRACT_OPERATIONS = {
   "PUT /api/v2/messaging/relay/{path}": "v2_messaging_relay_put",
   "PUT /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_put",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
+  "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
 } as const;
 
 export type ContractOperation = keyof typeof CONTRACT_OPERATIONS;
