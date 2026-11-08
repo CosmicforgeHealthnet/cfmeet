@@ -1,93 +1,63 @@
 /**
- * Voicemail types for the Calling API.
- * Manages voicemail mailboxes and messages.
+ * Voicemail (owner view). Mirrors packages/contracts/calling/enterprise/v1.schema.json
+ * (VoicemailMailbox, VoicemailMessage, VoicemailMediaAccess, SetVoicemailReadStateRequest).
+ * The web adapter always sends `principalId` = the signed-in principal (CAL-006), so Calling
+ * answers with the owner view (`VoicemailRequester::Principal`), never the administrator view.
  */
 
 import type { Uuid } from "./common";
 
-/** Type of voicemail greeting */
-export type VoicemailGreetingType = "DEFAULT" | "BUSY" | "UNAVAILABLE" | "CUSTOM";
-
-/** State of a voicemail message */
-export type VoicemailMessageState = "RECORDING" | "PROCESSING" | "READY" | "FAILED" | "DELETING";
-
-/** Read state of a voicemail message */
+export type MailboxOwnerType = "PRINCIPAL" | "EXTENSION" | "QUEUE" | "RING_GROUP";
+export type VoicemailMessageState = "RECORDING" | "PROCESSING" | "READY" | "FAILED" | "DELETING" | "DELETED";
 export type VoicemailReadState = "UNREAD" | "READ";
+export type ResourceStatus = "ACTIVE" | "DISABLED";
 
-/** A voicemail mailbox */
 export interface VoicemailMailbox {
   mailboxId: Uuid;
-  principalId: Uuid;
-  name: string;
-  extension?: string;
-  greetingType: VoicemailGreetingType;
-  customGreetingUrl?: string;
-  maxMessageDurationSeconds: number;
+  owner: { type: MailboxOwnerType; id: Uuid };
+  displayLabel: string;
+  maxMessageSeconds: number;
   retentionDays: number;
-  emailNotification: boolean;
-  notificationEmail?: string;
-  transcriptionEnabled: boolean;
-  enabled: boolean;
+  status: ResourceStatus;
+  version: number;
   createdAt: string;
   updatedAt: string;
+  disabledAt: string | null;
 }
 
-/** List of voicemail mailboxes */
+/** The adapter's "my mailboxes" answer (bounded discovery; `truncated` when the bound was hit). */
 export interface VoicemailMailboxList {
-  data: VoicemailMailbox[];
+  mailboxes: VoicemailMailbox[];
+  nextCursor: string | null;
+  truncated?: boolean;
 }
 
-/** Request body for creating a mailbox */
-export interface CreateMailboxRequest {
-  name: string;
-  extension?: string;
-  greetingType?: VoicemailGreetingType;
-  maxMessageDurationSeconds?: number;
-  retentionDays?: number;
-  emailNotification?: boolean;
-  notificationEmail?: string;
-  transcriptionEnabled?: boolean;
-}
-
-/** Request body for updating a mailbox */
-export interface UpdateMailboxRequest {
-  name?: string;
-  greetingType?: VoicemailGreetingType;
-  customGreetingUrl?: string;
-  maxMessageDurationSeconds?: number;
-  retentionDays?: number;
-  emailNotification?: boolean;
-  notificationEmail?: string;
-  transcriptionEnabled?: boolean;
-  enabled?: boolean;
-}
-
-/** A voicemail message */
 export interface VoicemailMessage {
   messageId: Uuid;
   mailboxId: Uuid;
-  callId?: Uuid;
-  callerPrincipalId?: Uuid;
-  callerDisplayName?: string;
-  callerNumber?: string;
+  callId: Uuid;
+  callerPrincipalId: Uuid;
+  captureSource: string;
   state: VoicemailMessageState;
   readState: VoicemailReadState;
-  durationSeconds: number;
-  transcription?: string;
-  transcriptionConfidence?: number;
-  createdAt: string;
-  readAt?: string;
+  contentType: "audio/wav" | "audio/ogg" | null;
+  sizeBytes: number | null;
+  durationMs: number | null;
+  sha256: string | null;
+  receivedAt: string;
+  readyAt: string | null;
+  readAt: string | null;
+  failureCode: string | null;
+  retentionUntil: string | null;
+  deletedAt: string | null;
+  version: number;
 }
 
-/** Paginated list of voicemail messages */
 export interface VoicemailMessageList {
-  mailboxId: Uuid;
-  data: VoicemailMessage[];
-  nextCursor?: string | null;
-  unreadCount: number;
+  messages: VoicemailMessage[];
+  nextCursor: string | null;
 }
 
-/** Filters for listing voicemail messages */
 export interface VoicemailMessageFilters {
   mailboxId: Uuid;
   readState?: VoicemailReadState;
@@ -95,14 +65,17 @@ export interface VoicemailMessageFilters {
   cursor?: string;
 }
 
-/** Result of requesting media access */
+/** Short-lived (at most 900 s) signed URL of a READY message. */
 export interface MediaAccessResult {
   messageId: Uuid;
   url: string;
   expiresAt: string;
+  contentType: "audio/wav" | "audio/ogg";
+  sizeBytes: number;
+  sha256: string;
 }
 
-/** Request body for setting read state */
 export interface ReadStateRequest {
+  expectedVersion: number;
   readState: VoicemailReadState;
 }

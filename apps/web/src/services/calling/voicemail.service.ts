@@ -1,138 +1,44 @@
 /**
- * Voicemail API service.
- * Manages voicemail mailboxes and messages.
+ * Self-service voicemail (CAL-006) through the same-origin adapter. The adapter binds every
+ * request to the signed-in principal (Calling's owner view); mailbox administration of the
+ * shared scope is not part of this service.
  */
 
 import callingApi from "./api";
+import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import type {
-  VoicemailMailbox,
-  VoicemailMailboxList,
-  CreateMailboxRequest,
-  UpdateMailboxRequest,
-  VoicemailMessage,
-  VoicemailMessageList,
-  VoicemailMessageFilters,
   MediaAccessResult,
   ReadStateRequest,
+  VoicemailMailboxList,
+  VoicemailMessage,
+  VoicemailMessageFilters,
+  VoicemailMessageList,
 } from "@/types/calling";
 
 export const voicemailService = {
-  // -------------------------------------------------------------------------
-  // Mailbox operations
-  // -------------------------------------------------------------------------
+  /** The mailboxes the signed-in user owns (GET /v1/enterprise/voicemail/mailboxes, owner-filtered by the adapter). */
+  listMailboxes: async (): Promise<VoicemailMailboxList> =>
+    (await callingApi.get<VoicemailMailboxList>("/v1/enterprise/voicemail/mailboxes")).data,
 
-  /**
-   * List all voicemail mailboxes
-   */
-  listMailboxes: async (): Promise<VoicemailMailboxList> => {
-    const response = await callingApi.get<VoicemailMailboxList>(
-      "/v1/enterprise/voicemail/mailboxes"
-    );
-    return response.data;
+  listMessages: async (filters: VoicemailMessageFilters): Promise<VoicemailMessageList> =>
+    (await callingApi.get<VoicemailMessageList>("/v1/enterprise/voicemail/messages", { params: filters })).data,
+
+  getMessage: async (messageId: string): Promise<VoicemailMessage> =>
+    (await callingApi.get<VoicemailMessage>(`/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}`)).data,
+
+  deleteMessage: async (messageId: string, expectedVersion: number): Promise<void> => {
+    await callingApi.delete(`/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}`, {
+      params: { expectedVersion },
+      headers: { "Idempotency-Key": newIdempotencyKey() },
+    });
   },
 
-  /**
-   * Get a specific mailbox
-   */
-  getMailbox: async (mailboxId: string): Promise<VoicemailMailbox> => {
-    const response = await callingApi.get<VoicemailMailbox>(
-      `/v1/enterprise/voicemail/mailboxes/${encodeURIComponent(mailboxId)}`
-    );
-    return response.data;
-  },
+  /** A short-lived signed URL (at most 900 s); never stored. */
+  getMediaAccess: async (messageId: string): Promise<MediaAccessResult> =>
+    (await callingApi.post<MediaAccessResult>(`/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}/media-access`, {})).data,
 
-  /**
-   * Create a new voicemail mailbox
-   */
-  createMailbox: async (body: CreateMailboxRequest): Promise<VoicemailMailbox> => {
-    const response = await callingApi.post<VoicemailMailbox>(
-      "/v1/enterprise/voicemail/mailboxes",
-      body
-    );
-    return response.data;
-  },
-
-  /**
-   * Update a mailbox's settings
-   */
-  updateMailbox: async (
-    mailboxId: string,
-    body: UpdateMailboxRequest
-  ): Promise<VoicemailMailbox> => {
-    const response = await callingApi.patch<VoicemailMailbox>(
-      `/v1/enterprise/voicemail/mailboxes/${encodeURIComponent(mailboxId)}`,
-      body
-    );
-    return response.data;
-  },
-
-  /**
-   * Delete (disable) a mailbox
-   */
-  deleteMailbox: async (mailboxId: string): Promise<void> => {
-    await callingApi.delete(
-      `/v1/enterprise/voicemail/mailboxes/${encodeURIComponent(mailboxId)}`
-    );
-  },
-
-  // -------------------------------------------------------------------------
-  // Message operations
-  // -------------------------------------------------------------------------
-
-  /**
-   * List messages in a mailbox
-   */
-  listMessages: async (
-    filters: VoicemailMessageFilters
-  ): Promise<VoicemailMessageList> => {
-    const response = await callingApi.get<VoicemailMessageList>(
-      "/v1/enterprise/voicemail/messages",
-      { params: filters }
-    );
-    return response.data;
-  },
-
-  /**
-   * Get a specific message
-   */
-  getMessage: async (messageId: string): Promise<VoicemailMessage> => {
-    const response = await callingApi.get<VoicemailMessage>(
-      `/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}`
-    );
-    return response.data;
-  },
-
-  /**
-   * Delete a voicemail message
-   */
-  deleteMessage: async (messageId: string): Promise<void> => {
-    await callingApi.delete(
-      `/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}`
-    );
-  },
-
-  /**
-   * Get short-lived access URL for message audio
-   */
-  getMediaAccess: async (messageId: string): Promise<MediaAccessResult> => {
-    const response = await callingApi.post<MediaAccessResult>(
-      `/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}/media-access`,
-      {}
-    );
-    return response.data;
-  },
-
-  /**
-   * Mark a message as read or unread
-   */
-  setReadState: async (
-    messageId: string,
-    body: ReadStateRequest
-  ): Promise<VoicemailMessage> => {
-    const response = await callingApi.put<VoicemailMessage>(
-      `/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}/read-state`,
-      body
-    );
-    return response.data;
-  },
+  setReadState: async (messageId: string, body: ReadStateRequest): Promise<VoicemailMessage> =>
+    (await callingApi.put<VoicemailMessage>(`/v1/enterprise/voicemail/messages/${encodeURIComponent(messageId)}/read-state`, body, {
+      headers: { "Idempotency-Key": newIdempotencyKey() },
+    })).data,
 };

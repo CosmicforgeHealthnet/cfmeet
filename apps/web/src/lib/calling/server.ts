@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Call, EndpointList } from "@/types/calling";
+import { callingBaseUrl, callingRuntimeMode, CallingConfigurationError } from "@/lib/calling/runtime-guard";
 
 export class CallingHttpError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -16,11 +17,16 @@ export type CallingIdentity = {
 };
 
 /**
- * Check if calling dev mode is enabled.
- * In dev mode, we bypass Platform Access and return a mock identity.
+ * Calling development mode (fixed identity, mock reads). Only a development build without a
+ * platform credential may use it (CAL-008): anywhere else the flag fails closed with 503.
  */
-function isDevMode(): boolean {
-  return process.env.CALLING_DEV_MODE === "true";
+export function callingDevMode(): boolean {
+  try {
+    return callingRuntimeMode(process.env) === "dev";
+  } catch (error) {
+    if (error instanceof CallingConfigurationError) throw new CallingHttpError(503, error.code, error.message);
+    throw error;
+  }
 }
 
 /**
@@ -34,8 +40,8 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
     throw new CallingHttpError(401, "AUTHENTICATION_FAILED", "Sign in to use calling.");
   }
 
-  // Dev mode: return mock identity for testing without full backend
-  if (isDevMode()) {
+  // Dev mode (development build only): a fixed identity for local work without a backend.
+  if (callingDevMode()) {
     const devPrincipalId = process.env.CALLING_DEV_PRINCIPAL_ID || "dev-user-001";
     return {
       principalId: devPrincipalId,
@@ -47,13 +53,17 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
 
   // Production mode: verify through messaging service
   const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+  // The login bearer is only ever sent to the identity authority over TLS in production.
+  if (process.env.NODE_ENV === "production" && !base.startsWith("https://")) {
+    throw new CallingHttpError(503, "CALLING_NOT_CONFIGURED", "The identity service is not securely configured.");
+  }
   let response: Response;
   try {
     response = await fetch(`${base.replace(/\/api\/v1\/?$/, "/api/v2")}/messaging/me`, {
       headers: { Authorization: authorization }, cache: "no-store", redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
-  } catch (error) {
+  } catch {
     // Network error or timeout
     throw new CallingHttpError(503, "SERVICE_UNAVAILABLE",
       "Cannot reach the identity service. Ensure the meeting service is running.");
@@ -77,7 +87,7 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
 
   if (!process.env.CALLING_PLATFORM_CREDENTIAL) {
     throw new CallingHttpError(503, "CALLING_NOT_CONFIGURED",
-      "CALLING_PLATFORM_CREDENTIAL is not set. Set CALLING_DEV_MODE=true for development.");
+      "Calling is not configured for this deployment.");
   }
 
   if (identity.tenantId !== process.env.CALLING_TENANT_ID ||
@@ -90,18 +100,23 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
   return identity;
 }
 
-export async function callingFetch(path: string, init: RequestInit = {}) {
-  const configured = process.env.CALLING_API_URL || process.env.NEXT_PUBLIC_CALLING_API_URL;
-  // Never silently fall back to a localhost Calling backend in a deployed app.
-  // The adapter must only call the explicitly configured service over TLS.
-  if (process.env.NODE_ENV === "production" && (!configured || !configured.startsWith("https://"))) {
-    throw new CallingHttpError(503, "CALLING_NOT_CONFIGURED", "Calling API is not securely configured.");
+/** The configured Calling origin; production requires an explicit https:// URL (CAL-020). */
+export function callingBase(): string {
+  try {
+    return callingBaseUrl(process.env);
+  } catch (error) {
+    if (error instanceof CallingConfigurationError) throw new CallingHttpError(503, error.code, error.message);
+    throw error;
   }
-  const base = configured || "http://localhost:8090";
+}
+
+export async function callingFetch(path: string, init: RequestInit = {}) {
+  // Never silently fall back to a localhost Calling backend in a deployed app.
+  const base = callingBase();
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${process.env.CALLING_PLATFORM_CREDENTIAL}`);
   headers.set("Content-Type", "application/json");
-  return fetch(`${base.replace(/\/$/, "")}${path}`, {
+  return fetch(`${base}${path}`, {
     ...init, headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(20_000),
   });
 }
