@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.2.0"
+      "description": "cfmeet.communications.http-api 1.3.0"
     }
   ],
   "paths": {
@@ -62157,7 +62157,7 @@
           "status": {
             "type": "string",
             "enum": [
-              "DEFERRED"
+              "PROVIDER_BLOCKED"
             ]
           },
           "required": {
@@ -62170,7 +62170,8 @@
         "required": [
           "status",
           "required"
-        ]
+        ],
+        "description": "Phone verification is provider-gated (ADR 0056 section 8): PROVIDER_BLOCKED until an SMS or verification provider is approved, never required. The same canonical label as the account profile (GET /api/v2/me/profile); DEFERRED was retired in 1.3.0."
       },
       "communications.Privacy": {
         "type": "object",

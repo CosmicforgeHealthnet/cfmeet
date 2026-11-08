@@ -235,7 +235,7 @@ impl State {
                 "history":"Encrypted history moves only by device-to-device transfer or the user's own encrypted backup; the server holds no keys"},
             "calls":{"history":"GET /api/v2/communications/calls/history"},
             "contacts":{"source":"SERVER","note":"Contacts, lists, favorites and preferences are restored from the server"},
-            "phoneRecovery":{"status":"DEFERRED","available":false}}),
+            "phoneRecovery":{"status":"PROVIDER_BLOCKED","available":false}}),
         )
     }
 }

@@ -1931,6 +1931,7 @@ class PermittedActions {
   Map<String, Object?> toJson() => json;
 }
 
+/// Phone verification is provider-gated (ADR 0056 section 8): PROVIDER_BLOCKED until an SMS or verification provider is approved, never required. The same canonical label as the account profile (GET /api/v2/me/profile); DEFERRED was retired in 1.3.0.
 class PhoneVerification {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const PhoneVerification.fromJson(this.json);

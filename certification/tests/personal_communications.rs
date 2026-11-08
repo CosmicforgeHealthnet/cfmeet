@@ -721,7 +721,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     )?;
     assert_eq!(capabilities["messaging"]["securityReady"], false);
     assert_eq!(capabilities["messaging"]["available"], false);
-    assert_eq!(capabilities["phoneVerification"]["status"], "DEFERRED");
+    assert_eq!(capabilities["phoneVerification"]["status"], "PROVIDER_BLOCKED");
     let policy = status(
         request(
             s,

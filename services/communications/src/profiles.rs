@@ -143,7 +143,7 @@ impl State {
         Ok(
             json!({"schemaVersion":1,"profileId":p.id,"cfMeetId":self.store.current_public_id(&self.store.db,p.id).await?,"displayName":p.display_name,"avatarReference":p.avatar_reference,
             "activationState":p.activation_state,"version":p.version,"createdAt":p.created_at,"updatedAt":p.updated_at,
-            "phoneVerification":{"status":"DEFERRED","required":false}}),
+            "phoneVerification":{"status":"PROVIDER_BLOCKED","required":false}}),
         )
     }
     pub async fn rotate_public_id(

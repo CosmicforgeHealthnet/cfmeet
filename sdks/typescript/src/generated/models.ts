@@ -2662,8 +2662,9 @@ export namespace Communications {
     directCallEligible: boolean;
     directChatEligible: boolean;
   };
+  /** Phone verification is provider-gated (ADR 0056 section 8): PROVIDER_BLOCKED until an SMS or verification provider is approved, never required. The same canonical label as the account profile (GET /api/v2/me/profile); DEFERRED was retired in 1.3.0. */
   export type PhoneVerification = {
-    status: "DEFERRED";
+    status: "PROVIDER_BLOCKED";
     required: false;
   };
   export type Privacy = {

@@ -279,7 +279,7 @@ impl State {
                 "privateE2ee":{"available":false,"reason":"ACCOUNT_INACTIVE"}});
         }
         json!({"schemaVersion":1,"activationState":p.activation_state,"personalCalling":calling,"messaging":messaging,
-            "contacts":{"available":p.activation_state==Activation::Active},"phoneVerification":{"status":"DEFERRED","required":false},
+            "contacts":{"available":p.activation_state==Activation::Active},"phoneVerification":{"status":"PROVIDER_BLOCKED","required":false},
             "meetings":{"independent":true,"authorization":"EXISTING_MEETING_RULES"}})
     }
     pub async fn visible_profile(

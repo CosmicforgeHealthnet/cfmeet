@@ -2,10 +2,10 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet public API — communications",
-    "version": "1.2.0",
-    "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded.",
+    "version": "1.3.0",
+    "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded. 1.3.0 (final closure): phone verification and phone recovery report the canonical PROVIDER_BLOCKED (was DEFERRED), the label the account profile uses.",
     "x-cfmeet-source-contract": "cfmeet.communications.http-api",
-    "x-cfmeet-source-version": "1.2.0"
+    "x-cfmeet-source-version": "1.3.0"
   },
   "servers": [
     {
@@ -15026,7 +15026,7 @@
           "status": {
             "type": "string",
             "enum": [
-              "DEFERRED"
+              "PROVIDER_BLOCKED"
             ]
           },
           "required": {
@@ -15039,7 +15039,8 @@
         "required": [
           "status",
           "required"
-        ]
+        ],
+        "description": "Phone verification is provider-gated (ADR 0056 section 8): PROVIDER_BLOCKED until an SMS or verification provider is approved, never required. The same canonical label as the account profile (GET /api/v2/me/profile); DEFERRED was retired in 1.3.0."
       },
       "Privacy": {
         "type": "object",
