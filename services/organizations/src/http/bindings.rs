@@ -32,8 +32,20 @@ use crate::{
     store,
 };
 
-/// The only consuming service of a binding in this version.
+/// Consuming services of a binding: Calling (Section 12 follow-up) and Messaging (final
+/// closure: organization-scope Messaging through the Meeting relay).
 pub const CALLING: &str = "calling";
+pub const MESSAGING: &str = "messaging";
+pub const SERVICES: &[&str] = &[CALLING, MESSAGING];
+
+/// The binding service named in the path; unknown services look like a missing binding.
+fn service_of(name: &str) -> Result<&'static str, ApiError> {
+    SERVICES
+        .iter()
+        .copied()
+        .find(|s| *s == name)
+        .ok_or_else(not_bound)
+}
 
 /// One recorded binding.
 #[derive(Debug, Clone, FromQueryResult)]
@@ -112,33 +124,35 @@ fn not_bound() -> ApiError {
     )
 }
 
-/// `GET /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling`.
-pub async fn get_calling(
+/// `GET /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}`.
+pub async fn get_binding(
     State(state): State<AppState>,
     caller: Caller,
-    Path(id): Path<Uuid>,
+    Path((id, service)): Path<(Uuid, String)>,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
+    let service = service_of(&service)?;
     store::org(&state.db, id, false)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
-    let row = binding(&state.db, id, provisioning::CAPABILITY, CALLING, false)
+    let row = binding(&state.db, id, provisioning::CAPABILITY, service, false)
         .await?
         .ok_or_else(not_bound)?;
     Ok(respond(StatusCode::OK, row.to_json()))
 }
 
-/// `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling`
+/// `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}`
 /// `{serviceAccountId, credentialId, expectedVersion?}` — create or replace; repeating the
 /// recorded ids is a no-op (same version). Refused for an archived organization and while
 /// the organization has no recorded triple (`PROVISIONING_PENDING`).
-pub async fn put_calling(
+pub async fn put_binding(
     State(state): State<AppState>,
     caller: Caller,
-    Path(id): Path<Uuid>,
+    Path((id, service)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
+    let service = service_of(&service)?;
     let (req, _): (PutBody, Value) = parse(&body)?;
     if req.service_account_id.is_nil() || req.credential_id.is_nil() {
         return Err(ApiError::validation(
@@ -161,7 +175,7 @@ pub async fn put_calling(
     if !has_triple {
         return Err(ApiError::new(ErrorCode::ProvisioningPending));
     }
-    let current = binding(&txn, id, provisioning::CAPABILITY, CALLING, true).await?;
+    let current = binding(&txn, id, provisioning::CAPABILITY, service, true).await?;
     let current_version = current.as_ref().map(|b| b.version).unwrap_or(0);
     if req.expected_version.is_some_and(|v| v != current_version) {
         return Err(ApiError::new(ErrorCode::VersionConflict));
@@ -188,7 +202,7 @@ pub async fn put_calling(
         vec![
             id.into(),
             provisioning::CAPABILITY.into(),
-            CALLING.into(),
+            service.into(),
             req.service_account_id.into(),
             req.credential_id.into(),
             ctx.user_id.into(),
@@ -196,7 +210,7 @@ pub async fn put_calling(
         ],
     )
     .await?;
-    let row = binding(&txn, id, provisioning::CAPABILITY, CALLING, false)
+    let row = binding(&txn, id, provisioning::CAPABILITY, service, false)
         .await?
         .ok_or(ApiError::new(ErrorCode::InternalError))?;
     // Ids only (they are not secrets); the audit summary says what changed.
@@ -210,7 +224,7 @@ pub async fn put_calling(
         Some(id),
         json!({
             "capability": provisioning::CAPABILITY,
-            "service": CALLING,
+            "service": service,
             "serviceAccountId": row.service_account_id,
             "credentialId": row.credential_id,
             "version": row.version,
@@ -222,25 +236,26 @@ pub async fn put_calling(
     Ok(respond(StatusCode::OK, row.to_json()))
 }
 
-/// `DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling`
+/// `DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}`
 /// — idempotent; also allowed for an archived organization (removal only narrows).
-pub async fn delete_calling(
+pub async fn delete_binding(
     State(state): State<AppState>,
     caller: Caller,
-    Path(id): Path<Uuid>,
+    Path((id, service)): Path<(Uuid, String)>,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
+    let service = service_of(&service)?;
     let txn = state.db.begin().await?;
     store::org(&txn, id, true)
         .await?
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
-    let current = binding(&txn, id, provisioning::CAPABILITY, CALLING, true).await?;
+    let current = binding(&txn, id, provisioning::CAPABILITY, service, true).await?;
     let removed = current.is_some();
     if let Some(b) = current {
         db::exec(
             &txn,
             "DELETE FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3",
-            vec![id.into(), provisioning::CAPABILITY.into(), CALLING.into()],
+            vec![id.into(), provisioning::CAPABILITY.into(), service.into()],
         )
         .await?;
         let now = db::now(&txn).await?;
@@ -254,7 +269,7 @@ pub async fn delete_calling(
             Some(id),
             json!({
                 "capability": provisioning::CAPABILITY,
-                "service": CALLING,
+                "service": service,
                 "serviceAccountId": b.service_account_id,
                 "credentialId": b.credential_id,
                 "version": b.version,
@@ -265,6 +280,6 @@ pub async fn delete_calling(
     txn.commit().await?;
     Ok(respond(
         StatusCode::OK,
-        json!({ "organizationId": id, "capability": provisioning::CAPABILITY, "service": CALLING, "removed": removed }),
+        json!({ "organizationId": id, "capability": provisioning::CAPABILITY, "service": service, "removed": removed }),
     ))
 }

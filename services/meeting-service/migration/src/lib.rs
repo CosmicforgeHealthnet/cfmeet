@@ -355,7 +355,9 @@ pub struct OrganizationIntegrationMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for OrganizationIntegrationMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261110_000001_organization_integration::Migration)]
+        vec![Box::new(
+            m20261110_000001_organization_integration::Migration,
+        )]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("organization_integration_migrations").into_iden()

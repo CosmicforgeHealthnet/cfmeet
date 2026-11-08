@@ -34,7 +34,10 @@ impl EventDispatcher for Recording {
     }
 
     async fn deliver(&self, destination: &str, envelope: &Value) -> Result<(), DeliveryError> {
-        assert_eq!(destination, MEETING, "the reconciliation record is never sent");
+        assert_eq!(
+            destination, MEETING,
+            "the reconciliation record is never sent"
+        );
         assert!(envelope["eventId"].is_string());
         self.sent.fetch_add(1, Ordering::SeqCst);
         if self.fail {
@@ -136,15 +139,21 @@ async fn outbox_leases_are_exclusive_and_failures_back_off() {
 
     // Two concurrent claimers never share a row.
     let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-    let first = outbox::claim_due(&h.db.conn, a, 1, &meeting()).await.unwrap();
-    let second = outbox::claim_due(&h.db.conn, b, 10, &meeting()).await.unwrap();
+    let first = outbox::claim_due(&h.db.conn, a, 1, &meeting())
+        .await
+        .unwrap();
+    let second = outbox::claim_due(&h.db.conn, b, 10, &meeting())
+        .await
+        .unwrap();
     assert_eq!(first.len(), 1);
     assert_eq!(second.len(), 1);
     assert_ne!(first[0].seq, second[0].seq);
-    assert!(outbox::claim_due(&h.db.conn, Uuid::new_v4(), 10, &meeting())
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        outbox::claim_due(&h.db.conn, Uuid::new_v4(), 10, &meeting())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     // A failure releases the lease and schedules a retry; a stale lease cannot settle.
     outbox::settle(&h.db.conn, &first[0], b, Ok(()))
         .await
@@ -265,7 +274,8 @@ async fn the_worker_loop_runs_until_shutdown() {
 }
 
 #[tokio::test]
-async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_after_a_dead_letter() {
+async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_after_a_dead_letter(
+) {
     let Some(h) = Harness::new().await else {
         return;
     };
@@ -310,7 +320,9 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
         .expect(200);
     // The first event of the membership dead-letters (permanent refusal).
     let lease = Uuid::new_v4();
-    let claimed = outbox::claim_due(&h.db.conn, lease, 50, &meeting()).await.unwrap();
+    let claimed = outbox::claim_due(&h.db.conn, lease, 50, &meeting())
+        .await
+        .unwrap();
     let types: Vec<String> = claimed
         .iter()
         .map(|r| r.payload["eventType"].as_str().unwrap().to_string())
@@ -318,11 +330,17 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
     // Only the first version of each aggregate is claimable: the membership's later
     // versions wait for their predecessor.
     assert_eq!(
-        types.iter().filter(|t| t.starts_with("membership.")).count(),
+        types
+            .iter()
+            .filter(|t| t.starts_with("membership."))
+            .count(),
         2,
         "{types:?}"
     );
-    assert!(!types.contains(&"membership.removed".to_string()), "{types:?}");
+    assert!(
+        !types.contains(&"membership.removed".to_string()),
+        "{types:?}"
+    );
     for row in &claimed {
         let refused = row.payload["aggregateId"].as_str() == Some(membership.as_str());
         let outcome = if refused {
@@ -333,15 +351,23 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
         } else {
             Ok(())
         };
-        outbox::settle(&h.db.conn, row, lease, outcome).await.unwrap();
+        outbox::settle(&h.db.conn, row, lease, outcome)
+            .await
+            .unwrap();
     }
     // Its successors stay held while the predecessor is dead.
-    assert!(outbox::claim_due(&h.db.conn, Uuid::new_v4(), 50, &meeting())
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        outbox::claim_due(&h.db.conn, Uuid::new_v4(), 50, &meeting())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let status = outbox::destination_status(&h.db.conn).await.unwrap();
-    assert_eq!(status.len(), 1, "the reconciliation record is not a consumer");
+    assert_eq!(
+        status.len(),
+        1,
+        "the reconciliation record is not a consumer"
+    );
     assert_eq!((status[0].dead, status[0].pending), (1, 2));
     assert_eq!(status[0].last_error_class.as_deref(), Some("REFUSED_400"));
 
@@ -364,13 +390,17 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
     for _ in 0..4 {
         let before: Vec<String> = {
             let lease = Uuid::new_v4();
-            let rows = outbox::claim_due(&h.db.conn, lease, 50, &meeting()).await.unwrap();
+            let rows = outbox::claim_due(&h.db.conn, lease, 50, &meeting())
+                .await
+                .unwrap();
             let t = rows
                 .iter()
                 .map(|r| r.payload["eventType"].as_str().unwrap().to_string())
                 .collect();
             for row in &rows {
-                outbox::settle(&h.db.conn, row, lease, Ok(())).await.unwrap();
+                outbox::settle(&h.db.conn, row, lease, Ok(()))
+                    .await
+                    .unwrap();
             }
             t
         };
@@ -378,12 +408,22 @@ async fn a_consumer_receives_each_aggregate_in_version_order_and_replay_resumes_
     }
     assert_eq!(
         order,
-        ["membership.activated", "membership.role_changed", "membership.removed"],
+        [
+            "membership.activated",
+            "membership.role_changed",
+            "membership.removed"
+        ],
         "one version per pass, in aggregate order"
     );
-    let r = h.by(&h.peers.operator).get("/internal/v1/admin/event-delivery").await;
+    let r = h
+        .by(&h.peers.operator)
+        .get("/internal/v1/admin/event-delivery")
+        .await;
     let d = &r.expect(200)["destinations"][0];
-    assert_eq!((d["dead"].as_i64(), d["pending"].as_i64()), (Some(0), Some(0)));
+    assert_eq!(
+        (d["dead"].as_i64(), d["pending"].as_i64()),
+        (Some(0), Some(0))
+    );
     // A caller without organization.administer cannot read or replay.
     h.by(&h.peers.messaging)
         .get("/internal/v1/admin/event-delivery")

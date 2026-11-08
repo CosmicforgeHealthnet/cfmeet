@@ -3,9 +3,7 @@
 
 use std::sync::Arc;
 
-use organizations::{
-    config::OrganizationsConfig, http, state::AppState, worker,
-};
+use organizations::{config::OrganizationsConfig, http, state::AppState, worker};
 
 fn fatal(what: &str, err: impl std::fmt::Display) -> ! {
     eprintln!("organizations: {what}: {err}");

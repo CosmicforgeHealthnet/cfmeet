@@ -37,8 +37,8 @@ use axum::{
     Json, Router,
 };
 use cf_service_auth::{
-    services, InternalPermission, RuntimeEnvironment, ServiceId, ServiceTokenVerifier,
-    SystemClock, TrustPolicy,
+    services, InternalPermission, RuntimeEnvironment, ServiceId, ServiceTokenVerifier, SystemClock,
+    TrustPolicy,
 };
 use sea_orm::{ConnectionTrait, DbBackend, Statement, TransactionTrait};
 use serde::Deserialize;
@@ -163,7 +163,10 @@ pub enum Effect {
     /// Refresh the organization projection from the authoritative snapshot.
     RefreshProjection,
     /// Set the member's desired organization access.
-    MemberAccess { user_id: Uuid, desired: &'static str },
+    MemberAccess {
+        user_id: Uuid,
+        desired: &'static str,
+    },
     /// Recorded only (no local effect).
     Record,
 }
@@ -207,9 +210,7 @@ pub fn effect_of(envelope: &Envelope) -> Result<Effect, &'static str> {
 
 /// Canonical digest of an envelope (serde_json maps are ordered).
 pub fn digest(body: &Value) -> String {
-    hex::encode(Sha256::digest(
-        serde_json::to_vec(body).unwrap_or_default(),
-    ))
+    hex::encode(Sha256::digest(serde_json::to_vec(body).unwrap_or_default()))
 }
 
 async fn ingest(State(s): State<EventsState>, request: Request) -> Response {
@@ -485,7 +486,10 @@ mod tests {
         ] {
             assert_eq!(
                 effect_of(&envelope(t, json!({ "userId": u }))).unwrap(),
-                Effect::MemberAccess { user_id: u, desired },
+                Effect::MemberAccess {
+                    user_id: u,
+                    desired
+                },
                 "{t}"
             );
             assert!(effect_of(&envelope(t, json!({}))).is_err(), "{t}");
@@ -494,8 +498,15 @@ mod tests {
 
     #[test]
     fn lifecycle_events_refresh_the_projection_and_unknown_ones_are_recorded() {
-        for t in ["organization.suspended", "organization.reactivated", "policy.updated"] {
-            assert_eq!(effect_of(&envelope(t, json!({}))).unwrap(), Effect::RefreshProjection);
+        for t in [
+            "organization.suspended",
+            "organization.reactivated",
+            "policy.updated",
+        ] {
+            assert_eq!(
+                effect_of(&envelope(t, json!({}))).unwrap(),
+                Effect::RefreshProjection
+            );
         }
         assert_eq!(
             effect_of(&envelope("team.created", json!({}))).unwrap(),
@@ -511,7 +522,9 @@ mod tests {
         let mut e = envelope("membership.removed", json!({}));
         e.aggregate_version = 0;
         assert!(e.validate().is_err());
-        assert!(envelope("Membership.Removed", json!({})).validate().is_err());
+        assert!(envelope("Membership.Removed", json!({}))
+            .validate()
+            .is_err());
         assert!(envelope("membership", json!({})).validate().is_err());
     }
 

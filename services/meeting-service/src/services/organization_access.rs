@@ -268,7 +268,11 @@ pub fn spawn(db: DatabaseConnection, port: Arc<dyn PrincipalStatusPort>, interva
         loop {
             match run_once(&db, port.as_ref(), 100).await {
                 Ok(r) if r.failed > 0 => {
-                    tracing::warn!(applied = r.applied, failed = r.failed, "organization access pass")
+                    tracing::warn!(
+                        applied = r.applied,
+                        failed = r.failed,
+                        "organization access pass"
+                    )
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("organization access pass failed: {e}"),

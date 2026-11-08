@@ -14,6 +14,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20261106_000001_organizations_foundation;
 mod m20261107_000002_teams_policies_provisioning;
 mod m20261108_000003_scope_service_bindings;
+mod m20261110_000004_messaging_service_binding;
 
 /// Name of the table recording which Organizations migrations have been applied.
 pub const MIGRATION_TABLE: &str = "organizations_seaql_migrations";
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261106_000001_organizations_foundation::Migration),
             Box::new(m20261107_000002_teams_policies_provisioning::Migration),
             Box::new(m20261108_000003_scope_service_bindings::Migration),
+            Box::new(m20261110_000004_messaging_service_binding::Migration),
         ]
     }
 

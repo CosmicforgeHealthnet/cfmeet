@@ -162,14 +162,21 @@ async fn organization_events_are_authenticated_deduplicated_and_applied_in_versi
 
     // Removal: the member's desired organization access is REMOVED (version 3).
     let (s, v) = deliver(&router, Some(&orgs), removed.to_string()).await;
-    assert_eq!((s, v["outcome"].as_str()), (StatusCode::OK, Some("APPLIED")), "{v}");
+    assert_eq!(
+        (s, v["outcome"].as_str()),
+        (StatusCode::OK, Some("APPLIED")),
+        "{v}"
+    );
     assert_eq!(access(&app, org, member).await, Some(("REMOVED".into(), 3)));
 
     // At-least-once: the same event again is a duplicate (key order does not matter).
-    let reordered: Value =
-        serde_json::from_str(&serde_json::to_string(&removed).unwrap()).unwrap();
+    let reordered: Value = serde_json::from_str(&serde_json::to_string(&removed).unwrap()).unwrap();
     let (s, v) = deliver(&router, Some(&orgs), reordered.to_string()).await;
-    assert_eq!((s, v["outcome"].as_str()), (StatusCode::OK, Some("DUPLICATE")), "{v}");
+    assert_eq!(
+        (s, v["outcome"].as_str()),
+        (StatusCode::OK, Some("DUPLICATE")),
+        "{v}"
+    );
     // A different body under the same id is refused (the producer dead-letters it).
     let mut forged = removed.clone();
     forged["payload"]["userId"] = json!(Uuid::new_v4());
@@ -188,7 +195,11 @@ async fn organization_events_are_authenticated_deduplicated_and_applied_in_versi
         json!({ "userId": member, "role": "MEMBER", "membershipVersion": 2 }),
     );
     let (s, v) = deliver(&router, Some(&orgs), late.to_string()).await;
-    assert_eq!((s, v["outcome"].as_str()), (StatusCode::OK, Some("STALE")), "{v}");
+    assert_eq!(
+        (s, v["outcome"].as_str()),
+        (StatusCode::OK, Some("STALE")),
+        "{v}"
+    );
     assert_eq!(access(&app, org, member).await, Some(("REMOVED".into(), 3)));
 
     // A newer version (re-invited and accepted) restores ACTIVE.
@@ -202,7 +213,11 @@ async fn organization_events_are_authenticated_deduplicated_and_applied_in_versi
         json!({ "userId": member, "role": "MEMBER", "membershipVersion": 4 }),
     );
     let (s, v) = deliver(&router, Some(&orgs), back.to_string()).await;
-    assert_eq!((s, v["outcome"].as_str()), (StatusCode::OK, Some("APPLIED")), "{v}");
+    assert_eq!(
+        (s, v["outcome"].as_str()),
+        (StatusCode::OK, Some("APPLIED")),
+        "{v}"
+    );
     assert_eq!(access(&app, org, member).await, Some(("ACTIVE".into(), 4)));
 
     // Suspension of another member, from a different membership aggregate.
@@ -223,26 +238,52 @@ async fn organization_events_are_authenticated_deduplicated_and_applied_in_versi
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(access(&app, org, other).await, Some(("SUSPENDED".into(), 2)));
+    assert_eq!(
+        access(&app, org, other).await,
+        Some(("SUSPENDED".into(), 2))
+    );
 
     // Legacy authority mode: lifecycle events are recorded (the Meeting Service is itself
     // the organization authority); unknown event types are recorded, never refused.
-    for (t, a) in [("organization.suspended", "organization"), ("team.created", "team")] {
+    for (t, a) in [
+        ("organization.suspended", "organization"),
+        ("team.created", "team"),
+    ] {
         let (s, v) = deliver(
             &router,
             Some(&orgs),
             event(Uuid::new_v4(), t, org, a, Uuid::new_v4(), 1, json!({})).to_string(),
         )
         .await;
-        assert_eq!((s, v["outcome"].as_str()), (StatusCode::OK, Some("RECORDED")), "{t}: {v}");
+        assert_eq!(
+            (s, v["outcome"].as_str()),
+            (StatusCode::OK, Some("RECORDED")),
+            "{t}: {v}"
+        );
     }
 
     // Malformed envelopes are refused (permanent: the producer dead-letters them).
     for bad in [
         json!({ "eventId": Uuid::new_v4() }),
-        event(Uuid::new_v4(), "membership.removed", org, "membership", Uuid::new_v4(), 1, json!({})),
+        event(
+            Uuid::new_v4(),
+            "membership.removed",
+            org,
+            "membership",
+            Uuid::new_v4(),
+            1,
+            json!({}),
+        ),
         {
-            let mut e = event(Uuid::new_v4(), "membership.removed", org, "membership", Uuid::new_v4(), 1, json!({ "userId": member }));
+            let mut e = event(
+                Uuid::new_v4(),
+                "membership.removed",
+                org,
+                "membership",
+                Uuid::new_v4(),
+                1,
+                json!({ "userId": member }),
+            );
             e["schemaVersion"] = json!(2);
             e
         },
@@ -314,7 +355,12 @@ mod access_worker {
 
     #[async_trait]
     impl PrincipalStatusPort for NewerDuringCall {
-        async fn set_status(&self, _: &ScopeEnvironment, _: Uuid, _: &str) -> Result<(), PortError> {
+        async fn set_status(
+            &self,
+            _: &ScopeEnvironment,
+            _: Uuid,
+            _: &str,
+        ) -> Result<(), PortError> {
             self.db
                 .execute(Statement::from_string(
                     sea_orm::DbBackend::Postgres,
@@ -422,7 +468,9 @@ mod access_worker {
             class: "PLATFORM_ACCESS_503".into(),
             permanent: false,
         });
-        let r = organization_access::run_once(&app.db.conn, &port, 10).await.unwrap();
+        let r = organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
         assert_eq!((r.applied, r.failed), (0, 1));
         assert_eq!(
             row(&app, org, member).await,
@@ -433,13 +481,21 @@ mod access_worker {
         // Not due again until the backoff elapses.
         *port.fail.lock().unwrap() = None;
         assert_eq!(
-            organization_access::run_once(&app.db.conn, &port, 10).await.unwrap(),
+            organization_access::run_once(&app.db.conn, &port, 10)
+                .await
+                .unwrap(),
             Default::default()
         );
-        exec(&app, "UPDATE organization_member_access SET next_attempt_at = now()".into()).await;
+        exec(
+            &app,
+            "UPDATE organization_member_access SET next_attempt_at = now()".into(),
+        )
+        .await;
 
         // Removal suspends the principal of THIS organization only.
-        let r = organization_access::run_once(&app.db.conn, &port, 10).await.unwrap();
+        let r = organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
         assert_eq!((r.applied, r.principals_updated), (1, 1));
         assert_eq!(
             port.calls.lock().unwrap().clone(),
@@ -450,16 +506,26 @@ mod access_worker {
             row(&app, org, member).await,
             (Some("REMOVED".into()), Some(3), 0, None)
         );
-        assert_eq!(organization_access::backlog(&app.db.conn).await.unwrap().pending, 0);
         assert_eq!(
-            organization_access::run_once(&app.db.conn, &port, 10).await.unwrap(),
+            organization_access::backlog(&app.db.conn)
+                .await
+                .unwrap()
+                .pending,
+            0
+        );
+        assert_eq!(
+            organization_access::run_once(&app.db.conn, &port, 10)
+                .await
+                .unwrap(),
             Default::default(),
             "nothing more to do"
         );
 
         // Re-admission (a newer membership version) restores the principal.
         desire(&app, org, member, "ACTIVE", 5).await;
-        organization_access::run_once(&app.db.conn, &port, 10).await.unwrap();
+        organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
         assert_eq!(port.calls.lock().unwrap().last().unwrap().2, "ACTIVE");
         assert_eq!(row(&app, org, member).await.0.as_deref(), Some("ACTIVE"));
 
@@ -467,7 +533,9 @@ mod access_worker {
         let stranger = Uuid::new_v4();
         desire(&app, org, stranger, "SUSPENDED", 2).await;
         let before = port.calls.lock().unwrap().len();
-        let r = organization_access::run_once(&app.db.conn, &port, 10).await.unwrap();
+        let r = organization_access::run_once(&app.db.conn, &port, 10)
+            .await
+            .unwrap();
         assert_eq!((r.applied, r.principals_updated), (1, 0));
         assert_eq!(port.calls.lock().unwrap().len(), before);
     }
@@ -495,6 +563,12 @@ mod access_worker {
             (None, None),
             "version 2 is not recorded as the applied state of version 3"
         );
-        assert_eq!(organization_access::backlog(&app.db.conn).await.unwrap().pending, 1);
+        assert_eq!(
+            organization_access::backlog(&app.db.conn)
+                .await
+                .unwrap()
+                .pending,
+            1
+        );
     }
 }

@@ -490,7 +490,10 @@ impl OrganizationCalling {
             )
             .await
             .map_err(|why| PortError {
-                class: format!("PLATFORM_ACCESS_{}", why.to_ascii_uppercase().replace(' ', "_")),
+                class: format!(
+                    "PLATFORM_ACCESS_{}",
+                    why.to_ascii_uppercase().replace(' ', "_")
+                ),
                 permanent: false,
             })?;
         match code {

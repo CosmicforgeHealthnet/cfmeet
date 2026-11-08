@@ -790,7 +790,7 @@
     },
     {
       "id": "cfmeet.organizations.internal-api-bundled",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/organizations/internal/v1.openapi.json",
       "owner": "organizations",
@@ -860,14 +860,14 @@
     },
     {
       "id": "cfmeet.organizations.internal-api",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "organizations/internal/v1.openapi.json",
       "owner": "organizations",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies (compare-and-swap, effective constraints, POLICY_RESTRICTED), the role / capability matrix, team context in resolve / evaluate, verified technical-scope resolution and the operator provisioning retry. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012): operator-only Calling service binding per organization scope (GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling) and serviceBindings on scopes/resolve."
+      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies (compare-and-swap, effective constraints, POLICY_RESTRICTED), the role / capability matrix, team context in resolve / evaluate, verified technical-scope resolution and the operator provisioning retry. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012): operator-only Calling service binding per organization scope (GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling) and serviceBindings on scopes/resolve. 1.3.0 (final closure): organization event delivery status / dead-letter replay (organization.administer) and the Messaging service binding (serviceBindings.messaging)."
     },
     {
       "id": "cfmeet.developer-platform.control",

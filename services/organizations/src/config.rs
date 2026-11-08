@@ -238,15 +238,17 @@ impl OrganizationsConfig {
             .map(str::trim)
             .filter(|n| !n.is_empty())
         {
-            let Some((destination, url_var)) =
-                EVENT_CONSUMERS.iter().find(|(d, _)| *d == name)
+            let Some((destination, url_var)) = EVENT_CONSUMERS.iter().find(|(d, _)| *d == name)
             else {
                 return Err(invalid(
                     "ORGANIZATIONS_EVENT_DESTINATIONS",
                     "names a service that does not consume organization events",
                 ));
             };
-            if event_consumers.iter().any(|c| c.destination == *destination) {
+            if event_consumers
+                .iter()
+                .any(|c| c.destination == *destination)
+            {
                 return Err(invalid(
                     "ORGANIZATIONS_EVENT_DESTINATIONS",
                     "names a consumer twice",
@@ -319,7 +321,11 @@ impl OrganizationsConfig {
         &self,
         clock: SharedClock,
     ) -> Result<Arc<dyn EventDispatcher>, ConfigError> {
-        let Some(s) = self.signing.as_ref().filter(|_| !self.event_consumers.is_empty()) else {
+        let Some(s) = self
+            .signing
+            .as_ref()
+            .filter(|_| !self.event_consumers.is_empty())
+        else {
             return Ok(Arc::new(DisabledDispatcher));
         };
         let key = ServiceSigningKey::from_pkcs8_pem_file(s.key_id.clone(), &s.private_key_file)
@@ -492,7 +498,10 @@ mod tests {
         on.push(("ORGANIZATIONS_EVENT_DESTINATIONS", "cfmeet.meeting-service"));
         // The consumer URL and the signing key are required.
         assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
-        on.push(("CF_MEETING_SERVICE_BASE_URL", "https://meeting.internal:8443"));
+        on.push((
+            "CF_MEETING_SERVICE_BASE_URL",
+            "https://meeting.internal:8443",
+        ));
         assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
         on.extend([
             ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),

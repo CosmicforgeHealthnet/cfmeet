@@ -337,7 +337,11 @@ async fn duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_dup
     );
     run(&h, &pa).await;
     assert_eq!(read(&h, &org).await["provisioningState"], "READY");
-    let events = h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await;
+    let events = h
+        .count(
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'",
+        )
+        .await;
     // Replayed passes and operator retries of a READY organization change nothing.
     for _ in 0..3 {
         due_now(&h).await;
@@ -350,7 +354,10 @@ async fn duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_dup
     assert_eq!(pa.provision_calls.load(Ordering::SeqCst), 1);
     assert_eq!(pa.scopes.lock().unwrap().len(), 1);
     assert_eq!(
-        h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await,
+        h.count(
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'"
+        )
+        .await,
         events
     );
     assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation' AND event_type = 'organization.provisioned'").await, 1);
@@ -716,7 +723,10 @@ async fn calling_binding_is_operator_only_versioned_audited_and_carried_by_resol
 
     // READY without a binding: resolve says so explicitly.
     let v = resolve(&h, &org).await.expect(200).clone();
-    assert_eq!(v["serviceBindings"], json!({ "calling": null }));
+    assert_eq!(
+        v["serviceBindings"],
+        json!({ "calling": null, "messaging": null })
+    );
     h.by(&h.peers.operator)
         .get(&binding_path(&org))
         .await
@@ -818,8 +828,43 @@ async fn calling_binding_is_operator_only_versioned_audited_and_carried_by_resol
     assert_eq!(h.count(&format!("SELECT count(*) FROM organization_audit_events WHERE action = 'scope.service_binding_cleared' AND organization_id = '{org}'")).await, 1);
     assert_eq!(
         resolve(&h, &org).await.expect(200)["serviceBindings"],
-        json!({ "calling": null })
+        json!({ "calling": null, "messaging": null })
     );
+
+    // Final closure: a Messaging binding is recorded independently of the Calling one and
+    // carried by resolve; an unknown service looks like a missing binding.
+    let messaging_path =
+        format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/messaging");
+    let msa = Uuid::new_v4();
+    let m = h
+        .by(&h.peers.operator)
+        .send(
+            axum::http::Method::PUT,
+            &messaging_path,
+            Some(json!({ "serviceAccountId": msa, "credentialId": Uuid::new_v4() })),
+        )
+        .await;
+    assert_eq!(m.expect(200)["service"], "messaging");
+    let v = resolve(&h, &org).await.expect(200).clone();
+    assert_eq!(
+        v["serviceBindings"]["messaging"]["serviceAccountId"],
+        json!(msa)
+    );
+    assert_eq!(v["serviceBindings"]["calling"], json!(null));
+    h.by(&h.peers.operator)
+        .get(&format!(
+            "/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/telephony"
+        ))
+        .await
+        .expect_error(404, "NOT_FOUND");
+    h.by(&h.peers.messaging)
+        .get(&messaging_path)
+        .await
+        .expect_error(403, "INTERNAL_PERMISSION_DENIED");
+    h.by(&h.peers.operator)
+        .send(axum::http::Method::DELETE, &messaging_path, None)
+        .await
+        .expect(200);
 
     // A suspended organization's resolve is refused whatever the binding says.
     put_binding(&h, &org, body.clone()).await.expect(200);
@@ -853,7 +898,7 @@ async fn calling_binding_is_operator_only_versioned_audited_and_carried_by_resol
     // The schema refuses an unknown service outright.
     assert!(h
         .exec(&format!(
-            "INSERT INTO organization_scope_service_bindings (organization_id, service, service_account_id, credential_id, created_at, updated_at) VALUES ('{org}', 'messaging', gen_random_uuid(), gen_random_uuid(), now(), now())"
+            "INSERT INTO organization_scope_service_bindings (organization_id, service, service_account_id, credential_id, created_at, updated_at) VALUES ('{org}', 'telephony', gen_random_uuid(), gen_random_uuid(), now(), now())"
         ))
         .await
         .is_err());

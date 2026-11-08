@@ -19,7 +19,10 @@ use crate::{
 pub async fn status(State(state): State<AppState>, caller: Caller) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationAdminister)?;
     let destinations = outbox::destination_status(&state.db).await?;
-    Ok(respond(StatusCode::OK, json!({ "destinations": destinations })))
+    Ok(respond(
+        StatusCode::OK,
+        json!({ "destinations": destinations }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

@@ -165,10 +165,10 @@ pub fn app(state: AppState) -> Router {
             post(organizations::provisioning_retry),
         )
         .route(
-            "/admin/organizations/:id/scopes/primary/service-bindings/calling",
-            get(bindings::get_calling)
-                .put(bindings::put_calling)
-                .delete(bindings::delete_calling),
+            "/admin/organizations/:id/scopes/primary/service-bindings/:service",
+            get(bindings::get_binding)
+                .put(bindings::put_binding)
+                .delete(bindings::delete_binding),
         )
         .route("/admin/event-delivery", get(outbox::status))
         .route("/admin/event-delivery/replay", post(outbox::replay))

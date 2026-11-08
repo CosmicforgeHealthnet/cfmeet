@@ -120,7 +120,13 @@ async fn the_shared_vector_imports_with_ids_and_timestamps_preserved_and_reimpor
     assert_eq!(again.expect(200)["imported"], 0);
     assert_eq!(again.json["unchanged"], 2);
     assert_eq!(again.json["conflicts"], json!([]));
-    assert_eq!(h.count("SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'").await, 2);
+    assert_eq!(
+        h.count(
+            "SELECT count(*) FROM organization_outbox WHERE destination = 'cfmeet.reconciliation'"
+        )
+        .await,
+        2
+    );
     assert_eq!(
         h.count("SELECT count(*) FROM organization_import_runs")
             .await,
