@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/providers/theme-provider";
 
-type IconName = "home" | "home-outline" | "list" | "list-outline" | "calendar" | "calendar-outline" | "settings" | "settings-outline";
+type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 interface TabIconProps {
   icon: IconName;
@@ -62,52 +62,45 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          tabBarAccessibilityLabel: "Home",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              icon="home"
-              iconOutline="home-outline"
-              focused={focused}
-              color={focused ? activeColor : inactiveColor}
-            />
+            <TabIcon icon="home" iconOutline="home-outline" focused={focused} color={focused ? activeColor : inactiveColor} />
           ),
         }}
       />
       <Tabs.Screen
         name="meetings"
         options={{
+          tabBarAccessibilityLabel: "Meetings",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              icon="list"
-              iconOutline="list-outline"
-              focused={focused}
-              color={focused ? activeColor : inactiveColor}
-            />
+            <TabIcon icon="calendar" iconOutline="calendar-outline" focused={focused} color={focused ? activeColor : inactiveColor} />
           ),
         }}
       />
       <Tabs.Screen
         name="schedule"
         options={{
+          tabBarAccessibilityLabel: "Schedule",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              icon="calendar"
-              iconOutline="calendar-outline"
-              focused={focused}
-              color={focused ? activeColor : inactiveColor}
-            />
+            <TabIcon icon="add-circle" iconOutline="add-circle-outline" focused={focused} color={focused ? activeColor : inactiveColor} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="chats"
+        options={{
+          tabBarAccessibilityLabel: "Chats",
+          tabBarIcon: ({ focused }) => (
+            <TabIcon icon="chatbubbles" iconOutline="chatbubbles-outline" focused={focused} color={focused ? activeColor : inactiveColor} />
           ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
+          tabBarAccessibilityLabel: "Settings",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              icon="settings"
-              iconOutline="settings-outline"
-              focused={focused}
-              color={focused ? activeColor : inactiveColor}
-            />
+            <TabIcon icon="settings" iconOutline="settings-outline" focused={focused} color={focused ? activeColor : inactiveColor} />
           ),
         }}
       />

@@ -19,8 +19,9 @@ export function useLogin() {
 
   return useMutation({
     mutationFn: async (data: LoginRequest): Promise<LoginResponse> => {
+      let response: LoginResponse;
       try {
-        return await authApi.login({ email: data.email.trim(), password: data.password });
+        response = await authApi.login({ email: data.email.trim(), password: data.password });
       } catch (error) {
         const decoded = decodeApiError(error);
         if (decoded.kind === "verification_required") {
@@ -28,12 +29,14 @@ export function useLogin() {
         }
         throw new ApiRequestError(decoded);
       }
+      if (routeAfterSignIn(response.user.status, data.email).kind === "blocked") {
+        // Nothing is stored for an inactive or suspended account.
+        throw new Error("This account is not active. Contact support to restore access.");
+      }
+      return response;
     },
     onSuccess: async (response, variables) => {
       const next = routeAfterSignIn(response.user.status, variables.email);
-      if (next.kind === "blocked") {
-        throw new Error("This account is not active.");
-      }
       await tokenStorage.setTokens(response.access_token, response.refresh_token);
       const user = { ...response.user, email: variables.email.trim().toLowerCase() };
       await userStorage.setUserInfo(user);

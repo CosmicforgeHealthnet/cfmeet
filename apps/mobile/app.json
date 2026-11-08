@@ -19,7 +19,15 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cosmicforge.cfmeet"
+      "bundleIdentifier": "com.cosmicforge.cfmeet",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CF Meet uses the camera for video in meetings.",
+        "NSMicrophoneUsageDescription": "CF Meet uses the microphone for audio in meetings.",
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      }
     },
     "android": {
       "package": "com.cosmicforge.cfmeet",
@@ -29,7 +37,15 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -49,7 +65,9 @@
             "backgroundColor": "#0F172A"
           }
         }
-      ]
+      ],
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
     ],
     "extra": {
       "router": {}
