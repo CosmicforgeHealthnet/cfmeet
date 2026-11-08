@@ -43,3 +43,7 @@ path = "src/profile-notifications-main.rs"
 [[bin]]
 name = "account-hardening-migration"
 path = "src/account-hardening-main.rs"
+
+[[bin]]
+name = "organization-integration-migration"
+path = "src/organization-integration-main.rs"

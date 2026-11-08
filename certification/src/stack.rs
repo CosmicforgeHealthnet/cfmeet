@@ -45,6 +45,7 @@ pub const BINARIES: &[&str] = &[
     "meetings-calendar-migration",
     "profile-notifications-migration",
     "account-hardening-migration",
+    "organization-integration-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -333,6 +334,7 @@ impl Stack {
             db::migrate(&self.bin("profile-notifications-migration"), &url)?;
             // Blueprint Sections 2-3 hardening: hashed legacy secrets, required at startup.
             db::migrate(&self.bin("account-hardening-migration"), &url)?;
+            db::migrate(&self.bin("organization-integration-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

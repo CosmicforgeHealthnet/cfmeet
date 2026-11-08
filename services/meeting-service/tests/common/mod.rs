@@ -160,6 +160,10 @@ async fn template(admin: &str) -> String {
             migration::AccountHardeningMigrator::up(&tmpl, None)
                 .await
                 .expect("account hardening migrations apply");
+            // Final closure: Organizations event inbox, fences, member access.
+            migration::OrganizationIntegrationMigrator::up(&tmpl, None)
+                .await
+                .expect("organization integration migrations apply");
             tmpl.close().await.ok();
             name
         })

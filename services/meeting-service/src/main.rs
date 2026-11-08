@@ -372,6 +372,41 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
 
+    // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
+    // live in their own additive history (`organization-integration-migration up`).
+    let organization_events =
+        backend::services::organization_events::OrganizationEventsConfig::from_env()
+            .and_then(|c| c.map(|c| c.verifier()).transpose())
+            .unwrap_or_else(|e| panic!("organization events configuration error: {e}"));
+    if organization_events.is_some()
+        && !migration::organization_integration_ready(&state.db)
+            .await
+            .expect("Organization integration migration readiness")
+    {
+        panic!("Organization integration migration is required (organization-integration-migration up)");
+    }
+    let events_router = organization_events
+        .map(|verifier| backend::services::organization_events::router(state.clone(), verifier));
+    if events_router.is_some() {
+        tracing::info!("Organizations event ingress enabled");
+        // Offboarding / restoration of organization-scope principals (needs the signed
+        // Platform Access client of the organization relay).
+        match state.meeting.core.organization_calling.clone() {
+            Some(port) => {
+                backend::services::organization_access::spawn(
+                    state.db.clone(),
+                    port,
+                    std::time::Duration::from_secs(5),
+                );
+                tracing::info!("organization access worker started");
+            }
+            None => tracing::warn!(
+                "organization events are enabled but the organization relay is not configured: \
+                 membership changes are recorded and applied once it is"
+            ),
+        }
+    }
+
     // Build application with routes
     let mut app = Router::new()
         .merge(routes::create_routes(state))
@@ -380,6 +415,9 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
         app = app.merge(bridge);
+    }
+    if let Some(events) = events_router {
+        app = app.merge(events);
     }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

@@ -454,6 +454,64 @@ impl OrganizationCalling {
         Ok((status, value))
     }
 
+    /// Sets the member's principal status in one organization environment through
+    /// Platform Access (`POST /internal/v1/principals/account-status`, signed with that
+    /// organization's delegated context). Messaging and Calling resolve the principal on
+    /// every request, so SUSPENDED denies reads, sends, calls and realtime there; the
+    /// member's personal-scope principal is a different principal and is untouched.
+    /// `Ok(())` also when there is nothing to change (404: no principal; 409: tombstoned).
+    pub async fn set_principal_status(
+        &self,
+        scope: &crate::services::organization_access::ScopeEnvironment,
+        user_id: Uuid,
+        status: &str,
+    ) -> Result<(), crate::services::organization_access::PortError> {
+        use crate::services::organization_access::PortError;
+        let context = DelegatedPlatformContext::new(
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            ApplicationEnvironmentKind::Production,
+            scope.service_account_id,
+        );
+        let (code, value) = self
+            .exchange(
+                ServiceId::platform_access(),
+                &self.platform_access,
+                Method::POST,
+                "/internal/v1/principals/account-status",
+                &[],
+                None,
+                Some(&json!({
+                    "externalReference": format!("{USER_REFERENCE_PREFIX}{user_id}"),
+                    "status": status,
+                })),
+                context,
+            )
+            .await
+            .map_err(|why| PortError {
+                class: format!("PLATFORM_ACCESS_{}", why.to_ascii_uppercase().replace(' ', "_")),
+                permanent: false,
+            })?;
+        match code {
+            200..=299 | 404 | 409 => Ok(()),
+            429 | 500..=599 => Err(PortError {
+                class: format!("PLATFORM_ACCESS_{code}"),
+                permanent: false,
+            }),
+            _ => Err(PortError {
+                class: format!(
+                    "PLATFORM_ACCESS_REFUSED_{}",
+                    value["error"]["code"].as_str().unwrap_or("UNKNOWN")
+                )
+                .chars()
+                .take(64)
+                .collect(),
+                permanent: true,
+            }),
+        }
+    }
+
     /// The member's NATIVE_CF_USER principal in the organization's environment (created
     /// on first use through Platform Access; cached in `communication_principal_links`,
     /// which is keyed by environment, so a personal-scope principal is never reused).
@@ -464,6 +522,14 @@ impl OrganizationCalling {
         binding: CallingServiceBinding,
         user_id: Uuid,
     ) -> ApiResult<Uuid> {
+        // Offboarding reaches this organization's principals through the recorded scope
+        // after the membership itself is gone. Best effort: the relay never depends on it.
+        crate::services::organization_access::record_scope_environment(
+            db,
+            scope,
+            binding.service_account_id,
+        )
+        .await;
         if let Some(row) = db
             .query_one(Statement::from_sql_and_values(
                 DbBackend::Postgres,

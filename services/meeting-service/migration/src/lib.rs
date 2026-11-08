@@ -33,6 +33,7 @@ mod m20261107_000001_meetings_calendar;
 mod m20261108_000001_account_profile;
 mod m20261108_000002_meeting_notifications;
 mod m20261109_000001_account_hardening;
+mod m20261110_000001_organization_integration;
 
 pub mod phase2_backfill;
 
@@ -343,6 +344,29 @@ pub async fn account_hardening_ready<C: sea_orm_migration::sea_orm::ConnectionTr
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<AccountHardeningMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Final closure: Organizations event inbox, aggregate fences and organization member
+/// access (offboarding). A SEPARATE additive history so the previously deployed image
+/// still starts after it is applied (rollback safety).
+pub struct OrganizationIntegrationMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for OrganizationIntegrationMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261110_000001_organization_integration::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("organization_integration_migrations").into_iden()
+    }
+}
+
+/// The organization-integration history satisfies the DATA-011 target rule.
+pub async fn organization_integration_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<OrganizationIntegrationMigrator, _>(db)
         .await?
         .is_empty())
 }
