@@ -11,10 +11,12 @@ on:
     branches: [main, staging]
     paths:
       - "apps/mobile/**"
+      - "packages/contracts/openapi/meeting-service.json"
       - ".github/workflows/mobile.yml"
   pull_request:
     paths:
       - "apps/mobile/**"
+      - "packages/contracts/openapi/meeting-service.json"
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
     inputs:
@@ -78,6 +80,14 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Typecheck tests
+        run: npx tsc --noEmit -p tests
+
+      # Contract types freshness, client contract test (every route is a served operation,
+      # no raw paths in API modules) and the pure logic tests (node --test, type stripping).
+      - name: Unit and client contract tests
+        run: npm test
 
   build-preview:
     name: EAS Build (Preview)
