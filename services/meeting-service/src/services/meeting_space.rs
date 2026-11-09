@@ -621,6 +621,47 @@ impl MeetingSpaceService {
         })
     }
 
+    /// The view of a space reached by identifier lookup (`GET /api/v2/meeting-spaces/{id}`,
+    /// `GET /api/v2/resolve/{identifier}`, Hub meeting cards).
+    ///
+    /// Resolving an identifier never implies access. An `ORGANIZATION_ONLY` space is disclosed
+    /// (even as a SUMMARY) only to a caller with standing: an owner / member, a server-verified
+    /// member of its organization, or a caller with calendar access (conference participant
+    /// credential, email-bound invitation, webinar registration, admitted participation,
+    /// owning platform environment). Signed-out callers get AUTHENTICATION_REQUIRED so the
+    /// client can offer sign-in; any other caller gets MEETING_NOT_FOUND, as for an unknown
+    /// code. Invitation-token resolution keeps using [`Self::view_of`]: the token is the grant.
+    pub async fn lookup_view_of(
+        &self,
+        ctx: &ActorContext,
+        space: meeting_spaces::Model,
+    ) -> ApiResult<SpaceView> {
+        let view = self.view_of(ctx, space).await?;
+        if view.space.access_policy != AccessPolicy::OrganizationOnly
+            || view.viewer_role.is_some()
+            || view
+                .space
+                .organization_id
+                .is_some_and(|o| ctx.verified_organizations.contains(&o))
+        {
+            return Ok(view);
+        }
+        let calendar = crate::services::calendar::CalendarService::new(self.core.clone());
+        if calendar
+            .has_access(ctx, &view.space, view.latest_conference.as_ref())
+            .await?
+        {
+            return Ok(view);
+        }
+        if ctx.registered().is_none() && ctx.platform().is_none() {
+            return Err(ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "Sign in with your organization account to open this meeting",
+            ));
+        }
+        Err(crate::services::meeting_core::not_found_space())
+    }
+
     /// Spaces the actor owns or is an active member of, newest first.
     ///
     /// MTG-018: a constant number of queries (spaces, memberships, canonical conferences)

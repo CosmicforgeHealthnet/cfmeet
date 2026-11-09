@@ -857,6 +857,19 @@ impl CalendarService {
     // ICS
     // -----------------------------------------------------------------------
 
+    /// Whether the actor has any calendar access to the space (see `calendar_access`).
+    pub(crate) async fn has_access(
+        &self,
+        ctx: &ActorContext,
+        space: &meeting_spaces::Model,
+        conference: Option<&conference_sessions::Model>,
+    ) -> ApiResult<bool> {
+        Ok(self
+            .calendar_access(ctx, space, conference)
+            .await?
+            .is_some())
+    }
+
     /// Calendar access to a space (and optionally one conference): management or
     /// membership, an admitted participation, an email-bound invitation or a webinar
     /// registration. `None` = no access.

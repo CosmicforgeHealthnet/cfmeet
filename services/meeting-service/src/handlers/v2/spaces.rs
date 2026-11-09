@@ -117,12 +117,16 @@ pub async fn list_meeting_spaces(
 /// Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.
 ///
 /// Callers without management rights receive the SUMMARY view; resolution never implies
-/// authorization.
+/// authorization. An ORGANIZATION_ONLY space is disclosed only to its owner / members, verified
+/// members of its organization and callers with calendar access (invitation, registration,
+/// participation): a signed-out caller gets AUTHENTICATION_REQUIRED, anyone else
+/// MEETING_NOT_FOUND.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}", tag = "Meeting Spaces (v2)", operation_id = "v2_get_meeting_space",
     params(("id" = String, Path, description = "Space UUID, meeting code, legacy meeting UUID or legacy code")),
     responses(
         (status = 200, description = "Space", body = MeetingSpaceResponse),
+        (status = 401, description = "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)", body = ErrorEnvelope),
         (status = 404, description = "MEETING_NOT_FOUND", body = ErrorEnvelope),
     ),
     security((), ("bearer_auth" = []))
@@ -136,7 +140,7 @@ pub async fn get_meeting_space(
     let view = state
         .meeting
         .spaces
-        .view_of(&actor, resolution.space)
+        .lookup_view_of(&actor, resolution.space)
         .await?;
     Ok(Json(views::space(&view)))
 }
@@ -147,12 +151,15 @@ pub async fn get_meeting_space(
 /// matching space, its canonical conference (the LIVE one, else the next upcoming one, else the
 /// latest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.
 /// Resolving does not grant access: callers who cannot manage the space get the summary view only.
-/// Unknown identifiers return MEETING_NOT_FOUND.
+/// Unknown identifiers return MEETING_NOT_FOUND. An ORGANIZATION_ONLY space resolves only for its
+/// owner / members, verified members of its organization and callers with calendar access; a
+/// signed-out caller gets AUTHENTICATION_REQUIRED (offer sign-in), anyone else MEETING_NOT_FOUND.
 #[utoipa::path(
     get, path = "/api/v2/resolve/{identifier}", tag = "Meeting Spaces (v2)", operation_id = "v2_resolve_identifier",
     params(("identifier" = String, Path, description = "Space UUID, meeting code, legacy meeting UUID or legacy code")),
     responses(
         (status = 200, description = "Resolved", body = ResolveResponse),
+        (status = 401, description = "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)", body = ErrorEnvelope),
         (status = 404, description = "MEETING_NOT_FOUND", body = ErrorEnvelope),
     ),
     security((), ("bearer_auth" = []))
@@ -171,7 +178,7 @@ pub async fn resolve_identifier(
     let view = state
         .meeting
         .spaces
-        .view_of(&actor, resolution.space)
+        .lookup_view_of(&actor, resolution.space)
         .await?;
     let full = view.full;
     Ok(Json(ResolveResponse {

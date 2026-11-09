@@ -21218,7 +21218,7 @@
           "meetings"
         ],
         "summary": "Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.",
-        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization.",
+        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization. An ORGANIZATION_ONLY space is disclosed only to its owner / members, verified\nmembers of its organization and callers with calendar access (invitation, registration,\nparticipation): a signed-out caller gets AUTHENTICATION_REQUIRED, anyone else\nMEETING_NOT_FOUND.",
         "operationId": "v2_get_meeting_space",
         "parameters": [
           {
@@ -21238,6 +21238,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/meetings.MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
                 }
               }
             }
@@ -22989,7 +22999,7 @@
           "meetings"
         ],
         "summary": "Resolve any supported meeting identifier to the canonical space and conference.",
-        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND.",
+        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND. An ORGANIZATION_ONLY space resolves only for its\nowner / members, verified members of its organization and callers with calendar access; a\nsigned-out caller gets AUTHENTICATION_REQUIRED (offer sign-in), anyone else MEETING_NOT_FOUND.",
         "operationId": "v2_resolve_identifier",
         "parameters": [
           {
@@ -23009,6 +23019,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/meetings.ResolveResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
                 }
               }
             }

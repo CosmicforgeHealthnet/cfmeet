@@ -788,7 +788,7 @@ async fn resolve_meeting(
     let view = state
         .meeting
         .spaces
-        .view_of(&actor, resolution.space)
+        .lookup_view_of(&actor, resolution.space)
         .await?;
     let response = crate::handlers::v2::views::space(&view);
     let role = public_role(view.viewer_role);
