@@ -11,7 +11,8 @@ with an owner gate, 2 EXTERNAL_BLOCKED with truthful reporting; none NOT_COVERED
 failed), no P0/P1 finding has implementable backend work left, and the full CI matrix is green.
 Six implementable backend findings remain open, all P2/P3 (§6). They block no journey and no frontend
 contract, so the backend contract is frozen and handed over; they keep the strict "every
-implementable finding closed" verdict from being claimed.
+implementable finding closed" verdict from being claimed. Repository cleanup is also incomplete: the
+38 temporary branches are verified safe to delete, but this session cannot delete remote refs (§5).
 
 ## 2. What this closure implemented
 
@@ -50,7 +51,7 @@ unchanged.
 
 ## 5. Removed or deprecated
 
-38 obsolete remote branches removed after verification (branch consolidation report). No API removed.
+38 temporary remote branches verified safe to remove (0 unique commits); deletion is blocked in this session (git proxy 403) and is one owner command: `scripts/repository/delete-consolidated-branches.sh --apply` (branch consolidation report §5). No API removed.
 Deprecated with migration (unchanged): legacy v1 meeting create paths, legacy meeting webhooks, the Hub
 block-events ingest, legacy API keys (see API inventory §4).
 

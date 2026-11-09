@@ -68,3 +68,49 @@ No branch was found with active uncommitted work: there are no open PRs other th
 | `feature/sections-9-23` | `71eedfebcdac788c80a2f3743527cc953b07e257` | ancestor of staging (fully merged) | none | none needed | DELETE |
 | `fix/rtc-quarantine-wait` | `6d708f04598a70fe094d111e90f41abdf7ffd7ed` | ancestor of staging (fully merged) | none | none needed | DELETE |
 | `fix/webhook-marker-false-positive` | `379c8740aaf8ccde6d86fc5809dc315b21ea492f` | ancestor of staging (fully merged) | none | none needed | DELETE |
+
+Note: the table lists 38 branches (40 heads minus `main` and `staging`); `blueprint/final-org-events` is the only one with unique work. The closure's own temporary branch `claude/cfmeet-consolidation-closure-vk2pe3` was created for this work and is also to be removed.
+
+## 4. Recovery and integration
+
+| Step | Result |
+|---|---|
+| Unique work recovered | `blueprint/final-org-events` (35 commits, `b148ca9b`) taken as the base of the closure branch; nothing else unique existed |
+| Known failure fixed before merge | J-07 disclosure (`a48b0413`); next real-process failure (J-12 harness, `84b981b1`) fixed; Part VI certification then green (run 42579359634) |
+| Further closure work | SEC-004, ORG-011/MTG-016, J-08, J-11, J-18, frontend reference + guide, final documents |
+| Integration into `staging` | fast-forward `ab349836` → `094090e3` (no force push, no history rewrite); later documentation commits fast-forwarded the same way |
+| Excluded work | none: no branch held contradictory or unsafe unique commits; the 4 `s18-sip-race*` tips are patch-identical to `e9950455` |
+| `main` | unchanged at `586b88cb`; PR #39 (`staging` → `main`) left open, not merged |
+| Automation | `organizations.yml` and `backup-restore-drill.yml` no longer trigger on `blueprint/**` (`3b8b7f42`); no deploy script references a temporary branch |
+
+## 5. Branch deletion — BLOCKED in this session
+
+Every temporary branch was verified safe to delete (34 ancestors of `staging`, 4 patch-identical, 0 unique). Deletion failed: the session's git proxy answers `HTTP 403` to ref deletions (`git push origin --delete …`), while pushes to `staging` succeed, and the GitHub tools available to the agent have no delete-branch operation. No branch was deleted.
+
+To finish (owner, from any clone with push rights; deletions are pinned to the recorded tips and re-verified against `staging`):
+
+```bash
+bash scripts/repository/delete-consolidated-branches.sh          # dry run: "would delete" × 39
+bash scripts/repository/delete-consolidated-branches.sh --apply  # deletes; prints the remaining heads
+```
+
+Expected end state: `origin/main` and `origin/staging` only. Original tips stay recoverable: 38 of 39 are reachable from `staging`; `0ee026e9` (the `s18-sip-race*` tip) is patch-identical to `e9950455` and listed above.
+
+## 6. Verification output (at the time of writing)
+
+```text
+$ git ls-remote --heads origin | wc -l
+41
+$ git rev-parse origin/staging origin/main
+094090e32d994a2b8140ff446cc0195d58dc2816
+586b88cb121d07ac0821f5d334820bae3868f6c2
+$ git branch --list
+* claude/cfmeet-consolidation-closure-vk2pe3
+  staging
+$ git worktree list
+/home/user/cfmeet  094090e3 [claude/cfmeet-consolidation-closure-vk2pe3]
+$ git status --short
+(clean)
+```
+
+Remote heads are still 41 because deletion is blocked (§5); the two permanent branches exist and `staging` contains the accepted implementation.
