@@ -16,7 +16,7 @@
 | Email identity | Case-insensitive lookups and lowercased new registrations | DATA-002, ACC-023 |
 | Signing material | Startup refuses missing/example/short `JWT_SECRET` outside development | SEC-001, ACC-018 |
 | Audit | Append-only `account_security_events`; `GET /api/v2/admin/audit-events` (platform administrators) | SEC-013, DATA-015 |
-| Guest refresh | Requires the guest participant to still exist | SEC-004 (existence part) |
+| Guest refresh | Requires a live guest participation: participant present, not kicked, not left; meeting neither ended nor cancelled; guest session ≤ 24 h from join; refresh token single use | SEC-004 (closed) |
 
 New migration history: `account_security_migrations` (`m20261106_000001_account_security`), applied by `/app/account-security-migration up`. It only adds tables, a trigger, two functions and a non-unique index; the previous image is unaffected by it.
 

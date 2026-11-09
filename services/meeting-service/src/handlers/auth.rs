@@ -417,12 +417,16 @@ pub async fn refresh_token(
     let subject = Uuid::parse_str(&claims.sub).map_err(|_| invalid())?;
 
     if claims.role == "guest" {
-        // SEC-004: a guest refresh needs the guest participant to still exist.
-        use crate::models::participants::Entity as Participants;
-        Participants::find_by_id(subject)
-            .one(&state.db)
-            .await?
-            .ok_or_else(invalid)?;
+        // SEC-004: a guest refresh needs a live guest participation (see
+        // `guest_refresh_allowed`), and the presented refresh token is single use.
+        if !guest_refresh_allowed(&state, subject, &claims).await? {
+            return Err(invalid());
+        }
+        let remaining = (claims.exp - chrono::Utc::now().timestamp()).max(1) as u64;
+        state
+            .token_blacklist
+            .blacklist_token(&payload.refresh_token, remaining)
+            .await?;
         let (access_token, refresh_token) =
             state
                 .jwt_service
@@ -455,6 +459,44 @@ pub async fn refresh_token(
         access_token,
         refresh_token,
     }))
+}
+
+/// Absolute lifetime of a legacy guest session, counted from the guest's join
+/// (`auth_time`); refresh never extends it (SEC-004).
+pub const GUEST_SESSION_MAX_SECONDS: i64 = 24 * 60 * 60;
+
+/// SEC-004 liveness rule for a legacy guest refresh: the guest participant still exists,
+/// was not removed (kicked) and has not left, its meeting is neither ended nor cancelled,
+/// and the guest session is younger than [`GUEST_SESSION_MAX_SECONDS`].
+async fn guest_refresh_allowed(
+    state: &AppState,
+    participant_id: Uuid,
+    claims: &Claims,
+) -> ApiResult<bool> {
+    use crate::models::{
+        meetings::{Entity as Meetings, MeetingStatus},
+        participants::{Entity as Participants, ParticipantStatus},
+    };
+    let Some(auth_time) = claims.auth_time else {
+        return Ok(false);
+    };
+    if chrono::Utc::now().timestamp() - auth_time > GUEST_SESSION_MAX_SECONDS {
+        return Ok(false);
+    }
+    let Some(participant) = Participants::find_by_id(participant_id)
+        .one(&state.db)
+        .await?
+    else {
+        return Ok(false);
+    };
+    if participant.status == ParticipantStatus::Kicked || participant.leave_time.is_some() {
+        return Ok(false);
+    }
+    let live_meeting = Meetings::find_by_id(participant.meeting_id)
+        .one(&state.db)
+        .await?
+        .is_some_and(|m| !matches!(m.status, MeetingStatus::Ended | MeetingStatus::Cancelled));
+    Ok(live_meeting)
 }
 
 /// A refresh token issued before sessions existed is accepted once: it opens a session

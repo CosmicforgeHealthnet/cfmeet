@@ -493,3 +493,141 @@ async fn web_host_role_only_from_authenticated_authority() {
     assert_eq!(v["data"]["role"], "host");
     assert!(v["data"]["access_token"].is_null());
 }
+
+/// A refresh token signed with the server secret for `sub` / `role`.
+fn signed_refresh(sub: Uuid, role: &str, auth_time: i64) -> String {
+    let now = Utc::now().timestamp();
+    encode(
+        &Header::default(),
+        &Claims {
+            auth_time: Some(auth_time),
+            sub: sub.to_string(),
+            role: role.into(),
+            exp: now + 3600,
+            iat: now,
+            typ: Some("refresh".into()),
+            sid: None,
+            rti: None,
+        },
+        &EncodingKey::from_secret(b"test-jwt-secret"),
+    )
+    .unwrap()
+}
+
+async fn refresh_status(app: &TestApp, refresh_token: &str) -> StatusCode {
+    app.post(
+        "/api/v1/auth/refresh",
+        Auth::None,
+        json!({ "refresh_token": refresh_token }),
+    )
+    .await
+    .0
+}
+
+/// SEC-004: a guest refresh needs a live guest participation. The refresh token is single
+/// use; a removed (kicked) or departed guest, an ended or cancelled meeting and a guest
+/// session older than 24 hours are refused.
+#[tokio::test]
+async fn sec004_guest_refresh_requires_live_participation() {
+    let app = app!();
+    let host = app.user("host").await;
+    let (id, code) = legacy_meeting(&app, &host, false).await;
+    let guest = |name: &'static str| {
+        let app = &app;
+        let code = code.clone();
+        async move {
+            let (s, v) = app
+                .post(
+                    &format!("/api/v1/meetings/join/{code}"),
+                    Auth::None,
+                    web_body(None, name),
+                )
+                .await;
+            assert_eq!(s, StatusCode::OK, "{v}");
+            (
+                uuid(&v["data"]["participant_id"]),
+                v["data"]["refresh_token"].as_str().unwrap().to_string(),
+            )
+        }
+    };
+
+    // Live guest: refresh works once; the same refresh token cannot be replayed.
+    let (ada, ada_refresh) = guest("Ada").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/refresh",
+            Auth::None,
+            json!({ "refresh_token": ada_refresh }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let ada_next = v["refresh_token"]
+        .as_str()
+        .or_else(|| v["data"]["refresh_token"].as_str())
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        refresh_status(&app, &ada_refresh).await,
+        StatusCode::UNAUTHORIZED,
+        "single use"
+    );
+
+    // Removed by the host: refused.
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE participants SET status = 'kicked' WHERE id = '{ada}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        refresh_status(&app, &ada_next).await,
+        StatusCode::UNAUTHORIZED,
+        "kicked"
+    );
+
+    // Left the meeting: refused.
+    let (bo, bo_refresh) = guest("Bo").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE participants SET leave_time = now() WHERE id = '{bo}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        refresh_status(&app, &bo_refresh).await,
+        StatusCode::UNAUTHORIZED,
+        "left"
+    );
+
+    // Older than the absolute guest session lifetime: refused even while present.
+    let (cy, _) = guest("Cy").await;
+    let stale = signed_refresh(cy, "guest", Utc::now().timestamp() - 25 * 3600);
+    assert_eq!(
+        refresh_status(&app, &stale).await,
+        StatusCode::UNAUTHORIZED,
+        "older than 24 h"
+    );
+    let fresh = signed_refresh(cy, "guest", Utc::now().timestamp() - 3600);
+    assert_eq!(
+        refresh_status(&app, &fresh).await,
+        StatusCode::OK,
+        "within 24 h"
+    );
+
+    // Meeting ended: every remaining guest is refused.
+    let (_, di_refresh) = guest("Di").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE meetings SET status = 'ended' WHERE id = '{id}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        refresh_status(&app, &di_refresh).await,
+        StatusCode::UNAUTHORIZED,
+        "meeting ended"
+    );
+}
