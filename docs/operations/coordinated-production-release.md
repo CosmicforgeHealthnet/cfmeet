@@ -67,6 +67,7 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 | `activate-enterprise-calling` | yes | Requires authoritative. Grants `platform-principal.ensure` (Platform Access), `calling-request.act-for-organization` (Calling), `messaging-application.delegate` (Messaging), all ← Meeting; `CALLING_ORGANIZATION_FORWARDING_ENABLED=true`; `ORGANIZATION_CALLING_SCOPE=organization` (+ Calling/Messaging URLs if absent) on Meeting. The per-organization service bindings (runbook §4.4) remain operator API steps. |
 | `activate-developer-platform` | yes | Grants (checklist §4): Platform Access ← API Gateway `platform-credential.authenticate`; Platform Access ← Developer Platform `platform-identity.read`, `platform-identity.delegate`; Developer Platform ← API Gateway `developer-request.forward`, `developer-entitlement.read`, `developer-usage.record`. `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED=true`; gateway `API_GATEWAY_PUBLIC_ROUTING_ENABLED=true` + `CF_DEVELOPER_PLATFORM_BASE_URL`. Still not public. |
 | `activate-gateway-routing` | yes (public) | Requires the previous step. A loopback-only relay (`cfmeet-gateway-ingress`, 127.0.0.1:18110 → `cfmeet-api-gateway:8099`, same confinement as the storage relay) and `/etc/nginx/snippets/cfmeet-api-gateway.conf`, included after the Calling routes, routing **only** the Developer Platform families (`/v1/developer-platform`, `/v1/organizations`, `/v1/projects`, `/v1/environments`, `/v1/scopes`, `/v1/invitations`, `/v1/production-access-requests`, `/v1/commercial-plans`). Refuses if any existing location already serves one of them. Meeting, Calling and Messaging keep their direct routes; `/internal`, operator and provider-callback paths never reach the gateway. `nginx -t`, reload, then: gateway answers 401 unauthenticated, CORS for `https://cfmeet.com`, public smoke, regression; any failure removes the include, snippet and relay. `rollback` undoes it the same way. |
+| `activate-first-party-features` | yes | No prerequisites. Meeting: `FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_QUALITY_TELEMETRY_ENABLED` = `true`, and `NOTIFICATIONS_EMAIL_ENABLED=true` **only** when the Meeting Service already carries SMTP host + credentials. Messaging: `MESSAGING_SESSION_DEVICES_ENABLED=true` (MANAGED realtime; refuses if PRIVATE_E2EE devices are on). The healthcare profile is never switched (compliance decision). Reversible with `rollback`. |
 
 Activation order is enforced: provisioning → org events → export → import → shadow →
 authoritative → enterprise calling; developer platform → gateway routing. Every activation
@@ -145,6 +146,7 @@ run org-cutover-authoritative offsite-backup-verified,quiesced   # after the §6
 run activate-enterprise-calling
 run activate-developer-platform
 run activate-gateway-routing
+run activate-first-party-features
 
 run rollback                      # restores the latest release or activation
 gh run watch                      # each run uploads its log as an artifact
