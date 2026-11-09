@@ -640,6 +640,302 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
     assert!(v.get("tenantId").is_some() && v.get("applicationId").is_some());
 }
 
+/// Blueprint Section 13 (MSG-001/002/003): walks the Messaging consumer contract and
+/// proves every relayed operation is reachable through the real Meeting router with its
+/// documented method and EVERY documented query parameter, forwarded under Messaging's
+/// canonical names (the replay cursor's compatibility spelling included).
+#[tokio::test]
+async fn the_relay_reaches_every_contract_operation_with_its_documented_query() {
+    use backend::services::unified_messaging::relay::route_for;
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("relay-walk").await;
+    let id = Uuid::new_v4().to_string();
+    let contract: Value = serde_json::from_str(include_str!(
+        "../../../packages/contracts/bundled/messaging/http/v1.openapi.json"
+    ))
+    .unwrap();
+    let mut walked = 0;
+    for (path, item) in contract["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            let Ok(m) = method.to_uppercase().parse::<Method>() else {
+                continue;
+            };
+            let concrete = path
+                .trim_start_matches('/')
+                .split('/')
+                .map(|p| match p {
+                    "{reaction}" => ":thumbsup:".to_string(),
+                    p if p.starts_with('{') => id.clone(),
+                    p => p.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+            if route_for(&m, &concrete).is_none() {
+                continue;
+            }
+            let keys: Vec<String> = op["parameters"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|p| p["in"] == "query")
+                .map(|p| p["name"].as_str().unwrap().to_string())
+                .collect();
+            let query = keys
+                .iter()
+                .map(|k| format!("{k}=1"))
+                .collect::<Vec<_>>()
+                .join("&");
+            let uri = if query.is_empty() {
+                format!("{BRIDGE}/relay/{concrete}")
+            } else {
+                format!("{BRIDGE}/relay/{concrete}?{query}")
+            };
+            let body = (m != Method::GET && m != Method::DELETE).then(|| json!({}));
+            let before = gw.calls().len();
+            let (s, v) = app
+                .call(m.clone(), &uri, Auth::Bearer(&user.token), body)
+                .await;
+            assert!(s.is_success(), "{m} {uri}: {s} {v}");
+            let calls = gw.calls();
+            let last = calls[before..]
+                .iter()
+                .rfind(|c| c.peer == Peer::Messaging)
+                .unwrap_or_else(|| panic!("{m} {uri} was not relayed"));
+            assert_eq!(last.method, m, "{uri}");
+            assert_eq!(last.path, format!("/internal/v1/delegated/{concrete}"));
+            let forwarded: Vec<String> = last.query.iter().map(|(k, _)| k.clone()).collect();
+            assert_eq!(
+                forwarded, keys,
+                "{m} {path}: every documented query key reaches Messaging"
+            );
+            walked += 1;
+        }
+    }
+    assert_eq!(
+        walked,
+        backend::services::unified_messaging::relay::ROUTES.len(),
+        "every allowlisted operation is a contract operation reachable through the router"
+    );
+
+    // The replay cursor: the canonical `after` and the compatibility spelling both reach
+    // Messaging as `after`.
+    let conv = Uuid::new_v4();
+    for key in ["after", "afterEventSequence"] {
+        let (s, v) = app
+            .get(
+                format!("{BRIDGE}/relay/v1/conversations/{conv}/events?{key}=41&limit=20"),
+                Auth::Bearer(&user.token),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let last = gw.calls().into_iter().last().unwrap();
+        assert_eq!(
+            last.query,
+            vec![
+                ("after".to_string(), "41".to_string()),
+                ("limit".to_string(), "20".to_string())
+            ]
+        );
+    }
+    // Both spellings at once are ambiguous and never relayed.
+    let before = gw.calls().len();
+    let (s, _) = app
+        .get(
+            format!("{BRIDGE}/relay/v1/conversations/{conv}/events?after=1&afterEventSequence=2"),
+            Auth::Bearer(&user.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(gw.calls().len(), before);
+}
+
+/// MSG-002: the allowlisted PATCH operations (MANAGED edit, member role, conversation
+/// update) are relayed with their body; anything else stays unreachable.
+#[tokio::test]
+async fn the_relay_forwards_patch_operations_with_their_body() {
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("relay-patch").await;
+    let (conv, msg, member) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    for (path, body) in [
+        (
+            format!("conversations/{conv}/messages/{msg}"),
+            json!({ "text": "edited", "expectedEditCount": 0 }),
+        ),
+        (
+            format!("conversations/{conv}/members/{member}"),
+            json!({ "role": "ADMIN", "expectedVersion": 1 }),
+        ),
+        (
+            format!("conversations/{conv}"),
+            json!({ "expectedVersion": 3, "retentionSeconds": 86400, "title": "Ops" }),
+        ),
+    ] {
+        let (s, v) = app
+            .patch(
+                format!("{BRIDGE}/relay/v1/{path}"),
+                Auth::Bearer(&user.token),
+                body.clone(),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{path}: {v}");
+        let last = gw.calls().into_iter().last().unwrap();
+        assert_eq!(last.method, Method::PATCH);
+        assert_eq!(last.path, format!("/internal/v1/delegated/v1/{path}"));
+        assert_eq!(last.body, Some(body));
+    }
+    let before = gw.calls().len();
+    for path in [
+        "messaging/policy".to_string(),
+        format!("conversations/{conv}/pins/{msg}"),
+    ] {
+        let (s, v) = app
+            .patch(
+                format!("{BRIDGE}/relay/v1/{path}"),
+                Auth::Bearer(&user.token),
+                json!({}),
+            )
+            .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{path}: {v}");
+    }
+    let (s, _) = app
+        .patch(
+            format!("{BRIDGE}/relay/v1/conversations/{conv}"),
+            Auth::None,
+            json!({ "expectedVersion": 1 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        gw.calls().len(),
+        before,
+        "nothing refused reached Messaging"
+    );
+}
+
+/// MSG-004 (ADR 0049 amendment A1): a MANAGED-realtime session-device token is issued
+/// only for a session-bound sign-in; the account-session binding and expiry come from
+/// Meeting (never the client), and signing out of that session revokes its session
+/// devices in Messaging.
+#[tokio::test]
+async fn session_tokens_are_bound_to_the_verified_account_session() {
+    use backend::{
+        models::users,
+        services::account_security::{start_session, AuthMethod},
+    };
+    use sea_orm::EntityTrait;
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    let user = app.user("session-device").await;
+    let model = users::Entity::find_by_id(user.id)
+        .one(&app.db.conn)
+        .await
+        .unwrap()
+        .unwrap();
+    let session = start_session(&app.state, &model, AuthMethod::Password, None, None)
+        .await
+        .unwrap();
+    let path = format!("{BRIDGE}/session-tokens");
+    // A legacy token without an account session cannot hold a session device.
+    let before = gw.calls().len();
+    let (s, v) = app.post(&path, Auth::Bearer(&user.token), json!({})).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    // The client may not supply the binding (or anything but the documented fields).
+    let (s, v) = app
+        .post(
+            &path,
+            Auth::Bearer(&session.access_token),
+            json!({ "accountSessionRef": "f".repeat(64) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    let (s, _) = app.post(&path, Auth::None, json!({})).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        gw.calls().len(),
+        before,
+        "nothing refused reached Messaging"
+    );
+
+    let device = Uuid::new_v4();
+    let (s, v) = app
+        .post(
+            &path,
+            Auth::Bearer(&session.access_token),
+            json!({ "sessionDeviceId": device, "ttlSeconds": 120 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let call = gw
+        .calls()
+        .into_iter()
+        .rfind(|c| c.peer == Peer::Messaging)
+        .unwrap();
+    assert_eq!(
+        call.path,
+        "/internal/v1/delegated/v1/messaging/session-devices"
+    );
+    let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
+    assert_eq!(
+        call.acting,
+        Some(Acting {
+            principal_id: principal,
+            kind: PrincipalKind::NativeCfUser
+        })
+    );
+    let body = call.body.unwrap();
+    let um = app.state.meeting.core.unified.as_ref().unwrap();
+    let binding = um.account_session_ref(session.session_id);
+    assert_eq!(body["accountSessionRef"], json!(binding));
+    assert_eq!(binding.len(), 64);
+    assert!(!binding.contains(&session.session_id.simple().to_string()));
+    assert_eq!(body["sessionDeviceId"], json!(device));
+    assert_eq!(body["ttlSeconds"], json!(120));
+    let claims = app
+        .state
+        .jwt_service
+        .verify_token(&session.access_token)
+        .unwrap();
+    let not_after = chrono::DateTime::parse_from_rfc3339(body["notAfter"].as_str().unwrap())
+        .unwrap()
+        .timestamp();
+    assert_eq!(not_after, claims.exp, "never outlives the access token");
+
+    // Signing out of THIS session revokes its session devices (by the same binding).
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{}/revoke", session.session_id),
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let revoke = gw
+        .calls()
+        .into_iter()
+        .rfind(|c| c.peer == Peer::Messaging)
+        .unwrap();
+    assert_eq!(
+        revoke.path,
+        "/internal/v1/delegated/v1/messaging/session-devices/revoke"
+    );
+    assert_eq!(revoke.body, Some(json!({ "accountSessionRef": binding })));
+    // The revoked session's token no longer gets a session device.
+    let before = gw.calls().len();
+    let (s, _) = app
+        .post(&path, Auth::Bearer(&session.access_token), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(gw.calls().len(), before);
+}
+
 /// The directory is bounded by the caller's verified organizations: colleagues are found
 /// and resolved to principals; anyone else is neither listed, resolvable nor named.
 #[tokio::test]
@@ -733,4 +1029,71 @@ async fn the_directory_lists_and_resolves_only_organization_colleagues() {
         let (s, v) = app.call(method, &path, Auth::None, body).await;
         assert_eq!(s, StatusCode::UNAUTHORIZED, "{path}: {v}");
     }
+}
+
+/// Section 14 (ACC-010): an account-wide credential end other than logout (here the
+/// user deactivating the account) also revokes the Messaging sessions of the bridge
+/// principal, through the same durable queue, acting as that principal.
+#[tokio::test]
+async fn deactivation_revokes_the_bridge_principal_messaging_sessions() {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let gw = Scripted::new();
+    let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
+        return;
+    };
+    // The fixture account has no password and a pre-session token; ACC-026 re-authentication
+    // is covered by tests/account_hardening.rs, so it is switched off here.
+    let app = app.with_auth_env(&[("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH", "off")]);
+    let user = app.user("deactivating").await;
+    // The account uses Messaging through the bridge: Account maps it to a principal.
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/client-sessions/revoke-all"),
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let principal: Uuid = *gw.principals.lock().unwrap().values().next().unwrap();
+    let before = gw.calls().len();
+    let (s, v) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let revoke = gw.calls()[before..]
+        .iter()
+        .rfind(|c| c.peer == Peer::Messaging)
+        .cloned()
+        .expect("Messaging revocation");
+    assert_eq!(
+        revoke.path,
+        "/internal/v1/delegated/v1/messaging/client-sessions/revoke-all"
+    );
+    assert_eq!(
+        revoke.acting,
+        Some(Acting {
+            principal_id: principal,
+            kind: PrincipalKind::NativeCfUser
+        })
+    );
+    let row = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT reason, status FROM communication_session_revocations WHERE principal_id = $1 ORDER BY created_at DESC LIMIT 1",
+            [principal.into()],
+        ))
+        .await
+        .unwrap()
+        .expect("durable revocation job");
+    assert_eq!(
+        row.try_get::<String>("", "reason").unwrap(),
+        "ACCOUNT_DISABLED"
+    );
+    assert_eq!(row.try_get::<String>("", "status").unwrap(), "DONE");
 }

@@ -1,0 +1,104 @@
+# promtool unit tests for ../rules/messaging.rules.yml (SEC-016).
+# Run: promtool test rules infra/monitoring/prometheus/tests/*.test.yml
+# Gauges are labelled as scraped (job / instance); max() drops those labels in the alert.
+
+rule_files:
+  - ../rules/messaging.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: outbox dead letters warn
+    interval: 1m
+    input_series:
+      - series: 'messaging_outbox_events{job="messaging", instance="m-1", status="PUBLISHED"}'
+        values: '100x30'
+      - series: 'messaging_outbox_events{job="messaging", instance="m-1", status="DEAD_LETTER"}'
+        values: '0x5 2x25'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MessagingOutboxDeadLetters
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MessagingOutboxDeadLetters
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: messaging
+            exp_annotations:
+              summary: "Messaging outbox holds dead letters"
+              description: "Mirrors the OUTBOX_DEAD_LETTER incident category (raised on any dead letter). Fix the cause, then replay with messaging-admin dead-letters replay --kind outbox."
+              runbook_url: "docs/architecture/messaging-operations-runbook.md#8-dead-letters-136"
+
+  - name: retention backlog past 1 hour warns; 10 minutes does not
+    interval: 1m
+    input_series:
+      - series: 'messaging_purge_lag_seconds{job="messaging", instance="m-1"}'
+        values: '600x10 4000x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessagingRetentionBacklog
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: MessagingRetentionBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: messaging
+            exp_annotations:
+              summary: "Due message purges waiting more than 1 hour"
+              description: "Same threshold as the RETENTION_BACKLOG incident (RETENTION_BACKLOG_THRESHOLD = 1 h in services/messaging/src/compliance/retention.rs)."
+              runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
+  # APPROVAL REQUIRED placeholder threshold (10 minutes).
+  - name: outbox lag above the placeholder warns
+    interval: 1m
+    input_series:
+      - series: 'messaging_outbox_oldest_pending_seconds{job="messaging", instance="m-1"}'
+        values: '900x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MessagingOutboxLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: required
+              service: messaging
+            exp_annotations:
+              summary: "Oldest pending messaging outbox event older than 10 minutes"
+              description: "Committed events are not being published (relay stopped or downstream refusing)."
+              threshold_status: "APPROVAL REQUIRED: messaging-operations-runbook.md §9 lists the lag gauge without a threshold; 10 min (borrowed from the meeting-service outbox rule) is a repository placeholder"
+              runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
+  - name: outbox lag of two minutes does not warn
+    interval: 1m
+    input_series:
+      - series: 'messaging_outbox_oldest_pending_seconds{job="messaging", instance="m-1"}'
+        values: '120x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MessagingOutboxLagHigh
+        exp_alerts: []
+
+  - name: messaging metrics listener down warns
+    interval: 1m
+    input_series:
+      - series: 'up{job="messaging", instance="m-1"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessagingMetricsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: required
+              service: messaging
+              job: messaging
+              instance: m-1
+            exp_annotations:
+              summary: "Messaging metrics listener unreachable for 5 minutes"
+              description: "Without a scrape every messaging alert above is silent. Check the process and MESSAGING_METRICS_ADDRESS."
+              threshold_status: "APPROVAL REQUIRED: no runbook threshold; 5 min is a repository placeholder"
+              runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"

@@ -30,6 +30,8 @@ pub const NUMBERING: &str = "numbering";
 pub const SMS_GATEWAY: &str = "sms-gateway";
 pub const PRIVACY_RELAY: &str = "privacy-relay";
 pub const API_GATEWAY: &str = "api-gateway";
+/// Started only with [`StackOptions::organizations`].
+pub const ORGANIZATIONS: &str = "organizations";
 
 /// Every binary the stack runs (server, then migration), as built by
 /// `cargo build --workspace --bins` in each service workspace.
@@ -41,6 +43,11 @@ pub const BINARIES: &[&str] = &[
     "developer-platform-migration",
     "backend",
     "migration",
+    "account-security-migration",
+    "meetings-calendar-migration",
+    "profile-notifications-migration",
+    "account-hardening-migration",
+    "organization-integration-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -53,6 +60,9 @@ pub const BINARIES: &[&str] = &[
     "privacy-relay-migration",
     "api-gateway",
 ];
+
+/// Binaries needed only with [`StackOptions::organizations`] (checked when started).
+pub const ORGANIZATIONS_BINARIES: &[&str] = &["organizations", "organizations-migration"];
 
 /// Numbering's own number-search limit per application environment in the stack.
 pub const NUMBER_SEARCHES_PER_MINUTE: u32 = 5;
@@ -173,9 +183,20 @@ pub struct StackOptions {
     /// [`DEVELOPER_PLATFORM_WORKER`]), applied after the stack's own variables (a variable
     /// set here replaces the stack's value).
     pub env: BTreeMap<String, Vec<(String, String)>>,
+    /// Final closure: also run the REAL Organizations Service (own database, provisioning
+    /// against the real Platform Access, event delivery to the Meeting Service) and run
+    /// the Meeting Service as its authoritative client with the organization relays
+    /// (organization-scope Calling and Messaging) and the organization event ingress on.
+    pub organizations: bool,
 }
 
 impl StackOptions {
+    /// Runs the Organizations Service and the Meeting Service's organization integration.
+    pub fn with_organizations(mut self) -> Self {
+        self.organizations = true;
+        self
+    }
+
     /// Adds `key=value` to the environment of `process`.
     pub fn set(mut self, process: &str, key: &str, value: impl Into<String>) -> Self {
         self.env
@@ -255,6 +276,8 @@ pub const STARTED: &[&str] = &[
     services::NUMBERING,
     services::SMS_GATEWAY,
     services::PRIVACY_RELAY,
+    // Keys and trust only: the process runs with `StackOptions::organizations`.
+    services::ORGANIZATIONS,
 ];
 
 impl Stack {
@@ -320,6 +343,17 @@ impl Stack {
         let url = db::create(&self.config.admin_url, &name).await?;
         self.dbs.push(name.clone());
         db::migrate(&self.bin(migration), &url)?;
+        if service == MEETING_SERVICE {
+            // Blueprint Section 2: the account-security history is required at startup.
+            db::migrate(&self.bin("account-security-migration"), &url)?;
+            // Blueprint Section 10: the meetings-calendar history is required at startup.
+            db::migrate(&self.bin("meetings-calendar-migration"), &url)?;
+            // Blueprint Sections 9/11: the profile/notifications history is required at startup.
+            db::migrate(&self.bin("profile-notifications-migration"), &url)?;
+            // Blueprint Sections 2-3 hardening: hashed legacy secrets, required at startup.
+            db::migrate(&self.bin("account-hardening-migration"), &url)?;
+            db::migrate(&self.bin("organization-integration-migration"), &url)?;
+        }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under
         // its no-DDL runtime role (the Meeting Service keeps its own deployment model).
@@ -511,6 +545,20 @@ impl Stack {
                 format!("http://127.0.0.1:{}", free_port()),
             );
         }
+        let organizations = self.options.organizations;
+        if organizations {
+            for b in ORGANIZATIONS_BINARIES {
+                anyhow::ensure!(
+                    self.bin(b).is_file(),
+                    "{} is required for a stack with organizations",
+                    self.bin(b).display()
+                );
+            }
+            self.urls.insert(
+                ORGANIZATIONS.to_string(),
+                format!("http://127.0.0.1:{}", free_port()),
+            );
+        }
         let url = |s: &Self, n: &str| s.urls[n].clone();
         let addr = |s: &Self, n: &str| s.urls[n].trim_start_matches("http://").to_string();
         let kv = |k: &str, v: String| (k.to_string(), v);
@@ -532,6 +580,32 @@ impl Stack {
         let ready = format!("{}/ready", url(self, PLATFORM_ACCESS));
         self.launch(PLATFORM_ACCESS, "platform-access", env, Some(ready))
             .await?;
+
+        // Organizations (final closure, opt-in): the first-party organization authority,
+        // provisioning each organization's FIRST_PARTY scope in the real Platform Access
+        // and delivering its outbox events to the Meeting Service.
+        if organizations {
+            let db_url = self
+                .database(ORGANIZATIONS, "organizations-migration")
+                .await?;
+            let mut env = self.service_auth_env(services::ORGANIZATIONS, true)?;
+            env.extend([
+                kv("DATABASE_URL", db_url),
+                kv("ORGANIZATIONS_DATABASE_MAX_CONNECTIONS", "5".into()),
+                kv("ORGANIZATIONS_BIND_ADDRESS", addr(self, ORGANIZATIONS)),
+                kv("ORGANIZATIONS_WORKER_INTERVAL_MS", "1000".into()),
+                kv("ORGANIZATIONS_PROVISIONING_ENABLED", "true".into()),
+                kv("CF_PLATFORM_ACCESS_BASE_URL", url(self, PLATFORM_ACCESS)),
+                kv(
+                    "ORGANIZATIONS_EVENT_DESTINATIONS",
+                    services::MEETING_SERVICE.into(),
+                ),
+                kv("CF_MEETING_SERVICE_BASE_URL", url(self, MEETING_SERVICE)),
+            ]);
+            let ready = format!("{}/ready", url(self, ORGANIZATIONS));
+            self.launch(ORGANIZATIONS, "organizations", env, Some(ready))
+                .await?;
+        }
 
         // Meeting Service: CF Meet accounts / sessions and the Developer Console session
         // bridge. No RTC provider control (no LiveKit is contacted), no SMTP.
@@ -576,6 +650,16 @@ impl Stack {
             ),
             kv("MEETING_SERVICE_PUBLIC_EVENTS_INTERVAL_MS", "200".into()),
         ]);
+        if organizations {
+            env.extend([
+                kv("ORGANIZATIONS_AUTHORITY_MODE", "authoritative".into()),
+                kv("CF_ORGANIZATIONS_BASE_URL", url(self, ORGANIZATIONS)),
+                kv("ORGANIZATION_EVENTS_ENABLED", "true".into()),
+                kv("ORGANIZATION_CALLING_SCOPE", "organization".into()),
+                kv("CF_CALLING_BASE_URL", url(self, CALLING)),
+                kv("CF_MESSAGING_BASE_URL", url(self, MESSAGING)),
+            ]);
+        }
         let ready = format!("{}/health", url(self, MEETING_SERVICE));
         self.launch(MEETING_SERVICE, "backend", env, Some(ready))
             .await?;
@@ -700,6 +784,10 @@ impl Stack {
                 url(self, DEVELOPER_PLATFORM),
             ),
             kv("CALLING_IDENTITY_SYNC_INTERVAL_MS", "200".into()),
+            kv(
+                "CALLING_ORGANIZATION_FORWARDING_ENABLED",
+                organizations.to_string(),
+            ),
             kv("CALLING_WEBHOOK_SECRET_KEY_ID", "webhooks-cert-1".into()),
             kv(
                 "CALLING_WEBHOOK_SECRET_KEY_FILE",

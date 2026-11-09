@@ -11,6 +11,8 @@
 //! | `POST /delegation/tenants` | always an EXTERNAL tenant (first-party classification is operator-only) |
 //! | `GET /delegation/tenants/{id}` | read |
 //! | `POST /delegation/tenants/{id}/status` | ACTIVE / SUSPENDED (organization suspension / closure) |
+//! | `POST /delegation/tenants/{id}/display-name` | Section 15: organization rename propagation (EXTERNAL tenants only) |
+//! | `GET /delegation/tenant-slugs/{slug}` | Section 15: the EXTERNAL tenant of a creation slug (organization-creation reconciliation) |
 //! | `POST /delegation/tenants/{id}/applications` | project = application |
 //! | `GET /delegation/applications/{id}` | read |
 //! | `POST /delegation/applications/{id}/status` | project suspension / archive |
@@ -85,6 +87,11 @@ pub fn routes() -> Router<AppState> {
             "/delegation/tenants/:tenant_id/status",
             post(set_tenant_status),
         )
+        .route(
+            "/delegation/tenants/:tenant_id/display-name",
+            post(rename_tenant),
+        )
+        .route("/delegation/tenant-slugs/:slug", get(get_tenant_by_slug))
         .route(
             "/delegation/tenants/:tenant_id/applications",
             post(create_application),
@@ -259,6 +266,53 @@ async fn set_tenant_status(
     Ok(Json(
         s.platform
             .operator_set_tenant_status(&op, TenantId::from_uuid(id), b.status)
+            .await
+            .map_err(op_err)?,
+    ))
+}
+
+/// Section 15 (ORG-014): the EXTERNAL tenant created under `slug`, so the Developer
+/// Platform can reconcile an organization creation whose local commit never happened
+/// (the slug is the creation's idempotency reference). Any other tenant is NOT_FOUND.
+async fn get_tenant_by_slug(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Path(slug): Path<String>,
+) -> AccessResult<impl IntoResponse> {
+    read_only(&caller)?;
+    let t = s.platform.tenant_by_slug(&slug).await.map_err(op_err)?;
+    if t.classification != TenantClassification::External {
+        return Err(op_err(crate::identity::PlatformError::NotFound("tenant")));
+    }
+    Ok(Json(t))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DisplayNameBody {
+    display_name: String,
+}
+
+/// Section 15 (ORG-013): propagates an organization rename to its EXTERNAL tenant
+/// (audited `TENANT_RENAMED`). A FIRST_PARTY tenant's name stays operator-managed.
+async fn rename_tenant(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<DisplayNameBody>,
+) -> AccessResult<impl IntoResponse> {
+    let op = delegated(&caller, &headers)?;
+    let id = TenantId::from_uuid(id);
+    let current = s.platform.tenant(id).await.map_err(op_err)?;
+    if current.classification != TenantClassification::External {
+        return Err(policy(
+            "a first-party tenant is renamed by its operator, not by delegation",
+        ));
+    }
+    Ok(Json(
+        s.platform
+            .operator_rename_tenant(&op, id, &b.display_name)
             .await
             .map_err(op_err)?,
     ))

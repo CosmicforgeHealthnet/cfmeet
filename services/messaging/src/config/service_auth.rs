@@ -219,6 +219,17 @@ impl ServiceAuthSettings {
     /// Loads the key and trust bundle and builds signer, verifier and client; fails closed
     /// on anything malformed.
     pub fn load(&self, clock: SharedClock) -> Result<ServiceAuthRuntime, ConfigError> {
+        self.load_with_replay_guard(clock, None)
+    }
+
+    /// [`Self::load`] with a shared service-token replay guard (SEC-012) replacing the
+    /// process-local default. Ignored when the guard is disabled
+    /// (`SERVICE_AUTH_REPLAY_GUARD=off`).
+    pub fn load_with_replay_guard(
+        &self,
+        clock: SharedClock,
+        replay_guard: Option<Arc<dyn cf_service_auth::ReplayGuard>>,
+    ) -> Result<ServiceAuthRuntime, ConfigError> {
         let me = messaging_service_id();
         let key =
             ServiceSigningKey::from_pkcs8_pem_file(self.key_id.clone(), &self.private_key_file)
@@ -232,7 +243,11 @@ impl ServiceAuthSettings {
             self.token_ttl,
             clock.clone(),
         ));
-        let verifier = Arc::new(ServiceTokenVerifier::new(policy, clock));
+        let mut verifier = ServiceTokenVerifier::new(policy, clock);
+        if let Some(guard) = replay_guard.filter(|_| verifier.has_replay_guard()) {
+            verifier = verifier.with_replay_guard(guard);
+        }
+        let verifier = Arc::new(verifier);
         let mut targets = InternalTargets::new(self.runtime_environment);
         for (service, url) in &self.targets {
             targets

@@ -13,16 +13,19 @@ const identity = { principalId, tenantId: "tenant", applicationId: "app", enviro
 
 // Compile the real handlers in isolation, injecting only the network and server-only
 // marker. This exercises authorization decisions rather than copying their rules.
-function fixture({ own = true, ownsBlock = true, configured = true, scope = identity, login = true, ended = false, initiator = principalId, admin = false } = {}) {
+function fixture({ own = true, ownsBlock = true, configured = true, scope = identity, login = true, ended = false, initiator = principalId, admin = false, state = "CONNECTED", extraEnv = {}, upstream = () => null } = {}) {
   const sent = [];
   const env = { NEXT_PUBLIC_API_URL: "https://meeting.example/api/v1", CALLING_API_URL: "https://calling.example",
     CALLING_PLATFORM_CREDENTIAL: configured ? "server-secret" : "", CALLING_TENANT_ID: "tenant", CALLING_APPLICATION_ID: "app", CALLING_ENVIRONMENT_ID: "env",
-    CALLING_ADMIN_PRINCIPAL_IDS: admin ? principalId : "", CALLING_PRIVACY_ADMIN_PRINCIPAL_IDS: admin ? principalId : "" };
-  const call = { callId, initiatorPrincipalId: initiator,
-    participants: [{ participantId: "participant", principalId: own ? principalId : "other", endedAt: ended ? "2026-10-23T12:00:00Z" : null }],
+    CALLING_ADMIN_PRINCIPAL_IDS: admin ? principalId : "", CALLING_PRIVACY_ADMIN_PRINCIPAL_IDS: admin ? principalId : "", ...extraEnv };
+  const call = { callId, state: ended ? "ENDED" : state, initiatorPrincipalId: initiator,
+    participants: [{ participantId: "participant", principalId: own ? principalId : "other", role: initiator === principalId ? "INITIATOR" : "RECIPIENT", endedAt: ended ? "2026-10-23T12:00:00Z" : null },
+      { participantId: "peer", principalId: "other-party", role: initiator === principalId ? "RECIPIENT" : "INITIATOR", endedAt: null }],
     sessions: [{ sessionId, participantId: "participant", endpointId }], invitations: [] };
   const fetch = async (url, init) => {
     sent.push({ url, init });
+    const custom = upstream(url, init);
+    if (custom) return custom;
     if (url.endsWith("/messaging/me")) return Response.json(scope, { status: login ? 200 : 401 });
     if (url.includes("/calling/endpoints?")) return Response.json({ data: [{ endpointId, principalId, status: "ACTIVE" }] });
     if (url.includes("/v1/blocks?principalId=")) return Response.json({ items: ownsBlock ? [{ blockId, principalId }] : [] });
@@ -41,8 +44,10 @@ function fixture({ own = true, ownsBlock = true, configured = true, scope = iden
     }, process: { env }, fetch, Response, Request, Headers, AbortSignal, URL });
     return exports;
   };
-  const server = load("../src/lib/calling/server.ts");
-  const route = load("../src/app/api/calling/[...path]/route.ts", { "@/lib/calling/server": server });
+  const guard = load("../src/lib/calling/runtime-guard.ts");
+  const permissions = load("../src/lib/calling/call-permissions.ts");
+  const server = load("../src/lib/calling/server.ts", { "@/lib/calling/runtime-guard": guard });
+  const route = load("../src/app/api/calling/[...path]/route.ts", { "@/lib/calling/server": server, "@/lib/calling/call-permissions": permissions });
   const signaling = load("../src/app/api/calling-signaling/[...path]/route.ts", { "@/lib/calling/server": server });
   const request = async (path, method = "GET", body, headers = {}, endpoint = false) => (endpoint ? signaling : route)[method](new Request(`https://web.example/api/calling/${path}`, {
     method, headers: { Authorization: "Bearer login-token", ...headers }, body: body ? JSON.stringify(body) : undefined,
@@ -170,10 +175,120 @@ test("media credentials are issued only for the user's own session", async () =>
   assert.ok(!invalid.sent.some((s) => s.init.method === "POST"));
 });
 
-test("recipient cannot control the whole call but can leave their session", async () => {
-  const f = fixture({ initiator: "other" });
-  assert.equal((await f.request(`v1/calls/${callId}/end`, "POST", { expectedVersion: 2 })).status, 404);
-  assert.equal((await f.request(`v1/calls/${callId}/sessions/${sessionId}/remove`, "POST", { expectedVersion: 2 })).status, 200);
+test("any active party may end, hold and resume; only the caller cancels (CAL-002, ADR 0009)", async () => {
+  const recipient = fixture({ initiator: "other-party" });
+  for (const op of ["end", "hold", "resume"]) {
+    assert.equal((await recipient.request(`v1/calls/${callId}/${op}`, "POST", { expectedVersion: 2 })).status, 200, op);
+  }
+  assert.equal((await recipient.request(`v1/calls/${callId}/sessions/${sessionId}/remove`, "POST", { expectedVersion: 2 })).status, 200);
+  const ringing = fixture({ initiator: "other-party", state: "RINGING" });
+  assert.equal((await ringing.request(`v1/calls/${callId}/cancel`, "POST", { expectedVersion: 2 })).status, 404);
+  const caller = fixture({ state: "RINGING" });
+  assert.equal((await caller.request(`v1/calls/${callId}/cancel`, "POST", { expectedVersion: 2 })).status, 200);
+  // A transfer target (non-initiator) can still end a transferred call.
+  const transferred = fixture({ initiator: "retired-transferor" });
+  assert.equal((await transferred.request(`v1/calls/${callId}/end`, "POST", { expectedVersion: 3 })).status, 200);
+  const transfer = fixture({ initiator: "other-party" });
+  assert.equal((await transfer.request(`v1/calls/${callId}/transfer`, "POST", { transferringParticipantId: "peer", targetExtension: "4100", expectedVersion: 2 })).status, 200);
+  assert.equal(JSON.parse(transfer.sent.at(-1).init.body).transferringParticipantId, "participant");
+});
+
+test("a party that left a live group call can no longer control it", async () => {
+  const left = fixture({ upstream: (url) => url.endsWith(`/calls/${callId}`) ? Response.json({ callId, state: "CONNECTED", initiatorPrincipalId: "other-party",
+    participants: [{ participantId: "participant", principalId, endedAt: "2026-10-23T12:00:00Z" }, { participantId: "a", principalId: "x", endedAt: null }, { participantId: "b", principalId: "y", endedAt: null }],
+    sessions: [], invitations: [] }) : null });
+  assert.equal((await left.request(`v1/calls/${callId}/end`, "POST", { expectedVersion: 2 })).status, 404);
+  assert.equal((await left.request(`v1/calls/${callId}`)).status, 200);
+});
+
+test("recording consent and controls are bound to the participant and its own endpoint (CAL-005)", async () => {
+  const f = fixture();
+  assert.equal((await f.request(`v1/calls/${callId}/recording-authorizations?principalId=attacker`)).status, 200);
+  assert.equal(new URL(f.sent.at(-1).url).searchParams.get("principalId"), principalId);
+  assert.equal((await f.request(`v1/calls/${callId}/recording-consent`, "POST", { endpointId, decision: "GRANTED", participantId: "forged" })).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { endpointId, decision: "GRANTED" });
+  assert.equal((await f.request(`v1/calls/${callId}/recordings`, "POST", { principalId: "attacker" })).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { principalId });
+  assert.equal((await f.request(`v1/calls/${callId}/recordings/${blockId}/stop`, "POST", {})).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { principalId });
+  const invalid = fixture();
+  assert.equal((await invalid.request(`v1/calls/${callId}/recording-consent`, "POST", { endpointId: "foreign", decision: "GRANTED" })).status, 404);
+  assert.equal((await invalid.request(`v1/calls/${callId}/recording-consent`, "POST", { endpointId, decision: "MAYBE" })).status, 404);
+  assert.ok(!invalid.sent.some((s) => s.url.includes("recording-consent")));
+  const foreign = fixture({ own: false });
+  assert.equal((await foreign.request(`v1/calls/${callId}/recordings`, "POST", {})).status, 404);
+});
+
+test("abuse reports carry the reporter and a bounded category only (CAL-005)", async () => {
+  const f = fixture({ ended: true });
+  assert.equal((await f.request(`v1/calls/${callId}/abuse-reports`, "POST", { principalId: "attacker", category: "SPAM", description: "free text" })).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { principalId, category: "SPAM" });
+  assert.equal((await f.request(`v1/calls/${callId}/abuse-reports`, "POST", { category: "SCAM" })).status, 400);
+  assert.equal((await f.request("v1/abuse-reports?principalId=attacker")).status, 200);
+  assert.equal(new URL(f.sent.at(-1).url).searchParams.get("principalId"), principalId);
+});
+
+test("voicemail is self-service: owner view only, no allowlist (CAL-006)", async () => {
+  const mailbox = "66666666-6666-4666-8666-666666666666";
+  const shared = "77777777-7777-4777-8777-777777777777";
+  const foreign = "88888888-8888-4888-8888-888888888888";
+  const f = fixture({ upstream: (url) => {
+    if (url.includes("/voicemail/mailboxes?")) return Response.json({ mailboxes: [
+      { mailboxId: mailbox, owner: { type: "PRINCIPAL", id: principalId } },
+      { mailboxId: shared, owner: { type: "EXTENSION", id: blockId } },
+      { mailboxId: foreign, owner: { type: "PRINCIPAL", id: "someone-else" } }], nextCursor: null });
+    if (url.includes(`messages?mailboxId=${shared}`)) return Response.json({ messages: [], nextCursor: null });
+    return null;
+  } });
+  const list = await f.request("v1/enterprise/voicemail/mailboxes");
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).mailboxes.map((m) => m.mailboxId), [mailbox, shared]);
+  assert.equal((await f.request(`v1/enterprise/voicemail/messages?mailboxId=${mailbox}`)).status, 200);
+  assert.equal(new URL(f.sent.at(-1).url).searchParams.get("principalId"), principalId);
+  assert.equal((await f.request(`v1/enterprise/voicemail/messages/${mailbox}/media-access`, "POST", {})).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { principalId });
+  assert.equal((await f.request(`v1/enterprise/voicemail/messages/${mailbox}/read-state`, "PUT", { expectedVersion: 1, readState: "READ", principalId: "attacker" })).status, 200);
+  assert.equal(JSON.parse(f.sent.at(-1).init.body).principalId, principalId);
+  assert.equal((await f.request(`v1/enterprise/voicemail/messages/${mailbox}?expectedVersion=2`, "DELETE")).status, 200);
+  assert.equal(new URL(f.sent.at(-1).url).searchParams.get("principalId"), principalId);
+  // Mailbox administration of the shared scope stays allowlisted.
+  const admin = fixture();
+  assert.equal((await admin.request("v1/enterprise/voicemail/mailboxes", "POST", { displayLabel: "x" })).status, 403);
+});
+
+test("forwarding rules are the user's own and go to people, extensions or voicemail only (CAL-006)", async () => {
+  const rule = "66666666-6666-4666-8666-666666666666";
+  const target = "77777777-7777-4777-8777-777777777777";
+  const f = fixture({ upstream: (url, init) => url.endsWith(`/forwarding-rules/${rule}`) && (!init?.method || init.method === "GET") ? Response.json({ forwardingRuleId: rule, principalId }) : null });
+  assert.equal((await f.request("v1/enterprise/forwarding-rules?principalId=attacker")).status, 200);
+  assert.equal(new URL(f.sent.at(-1).url).searchParams.get("principalId"), principalId);
+  assert.equal((await f.request("v1/enterprise/forwarding-rules", "POST", { principalId: "attacker", condition: "NO_ANSWER", destination: { type: "PRINCIPAL", id: target } })).status, 200);
+  assert.equal(JSON.parse(f.sent.at(-1).init.body).principalId, principalId);
+  assert.equal((await f.request("v1/enterprise/forwarding-rules", "POST", { condition: "ALWAYS", destination: { type: "QUEUE", id: target } })).status, 403);
+  assert.equal((await f.request(`v1/enterprise/forwarding-rules/${rule}?expectedVersion=1`, "DELETE")).status, 200);
+  const other = fixture({ upstream: (url) => url.endsWith(`/forwarding-rules/${rule}`) ? Response.json({ forwardingRuleId: rule, principalId: "someone-else" }) : null });
+  assert.equal((await other.request(`v1/enterprise/forwarding-rules/${rule}?expectedVersion=1`, "DELETE")).status, 404);
+  assert.ok(!other.sent.some((s) => s.init?.method === "DELETE"));
+});
+
+test("CALLING_DEV_MODE never disables authentication in a production build or with a credential (CAL-008)", async () => {
+  const production = fixture({ extraEnv: { CALLING_DEV_MODE: "true", NODE_ENV: "production" } });
+  const response = await production.request("v1/calls");
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "CALLING_NOT_CONFIGURED");
+  assert.equal(production.sent.length, 0);
+  const withCredential = fixture({ extraEnv: { CALLING_DEV_MODE: "true" } });
+  assert.equal((await withCredential.request("v1/calls")).status, 503);
+  const dev = fixture({ configured: false, extraEnv: { CALLING_DEV_MODE: "true", NODE_ENV: "development" } });
+  assert.equal((await dev.request("v1/calls")).status, 200);
+  assert.equal(dev.sent.length, 0);
+});
+
+test("production refuses a plain-http Calling origin for the adapter and the signaling transport (CAL-020)", async () => {
+  const f = fixture({ extraEnv: { NODE_ENV: "production", CALLING_API_URL: "http://calling.example" } });
+  assert.equal((await f.request("v1/calls")).status, 503);
+  assert.equal((await f.request("v1/calling/invitations", "GET", undefined, { Authorization: "Bearer cfsig_test.token" }, true)).status, 503);
+  assert.ok(!f.sent.some((s) => s.url.startsWith("http://calling.example")));
 });
 
 test("ended participants can replay termination with their original command identity", async () => {

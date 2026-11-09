@@ -259,29 +259,44 @@ pub async fn materialize<C: ConnectionTrait>(
     Ok(inserted)
 }
 
-/// Remove future, unstarted, non-exception occurrences of a rule (no history attached);
-/// anything that cannot be removed is cancelled instead. Exceptions are preserved.
+/// History that forbids deleting an occurrence row (it is cancelled instead).
+const NO_HISTORY_SQL: &str = r#"NOT EXISTS (SELECT 1 FROM conference_participants p WHERE p.conference_id = c.id)
+                  AND NOT EXISTS (SELECT 1 FROM meeting_invitations i WHERE i.conference_id = c.id)
+                  AND NOT EXISTS (SELECT 1 FROM conference_audit_events a WHERE a.conference_id = c.id)
+                  AND NOT EXISTS (SELECT 1 FROM conference_bans b WHERE b.conference_id = c.id)"#;
+
+/// Remove future, unstarted occurrences of a rule (no history attached); anything that
+/// cannot be removed is cancelled instead.
+///
+/// * `include_exceptions = false` keeps exception rows (single-occurrence edits).
+/// * `include_exceptions = true` also retires unstarted exception rows — a rescheduled
+///   occurrence must not outlive the end of its series (MTG-014).
+/// * `include_cancelled` also deletes cancelled rows without history (re-anchoring
+///   regenerates them from `meeting_recurrence_exceptions`).
 async fn retire_future_occurrences<C: ConnectionTrait>(
     conn: &C,
     rule_id: Uuid,
     now: DateTime<Utc>,
     include_exceptions: bool,
+    include_cancelled: bool,
 ) -> ApiResult<u64> {
-    // With `include_exceptions` (series re-anchored, same rule) exception rows are
-    // regenerated from `meeting_recurrence_exceptions`, so their old rows are retired too.
     let deleted = conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            r#"DELETE FROM conference_sessions c
+            format!(
+                r#"DELETE FROM conference_sessions c
                 WHERE c.recurrence_rule_id = $1
-                  AND (c.status = 'CREATED' OR ($3 AND c.status = 'CANCELLED'))
+                  AND (c.status = 'CREATED' OR ($4 AND c.status = 'CANCELLED'))
                   AND (c.is_exception = false OR $3)
                   AND c.scheduled_start_at > $2
-                  AND NOT EXISTS (SELECT 1 FROM conference_participants p WHERE p.conference_id = c.id)
-                  AND NOT EXISTS (SELECT 1 FROM meeting_invitations i WHERE i.conference_id = c.id)
-                  AND NOT EXISTS (SELECT 1 FROM conference_audit_events a WHERE a.conference_id = c.id)
-                  AND NOT EXISTS (SELECT 1 FROM conference_bans b WHERE b.conference_id = c.id)"#,
-            [rule_id.into(), now.into(), include_exceptions.into()],
+                  AND {NO_HISTORY_SQL}"#
+            ),
+            [
+                rule_id.into(),
+                now.into(),
+                include_exceptions.into(),
+                include_cancelled.into(),
+            ],
         ))
         .await?
         .rows_affected();
@@ -333,7 +348,7 @@ pub async fn follow_space_timezone<C: ConnectionTrait>(
     if let Some(rule) = active_rule(conn, space.id, true).await? {
         let now = Utc::now();
         // Exceptions are keyed by wall-clock time, so they stay aligned after re-anchoring.
-        retire_future_occurrences(conn, rule.id, now, true).await?;
+        retire_future_occurrences(conn, rule.id, now, true, true).await?;
         let mut am: meeting_recurrence_rules::ActiveModel = rule.clone().into();
         am.timezone = Set(space.timezone.clone());
         am.materialized_until = Set(None);
@@ -504,6 +519,162 @@ pub async fn record_exception_for_conference<C: ConnectionTrait>(
     Ok(())
 }
 
+fn is_occurrence_of(set: &RRuleSet, tz: Tz, start: DateTime<Utc>) -> bool {
+    occurrences_between(set.clone(), tz, start, start + Duration::seconds(1), 1)
+        .first()
+        .map(|d| *d == start)
+        .unwrap_or(false)
+}
+
+/// Edit the active series in place (same rule id, so every occurrence key is stable):
+///
+/// * future occurrences that are still occurrences of the edited rule are kept (a plain
+///   one gets the new duration; an exception keeps its own schedule);
+/// * future occurrences that are no longer occurrences are retired (deleted without
+///   history, otherwise cancelled) and their exception records dropped;
+/// * past occurrences and their exception records are never touched;
+/// * the rule version advances by 1 + the dropped exception versions, so the calendar
+///   SEQUENCE never decreases; then the horizon is re-materialized (new keys only).
+#[allow(clippy::too_many_arguments)]
+async fn edit_series<C: ConnectionTrait>(
+    txn: &C,
+    space: &meeting_spaces::Model,
+    rule: meeting_recurrence_rules::Model,
+    req: &SetRecurrenceRequest,
+    new_set: RRuleSet,
+    now: DateTime<Utc>,
+    config: &MeetingV2Config,
+    actor: &AuditActor,
+) -> ApiResult<meeting_recurrence_rules::Model> {
+    let new_tz: Tz = space
+        .timezone
+        .parse()
+        .map_err(|_| validation("invalid timezone"))?;
+    let old_tz: Tz = rule.timezone.parse().unwrap_or(new_tz);
+    let duration = Duration::minutes(req.duration_minutes as i64);
+    let rows = conference_sessions::Entity::find()
+        .filter(conference_sessions::Column::RecurrenceRuleId.eq(rule.id))
+        .filter(
+            conference_sessions::Column::Status
+                .is_in([ConferenceStatus::Created, ConferenceStatus::Cancelled]),
+        )
+        .filter(conference_sessions::Column::OriginalStartAt.gt(now))
+        .lock(LockType::Update)
+        .all(txn)
+        .await?;
+    let (mut kept, mut retired) = (0u64, 0u64);
+    for row in rows {
+        let Some(original) = row.original_start_at else {
+            continue;
+        };
+        if is_occurrence_of(&new_set, new_tz, original) {
+            kept += 1;
+            let end = original + duration;
+            if !row.is_exception
+                && row.status == ConferenceStatus::Created
+                && row.scheduled_end_at != Some(end)
+            {
+                let version = row.version + 1;
+                let mut am: conference_sessions::ActiveModel = row.into();
+                am.scheduled_start_at = Set(Some(original));
+                am.scheduled_end_at = Set(Some(end));
+                am.version = Set(version);
+                am.updated_at = Set(now);
+                am.update(txn).await?;
+            }
+            continue;
+        }
+        retired += 1;
+        let deleted = txn
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                format!("DELETE FROM conference_sessions c WHERE c.id = $1 AND {NO_HISTORY_SQL}"),
+                [row.id.into()],
+            ))
+            .await?
+            .rows_affected();
+        if deleted == 0 && row.status == ConferenceStatus::Created {
+            let version = row.version + 1;
+            let mut am: conference_sessions::ActiveModel = row.clone().into();
+            am.status = Set(ConferenceStatus::Cancelled);
+            am.termination_reason = Set(Some(TerminationReason::Cancelled));
+            am.cancelled_at = Set(Some(now));
+            am.cancelled_by = Set(Some("system:recurrence".into()));
+            am.version = Set(version);
+            am.updated_at = Set(now);
+            let updated = am.update(txn).await?;
+            emit(
+                txn,
+                crate::services::conference::conference_event(
+                    &updated,
+                    crate::services::meeting_events::event::CONFERENCE_CANCELLED,
+                ),
+            )
+            .await?;
+        }
+    }
+    let mut dropped_versions = 0i32;
+    let mut dropped = 0u64;
+    for e in meeting_recurrence_exceptions::Entity::find()
+        .filter(meeting_recurrence_exceptions::Column::RecurrenceRuleId.eq(rule.id))
+        .all(txn)
+        .await?
+    {
+        let Some(original) =
+            crate::services::calendar::local_instant(old_tz, e.original_start_local)
+        else {
+            continue;
+        };
+        if original <= now || is_occurrence_of(&new_set, new_tz, original) {
+            continue;
+        }
+        dropped_versions = dropped_versions.saturating_add(e.version);
+        dropped += 1;
+        meeting_recurrence_exceptions::Entity::delete_by_id(e.id)
+            .exec(txn)
+            .await?;
+    }
+    let body = req.rrule.trim();
+    let mut am: meeting_recurrence_rules::ActiveModel = rule.clone().into();
+    am.rrule = Set(body.strip_prefix("RRULE:").unwrap_or(body).to_string());
+    am.timezone = Set(space.timezone.clone());
+    am.dtstart_local = Set(req.start_local);
+    am.duration_minutes = Set(req.duration_minutes);
+    am.materialized_until = Set(None);
+    am.version = Set(rule
+        .version
+        .saturating_add(1)
+        .saturating_add(dropped_versions));
+    am.updated_at = Set(now);
+    let updated = am.update(txn).await?;
+    let inserted = materialize(txn, space, &updated, now, config).await?;
+    audit(
+        txn,
+        actor,
+        AuditRecord {
+            meeting_space_id: space.id,
+            conference_id: None,
+            action: action::RECURRENCE_SET,
+            target_type: Some("RECURRENCE_RULE"),
+            target_ref: Some(updated.id.to_string()),
+            metadata: json!({
+                "rrule": updated.rrule,
+                "timezone": updated.timezone,
+                "edited": true,
+                "keptOccurrences": kept,
+                "retiredOccurrences": retired,
+                "droppedExceptions": dropped,
+                "materialized": inserted,
+            }),
+        },
+    )
+    .await?;
+    Ok(meeting_recurrence_rules::Entity::find_by_id(updated.id)
+        .one(txn)
+        .await?
+        .unwrap_or(updated))
+}
+
 pub struct RecurrenceService {
     core: Core,
 }
@@ -565,19 +736,28 @@ impl RecurrenceService {
         if space.status != SpaceStatus::Active {
             return Err(state_conflict("Archived meeting spaces cannot recur"));
         }
-        build_rule_set(&req.rrule, &space.timezone, req.start_local).map_err(validation)?;
+        let new_set =
+            build_rule_set(&req.rrule, &space.timezone, req.start_local).map_err(validation)?;
         let now = Utc::now();
-        let mut replaced = None;
         if let Some(old) = active_rule(&txn, space_id, true).await? {
-            retire_future_occurrences(&txn, old.id, now, false).await?;
-            let mut am: meeting_recurrence_rules::ActiveModel = old.clone().into();
-            am.status = Set(RecurrenceStatus::Ended);
-            am.ended_at = Set(Some(now));
-            am.updated_at = Set(now);
-            am.version = Set(old.version + 1);
-            am.update(&txn).await?;
-            replaced = Some(old.id);
+            // MTG-014: a series edit keeps the rule (and every occurrence key), keeps the
+            // exceptions that still match an occurrence and the occurrences that did not
+            // move, instead of replacing the series.
+            let rule = edit_series(
+                &txn,
+                &space,
+                old,
+                &req,
+                new_set,
+                now,
+                &self.core.config,
+                &AuditActor::from(ctx),
+            )
+            .await?;
+            txn.commit().await?;
+            return Ok(rule);
         }
+        let replaced: Option<Uuid> = None;
         let body = req.rrule.trim();
         let rule = meeting_recurrence_rules::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -781,7 +961,8 @@ impl RecurrenceService {
             .collect())
     }
 
-    /// End the series. Started/past occurrences and exceptions are preserved.
+    /// End the series. Started/past occurrences and exception records are preserved;
+    /// every unstarted future occurrence (rescheduled ones included) is retired.
     pub async fn end(&self, ctx: &ActorContext, space_id: Uuid) -> ApiResult<()> {
         let txn = self.core.db.begin().await?;
         let space = lock_space(&txn, space_id).await?;
@@ -791,7 +972,8 @@ impl RecurrenceService {
             return Ok(());
         };
         let now = Utc::now();
-        let retired = retire_future_occurrences(&txn, rule.id, now, false).await?;
+        // Every unstarted future occurrence ends with the series, rescheduled ones too.
+        let retired = retire_future_occurrences(&txn, rule.id, now, true, false).await?;
         let mut am: meeting_recurrence_rules::ActiveModel = rule.clone().into();
         am.status = Set(RecurrenceStatus::Ended);
         am.ended_at = Set(Some(now));

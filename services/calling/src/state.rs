@@ -68,6 +68,10 @@ pub struct AppState {
     /// `CALLING_LEGACY_USAGE_AUTHORITY=retired` (Part VI §21.2): the customer usage /
     /// limit views answer 503 `CF-Usage-Migration: moved`.
     pub legacy_usage_retired: bool,
+    /// `CALLING_ORGANIZATION_FORWARDING_ENABLED` (Blueprint Section 12 follow-up,
+    /// CAL-007; default false): customer routes accept Meeting Service requests for a
+    /// first-party organization member (`calling-request.act-for-organization`).
+    pub organization_forwarding_enabled: bool,
     pub db: DatabaseConnection,
     pub clock: SharedClock,
     /// Customer credential authentication, delegated to Platform Access (ADR 0032).
@@ -194,6 +198,7 @@ impl AppState {
             enterprise,
             webhooks,
             legacy_usage_retired: false,
+            organization_forwarding_enabled: false,
             usage: Arc::new(crate::usage::UsageService::new(
                 db.clone(),
                 clock.clone(),

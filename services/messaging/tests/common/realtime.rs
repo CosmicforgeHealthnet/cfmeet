@@ -76,7 +76,24 @@ impl Rt {
         broker: Arc<dyn messaging::realtime::broker::Broker>,
         presence: Arc<dyn messaging::realtime::ephemeral::PresenceStore>,
     ) -> Option<Self> {
-        Self::assemble(settings, local, broker, presence, None).await
+        Self::assemble(settings, local, broker, presence, None, |_| {}).await
+    }
+
+    /// An instance whose application state is adjusted first (e.g. E2EE devices off).
+    pub async fn with_state(
+        settings: RealtimeSettings,
+        configure: impl FnOnce(&mut messaging::state::AppState) + Send + 'static,
+    ) -> Option<Self> {
+        let broker = Arc::new(LocalBroker::default());
+        Self::assemble(
+            settings,
+            broker.clone(),
+            broker,
+            Arc::new(MemoryPresence::default()),
+            None,
+            configure,
+        )
+        .await
     }
 
     /// An instance whose push jobs go to `provider` (e.g. the live adapters aimed at
@@ -92,6 +109,7 @@ impl Rt {
             broker,
             Arc::new(MemoryPresence::default()),
             Some(provider),
+            |_| {},
         )
         .await
     }
@@ -102,6 +120,7 @@ impl Rt {
         broker: Arc<dyn messaging::realtime::broker::Broker>,
         presence: Arc<dyn messaging::realtime::ephemeral::PresenceStore>,
         provider: Option<Arc<dyn messaging::realtime::push::PushProvider>>,
+        configure: impl FnOnce(&mut messaging::state::AppState) + Send + 'static,
     ) -> Option<Self> {
         let push = Arc::new(LocalTestPush::default());
         let keys = ClientTokenKeys::generate();
@@ -116,6 +135,7 @@ impl Rt {
         let rt2 = realtime.clone();
         let h = Harness::build(move |s| {
             s.realtime = rt2;
+            configure(s);
         })
         .await?;
         realtime.start();
@@ -134,9 +154,18 @@ impl Rt {
             },
             "test",
         ));
-        let mut tasks = vec![tokio::spawn(
-            publisher.run_with_wakeup(Duration::from_millis(50), realtime.outbox_wakeup.clone()),
-        )];
+        let mut tasks = vec![
+            tokio::spawn(
+                publisher
+                    .run_with_wakeup(Duration::from_millis(50), realtime.outbox_wakeup.clone()),
+            ),
+            // MSG-018: coalesced receipts are published when their window ends (on the
+            // harness's manual clock).
+            tokio::spawn(messaging::messages::receipts::run(
+                h.state.clone(),
+                Duration::from_millis(50),
+            )),
+        ];
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = h.router();

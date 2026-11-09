@@ -71,6 +71,38 @@ end-to-end encrypted and without exposing service credentials to clients.
 * Web / mobile clients are not changed here; real-device runtime certification remains a
   Part K gate.
 
+## Amendment (Blueprint v1.0 Section 13) — superseded scope and relay parity
+
+* **Superseded scope limit (MSG-015).** The first scope limit above no longer describes the
+  code: breakout and private chat migrate under the same state machine to their own
+  MEETING conversations (`unified_messaging/scoped.rs`, `store.rs`: "used for EVERY meeting
+  chat scope"; the migration status reports `scope.migrated = MAIN_ROOM_CHAT, ANNOUNCEMENTS,
+  BREAKOUT_CHAT, PRIVATE_CHAT` and `scope.legacy = []`).
+* **Client relay parity (MSG-001/002/003).** `/api/v2/messaging/relay/{path}` relays every
+  allowlisted method including PATCH (MANAGED edit, member role, conversation update /
+  retention / title) and exactly the Messaging contract's query parameters per operation
+  (`scope`, `reason`, `threadRootId`, `lifecycleState`, `contextClass`, `orderBy`). The
+  replay cursor is forwarded as Messaging's canonical `after`; the WebSocket spelling
+  `afterEventSequence` is accepted as a compatibility alias and rewritten. A unit test
+  walks the bundled Messaging contract against the allowlist and an integration test
+  walks it through the real router.
+* **Identity bridge addition.** `POST /api/v2/messaging/session-tokens` issues
+  MANAGED-realtime session-device tokens bound to the verified account session (ADR 0049
+  amendment A1); signing out of that session revokes them.
+* **Organization conversations (built in the final closure, 2026-11-09; supersedes the
+  earlier "integration point, not built" note).** Organization conversations are not a
+  `context` inside the personal scope: they live in the **organization's own FIRST_PARTY
+  technical scope** (ADR 0056 §4), reached through
+  `/api/v2/organizations/{id}/messaging/relay/{path}` (the same allowlist as the personal
+  relay), `/api/v2/organizations/{id}/messaging/session-tokens` (MANAGED realtime) and
+  `/api/v2/organizations/{id}/messaging/members/resolve` (active colleagues → their
+  organization-scope principals). Membership, organization status and `features.messaging`
+  are decided by the Organizations Service per request; the Messaging binding is per
+  organization scope (`service-bindings/messaging`). Offboarding suspends the member's
+  organization principal (organization events → Meeting `organization_access` worker →
+  Platform Access), which stops reads, sends and realtime while personal Messaging is
+  untouched. Certified across real processes in `organization_lifecycle.rs` (J-10).
+
 ## Consequences
 
 The journey is proven across real Platform Access and Messaging processes

@@ -1,54 +1,28 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Trash2, Plus, AlertCircle, Check, Key } from "lucide-react";
+import { Trash2, AlertCircle, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/hooks";
-import { CreateApiKeyResponse } from "@/types/api-keys";
+import { useApiKeys, useRevokeApiKey } from "@/hooks";
 import { cn } from "@/lib/utils";
+import LegacyDeprecationNotice from "./LegacyDeprecationNotice";
 
+const day = (value: string) =>
+  new Date(value).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+
+/**
+ * Legacy API keys (deprecated, PLT-004): read-only list plus revoke. Creating keys moved to
+ * the Developer Portal (`/developers/credentials`).
+ */
 export default function ApiKeysContent() {
   const { data: keys = [], isLoading, error: fetchError } = useApiKeys();
-  const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
-
-  const [newKey, setNewKey] = useState<CreateApiKeyResponse | null>(null);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
-  const handleCreate = () => {
-    setError("");
-    createApiKey.mutate(undefined, {
-      onSuccess: (data) => {
-        setNewKey(data);
-      },
-      onError: () => {
-        setError("Failed to create API key");
-      },
-    });
-  };
-
   const handleRevoke = (id: string) => {
-    if (
-      !confirm(
-        "Are you sure you want to revoke this API key? This action cannot be undone.",
-      )
-    ) {
-      return;
-    }
-
-    revokeApiKey.mutate(id, {
-      onError: () => {
-        setError("Failed to revoke API key");
-      },
-    });
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (!confirm("Revoke this legacy API key? Requests using it will fail. This cannot be undone.")) return;
+    revokeApiKey.mutate(id, { onError: () => setError("Failed to revoke API key") });
   };
 
   if (isLoading) {
@@ -59,23 +33,16 @@ export default function ApiKeysContent() {
     );
   }
 
-  // Combine errors
   const displayError = error || (fetchError ? "Failed to fetch API keys" : "");
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold mb-1">API Keys</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage your API keys for third-party integrations.
-          </p>
-        </div>
-        <Button onClick={handleCreate} loading={createApiKey.isPending}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create New Key
-        </Button>
+      <div>
+        <h2 className="text-lg font-semibold mb-1">Legacy API keys</h2>
+        <p className="text-sm text-muted-foreground">Keys issued by the old meeting API. Read-only: revoke them after migrating.</p>
       </div>
+
+      <LegacyDeprecationNotice kind="api-keys" />
 
       {displayError && (
         <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm border border-red-100 flex items-center gap-2">
@@ -84,109 +51,37 @@ export default function ApiKeysContent() {
         </div>
       )}
 
-      {/* New Key Modal/Alert */}
-      {newKey && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-6 relative animate-in fade-in slide-in-from-top-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-green-100 rounded-lg text-green-600">
-              <Key className="w-5 h-5" />
-            </div>
-            <div className="space-y-3 flex-1">
-              <h3 className="font-semibold text-green-900">
-                API Key Created Successfully
-              </h3>
-              <p className="text-sm text-green-800">
-                Please copy your API key now. For security reasons, it will
-                never be shown again.
-              </p>
-
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-card border border-green-200 px-3 py-2 rounded-lg text-sm font-mono text-foreground break-all">
-                  {newKey.api_key}
-                </code>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="bg-card border-green-200 text-green-700 hover:bg-green-50"
-                  onClick={() => copyToClipboard(newKey.api_key)}
-                >
-                  {copied ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Copy className="w-4 h-4" />
-                  )}
-                </Button>
-              </div>
-
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-green-700 hover:text-green-800 hover:bg-green-100"
-                  onClick={() => setNewKey(null)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Keys List */}
       <div className="space-y-4">
         {keys.length === 0 ? (
           <div className="text-center py-12 bg-muted rounded-xl border border-dashed border-border">
             <Key className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
-            <p className="text-muted-foreground font-medium">No API keys found</p>
-            <p className="text-muted-foreground text-sm">Create one to get started</p>
+            <p className="text-muted-foreground font-medium">No legacy API keys</p>
+            <p className="text-muted-foreground text-sm">Create API keys in the developer console.</p>
           </div>
         ) : (
           keys.map((key) => (
             <div
               key={key.id}
-              className={cn(
-                "bg-card rounded-xl border p-4 transition-all hover:shadow-sm",
-                key.status === "revoked"
-                  ? "border-border opacity-60 bg-muted"
-                  : "border-border",
-              )}
+              className={cn("bg-card rounded-xl border border-border p-4", key.status === "revoked" && "opacity-60 bg-muted")}
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium text-foreground">
-                      {key.api_key_masked}
-                    </span>
+                    <span className="font-mono text-sm font-medium text-foreground">{key.api_key_masked}</span>
                     <span
                       className={cn(
                         "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
-                        key.status === "active"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-muted text-muted-foreground",
+                        key.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground",
                       )}
                     >
                       {key.status}
                     </span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">deprecated</span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>
-                      Created{" "}
-                      {new Date(key.created_at).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
+                    <span>Created {day(key.created_at)}</span>
                     <span>•</span>
-                    <span>
-                      Expires{" "}
-                      {new Date(key.expires_at).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
+                    <span>Expires {day(key.expires_at)}</span>
                   </div>
                 </div>
 
@@ -197,16 +92,12 @@ export default function ApiKeysContent() {
                       {key.used_count} / {key.usage_limit}
                     </p>
                   </div>
-
                   {key.status === "active" && (
                     <Button
                       variant="ghost"
                       size="sm"
                       className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      loading={
-                        revokeApiKey.isPending &&
-                        revokeApiKey.variables === key.id
-                      }
+                      loading={revokeApiKey.isPending && revokeApiKey.variables === key.id}
                       onClick={() => handleRevoke(key.id)}
                     >
                       <Trash2 className="w-4 h-4 mr-2" />

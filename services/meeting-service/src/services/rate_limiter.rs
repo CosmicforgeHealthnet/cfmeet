@@ -52,6 +52,29 @@ impl RateLimiterService {
         Ok(MAX_LOGIN_ATTEMPTS - count)
     }
 
+    /// Generic fixed-window limit for one action and one subject (for example a client
+    /// address). The subject is hashed, so raw addresses never appear in Redis keys.
+    pub async fn check_action_rate(
+        &self,
+        action: &str,
+        subject: &str,
+        max_attempts: i64,
+        window_secs: u64,
+    ) -> ApiResult<()> {
+        use sha2::{Digest, Sha256};
+        let digest = hex::encode(Sha256::digest(subject.as_bytes()));
+        let key = format!("rate:{action}:{}", &digest[..32]);
+        let count = self.redis.incr_with_ttl(&key, window_secs).await?;
+        if count > max_attempts {
+            let ttl = self.redis.ttl(&key).await?;
+            return Err(ApiError::TooManyRequests(format!(
+                "Too many requests. Please try again in {} seconds.",
+                ttl.max(0)
+            )));
+        }
+        Ok(())
+    }
+
     /// Clear login rate limit on successful login
     pub async fn clear_login_rate(&self, identifier: &str) -> ApiResult<()> {
         let key = self.login_key(identifier);

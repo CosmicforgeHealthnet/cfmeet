@@ -465,6 +465,30 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
 
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
+### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
+
+`CALLING_ORGANIZATION_FORWARDING_ENABLED` (`true` / `false`, **default `false`**). When
+on, customer routes accept a third authentication path next to the bearer credential and
+the API Gateway forward: a service token from the Meeting Service holding
+`calling-request.act-for-organization` (grantable only to the Meeting Service, sensitive;
+the issuer identity is checked as well as the grant). Its signed delegated context must
+name the organization's Calling credential (id only — Platform Access re-verifies it live
+through `/internal/v1/credentials/delegated-authority`, exactly like a gateway forward)
+and a `NATIVE_CF_USER` acting principal. Calling then requires a FIRST_PARTY tenant with
+the reserved organization slug `org-<32 hex>` (defence in depth; the Organizations
+mapping and Platform Access stay the authority) and resolves the principal, ACTIVE and
+`NATIVE_CF_USER`, inside the credential's tenant / application / environment. The
+principal is recorded on enterprise administrative audit rows (`actorPrincipalId`,
+migration `m20261201_000048_enterprise_audit_acting_principal`) so `/v1/enterprise/audit`
+names the human. Refusals are the normalized 401 (`forward_not_permitted`,
+`delegated_credential_missing`, `acting_principal_missing`, `not_organization_scope`,
+`acting_principal_out_of_scope` in the operator log); an unreachable authority is 503.
+With the flag off, the Meeting Service's token is refused like any non-gateway issuer.
+
+Enabling it is a release step: Calling's trust bundle must grant the Meeting Service
+`calling-request.act-for-organization`, and each organization needs an operator-created
+Calling service account + credential in its dedicated scope.
+
 ## Identity (owned by Platform Access, ADR 0032)
 
 Since Part IV the platform identity hierarchy is owned by **Platform Access**
@@ -599,6 +623,23 @@ app refusals.
   Call events): a pre-connect Call with no Call event for that long fails (TIMEOUT)
   through the canonical transition — ring offers cancelled, media marked for teardown,
   public / SIP legs released in the same transaction. `SKIP LOCKED`, multi-instance safe.
+* **Automatic end** (Blueprint §12, CAL-001) — a Call never outlives its parties. Through
+  the END path (system command; `end_trigger` on the CALL_STATE_CHANGED → ENDING event;
+  `calling_calls_auto_ended_total{reason}`): a CONNECTED / HELD Call with fewer than two
+  parties with live participation ends `PARTICIPATION_ENDED` — evaluated on session
+  removal ("leave"), on a provider disconnect, after a transfer completes / fails and by the
+  reaper once `CALLING_PARTICIPATION_GRACE_SECONDS` (default 60) has passed for a dropped
+  connection. A party is an active participant with a CONNECTED session, a session
+  DISCONNECTED / not yet connected within the grace, a live SIP / public leg or a live
+  ring offer (or an unowned live public leg); the shared APPLICATION leg and recording
+  captures are never parties. The reaper (every reconcile interval, `SKIP LOCKED`) also
+  ends ANSWERED / CONNECTED / HELD Calls idle (nothing connected) for
+  `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (default 600, `IDLE_TIMEOUT`) and any answered Call
+  older than `CALLING_MAX_CALL_DURATION_SECONDS` (default 28800, `MAX_DURATION`).
+  Pre-connect Calls (IVR menus, queue waits, voicemail recordings — all still ringing) are
+  never touched; a TRANSFERRING Call waits for its transfer. The media resource of an
+  active Call whose sessions are all gone past the grace is never re-created. Usage is
+  finalized and parties / queue agents become free exactly as for a client END.
 * **Backlog** — the worker loop samples `calling_outbox_pending`,
   `calling_outbox_oldest_pending_age_seconds`, `calling_telephony_commands_pending`,
   `calling_telephony_commands_oldest_pending_age_seconds`,

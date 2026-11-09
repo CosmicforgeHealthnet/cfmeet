@@ -26,6 +26,7 @@ use utoipa::OpenApi;
         // OAuth endpoints
         crate::handlers::auth::oauth_google_init,
         crate::handlers::auth::oauth_google_callback,
+        crate::handlers::auth::oauth_google_exchange,
         // API Key endpoints
         crate::handlers::api_keys::create_api_key,
         crate::handlers::api_keys::list_api_keys,
@@ -96,6 +97,9 @@ use utoipa::OpenApi;
         crate::handlers::v2::conferences::create_conference,
         crate::handlers::v2::conferences::list_conferences,
         crate::handlers::v2::conferences::get_conference,
+        crate::handlers::v2::calendar::my_conferences,
+        crate::handlers::v2::calendar::conference_calendar,
+        crate::handlers::v2::calendar::meeting_space_calendar,
         crate::handlers::v2::conferences::prepare_conference,
         crate::handlers::v2::conferences::start_conference,
         crate::handlers::v2::conferences::lock_conference,
@@ -178,6 +182,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::unified_messaging::publish_key_packages,
         crate::handlers::v2::unified_messaging::revoke_device,
         crate::handlers::v2::unified_messaging::client_token,
+        crate::handlers::v2::unified_messaging::session_token,
         crate::handlers::v2::unified_messaging::revoke_all_sessions,
         crate::handlers::v2::unified_messaging::me,
         crate::handlers::v2::unified_messaging::directory,
@@ -186,6 +191,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::unified_messaging::relay_get,
         crate::handlers::v2::unified_messaging::relay_post,
         crate::handlers::v2::unified_messaging::relay_put,
+        crate::handlers::v2::unified_messaging::relay_patch,
         crate::handlers::v2::unified_messaging::relay_delete,
         crate::handlers::v2::unified_messaging::migration_status,
         crate::handlers::v2::unified_messaging::migration_transition,
@@ -197,6 +203,54 @@ use utoipa::OpenApi;
         crate::handlers::v2::organizations::list_organization_members,
         crate::handlers::v2::organizations::upsert_organization_member,
         crate::handlers::v2::organizations::my_organizations,
+        crate::handlers::v2::organizations::create_business_organization,
+        crate::handlers::v2::organizations::get_business_organization,
+        crate::handlers::v2::organizations::update_business_organization,
+        crate::handlers::v2::organizations::update_organization_membership,
+        crate::handlers::v2::organizations::leave_organization,
+        crate::handlers::v2::organizations::transfer_organization_ownership,
+        crate::handlers::v2::organizations::create_organization_invitation,
+        crate::handlers::v2::organizations::list_organization_invitations,
+        crate::handlers::v2::organizations::revoke_organization_invitation,
+        crate::handlers::v2::organizations::accept_organization_invitation,
+        crate::handlers::v2::organizations::decline_organization_invitation,
+        crate::handlers::v2::organizations::suspend_business_organization,
+        crate::handlers::v2::organizations::reactivate_business_organization,
+        crate::handlers::v2::organizations::archive_business_organization,
+        crate::handlers::v2::organizations::list_organization_audit_events,
+        crate::handlers::v2::organizations::get_organization_provisioning,
+        crate::handlers::v2::organizations::admin_list_organizations,
+        crate::handlers::v2::organizations::list_organization_teams,
+        crate::handlers::v2::organizations::create_organization_team,
+        crate::handlers::v2::organizations::get_organization_team,
+        crate::handlers::v2::organizations::update_organization_team,
+        crate::handlers::v2::organizations::archive_organization_team,
+        crate::handlers::v2::organizations::list_organization_team_members,
+        crate::handlers::v2::organizations::add_organization_team_member,
+        crate::handlers::v2::organizations::update_organization_team_member,
+        crate::handlers::v2::organizations::remove_organization_team_member,
+        crate::handlers::v2::organizations::get_organization_policy,
+        crate::handlers::v2::organizations::update_organization_policy,
+        crate::handlers::v2::workspaces::my_workspaces,
+        crate::handlers::v2::workspaces::my_workspace_capabilities,
+        crate::handlers::v2::organization_calling::calling_get,
+        crate::handlers::v2::organization_calling::calling_post,
+        crate::handlers::v2::organization_calling::calling_put,
+        crate::handlers::v2::organization_calling::calling_patch,
+        crate::handlers::v2::organization_calling::calling_delete,
+        crate::handlers::v2::organization_messaging::messaging_get,
+        crate::handlers::v2::organization_messaging::messaging_post,
+        crate::handlers::v2::organization_messaging::messaging_put,
+        crate::handlers::v2::organization_messaging::messaging_patch,
+        crate::handlers::v2::organization_messaging::messaging_delete,
+        crate::handlers::v2::organization_messaging::messaging_session_token,
+        crate::handlers::v2::organization_messaging::messaging_resolve_members,
+        crate::handlers::v2::account_profile::get_my_profile,
+        crate::handlers::v2::account_profile::update_my_profile,
+        crate::handlers::v2::account_sessions::list_my_sessions,
+        crate::handlers::v2::account_sessions::revoke_my_session,
+        crate::handlers::v2::account_sessions::revoke_all_my_sessions,
+        crate::handlers::v2::account_sessions::list_account_audit_events,
         // Parts G–I
         crate::handlers::v2::artifacts::start_recording,
         crate::handlers::v2::artifacts::list_recordings,
@@ -292,6 +346,7 @@ use utoipa::OpenApi;
             // User schemas
             crate::dto::UserMeResponse,
             crate::dto::UpdateMeRequest,
+            crate::dto::DeactivateAccountRequest,
             // Webhook schemas
             crate::dto::CreateWebhookRequest,
             crate::dto::UpdateWebhookRequest,
@@ -337,6 +392,12 @@ use utoipa::OpenApi;
             crate::dto::v2::ConferenceSummary,
             crate::dto::v2::ConferenceResponse,
             crate::dto::v2::ConferenceListResponse,
+            crate::dto::v2::ListMeetingSpacesQuery,
+            crate::dto::v2::AgendaQuery,
+            crate::dto::v2::AgendaRelation,
+            crate::dto::v2::AgendaSpace,
+            crate::dto::v2::AgendaItem,
+            crate::dto::v2::AgendaResponse,
             crate::dto::v2::ProviderEnforcement,
             crate::dto::v2::ConferenceActionResponse,
             crate::dto::v2::SetRecurrenceRequest,
@@ -468,6 +529,63 @@ use utoipa::OpenApi;
             crate::dto::v2::OrganizationResponse,
             crate::dto::v2::OrganizationMemberResponse,
             crate::dto::v2::MyOrganizationResponse,
+            crate::dto::v2::OrganizationLegalRegistration,
+            crate::dto::v2::OrganizationProfile,
+            crate::dto::v2::CreateBusinessOrganizationRequest,
+            crate::dto::v2::UpdateBusinessOrganizationRequest,
+            crate::dto::v2::OrganizationViewer,
+            crate::dto::v2::BusinessOrganization,
+            crate::dto::v2::BusinessOrganizationPage,
+            crate::dto::v2::BusinessOrganizationMembership,
+            crate::dto::v2::UpdateBusinessMembershipRequest,
+            crate::dto::v2::OrganizationOwnershipTransferRequest,
+            crate::dto::v2::CreateOrganizationInvitationRequest,
+            crate::dto::v2::OrganizationInvitation,
+            crate::dto::v2::OrganizationInvitationTokenRequest,
+            crate::dto::v2::OrganizationLifecycleRequest,
+            crate::dto::v2::OrganizationInvitationList,
+            crate::dto::v2::OrganizationAuditActor,
+            crate::dto::v2::OrganizationAuditEvent,
+            crate::dto::v2::OrganizationAuditEventPage,
+            crate::dto::v2::OrganizationScopeMapping,
+            crate::dto::v2::OrganizationProvisioning,
+            crate::dto::v2::OrganizationTeam,
+            crate::dto::v2::OrganizationTeamPage,
+            crate::dto::v2::CreateOrganizationTeamRequest,
+            crate::dto::v2::UpdateOrganizationTeamRequest,
+            crate::dto::v2::ArchiveOrganizationTeamRequest,
+            crate::dto::v2::OrganizationTeamMember,
+            crate::dto::v2::OrganizationTeamMemberPage,
+            crate::dto::v2::AddOrganizationTeamMemberRequest,
+            crate::dto::v2::UpdateOrganizationTeamMemberRequest,
+            crate::dto::v2::OrganizationPolicyMemberDirectory,
+            crate::dto::v2::OrganizationPolicyGuests,
+            crate::dto::v2::OrganizationPolicyMeetings,
+            crate::dto::v2::OrganizationPolicyFeatures,
+            crate::dto::v2::OrganizationPolicyRetention,
+            crate::dto::v2::OrganizationPolicyDelegatedAdministration,
+            crate::dto::v2::OrganizationPolicyDocument,
+            crate::dto::v2::OrganizationPolicy,
+            crate::dto::v2::UpdateOrganizationPolicyRequest,
+            crate::dto::v2::WorkspaceKind,
+            crate::dto::v2::WorkspaceAuthority,
+            crate::dto::v2::WorkspaceCapabilityReason,
+            crate::dto::v2::WorkspaceCapabilitySummary,
+            crate::dto::v2::Workspace,
+            crate::dto::v2::WorkspacePage,
+            crate::dto::v2::WorkspaceCapability,
+            crate::dto::v2::WorkspaceFeatures,
+            crate::dto::v2::WorkspaceCapabilities,
+            crate::dto::auth::GoogleExchangeRequest,
+            crate::services::account_security::SessionRecord,
+            crate::services::account_security::SecurityEventRecord,
+            crate::services::account_profile::AccountProfile,
+            crate::services::notifications::EmailDelivery,
+            crate::services::account_profile::PhoneVerificationStatus,
+            crate::handlers::v2::account_profile::UpdateAccountProfileRequest,
+            crate::handlers::v2::account_sessions::AccountSessionListResponse,
+            crate::handlers::v2::account_sessions::AccountSessionRevokeResponse,
+            crate::handlers::v2::account_sessions::SecurityEventPage,
             crate::domain::OrganizationStatus,
             crate::domain::OrganizationRole,
             crate::domain::OrganizationMemberStatus,
@@ -565,10 +683,12 @@ use utoipa::OpenApi;
             // deliberately NOT part of the public consumer contract.
         )
     ),
-    modifiers(&SecurityAddon, &PlatformCredentialAddon),
+    modifiers(&SecurityAddon, &PlatformCredentialAddon, &OptionalBodyAddon),
     tags(
         (name = "General", description = "Application information and health endpoints"),
         (name = "Authentication", description = "User authentication endpoints"),
+        (name = "Account profile (v2)", description = "Blueprint Section 9: the signed-in user's account profile (username, display name, avatar reference, time zone, locale, email verification and the canonical account status). The Account is the authority; the Communications profile shows the same display name and avatar."),
+        (name = "Account sessions (v2)", description = "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."),
         (name = "API Keys", description = "API key management for third-party integrations.\n\n## Usage\n- Create API keys via authenticated endpoints\n- Use `Api-Key: <key>` header for authentication\n- API keys have usage limits and expiration dates\n- Keys can be revoked at any time\n\n## Notes\n- Full API key is only shown on creation\n- Third-party devs cannot access internal media servers directly\n- Short-lived join tokens required for connecting to RTC infrastructure"),
         (name = "Meetings", description = "Meeting lifecycle management with LiveKit integration"),
         (name = "Participants", description = "Participant management (kick, list)"),
@@ -576,8 +696,8 @@ use utoipa::OpenApi;
         (name = "Waiting Room", description = "Admit/Deny participants from waiting room"),
         (name = "Media Control", description = "Control audio, video, and screen sharing"),
         (name = "Chat", description = "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) → LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"),
-        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens"),
-        (name = "Webhooks", description = "Webhook management for event notifications.\n\n## Events\n- `meeting_start`: Triggered when a meeting begins\n- `meeting_end`: Triggered when a meeting ends\n- `participant_join`: Triggered when a participant joins\n- `participant_leave`: Triggered when a participant leaves\n\n## Security\n- Each webhook has a unique secret for payload signing\n- Secret is only shown once on creation\n- Payloads are signed using HMAC-SHA256\n\n## Notes\n- Webhooks are user-scoped\n- Delivery is async and failure-tolerant"),
+        (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"),
+        (name = "Webhooks", description = "**Deprecated** (Blueprint v1.0 Section 16, PLT-003). Legacy per-user meeting webhook registrations.\n\n## Nothing is delivered\nRegistrations are stored, but no event is ever delivered to a registered endpoint: the Meeting Service has no webhook dispatcher. The event types (`meeting_start`, `meeting_end`, `participant_join`, `participant_leave`) are accepted for compatibility only.\n\n## Deprecation\nEvery response carries `Deprecation` and `Sunset` headers. Removal still requires a measured zero-consumer window (register decision D-9).\n\n## Replacement\nUse Developer Platform webhooks (`/v1/environments/{environmentId}/webhooks`): signed delivery, delivery history, replay and secret rotation. Migration guide: `docs/api/legacy-meeting-webhooks-deprecation.md`."),
         (name = "Meeting Spaces (v2)", description = "Phase 2 persistent meeting definitions. A MeetingSpace is not a live call. Owner is always the authenticated caller; meeting links/codes identify a meeting but never grant membership or roles."),
         (name = "Scheduling (v2)", description = "RFC 5545 recurrence interpreted in the meeting space timezone; bounded, idempotent occurrence materialization."),
         (name = "Conferences (v2)", description = "ConferenceSession lifecycle: CREATED → PREPARING → WAITING → LIVE → ENDING → ENDED (+ CANCELLED / FAILED). ENDED is reached only after provider termination (Part E)."),
@@ -593,7 +713,7 @@ use utoipa::OpenApi;
         (name = "Q&A (v2)", description = "Part F: questions, upvotes and moderation (separate from chat; anonymous identity never projected)."),
         (name = "Realtime (v2)", description = "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."),
         (name = "Waiting Room (v2)", description = "Waiting is a participant admission state. Access policy is always evaluated first."),
-        (name = "Organizations (v2)", description = "Authoritative CF organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it."),
+        (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."),
         (name = "Compatibility (v2)", description = "Legacy → v2 migration evidence and shadow comparison (platform administrators)."),
         (name = "Recordings (v2)", description = "Part G: composite recording through the provider egress. REQUESTED → RECORDING only on provider evidence; STOPPING → PROCESSING → READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."),
         (name = "Artifacts (v2)", description = "Part G: recordings, transcripts and generated reports. Access is authorized per request and delivered as a short-lived signed URL; storage keys and provider ids are never exposed. Retention and deletion are confirmed against storage."),
@@ -608,7 +728,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.2.0",
+        version = "1.5.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",
@@ -656,6 +776,35 @@ impl utoipa::Modify for SecurityAddon {
 /// additionally accept a platform credential through the API Gateway. Each gets the
 /// `platformCredential` security alternative (its role is the required scope) and
 /// `x-cfmeet-required-scope`, from which the gateway's route manifest is generated.
+/// Blueprint v1.0 Section 16 (MTG-020): `request_body = Option<T>` marks a body optional
+/// (`required: false`, what the `V2OptionalJson` extractor accepts: an absent / empty
+/// body), but utoipa also wraps the schema as nullable. A JSON `null` body is refused
+/// (400), so the schema stays the plain reference; only `required` says "optional".
+struct OptionalBodyAddon;
+
+impl utoipa::Modify for OptionalBodyAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{schema::Schema, RefOr, Required};
+        for item in openapi.paths.paths.values_mut() {
+            for operation in item.operations.values_mut() {
+                let Some(body) = operation.request_body.as_mut() else {
+                    continue;
+                };
+                if !matches!(body.required, Some(Required::False)) {
+                    continue;
+                }
+                for content in body.content.values_mut() {
+                    if let RefOr::T(Schema::AllOf(all)) = &content.schema {
+                        if all.nullable && all.items.len() == 1 {
+                            content.schema = all.items[0].clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct PlatformCredentialAddon;
 
 impl utoipa::Modify for PlatformCredentialAddon {
@@ -724,86 +873,73 @@ fn public_server_url(configured: Option<&str>) -> String {
         .to_string()
 }
 
-/// Contract-first OpenAPI documents for peer services. These are deliberately served by
-/// the documentation host only; they do NOT proxy APIs or weaken the peer services' auth.
-/// Swagger's dropdown can render the full platform without adding cross-service DB/code deps.
+/// Public OpenAPI documents for peer services (Blueprint v1.0 Section 16, PLT-006).
 ///
-/// They are the BUNDLED renderings (`packages/contracts/bundled/**`, generated by
-/// `scripts/contracts/bundle_openapi.py`): every `https://schemas.cfmeet.com/...` reference
-/// is inlined into the document's own `components/schemas`. The schema host is a naming
-/// authority, not a deployed service, so the raw contracts made Swagger UI report
-/// "Could not resolve reference: Failed to fetch".
-const COMMUNICATIONS_API: &str =
-    include_str!("../../../../packages/contracts/bundled/public/communications/v1.openapi.json");
-const CALLING_API: &str =
-    include_str!("../../../../packages/contracts/bundled/calling/http/v1.openapi.json");
-const PLATFORM_ACCESS_API: &str =
-    include_str!("../../../../packages/contracts/bundled/platform-access/internal/v1.openapi.json");
-const NUMBERING_API: &str =
-    include_str!("../../../../packages/contracts/bundled/numbering/internal/v1.openapi.json");
-const PRIVACY_RELAY_API: &str =
-    include_str!("../../../../packages/contracts/bundled/privacy-relay/http/v1.openapi.json");
-const PRIVACY_RELAY_INTERNAL_API: &str =
-    include_str!("../../../../packages/contracts/bundled/privacy-relay/internal/v1.openapi.json");
-const TELEPHONY_API: &str =
-    include_str!("../../../../packages/contracts/bundled/telephony/internal/v1.openapi.json");
-const SMS_GATEWAY_API: &str =
-    include_str!("../../../../packages/contracts/bundled/sms-gateway/http/v1.openapi.json");
-const MESSAGING_API: &str =
-    include_str!("../../../../packages/contracts/bundled/messaging/http/v1.openapi.json");
-// Part VI: already audience-filtered, bundled OpenAPI from the gateway route catalogue.
-// This documentation host never proxies these APIs or exposes their internal variants.
-const DEVELOPER_PLATFORM_PUBLIC_API: &str = include_str!(
-    "../../../../packages/contracts/bundled/public/developer-platform/v1.openapi.json"
-);
-const API_GATEWAY_PUBLIC_API: &str =
-    include_str!("../../../../packages/contracts/bundled/public/gateway/v1.openapi.json");
+/// ONE source of truth: the generated public bundles `packages/contracts/bundled/public/**`
+/// (`scripts/contracts/public_api.py` + `scripts/contracts/bundle_openapi.py`, derived from
+/// the source contracts and the gateway catalogue `infra/api-gateway/public-routes.json`).
+/// They hold exactly the operations the gateway classifies `PUBLIC_CUSTOMER`; `EXCLUDED`
+/// ones (e.g. Contact Vault `CONTACT_VAULT_PRIVATE`), internal, operator and provider
+/// operations are absent, and every `$ref` is resolved inside the document. The gateway
+/// (`GET /docs`) and Calling's documentation page serve the same files, so the three
+/// renderers can no longer publish contradictory surfaces. Internal and operator contracts
+/// are documented only in the private engineering catalogue
+/// (`scripts/swagger/build-private-docs.py`), never here.
+///
+/// These documents are served by the documentation host only; they do NOT proxy APIs or
+/// weaken the peer services' auth.
+macro_rules! public_bundle {
+    ($domain:literal) => {
+        include_str!(concat!(
+            "../../../../packages/contracts/bundled/public/",
+            $domain,
+            "/v1.openapi.json"
+        ))
+    };
+}
 
-/// (Swagger name, served path, document). The Meeting Service document is generated at
-/// runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 11] = [
+/// (Swagger name, served path, public bundle). The Meeting Service document is generated
+/// at runtime (it carries the configured server list) and is listed first.
+const PEER_DOCS: [(&str, &str, &str); 8] = [
     (
         "Communications",
         "/api-docs/communications.json",
-        COMMUNICATIONS_API,
+        public_bundle!("communications"),
     ),
-    ("Calling", "/api-docs/calling.json", CALLING_API),
     (
-        "Platform Access (internal)",
-        "/api-docs/platform-access.json",
-        PLATFORM_ACCESS_API,
+        "Calling",
+        "/api-docs/calling.json",
+        public_bundle!("calling"),
     ),
     (
         "Numbering / DCNs",
         "/api-docs/numbering.json",
-        NUMBERING_API,
+        public_bundle!("numbering"),
     ),
     (
         "Privacy Relay",
         "/api-docs/privacy-relay.json",
-        PRIVACY_RELAY_API,
+        public_bundle!("privacy-relay"),
     ),
     (
-        "Privacy Relay (internal)",
-        "/api-docs/privacy-relay-internal.json",
-        PRIVACY_RELAY_INTERNAL_API,
+        "SMS Gateway",
+        "/api-docs/sms-gateway.json",
+        public_bundle!("sms"),
     ),
     (
-        "Telephony (internal)",
-        "/api-docs/telephony.json",
-        TELEPHONY_API,
+        "Messaging",
+        "/api-docs/messaging.json",
+        public_bundle!("messaging"),
     ),
-    ("SMS Gateway", "/api-docs/sms-gateway.json", SMS_GATEWAY_API),
-    ("Messaging", "/api-docs/messaging.json", MESSAGING_API),
     (
         "Developer Platform",
         "/api-docs/developer-platform.json",
-        DEVELOPER_PLATFORM_PUBLIC_API,
+        public_bundle!("developer-platform"),
     ),
     (
         "API Gateway",
         "/api-docs/api-gateway.json",
-        API_GATEWAY_PUBLIC_API,
+        public_bundle!("gateway"),
     ),
 ];
 
@@ -902,15 +1038,18 @@ fn swagger_config() -> serde_json::Value {
     urls.extend(
         PEER_DOCS
             .iter()
-            .filter(|(name, _, _)| !name.ends_with("(internal)"))
             .map(|(name, path, _)| serde_json::json!({ "name": name, "url": path })),
     );
     serde_json::json!({ "urls": urls, "primaryName": "Meetings" })
 }
 
-/// Public API documentation is an audience-specific view of the canonical contract.
+/// Public API documentation is an audience-specific view of a contract. Peer documents
+/// are already the generated public bundles (the audience decision lives in
+/// `infra/api-gateway/public-routes.json`, not here); the generic structural filter below
+/// is defense in depth and, for the Meeting Service's own runtime document, removes its
+/// admin and probe routes. No per-service path list is kept here: hiding an operation the
+/// gateway publishes, or publishing one it excludes, is a catalogue decision.
 /// Filtering happens before the JSON reaches a public endpoint (not just in the UI).
-/// The original contracts remain unchanged for tests, SDK generation and the private portal.
 fn public_doc(service: &str, raw: &str) -> String {
     let mut doc: serde_json::Value =
         serde_json::from_str(raw).expect("checked-in OpenAPI contract must be valid JSON");
@@ -927,27 +1066,6 @@ fn public_doc(service: &str, raw: &str) -> String {
         {
             return false;
         }
-        // Restrict operational compliance and credential-minting endpoints to the
-        // private engineering catalog. This is discoverability policy, not API auth.
-        if (service == "Messaging"
-            && [
-                "/v1/messaging/policy",
-                "/v1/messaging/legal-holds",
-                "/v1/messaging/reports",
-                "/v1/messaging/moderation",
-                "/v1/messaging/exports",
-                "/v1/messaging/deletion-requests",
-                "/v1/messaging/audit",
-            ]
-            .iter()
-            .any(|prefix| path.starts_with(prefix)))
-            || (service == "Calling" && path == "/v1/abuse-reports")
-            || (service == "Privacy Relay"
-                && (path == "/v1/privacy-relay/contact-access-grants"
-                    || path.ends_with("/verification")))
-        {
-            return false;
-        }
         let methods = item
             .as_object()
             .expect("checked-in OpenAPI path item must be an object");
@@ -960,7 +1078,7 @@ fn public_doc(service: &str, raw: &str) -> String {
     });
     if service == "Messaging" {
         // Document actual native routing without exposing application/service credentials
-        // or inventing a second message API. Privileged paths were filtered above.
+        // or inventing a second message API. Operator and internal paths are not in the bundle.
         for (path, item) in doc["paths"].as_object_mut().unwrap() {
             for (method, operation) in item.as_object_mut().unwrap() {
                 if !matches!(method.as_str(), "get" | "post" | "put" | "patch" | "delete") {
@@ -976,24 +1094,13 @@ fn public_doc(service: &str, raw: &str) -> String {
                 }
             }
         }
-        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. Production enrollment remains blocked pending independent assessment. Administrative operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
+        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. Production enrollment remains blocked pending independent assessment. Operator and internal service operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
     }
-    // The source Developer Platform public bundle uses operation tags but currently omits
-    // the top-level tag declarations. Swagger can render those operations only if their
-    // existing source tags are declared. Do not invent any additional API operation.
-    // The public gateway contract has one context operation without a tag/summary;
-    // provide read-only documentation labels while keeping its canonical contract intact.
-    if service == "API Gateway" {
-        let context = doc["paths"]["/v1/developer-platform/context"]["get"]
-            .as_object_mut()
-            .expect("gateway context operation must be present");
-        context
-            .entry("tags".to_string())
-            .or_insert_with(|| serde_json::json!(["API Gateway"]));
-        context
-            .entry("summary".to_string())
-            .or_insert_with(|| serde_json::json!("Read the delegated Developer Platform context."));
-    }
+    // The generated public bundles carry each operation's source tag (and summary) but no
+    // top-level `tags` array, so every used tag is declared here; no operation is added or
+    // relabelled. (The former API Gateway context-operation label patch is gone: the
+    // gateway bundle labels that operation itself — see the test
+    // `public_bundles_already_label_every_operation`.)
     // A section whose operations were all filtered out (e.g. "Admin") would still render
     // as an empty Swagger heading; publish only the sections that still hold operations.
     let used: std::collections::BTreeSet<String> = doc["paths"]
@@ -1044,6 +1151,15 @@ pub fn swagger_router(_server_addr: &str) -> Router {
     let mut public_server = utoipa::openapi::Server::new(public_server_url(configured.as_deref()));
     public_server.description = Some("Meeting Service deployment".to_string());
     openapi.servers = Some(vec![public_server]);
+    // Audience note (PLT-006): this is the Meeting Service's own direct-ingress contract,
+    // first-party routes included; the gateway publishes the third-party subset.
+    openapi.info.description = Some(format!(
+        "{}\n\nThis document is the Meeting Service's own direct-ingress contract (CF Meet \
+         first-party routes included). Third-party integrations use the API Gateway's public \
+         Meetings document (`/openapi/meetings.json`, generated from \
+         `packages/contracts/bundled/public/meetings`).",
+        openapi.info.description.as_deref().unwrap_or("").trim_end()
+    ));
     let meeting_doc = public_doc(
         "Meetings",
         &openapi.to_json().expect("OpenAPI document serializes"),
@@ -1091,9 +1207,6 @@ pub fn swagger_router(_server_addr: &str) -> Router {
             }),
         );
     for (name, path, body) in PEER_DOCS {
-        if name.ends_with("(internal)") {
-            continue;
-        }
         let public_body = public_doc(name, body);
         router = router.route(
             path,
@@ -1110,16 +1223,25 @@ pub fn swagger_router(_server_addr: &str) -> Router {
 mod tests {
     use super::*;
 
+    /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
+    const SERVED_MESSAGING_OPERATIONS: usize = 96;
+    const SERVED_MESSAGING_NATIVE: usize = 71;
+
+    fn peer(name: &str) -> &'static str {
+        PEER_DOCS
+            .iter()
+            .find(|(n, _, _)| *n == name)
+            .map(|(_, _, raw)| *raw)
+            .unwrap_or_else(|| panic!("no peer document {name}"))
+    }
+
     #[test]
     fn peer_openapi_specs_are_valid_and_expose_expected_operations() {
         let specs = [
-            (CALLING_API, "/v1/calls"),
-            (PLATFORM_ACCESS_API, "/internal/v1"),
-            (NUMBERING_API, "/v1/numbers/assignments"),
-            (PRIVACY_RELAY_API, "/v1/privacy-relay/contexts"),
-            (PRIVACY_RELAY_INTERNAL_API, "/internal/v1"),
-            (TELEPHONY_API, "/internal/v1"),
-            (SMS_GATEWAY_API, "/v1/sms/messages"),
+            (peer("Calling"), "/v1/calls"),
+            (peer("Numbering / DCNs"), "/v1/numbers/assignments"),
+            (peer("Privacy Relay"), "/v1/privacy-relay/contexts"),
+            (peer("SMS Gateway"), "/v1/sms/messages"),
         ];
         for (raw, expected_prefix) in specs {
             let doc: serde_json::Value = serde_json::from_str(raw).expect("valid OpenAPI JSON");
@@ -1183,38 +1305,165 @@ mod tests {
         }
     }
 
+    const HTTP_METHODS: [&str; 8] = [
+        "get", "post", "put", "patch", "delete", "head", "options", "trace",
+    ];
+
+    fn operations(doc: &serde_json::Value) -> std::collections::BTreeSet<(String, String)> {
+        doc["paths"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .flat_map(|(path, item)| {
+                HTTP_METHODS
+                    .iter()
+                    .filter(|m| item.get(**m).is_some())
+                    .map(move |m| (m.to_uppercase(), path.clone()))
+            })
+            .collect()
+    }
+
+    /// Gateway catalogue domain of each served peer document.
+    fn catalogue_domain(name: &str) -> &'static str {
+        match name {
+            "Communications" => "communications",
+            "Calling" => "calling",
+            "Numbering / DCNs" => "numbering",
+            "Privacy Relay" => "privacy-relay",
+            "SMS Gateway" => "sms",
+            "Messaging" => "messaging",
+            "Developer Platform" => "developer-platform",
+            "API Gateway" => "gateway",
+            other => panic!("peer document {other} has no gateway catalogue domain"),
+        }
+    }
+
+    /// PLT-006: each served peer document holds EXACTLY the operations the gateway
+    /// catalogue (`infra/api-gateway/route-manifest.json`, generated from
+    /// `public-routes.json`) classifies `PUBLIC_CUSTOMER` for that domain — nothing hidden
+    /// ad hoc, and no `EXCLUDED` / internal / operator / provider operation published.
+    #[test]
+    fn served_peer_documents_match_the_gateway_public_catalogue() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../infra/api-gateway/route-manifest.json"
+        ))
+        .expect("route manifest is valid JSON");
+        let catalogue = manifest["catalogue"].as_array().expect("catalogue");
+        let class_of = |domain: &str, method: &str, path: &str| -> Option<String> {
+            catalogue
+                .iter()
+                .find(|e| {
+                    e["domain"] == domain
+                        && e["method"].as_str().map(str::to_uppercase).as_deref() == Some(method)
+                        && e["path"] == path
+                })
+                .and_then(|e| e["class"].as_str().map(str::to_owned))
+        };
+        for (name, _, raw) in PEER_DOCS {
+            let domain = catalogue_domain(name);
+            let served: serde_json::Value = serde_json::from_str(&public_doc(name, raw)).unwrap();
+            let served_ops = operations(&served);
+            let bundle_ops = operations(&serde_json::from_str(raw).unwrap());
+            assert_eq!(served_ops, bundle_ops, "{name}: served != generated bundle");
+            let public_ops: std::collections::BTreeSet<(String, String)> = catalogue
+                .iter()
+                .filter(|e| e["domain"] == domain && e["class"] == "PUBLIC_CUSTOMER")
+                .map(|e| {
+                    (
+                        e["method"].as_str().unwrap().to_uppercase(),
+                        e["path"].as_str().unwrap().to_owned(),
+                    )
+                })
+                .collect();
+            assert!(!public_ops.is_empty(), "{name}");
+            assert_eq!(
+                served_ops, public_ops,
+                "{name}: served operations differ from the gateway PUBLIC_CUSTOMER catalogue"
+            );
+            for (method, path) in &served_ops {
+                assert_eq!(
+                    class_of(domain, method, path).as_deref(),
+                    Some("PUBLIC_CUSTOMER"),
+                    "{name}: {method} {path}"
+                );
+            }
+        }
+        // The audit's concrete cases.
+        let relay: serde_json::Value =
+            serde_json::from_str(&public_doc("Privacy Relay", peer("Privacy Relay"))).unwrap();
+        for (_, path) in operations(&relay) {
+            assert!(
+                !path.starts_with("/v1/privacy-relay/contacts"),
+                "Contact Vault private-contact operation {path} is EXCLUDED"
+            );
+        }
+        assert!(relay["paths"]["/v1/privacy-relay/contact-access-grants"]["post"].is_object());
+        let calling: serde_json::Value =
+            serde_json::from_str(&public_doc("Calling", peer("Calling"))).unwrap();
+        assert!(calling["paths"]["/v1/abuse-reports"].is_object());
+        assert!(operations(&calling)
+            .iter()
+            .all(|(_, p)| !p.starts_with("/v1/calling/media/rtc")));
+    }
+
+    /// The removed API Gateway label patch was a no-op: the generated public bundles
+    /// already carry a tag, a summary and a description on every operation.
+    #[test]
+    fn public_bundles_already_label_every_operation() {
+        for (name, _, raw) in PEER_DOCS {
+            let doc: serde_json::Value = serde_json::from_str(raw).unwrap();
+            for (method, path) in operations(&doc) {
+                let op = &doc["paths"][&path][method.to_lowercase()];
+                assert!(
+                    op["tags"].as_array().is_some_and(|t| !t.is_empty()),
+                    "{name}: {method} {path} has no tag"
+                );
+                for field in ["summary", "description", "operationId"] {
+                    assert!(
+                        op[field].as_str().is_some_and(|v| !v.trim().is_empty()),
+                        "{name}: {method} {path} has no {field}"
+                    );
+                }
+            }
+        }
+        let gateway: serde_json::Value = serde_json::from_str(peer("API Gateway")).unwrap();
+        let context = &gateway["paths"]["/v1/developer-platform/context"]["get"];
+        assert!(context["tags"].as_array().is_some_and(|t| !t.is_empty()));
+        assert!(context["summary"].is_string());
+    }
+
     #[test]
     fn public_specs_exclude_internal_and_privileged_operations() {
         for (name, _, raw) in PEER_DOCS {
-            if name.ends_with("(internal)") {
-                continue;
-            }
             let public: serde_json::Value = serde_json::from_str(&public_doc(name, raw)).unwrap();
-            let original: serde_json::Value = serde_json::from_str(raw).unwrap();
             assert!(!public["paths"].as_object().unwrap().is_empty(), "{name}");
-            assert!(
-                public["paths"].as_object().unwrap().len()
-                    <= original["paths"].as_object().unwrap().len(),
-                "{name}"
-            );
             for key in public["paths"].as_object().unwrap().keys() {
                 assert!(!key.starts_with("/internal/"), "{name}: {key}");
                 assert!(!key.starts_with("/provider-"), "{name}: {key}");
                 assert!(!key.starts_with("/v1/admin/"), "{name}: {key}");
             }
+            let schemes = public["components"]["securitySchemes"]
+                .as_object()
+                .map(|s| s.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            assert!(!schemes.iter().any(|s| s == "cfServiceAuth"), "{name}");
         }
         let public_calling: serde_json::Value =
-            serde_json::from_str(&public_doc("Calling", CALLING_API)).unwrap();
+            serde_json::from_str(&public_doc("Calling", peer("Calling"))).unwrap();
         assert!(public_calling["paths"]["/v1/calls"].is_object());
         assert!(public_calling["paths"]["/internal/v1/telephony/events"].is_null());
         let public_numbering: serde_json::Value =
-            serde_json::from_str(&public_doc("Numbering / DCNs", NUMBERING_API)).unwrap();
+            serde_json::from_str(&public_doc("Numbering / DCNs", peer("Numbering / DCNs")))
+                .unwrap();
         assert!(public_numbering["paths"]["/v1/numbers/search"].is_object());
         assert!(public_numbering["paths"]["/v1/admin/controls"].is_null());
         let public_messaging: serde_json::Value =
-            serde_json::from_str(&public_doc("Messaging", MESSAGING_API)).unwrap();
+            serde_json::from_str(&public_doc("Messaging", peer("Messaging"))).unwrap();
         assert!(public_messaging["paths"]["/v1/conversations"].is_object());
-        assert!(public_messaging["paths"]["/v1/messaging/legal-holds"].is_null());
+        // Compliance operations are PUBLIC_CUSTOMER at the gateway (credential scopes
+        // decide who may call them); they are no longer hidden ad hoc here.
+        assert!(public_messaging["paths"]["/v1/messaging/legal-holds"].is_object());
+        assert!(public_messaging["paths"]["/v1/messaging/policy"].is_object());
         assert_eq!(
             public_messaging["paths"]["/v1/conversations"]["post"]["x-cfmeet-native-path"],
             "/api/v2/messaging/relay/v1/conversations"
@@ -1228,7 +1477,37 @@ mod tests {
                 ["x-cfmeet-native-path"],
             "/api/v2/messaging/client-sessions/revoke-all"
         );
-        assert!(public_messaging["paths"]["/v1/messaging/policy"].is_null());
+        // Pinned for the production acceptance script
+        // (`infra/calling/production/messaging_acceptance.py`): operation count and native
+        // bindings of the served Messaging document.
+        let ops: Vec<&serde_json::Value> = public_messaging["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|item| item.as_object().unwrap().iter())
+            .filter(|(m, _)| {
+                matches!(
+                    m.as_str(),
+                    "get" | "post" | "put" | "patch" | "delete" | "options" | "head"
+                )
+            })
+            .map(|(_, op)| op)
+            .collect();
+        let native = ops
+            .iter()
+            .filter(|op| op.get("x-cfmeet-native-path").is_some())
+            .count();
+        println!(
+            "served messaging: {} operations, {native} native",
+            ops.len()
+        );
+        assert_eq!(
+            (ops.len(), native),
+            (SERVED_MESSAGING_OPERATIONS, SERVED_MESSAGING_NATIVE)
+        );
+        let description = public_messaging["info"]["description"].as_str().unwrap();
+        assert!(description.contains("PRIVATE_E2EE requires approved enrollment"));
+        assert!(description.contains("it never falls back to MANAGED"));
     }
 
     /// Every `$ref` of every document Swagger renders resolves INSIDE that document: no
@@ -1295,11 +1574,7 @@ mod tests {
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS
-                .iter()
-                .filter(|(name, _, _)| !name.ends_with("(internal)"))
-                .count()
-                + 1
+            PEER_DOCS.len() + 1
         );
     }
 

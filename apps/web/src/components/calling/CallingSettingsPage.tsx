@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * CallingSettingsPage - Container page for all calling settings.
+ * CallingSettingsPage — the signed-in user's own calling settings: blocking, forwarding and
+ * voicemail (self-service, CAL-006). Application-wide usage and limits are administrative and
+ * live under /calling/usage (shared scope) or the organization calling view.
  */
 
 import { useState } from "react";
-import { Settings, Ban, PhoneForwarded, BarChart3, Voicemail } from "lucide-react";
+import { Settings, Ban, PhoneForwarded, Voicemail } from "lucide-react";
 import BlockingPanel from "./BlockingPanel";
 import ForwardingSettings from "./ForwardingSettings";
-import UsageDashboard from "./UsageDashboard";
 import VoicemailInbox from "./VoicemailInbox";
 
-type TabId = "blocking" | "forwarding" | "usage" | "voicemail";
+type TabId = "blocking" | "forwarding" | "voicemail";
 
 interface Tab {
   id: TabId;
@@ -23,7 +24,6 @@ const tabs: Tab[] = [
   { id: "blocking", label: "Blocking", icon: Ban },
   { id: "forwarding", label: "Forwarding", icon: PhoneForwarded },
   { id: "voicemail", label: "Voicemail", icon: Voicemail },
-  { id: "usage", label: "Usage", icon: BarChart3 },
 ];
 
 interface CallingSettingsPageProps {
@@ -43,7 +43,7 @@ export default function CallingSettingsPage({
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Call Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Manage your call blocking, forwarding, voicemail, and usage.
+          Manage your call blocking, forwarding and voicemail.
         </p>
       </header>
 
@@ -73,7 +73,6 @@ export default function CallingSettingsPage({
         {activeTab === "blocking" && <BlockingPanel />}
         {activeTab === "forwarding" && <ForwardingSettings />}
         {activeTab === "voicemail" && <VoicemailInbox />}
-        {activeTab === "usage" && <UsageDashboard />}
       </div>
     </div>
   );

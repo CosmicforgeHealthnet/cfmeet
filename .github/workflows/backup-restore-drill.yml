@@ -1,0 +1,134 @@
+name: Backup and restore drill
+
+# Execution proof for infra/deployment/backup (SEC-010 / SEC-011): on a throwaway
+# PostgreSQL 16 service container, every catalog service database is backed up with a
+# read-only role, encrypted with age to a public recipient, copied to a simulated off-host
+# location (dir, rsync and rclone targets), decrypted with the owner identity and restored
+# into fresh drill_ databases that are verified against their manifests. Refusals are
+# asserted too: tampered archives, restores over existing / non-drill databases, missing or
+# private-key recipients, the wrong service's database. Never contacts production: no
+# secrets, no SSH, no schedule.
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "infra/deployment/backup/**"
+      - "services/*/migration/**"
+      - ".github/workflows/backup-restore-drill.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-restore-drill-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drill:
+    name: backup → encrypt → off-host copy → decrypt → restore → verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install age, rsync, rclone and the PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q age rsync rclone postgresql-client shellcheck
+          pg_dump --version
+          age --version
+          rsync --version | head -n 1
+          rclone version | head -n 1
+          shellcheck --version | head -n 2
+          # pg_dump must be at least the server's major version (16).
+          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n 1)" -ge 16
+
+      - name: Syntax and lint (bash -n, shellcheck)
+        run: |
+          set -euo pipefail
+          for f in infra/deployment/backup/*.sh infra/deployment/backup/tests/*.sh; do bash -n "$f"; done
+          shellcheck -x -s bash --severity=warning infra/deployment/backup/*.sh infra/deployment/backup/tests/*.sh
+          python3 -m py_compile infra/deployment/backup/manifest.py
+
+      - name: Unit tests (no database)
+        env:
+          CFMEET_BACKUP_TESTS_STRICT: "1"
+        run: bash infra/deployment/backup/tests/unit.sh
+
+      - name: Backup / restore drill against PostgreSQL 16
+        env:
+          # Throwaway CI service container only.
+          CFMEET_DRILL_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          CFMEET_DRILL_EVIDENCE_DIR: ${{ runner.temp }}/backup-drill-evidence
+        run: bash infra/deployment/backup/tests/ci-drill.sh
+
+      - name: Upload drill evidence (manifests and run summaries only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-drill-${{ github.run_id }}
+          path: ${{ runner.temp }}/backup-drill-evidence
+          if-no-files-found: ignore
+
+  real-schema-drill:
+    # Blueprint Section 18 J-18: the same tooling over every service's REAL migrated schema
+    # (each service's own migration binaries), not sample schemas.
+    name: real migrated schemas (all catalog databases) → encrypt → off-host → isolated restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.migration-target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-schema-drill
+          cache-directories: .migration-target
+      - name: Install age and the PostgreSQL client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q age postgresql-client
+          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n 1)" -ge 16
+      - name: Build every service's migration binaries
+        run: |
+          set -euo pipefail
+          for s in meeting-service communications developer-platform platform-access calling \
+                   messaging numbering privacy-relay telephony sms-gateway organizations; do
+            echo "::group::$s"
+            cargo build --locked --manifest-path "services/$s/migration/Cargo.toml" --bins
+            echo "::endgroup::"
+          done
+          ls -1 "$CARGO_TARGET_DIR/debug" | grep -- '-migration$\|^migration$'
+      - name: Real-schema backup / restore drill
+        env:
+          # Throwaway CI service container only.
+          CFMEET_DRILL_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          CFMEET_MIGRATION_BIN_DIR: ${{ github.workspace }}/.migration-target/debug
+        run: bash infra/deployment/backup/tests/real-schema-drill.sh

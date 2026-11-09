@@ -2,6 +2,7 @@
 # Everything is excluded except the directories the image is built from.
 *
 !packages/service-auth
+!packages/migration-guard
 !services/platform-access
 
 # Never send build output, local configuration or key material.

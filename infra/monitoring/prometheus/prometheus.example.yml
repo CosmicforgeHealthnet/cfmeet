@@ -1,0 +1,42 @@
+# EXAMPLE ONLY: NOT DEPLOYED. Shows how the rule files are loaded and how the CF Meet
+# metrics endpoints would be scraped (SEC-016). Hostnames use the reserved .invalid TLD on
+# purpose; replace them with the private network names of a real deployment.
+#
+# Validated in CI with `promtool check config` (.github/workflows/service-boundaries.yml),
+# which also loads every rule file matched below. CI mounts an EMPTY placeholder file at
+# the token path; no token exists in this repository.
+#
+# Requires Prometheus 3.x (`http_headers` in the scrape configuration).
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+# Relative to this file's directory.
+rule_files:
+  - rules/*.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager.example.invalid:9093"]
+
+scrape_configs:
+  # meeting-service: GET /internal/metrics answers only with the header
+  # `x-internal-token: $INTERNAL_API_TOKEN` (404 otherwise; services/meeting-service/src/
+  # handlers/internal.rs). The value is read from a file mounted from the secret store,
+  # never written here. Keep this route on the private network only.
+  - job_name: meeting-service
+    metrics_path: /internal/metrics
+    http_headers:
+      X-Internal-Token:
+        files: [/etc/prometheus/secrets/meeting-service-internal-api]
+    static_configs:
+      - targets: ["meeting-service.example.invalid:8080"]
+
+  # messaging: separate unauthenticated listener (MESSAGING_METRICS_ADDRESS, port 9197 in
+  # infra/calling/production/messaging_runtime.py); never exposed publicly.
+  - job_name: messaging
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["messaging.example.invalid:9197"]

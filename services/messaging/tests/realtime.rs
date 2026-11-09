@@ -1136,3 +1136,375 @@ async fn malformed_and_mutated_frames_never_break_a_connection() {
         assert!(f["type"].is_string(), "every server frame is typed: {f}");
     }
 }
+
+// ------------------------------------------------------------------------------------
+// Blueprint Section 13 (MSG-004, ADR 0049 amendment A1): session devices
+// ------------------------------------------------------------------------------------
+
+fn session_ref(seed: u8) -> String {
+    format!("{seed:02x}").repeat(32)
+}
+
+async fn session_device(
+    h: &Harness,
+    c: &Customer,
+    principal: Uuid,
+    binding: &str,
+    extra: Value,
+) -> common::Response {
+    let mut body = json!({
+        "accountSessionRef": binding,
+        "notAfter": (h.now() + chrono::Duration::minutes(30)).to_rfc3339(),
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        body[k] = v.clone();
+    }
+    h.post(c, Some(principal), "/v1/messaging/session-devices", body)
+        .await
+}
+
+/// With E2EE devices disabled (production), a first-party session device gets live
+/// MANAGED delivery — and nothing an E2EE device has: no device-direct REST operation,
+/// no place in the device directory, no device registration.
+#[tokio::test]
+async fn session_devices_give_managed_realtime_without_an_e2ee_device() {
+    let Some(rt) = Rt::with_state(test_settings(), |s| s.devices.enabled = false).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    // E2EE device registration stays refused.
+    let r = h.challenge(&c, alice).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("FEATURE_DISABLED", "E2EE_DEVICES_DISABLED"),
+        "{}",
+        r.text
+    );
+
+    let binding = session_ref(0xa1);
+    let r = session_device(h, &c, alice, &binding, json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/SessionDeviceToken",
+        &r.json,
+    );
+    assert_eq!(r.json["deviceKind"], "SESSION_DEVICE");
+    assert_eq!(
+        r.json["sessionDevice"]["capabilities"],
+        json!(["REALTIME_MANAGED"])
+    );
+    let device = uuid(&r.json["deviceId"]);
+    let token = r.json["token"].as_str().unwrap().to_string();
+    let expires =
+        chrono::DateTime::parse_from_rfc3339(r.json["expiresAt"].as_str().unwrap()).unwrap();
+    assert!(
+        expires <= h.now() + chrono::Duration::minutes(5),
+        "short-lived"
+    );
+    // Never an E2EE device: no device row (so no directory entry, KeyPackage or Welcome),
+    // and the principal still has no MLS device at all.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_devices WHERE id = '{device}' OR principal_id = '{alice}'"
+        ))
+        .await,
+        0
+    );
+    // Every device-direct REST operation refuses it (the E2EE ones included).
+    let cid = cid(&conv);
+    for (m, path) in [
+        (axum::http::Method::GET, "/v1/conversations".to_string()),
+        (
+            axum::http::Method::GET,
+            format!("/v1/conversations/{cid}/messages"),
+        ),
+        (
+            axum::http::Method::POST,
+            format!("/v1/messaging/devices/{device}/key-packages"),
+        ),
+        (
+            axum::http::Method::GET,
+            format!("/v1/messaging/devices/{device}/welcomes"),
+        ),
+        (
+            axum::http::Method::POST,
+            format!("/v1/conversations/{cid}/mls/key-package-claims"),
+        ),
+        (
+            axum::http::Method::POST,
+            format!("/v1/conversations/{cid}/mls/commits"),
+        ),
+        (
+            axum::http::Method::PUT,
+            format!("/v1/messaging/devices/{device}/push-registration"),
+        ),
+    ] {
+        let r = h
+            .send(
+                m.clone(),
+                None,
+                None,
+                &path,
+                Some(json!({})),
+                &[("authorization", &format!("CF-Client-Token {token}"))],
+            )
+            .await;
+        assert_eq!(
+            (r.code(), r.reason()),
+            ("CLIENT_TOKENS_NOT_ENABLED", "SESSION_DEVICE_REALTIME_ONLY"),
+            "{m} {path}: {}",
+            r.text
+        );
+    }
+
+    // Realtime: a ticket, a MANAGED subscription and live delivery.
+    let ticket = rt.ticket_with(&token).await;
+    assert_eq!(ticket.status, StatusCode::CREATED, "{}", ticket.text);
+    let mut ws = rt
+        .open(ticket.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("connected");
+    let sub = ws.subscribe(&conv, None).await;
+    assert_eq!(sub["type"], "subscribed", "{sub}");
+    h.send_managed(&c, &conv, bob, "live without an E2EE device")
+        .await;
+    assert_eq!(
+        ws.events(1).await[0]["data"]["message"]["managed"]["text"],
+        "live without an E2EE device"
+    );
+
+    // Renewal keeps the same session device (auth.refresh continues the connection);
+    // another account session cannot renew it.
+    let r = session_device(h, &c, alice, &binding, json!({ "sessionDeviceId": device })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(uuid(&r.json["deviceId"]), device);
+    let renewed = rt.ticket_with(r.json["token"].as_str().unwrap()).await;
+    ws.send(json!({ "type": "auth.refresh", "ticket": renewed.json["ticket"], "requestId": "r1" }))
+        .await;
+    assert_eq!(ws.next_of("auth.refreshed").await["requestId"], "r1");
+    let r = session_device(
+        h,
+        &c,
+        alice,
+        &session_ref(0xb2),
+        json!({ "sessionDeviceId": device }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // A token never outlives the account session's access token.
+    let r = session_device(
+        h,
+        &c,
+        alice,
+        &binding,
+        json!({ "notAfter": (h.now() + chrono::Duration::seconds(90)).to_rfc3339() }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let capped =
+        chrono::DateTime::parse_from_rfc3339(r.json["expiresAt"].as_str().unwrap()).unwrap();
+    assert!(capped <= h.now() + chrono::Duration::seconds(90));
+    let r = session_device(
+        h,
+        &c,
+        alice,
+        &binding,
+        json!({ "notAfter": h.now().to_rfc3339() }),
+    )
+    .await;
+    assert_eq!(r.reason(), "ACCOUNT_SESSION_EXPIRING", "{}", r.text);
+
+    // The account session ends: its session devices end and the connection closes.
+    let r = h
+        .post(
+            &c,
+            Some(alice),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": binding }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/SessionDeviceRevocation",
+        &r.json,
+    );
+    assert_eq!(r.json["revokedSessionDevices"], 2, "{}", r.text);
+    let (code, _) = ws.closed().await;
+    assert_eq!(code, Some(4401));
+    assert_eq!(rt.ticket_with(&token).await.code(), "AUTHENTICATION_FAILED");
+    let r = session_device(h, &c, alice, &binding, json!({ "sessionDeviceId": device })).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+
+    // "Log out everywhere" ends every session device of the principal.
+    let r = session_device(h, &c, alice, &session_ref(0xc3), json!({})).await;
+    let other = uuid(&r.json["deviceId"]);
+    let r = h
+        .post(
+            &c,
+            Some(alice),
+            "/v1/messaging/client-sessions/revoke-all",
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_session_devices WHERE id = '{other}' AND status = 'REVOKED'"
+        ))
+        .await,
+        1
+    );
+}
+
+/// A session device is refused every E2EE privilege even where E2EE devices exist: no
+/// PRIVATE_E2EE subscription (no ciphertext), never counted as an E2EE device, and only
+/// first-party relays may create one at all.
+#[tokio::test]
+async fn session_devices_are_refused_every_e2ee_privilege() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let (conv, a, _b) = h.e2ee_direct(&c).await;
+    let r = session_device(h, &c, a.principal, &session_ref(0x11), json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let ticket = rt.ticket_with(r.json["token"].as_str().unwrap()).await;
+    let mut ws = rt
+        .open(ticket.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("connected");
+    let refused = ws.subscribe(&conv, None).await;
+    assert_eq!(
+        (refused["type"].as_str(), refused["code"].as_str()),
+        (Some("error"), Some("E2EE_DEVICE_REQUIRED")),
+        "{refused}"
+    );
+    // The connection stays usable (no close).
+    ws.send(json!({ "type": "ping", "requestId": "p" })).await;
+    ws.next_of("pong").await;
+    // A principal holding only a session device has no E2EE device.
+    let carol = h.principal(&c);
+    let r = session_device(h, &c, carol, &session_ref(0x22), json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = h
+        .create_conversation(
+            &c,
+            carol,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": a.principal }),
+        )
+        .await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("E2EE_NOT_AVAILABLE", "CREATOR_HAS_NO_DEVICE"),
+        "{}",
+        r.text
+    );
+    // Third-party applications keep registering MLS devices; session devices are a
+    // first-party relay capability.
+    let third = h.customer(ALL_SCOPES);
+    let p = h.principal(&third);
+    let r = session_device(h, &third, p, &session_ref(0x33), json!({})).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        (
+            "PRINCIPAL_NOT_AUTHORIZED",
+            "SESSION_DEVICES_FIRST_PARTY_ONLY"
+        ),
+        "{}",
+        r.text
+    );
+    // Malformed bindings never create anything.
+    let r = session_device(h, &c, carol, "not-a-digest", json!({})).await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+}
+
+/// The operator switch: with session devices off, none is issued (E2EE untouched), and
+/// revocation stays available so no account-session end is ever lost.
+#[tokio::test]
+async fn session_devices_answer_feature_disabled_when_switched_off() {
+    let settings = RealtimeSettings {
+        session_devices_enabled: false,
+        ..test_settings()
+    };
+    let Some(rt) = Rt::with(settings).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let p = h.principal(&c);
+    let r = session_device(h, &c, p, &session_ref(0x44), json!({})).await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("FEATURE_DISABLED", "SESSION_DEVICES_DISABLED"),
+        "{}",
+        r.text
+    );
+    let r = h
+        .post(
+            &c,
+            Some(p),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": session_ref(0x44) }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+}
+
+/// SEC-020: a session device is bound to its environment. Another tenant's first-party
+/// relay — even knowing the device id AND the account-session reference — cannot renew
+/// it (NOT_FOUND, like an unknown device) and its revocation by that reference ends
+/// nothing of this tenant's.
+#[tokio::test]
+async fn session_devices_never_cross_tenants() {
+    let Some(rt) = Rt::with_state(test_settings(), |s| s.devices.enabled = false).await else {
+        return;
+    };
+    let h = &rt.h;
+    let a = h.first_party(true);
+    let b = h.first_party(true);
+    let alice = h.principal(&a);
+    let mallory = h.principal(&b);
+    let binding = session_ref(0xd1);
+    let r = session_device(h, &a, alice, &binding, json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let device = uuid(&r.json["deviceId"]);
+    let active_sql = format!(
+        "SELECT count(*) FROM messaging_session_devices WHERE id = '{device}' AND status = 'ACTIVE'"
+    );
+
+    let r = session_device(
+        h,
+        &b,
+        mallory,
+        &binding,
+        json!({ "sessionDeviceId": device }),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::NOT_FOUND, "NOT_FOUND"),
+        "{}",
+        r.text
+    );
+    assert!(!r.text.contains(&device.to_string()), "{}", r.text);
+    let r = h
+        .post(
+            &b,
+            Some(mallory),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": binding }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["revokedSessionDevices"], 0, "{}", r.text);
+    assert_eq!(
+        h.scalar(&active_sql).await,
+        1,
+        "another tenant ended this session device"
+    );
+    // The owner's own renewal still works (the refusal above was scope, not validation).
+    let r = session_device(h, &a, alice, &binding, json!({ "sessionDeviceId": device })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+}

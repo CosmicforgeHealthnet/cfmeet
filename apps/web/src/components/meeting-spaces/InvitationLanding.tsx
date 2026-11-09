@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useResolveInvitation } from "@/hooks/v2/useInvitations";
 import { invitationToken } from "@/lib/meeting-authority";
 import type { ResolveInvitationResponse } from "@/types/v2";
-import type { JoinMeetingData } from "@/types/meeting";
-import PreJoinScreen from "@/components/room/pre-join-screen";
-import LiveRoom from "@/components/room/live-room";
+import ConferenceRoom from "@/components/room/ConferenceRoom";
+import { RoomMessage } from "@/components/room/pre-join-screen";
+import { useResolveSpace } from "@/hooks/v2/useSpaces";
+import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Field, RequestError } from "./ManagementUI";
 
@@ -17,7 +18,6 @@ export default function InvitationLanding() {
   const [error, setError] = useState<unknown>();
   const [reviewed, setReviewed] = useState<{ token: string; details: ResolveInvitationResponse } | null>(null);
   const [joining, setJoining] = useState(false);
-  const [joined, setJoined] = useState<{ data: JoinMeetingData; camera: boolean; mic: boolean } | null>(null);
   const readFragment = useRef(false);
   useEffect(() => {
     if (readFragment.current) return;
@@ -30,8 +30,10 @@ export default function InvitationLanding() {
       window.history.replaceState(window.history.state, "", window.location.pathname);
     }
   }, []);
-  if (joined) return <LiveRoom joinData={joined.data} initialVideo={joined.camera} initialAudio={joined.mic} />;
-  if (joining && reviewed) return <PreJoinScreen roomId={reviewed.details.meetingSpace.meetingCode} initialInvitationToken={reviewed.token} selectedConferenceId={reviewed.details.conferenceId || undefined} onJoin={(data, prefs) => setJoined({ data, camera: prefs.isCameraOn, mic: prefs.isMicOn })} />;
+  // The token stays in memory and goes with the join request; the room is keyed by conference id.
+  if (joining && reviewed) return reviewed.details.conferenceId
+    ? <ConferenceRoom conferenceId={reviewed.details.conferenceId} initialInvitationToken={reviewed.token} />
+    : <SpaceInvitationRoom meetingCode={reviewed.details.meetingSpace.meetingCode} token={reviewed.token} />;
   return <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10"><div className="w-full max-w-lg space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8">
     <div><h1 className="text-2xl font-bold">Meeting invitation</h1><p className="mt-2 text-sm text-muted-foreground">Review this invitation before joining. Reviewing does not consume a use or grant membership.</p></div>
     {!reviewed ? <form className="space-y-4" onSubmit={async event => {
@@ -42,4 +44,13 @@ export default function InvitationLanding() {
     {error !== undefined && <RequestError error={error} />}
     <Button variant="ghost" asChild><Link href="/">Back to home</Link></Button>
   </div></main>;
+}
+
+/** A space-wide invitation joins the space's canonical conference. */
+function SpaceInvitationRoom({ meetingCode, token }: { meetingCode: string; token: string }) {
+  const resolved = useResolveSpace(meetingCode);
+  if (resolved.isLoading) return <div className="flex min-h-screen items-center justify-center"><Spinner label="Opening meeting..." /></div>;
+  const conferenceId = resolved.data?.conference?.id;
+  if (!conferenceId) return <RoomMessage icon="ended" title="Nothing to join yet">This meeting has no occurrence to join right now. Ask the organizer for the meeting time.</RoomMessage>;
+  return <ConferenceRoom conferenceId={conferenceId} initialInvitationToken={token} />;
 }

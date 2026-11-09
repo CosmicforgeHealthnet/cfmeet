@@ -16,6 +16,7 @@
 //! [`CallMediaProvider`] only.
 
 pub mod abuse_reports;
+mod auto_end;
 pub mod blocks;
 mod control;
 mod create;
@@ -40,6 +41,7 @@ use sea_orm::{
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
+pub use auto_end::AutoEndReason;
 pub use blocks::AbuseControls;
 pub use control::{ActionAvailability, AvailableActions};
 pub use create::{CreateAppCall, CreatedAppCall};
@@ -105,6 +107,18 @@ pub struct AppCallingConfig {
     pub new_calls_enabled: bool,
     /// `CALLING_APP_CALLING_ENABLED` (default ON): new application (app-to-app RTC) calls.
     pub app_calling_enabled: bool,
+    /// Automatic end (CAL-001): how long a DISCONNECTED (not ended) session — or a session
+    /// created but not yet connected — still counts as live participation, so a party
+    /// reloading its page or roaming networks is not ended. A CONNECTED / HELD Call whose
+    /// live parties drop below two ends (`end_trigger` PARTICIPATION_ENDED).
+    pub participation_grace: Duration,
+    /// Idle reaper (CAL-001): an ANSWERED / CONNECTED / HELD Call with no connected
+    /// session and no connected network leg for this long ends (`IDLE_TIMEOUT`).
+    pub idle_call_timeout: Duration,
+    /// Maximum call duration (CAL-001): an ANSWERED / CONNECTED / HELD / TRANSFERRING Call
+    /// older than this (counted from its first connection, else its answer) ends
+    /// (`MAX_DURATION`).
+    pub max_call_duration: Duration,
 }
 
 impl Default for AppCallingConfig {
@@ -123,6 +137,9 @@ impl Default for AppCallingConfig {
             worker_backlog_incident_age: Duration::seconds(600),
             new_calls_enabled: true,
             app_calling_enabled: true,
+            participation_grace: Duration::seconds(60),
+            idle_call_timeout: Duration::seconds(600),
+            max_call_duration: Duration::seconds(28_800),
         }
     }
 }
@@ -137,7 +154,11 @@ impl AppCallingConfig {
     /// `CALLING_CALL_SETUP_DEADLINE_SECONDS` (3900–86400, default 7200),
     /// `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (60–86400, default 600),
     /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` (true / false, default
-    /// true).
+    /// true),
+    /// `CALLING_PARTICIPATION_GRACE_SECONDS` (10–600, default 60),
+    /// `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (120–86400, default 600; above the grace),
+    /// `CALLING_MAX_CALL_DURATION_SECONDS` (1800–172800, default 28800; above the idle
+    /// timeout).
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let switch = |var: &'static str| -> Result<bool, ConfigError> {
             match get(var).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
@@ -164,7 +185,7 @@ impl AppCallingConfig {
                 }
             };
         let defaults = Self::default();
-        Ok(Self {
+        Self {
             invitation_ttl: Duration::seconds(number(
                 "CALLING_INVITATION_TTL_SECONDS",
                 45,
@@ -211,8 +232,46 @@ impl AppCallingConfig {
             )?),
             new_calls_enabled: switch("CALLING_NEW_CALLS_ENABLED")?,
             app_calling_enabled: switch("CALLING_APP_CALLING_ENABLED")?,
+            participation_grace: Duration::seconds(number(
+                "CALLING_PARTICIPATION_GRACE_SECONDS",
+                60,
+                10,
+                600,
+            )?),
+            idle_call_timeout: Duration::seconds(number(
+                "CALLING_IDLE_CALL_TIMEOUT_SECONDS",
+                600,
+                120,
+                86_400,
+            )?),
+            max_call_duration: Duration::seconds(number(
+                "CALLING_MAX_CALL_DURATION_SECONDS",
+                28_800,
+                1_800,
+                172_800,
+            )?),
             ..defaults
-        })
+        }
+        .validated()
+    }
+
+    /// Cross-field rules: a Call is never idle-reaped while a disconnected party is still
+    /// inside its reconnect grace, and never cut by the maximum duration before it could be
+    /// idle-reaped.
+    fn validated(self) -> Result<Self, ConfigError> {
+        if self.idle_call_timeout <= self.participation_grace {
+            return Err(ConfigError::invalid(
+                "CALLING_IDLE_CALL_TIMEOUT_SECONDS",
+                "must be greater than CALLING_PARTICIPATION_GRACE_SECONDS".into(),
+            ));
+        }
+        if self.max_call_duration <= self.idle_call_timeout {
+            return Err(ConfigError::invalid(
+                "CALLING_MAX_CALL_DURATION_SECONDS",
+                "must be greater than CALLING_IDLE_CALL_TIMEOUT_SECONDS".into(),
+            ));
+        }
+        Ok(self)
     }
 }
 

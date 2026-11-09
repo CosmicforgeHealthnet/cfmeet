@@ -237,7 +237,8 @@ pub async fn require_customer(
                 .headers()
                 .contains_key(headers::SERVICE_AUTHORIZATION)
             {
-                gateway_forwarded(&state, request.headers()).await
+                let (method, path) = (request.method().clone(), received_path(&request));
+                gateway_forwarded(&state, &method, &path, request.headers()).await
             } else {
                 let token = match presented(&request) {
                     Presented::Credential(t) => zeroize::Zeroizing::new(t),
@@ -274,6 +275,8 @@ pub async fn require_customer(
 /// reasons are fixed vocabulary, token values are never logged.
 async fn gateway_forwarded(
     state: &AppState,
+    method: &axum::http::Method,
+    path: &str,
     headers: &HeaderMap,
 ) -> Result<Authentication, AuthorityUnavailable> {
     let refused = |reason: &'static str| {
@@ -290,7 +293,14 @@ async fn gateway_forwarded(
     if headers.contains_key(header::AUTHORIZATION) {
         return refused("customer_authorization_present");
     }
-    let caller = match state.service_auth.verifier().verify_headers(headers) {
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let verified = state
+        .service_auth
+        .verifier()
+        .verify_request(method, path, headers)
+        .await;
+    let caller = match verified {
         Ok(caller) => caller,
         Err(error) => return refused(error.failure.as_str()),
     };
@@ -395,6 +405,20 @@ async fn client_token_request(
             return e.into_response();
         }
     };
+    // Section 13: a session device is accepted only by the realtime gateway; it never
+    // reaches a device-direct REST operation (KeyPackages, Welcomes, MLS commits,
+    // ciphertext, push registration, ...).
+    if session.is_session_device() {
+        crate::metrics::inc(
+            "messaging_client_token_rest_total",
+            &[("outcome", "session_device_refused")],
+        );
+        return ApiError::reason(
+            ErrorCode::ClientTokensNotEnabled,
+            "SESSION_DEVICE_REALTIME_ONLY",
+        )
+        .into_response();
+    }
     // Own-device routes: another device of the same principal is NOT_FOUND.
     if device.is_some_and(|d| Uuid::parse_str(&d).ok() != Some(session.device_id)) {
         return ApiError::code(ErrorCode::NotFound).into_response();
@@ -542,16 +566,30 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
     }
 }
 
+/// The request-target path as received (before any `Router::nest` prefix stripping),
+/// which is what a signer binds in `htu`.
+pub(crate) fn received_path(request: &Request) -> String {
+    request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned())
+}
+
 pub async fn require_internal_service(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let (method, path) = (request.method().clone(), received_path(&request));
+    let verified = state
         .service_auth
         .verifier()
-        .verify_headers(request.headers())
-    {
+        .verify_request(&method, &path, request.headers())
+        .await;
+    match verified {
         Ok(ctx) => {
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),

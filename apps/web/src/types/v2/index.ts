@@ -93,11 +93,12 @@ export type ConsentKind = "RECORDING" | "TRANSCRIPTION" | "AI_PROCESSING" | "DAT
 export type ArtifactType =
   | "RECORDING"
   | "TRANSCRIPT"
-  | "MEETING_SUMMARY"
+  | "CAPTION_TRACK"
   | "ATTENDANCE_REPORT"
-  | "POLL_REPORT"
   | "CHAT_EXPORT"
-  | "INTELLIGENCE_OUTPUT";
+  | "POLL_REPORT"
+  | "MEETING_SUMMARY"
+  | "WHITEBOARD_SNAPSHOT";
 
 export type ArtifactStatus =
   | "REQUESTED"
@@ -299,6 +300,8 @@ export interface MeetingSpaceResponse {
 
 export interface MeetingSpaceListResponse {
   items: MeetingSpaceResponse[];
+  /** Present only on paginated requests (`limit` or `cursor` sent) when another page exists. */
+  nextCursor?: string | null;
 }
 
 export interface InstantMeetingResponseV2 {
@@ -388,7 +391,10 @@ export interface CreateConferenceRequest {
 
 export interface RescheduleConferenceRequest {
   scheduledStartAt: string;
+  /** Omitted: the occurrence keeps its duration (a start-only occurrence stays start-only). */
   scheduledEndAt?: string;
+  /** Optional optimistic-concurrency guard (MEETING_VERSION_CONFLICT). */
+  version?: number;
 }
 
 export interface ListConferencesQuery {
@@ -427,6 +433,71 @@ export interface ConferenceActionResponse {
   conference: ConferenceResponse;
   changed: boolean;
   providerEnforcement: ProviderEnforcement;
+}
+
+// ---------------------------------------------------------------------------
+// Agenda / calendar (Section 10: GET /api/v2/me/conferences)
+// ---------------------------------------------------------------------------
+
+export type AgendaRelation = "OWNER" | "MEMBER" | "INVITEE" | "REGISTRANT" | "PARTICIPANT" | "ORGANIZATION";
+
+export interface AgendaQuery {
+  /** Inclusive lower bound on the scheduled start (RFC 3339). Default: now. */
+  from?: string;
+  /** Exclusive upper bound. Default `from` + 31 days; at most 366 days after `from`. */
+  to?: string;
+  /** Comma-separated conference statuses, e.g. `CREATED,LIVE`. */
+  status?: string;
+  /** Comma-separated `AgendaRelation`s. */
+  role?: string;
+  /** Restrict to one organization (the caller must be a verified member; otherwise 403). */
+  organizationId?: string;
+  cursor?: string;
+  /** 1-200, default 50. */
+  limit?: number;
+}
+
+export interface AgendaSpace {
+  /** Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space. */
+  title?: string | null;
+  meetingCode: string;
+  meetingType: MeetingType;
+  accessPolicy: AccessPolicy;
+  requiresPasscode: boolean;
+  status: SpaceStatus;
+  /** IANA timezone of the meeting. */
+  timezone: string;
+  /** FULL view only. */
+  organizationId?: string | null;
+}
+
+export interface AgendaItem {
+  /** Null for a recurring occurrence beyond the materialization horizon. */
+  conferenceId?: string | null;
+  meetingSpaceId: string;
+  /** Stable occurrence identity within the space (unchanged by materialization). */
+  occurrenceKey: string;
+  kind: ConferenceKind;
+  status: ConferenceStatus;
+  view: ResourceView;
+  scheduledStartAt: string;
+  scheduledEndAt?: string | null;
+  isException: boolean;
+  /** False for an occurrence computed from the recurrence rule (not yet materialized). */
+  materialized: boolean;
+  meetingSpace: AgendaSpace;
+  relations: AgendaRelation[];
+  viewerRole?: Role | null;
+  /** FULL view only. */
+  originalStartAt?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
+export interface AgendaResponse {
+  items: AgendaItem[];
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  nextCursor?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -764,20 +835,77 @@ export interface MediaCredentialResponse {
   permissions: JoinPermissions;
 }
 
-export interface PreJoinResponse {
-  meetingSpace: MeetingSpaceResponse;
-  conference?: ConferenceResponse;
-  requiresAuth: boolean;
-  requiresPasscode: boolean;
-  requiresInvitation: boolean;
-  waitingRoomEnabled: boolean;
-  consentRequirements: ConsentRequirement[];
+/** `GET /api/v2/conferences/{id}/pre-join` (OpenAPI `PreJoinResponse`). */
+export interface PreJoinAccess {
+  accessPolicy: AccessPolicy;
+  authenticationRequired: boolean;
+  invitationRequired: boolean;
+  passcodeRequired: boolean;
+  /** Decided by an external authority (e.g. a healthcare appointment). */
+  externalAuthorization: boolean;
+  waitingRoomExpected: boolean;
+  alreadyAuthorized: boolean;
 }
 
-export interface ConsentRequirement {
-  consentType: ConsentKind;
-  required: boolean;
-  description?: string;
+export interface PreJoinConsents {
+  /** Must be granted (join request `consents`) before admission. */
+  required: ConsentKind[];
+  version: string;
+  /** Already granted by the caller's participant (rejoin). */
+  granted: ConsentKind[];
+}
+
+export interface PreJoinNotices {
+  recordingPolicy: MediaCapturePolicy;
+  transcriptionPolicy: MediaCapturePolicy;
+  recordingActive: boolean;
+  transcriptionActive: boolean;
+  aiNotice: boolean;
+}
+
+export interface PreJoinMedia {
+  role: Role;
+  permissions: JoinPermissions;
+  audioLocked: boolean;
+  videoLocked: boolean;
+  screenSharePolicy: ScreenSharePolicy;
+  screenShareEligible: boolean;
+}
+
+export interface PreJoinDisplayName {
+  suggested?: string | null;
+  editable: boolean;
+  identityBearing: boolean;
+}
+
+export interface PreJoinDevices {
+  cameraPreview: boolean;
+  cameraSelection: boolean;
+  microphoneSelection: boolean;
+  microphoneTest: boolean;
+  speakerSelection: string;
+  backgroundEffects: string;
+  deviceIdentifiersCollected: boolean;
+}
+
+export interface PreJoinResponse {
+  meetingSpaceId: string;
+  conferenceId: string;
+  /** Hidden for sensitive (healthcare / high-security) meetings until authorized. */
+  title?: string | null;
+  meetingType: MeetingType;
+  conferenceStatus: ConferenceStatus;
+  scheduledStartAt?: string | null;
+  /** Media join is possible right now (LIVE). */
+  joinable: boolean;
+  organizer?: { displayName: string } | null;
+  organization?: { id: string; name: string } | null;
+  access: PreJoinAccess;
+  notices: PreJoinNotices;
+  consents: PreJoinConsents;
+  media: PreJoinMedia;
+  displayName: PreJoinDisplayName;
+  devices: PreJoinDevices;
 }
 
 // ---------------------------------------------------------------------------
@@ -1113,18 +1241,30 @@ export interface RecordingListResponse {
   recordings: ArtifactView[];
 }
 
+/** OpenAPI `ArtifactView` (services/meeting-service artifacts). */
 export interface ArtifactView {
   id: string;
   conferenceId: string;
   artifactType: ArtifactType;
   status: ArtifactStatus;
-  filename?: string;
-  mimeType?: string;
-  sizeBytes?: number;
-  durationSeconds?: number;
+  contentType?: string | null;
+  sizeBytes?: number | null;
+  durationMs?: number | null;
+  layout?: string | null;
+  checksumSha256?: string | null;
+  /** Server-generated, type-specific metadata. */
+  metadata: Record<string, unknown>;
+  retentionAt?: string | null;
   createdAt: string;
-  readyAt?: string;
-  deletedAt?: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  finalizedAt?: string | null;
+  /** Public-safe failure category. */
+  failureCode?: string | null;
+  sourceArtifactId?: string | null;
+  /** Deletion requested; no new access is issued. */
+  deletionPending: boolean;
 }
 
 export interface ArtifactListQuery {
@@ -1139,6 +1279,9 @@ export interface ArtifactAccess {
   artifactId: string;
   url: string;
   expiresAt: string;
+  expiresInSeconds: number;
+  contentType?: string | null;
+  sizeBytes?: number | null;
 }
 
 export interface AttendanceEntry {
@@ -1159,7 +1302,8 @@ export interface AttendanceReport {
 }
 
 export interface GenerateReportRequest {
-  artifactType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT" | "INTELLIGENCE_OUTPUT";
+  /** The backend generates only these report types (other types are VALIDATION_ERROR). */
+  artifactType: "ATTENDANCE_REPORT" | "POLL_REPORT" | "CHAT_EXPORT";
 }
 
 // ---------------------------------------------------------------------------

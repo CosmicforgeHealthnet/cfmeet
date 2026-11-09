@@ -108,3 +108,24 @@ export function messagingClientAccessToken(body: unknown, deviceId: string): Mes
   }
   return { token: data.token, tokenType: "CF-Client-Token", expiresAt: data.expiresAt };
 }
+
+/**
+ * Validates a MANAGED-realtime session-device token (ADR 0049 A1,
+ * `POST /api/v2/messaging/session-tokens`): realtime only, bound to the account session,
+ * never an end-to-end encrypted device. `expectedDeviceId` is the session device being
+ * renewed (null on first issue).
+ */
+export function messagingSessionDeviceToken(
+  body: unknown,
+  expectedDeviceId: string | null,
+): MessagingAccessToken & { deviceId: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new MessagingSessionError("Invalid Messaging session response");
+  }
+  const data = body as Record<string, unknown>;
+  if (data.deviceKind !== "SESSION_DEVICE" || typeof data.deviceId !== "string" || !UUID.test(data.deviceId) ||
+    (expectedDeviceId !== null && data.deviceId.toLowerCase() !== expectedDeviceId.toLowerCase())) {
+    throw new MessagingSessionError("Invalid or expired session-device Messaging session");
+  }
+  return { ...messagingClientAccessToken(body, data.deviceId), deviceId: data.deviceId.toLowerCase() };
+}

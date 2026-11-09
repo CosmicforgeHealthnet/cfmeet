@@ -24,6 +24,8 @@ on:
       - "services/calling/**"
       - "services/platform-access/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/usage-facts/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
@@ -35,6 +37,8 @@ on:
       - "services/calling/**"
       - "services/platform-access/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/usage-facts/**"
       - "packages/object-storage/**"
       - "packages/webhooks/**"
@@ -182,9 +186,14 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --locked
 
+      - name: Destructive migration guard (SEC-015)
+        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/calling-migration target/debug/calling-communications-migration
+
       - name: Migration smoke (up / reset / up)
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/calling_migration_smoke
         run: |
           set -euo pipefail

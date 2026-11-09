@@ -10,9 +10,9 @@
     "license": {
       "name": ""
     },
-    "version": "1.2.0",
+    "version": "1.5.0",
     "x-cfmeet-source-contract": "cfmeet.meeting-service.http-api",
-    "x-cfmeet-source-version": "1.2.0"
+    "x-cfmeet-source-version": "1.5.0"
   },
   "servers": [
     {
@@ -27,7 +27,7 @@
           "Conferences (v2)"
         ],
         "summary": "Read a conference. Callers without authority get the SUMMARY view.",
-        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with only the id, meeting space id and status.",
+        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings — the scheduled start and end (pre-join countdown).",
         "operationId": "v2_get_conference",
         "parameters": [
           {
@@ -2692,7 +2692,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -2801,7 +2801,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -3651,7 +3651,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -4069,7 +4069,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -6841,7 +6841,7 @@
           "Conferences (v2)"
         ],
         "summary": "Reschedule one unstarted occurrence (series untouched).",
-        "description": "Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the\nstart) for a conference still in state CREATED; any other state returns\nCONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For\nan occurrence of a recurring series only that occurrence moves.",
+        "description": "Sets a new `scheduledStartAt` (required; more than 5 minutes in the past is rejected) for a\nconference still in state CREATED; any other state returns CONFERENCE_STATE_CONFLICT. An omitted\n`scheduledEndAt` keeps the occurrence's duration (the end is never cleared); an explicit one must\nbe after the start and at most 24 hours later. An optional `version` guards against concurrent\nchanges (MEETING_VERSION_CONFLICT). Requires a bearer user token whose role holds\n`conference.start`. For an occurrence of a recurring series only that occurrence moves.",
         "operationId": "v2_reschedule_conference",
         "parameters": [
           {
@@ -6876,8 +6876,18 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "CONFERENCE_STATE_CONFLICT",
+            "description": "CONFERENCE_STATE_CONFLICT / MEETING_VERSION_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -7934,7 +7944,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -8028,13 +8038,164 @@
         ]
       }
     },
+    "/api/v2/me/conferences": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "List the caller's occurrences across meeting spaces (agenda / calendar range).",
+        "description": "Returns scheduled occurrences whose start lies in `[from, to)` (default: the next 31 days;\nat most 366 days), ordered by start, across every meeting space the caller owns, is an\nactive member of, holds an active invitation for (bound to the caller's verified email),\nis registered for, or took part in. A machine caller gets its own environment's meetings.\nRecurring occurrences beyond the 30-day materialization horizon are included with\n`materialized: false` and `conferenceId: null`; `occurrenceKey` is stable, so the entry keeps\nits identity once the occurrence is materialized. Filters: `status` and `role` (the caller's\nrelation: OWNER, MEMBER, INVITEE, REGISTRANT, PARTICIPANT, ORGANIZATION), both\ncomma-separated. `organizationId` restricts the agenda to that organization and adds its\norganization-visible meetings; the caller must be a verified member, and an unknown or\nunauthorized organization gets the same PERMISSION_DENIED. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`. Only managers of a space (FULL view) see\nmanagement detail; titles of HEALTHCARE / HIGH_SECURITY spaces are omitted otherwise.",
+        "operationId": "v2_my_conferences",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339, inclusive (default now)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339, exclusive (default from + 31 days, at most 366 days)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Comma-separated ConferenceStatus values",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "Comma-separated AgendaRelation values",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "description": "Organization of which the caller is a verified member",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agenda page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgendaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (organizationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_conferences",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
           "Organizations (v2)"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
-        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token. Once the Organizations\nService is authoritative the list comes from it (active, non-GUEST memberships of active\norganizations) and each item also carries `organizationRole`.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -8059,6 +8220,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8073,14 +8244,205 @@
         ]
       }
     },
+    "/api/v2/me/workspaces": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List the caller's workspaces (Personal and organizations).",
+        "description": "Returns the caller's workspace contexts: `personal` first, then every organization in which\nthe caller holds an ACTIVE membership, ordered by id, each with the caller's role, the\norganization's status (a SUSPENDED organization is listed and grants nothing), its\nprovisioning state and a small capability summary. Workspace context is per request: the\nserver stores no active organization, so organization-scoped calls keep naming their\norganization. Once the Organizations Service is authoritative the list comes from it (all\nroles, including GUEST; capabilities under the organization policy); before that it comes\nfrom the meeting-service organization directory with the rule of `GET\n/api/v2/me/organizations` and `provisioningState` is null. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`.",
+        "operationId": "v2_my_workspaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable; never a partial list)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspaces",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
+    "/api/v2/me/workspaces/{workspaceId}/capabilities": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Capabilities of one workspace, derived by the server.",
+        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` — `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
+        "operationId": "v2_my_workspace_capabilities",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "description": "`personal`, or an organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspace_capabilities",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/meeting-spaces": {
       "get": {
         "tags": [
           "Meeting Spaces (v2)"
         ],
         "summary": "List meeting spaces the caller owns or is a member of.",
-        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next upcoming one, else the latest). Owners, hosts\nand co-hosts get the full view, other members the summary view. Not paginated.",
+        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next unstarted one whose start window is still\nopen, else the latest). Owners, hosts and co-hosts get the full view, other members the summary\nview. Without `limit` and `cursor` the complete list is returned (legacy behaviour); with\neither, one page of `limit` (1-200, default 50) items and `nextCursor` while more exist.",
         "operationId": "v2_list_meeting_spaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50 when paginating)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Spaces",
@@ -8088,6 +8450,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeetingSpaceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -8126,8 +8498,22 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Create a meeting space. The owner is always the authenticated caller.",
-        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`.",
+        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`. Send an\n`Idempotency-Key` header (1-128 visible ASCII characters, kept 24 hours per caller) to make\nretries safe: a retry with the same key and body returns the same space (header\n`Idempotent-Replayed: true`); the same key with a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_meeting_space",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8140,7 +8526,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8178,6 +8564,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8205,7 +8601,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.",
-        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization.",
+        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization. An ORGANIZATION_ONLY space is disclosed only to its owner / members, verified\nmembers of its organization and callers with calendar access (invitation, registration,\nparticipation): a signed-out caller gets AUTHENTICATION_REQUIRED, anyone else\nMEETING_NOT_FOUND.",
         "operationId": "v2_get_meeting_space",
         "parameters": [
           {
@@ -8225,6 +8621,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -8264,7 +8670,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Update a meeting space (optimistic concurrency via `version`).",
-        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.",
+        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_update_meeting_space",
         "parameters": [
           {
@@ -8345,7 +8751,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Soft-archive a meeting space (owner only). History is preserved.",
-        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.",
+        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_archive_meeting_space",
         "parameters": [
           {
@@ -8368,7 +8774,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -8500,7 +8906,7 @@
           "Conferences (v2)"
         ],
         "summary": "Create a one-time scheduled conference occurrence.",
-        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later). Requires a bearer user token whose space role may start conferences\n(`conference.start`).",
+        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later; a start more than 5 minutes in the past is rejected). Requires a bearer\nuser token whose space role may schedule conferences. Send an `Idempotency-Key` header (1-128\nvisible ASCII characters, kept 24 hours per caller and space) to make retries safe: the same\nkey and body return the same conference (header `Idempotent-Replayed: true`); the same key\nwith a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_conference",
         "parameters": [
           {
@@ -8511,6 +8917,18 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -8526,7 +8944,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8535,8 +8953,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -8593,7 +9031,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -8697,7 +9135,7 @@
           "Invitations (v2)"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -8719,7 +9157,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -8732,8 +9170,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9091,7 +9549,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Transfer ownership (dedicated, protected operation).",
-        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.",
+        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_transfer_owner",
         "parameters": [
           {
@@ -9362,8 +9820,8 @@
         "tags": [
           "Scheduling (v2)"
         ],
-        "summary": "Create or replace the space's recurrence (RFC 5545 RRULE in the space timezone).",
-        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone) and a duration of 1–1440 minutes. An existing active rule is ended and\nits unstarted future occurrences are removed or cancelled before the new rule takes effect;\noccurrences within the scheduling horizon are created right away. Requires permission to\nschedule conferences (owner and host; co-host by default) and v2 meetings enabled for the\naccount. Archived spaces cannot recur.",
+        "summary": "Create or edit the space's recurrence (RFC 5545 RRULE in the space timezone).",
+        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone; it must exist and be unambiguous there) and a duration of 1–1440\nminutes. Editing an active series keeps the same rule id and occurrence keys: future\noccurrences that are still occurrences of the edited rule are kept (with the new duration;\nrescheduled ones keep their own time) together with their exceptions, while occurrences that\nno longer match are removed or cancelled and their exceptions dropped; past occurrences are\nnever touched. Occurrences within the scheduling horizon are created right away. Requires\npermission to schedule conferences (owner and host; co-host by default) and v2 meetings enabled\nfor the account. Archived spaces cannot recur.",
         "operationId": "v2_set_recurrence",
         "parameters": [
           {
@@ -9434,8 +9892,8 @@
         "tags": [
           "Scheduling (v2)"
         ],
-        "summary": "End the recurring series (past and exception occurrences are preserved).",
-        "description": "Ends the space's active recurrence: future unstarted occurrences of the series are removed or\ncancelled, while started or past occurrences and recorded exceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
+        "summary": "End the recurring series (past occurrences are preserved).",
+        "description": "Ends the space's active recurrence: every future unstarted occurrence of the series, including\nrescheduled ones, is removed or cancelled, while started or past occurrences and the recorded\nexceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
         "operationId": "v2_end_recurrence",
         "parameters": [
           {
@@ -9924,7 +10382,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Resolve any supported meeting identifier to the canonical space and conference.",
-        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND.",
+        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND. An ORGANIZATION_ONLY space resolves only for its\nowner / members, verified members of its organization and callers with calendar access; a\nsigned-out caller gets AUTHENTICATION_REQUIRED (offer sign-in), anyone else MEETING_NOT_FOUND.",
         "operationId": "v2_resolve_identifier",
         "parameters": [
           {
@@ -9944,6 +10402,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -10110,6 +10578,196 @@
           }
         },
         "additionalProperties": false
+      },
+      "AgendaItem": {
+        "type": "object",
+        "description": "One occurrence on the caller's agenda.",
+        "required": [
+          "occurrenceKey",
+          "meetingSpaceId",
+          "materialized",
+          "view",
+          "status",
+          "kind",
+          "scheduledStartAt",
+          "isException",
+          "relations",
+          "meetingSpace"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The conference id; null for a recurring occurrence beyond the materialization\nhorizon (it becomes a conference later, under the same `occurrenceKey`)."
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "isException": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ConferenceKind"
+          },
+          "materialized": {
+            "type": "boolean",
+            "description": "False for an occurrence computed from the recurrence rule (not yet materialized)."
+          },
+          "meetingSpace": {
+            "$ref": "#/components/schemas/AgendaSpace"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurrenceKey": {
+            "type": "string",
+            "description": "Stable occurrence identity within the meeting space (unchanged by materialization)."
+          },
+          "originalStartAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaRelation"
+            }
+          },
+          "scheduledEndAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConferenceStatus"
+          },
+          "view": {
+            "$ref": "#/components/schemas/ResourceView"
+          },
+          "viewerRole": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AgendaRelation": {
+        "type": "string",
+        "description": "Why an occurrence is on the caller's agenda.",
+        "enum": [
+          "OWNER",
+          "MEMBER",
+          "INVITEE",
+          "REGISTRANT",
+          "PARTICIPANT",
+          "ORGANIZATION"
+        ]
+      },
+      "AgendaResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgendaItem"
+            },
+            "description": "Ordered by scheduled start, then meeting space, then occurrence key."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `cursor` for the next page; null on the last page."
+          }
+        }
+      },
+      "AgendaSpace": {
+        "type": "object",
+        "description": "Meeting-space fields an agenda entry may show.",
+        "required": [
+          "meetingCode",
+          "meetingType",
+          "status",
+          "timezone",
+          "accessPolicy",
+          "requiresPasscode"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "meetingCode": {
+            "type": "string"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/MeetingType"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "FULL view only."
+          },
+          "requiresPasscode": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SpaceStatus"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone of the meeting: show times in this zone and in the viewer's zone."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space."
+          }
+        }
       },
       "AnnouncementResponse": {
         "type": "object",
@@ -11847,6 +12505,13 @@
               }
             ]
           },
+          "sendEmail": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Blueprint Section 11: also email the invitation link to `inviteeEmail` (required\nwith this flag). The result is reported in `emailDelivery`. Default false."
+          },
           "useLimit": {
             "type": [
               "integer",
@@ -11864,6 +12529,20 @@
           "token"
         ],
         "properties": {
+          "emailDelivery": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EmailDelivery"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "invitation": {
             "$ref": "#/components/schemas/InvitationResponse"
           },
@@ -12217,6 +12896,15 @@
         },
         "additionalProperties": false
       },
+      "EmailDelivery": {
+        "type": "string",
+        "description": "What happened to a requested invitation email.",
+        "enum": [
+          "DISABLED",
+          "ACCEPTED",
+          "FAILED"
+        ]
+      },
       "ErrorBody": {
         "type": "object",
         "required": [
@@ -12254,6 +12942,7 @@
         "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
+          "SESSION_NOT_FOUND",
           "MEETING_ACCESS_DENIED",
           "MEETING_PASSCODE_REQUIRED",
           "MEETING_PASSCODE_INVALID",
@@ -12337,6 +13026,25 @@
           "CHAT_UNAVAILABLE",
           "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
+          "ORGANIZATION_NOT_FOUND",
+          "MEMBERSHIP_REQUIRED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_ARCHIVED",
+          "LAST_OWNER",
+          "VERSION_CONFLICT",
+          "SLUG_TAKEN",
+          "INVITE_EXPIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROVISIONING_PENDING",
+          "INVITATION_REQUIRED",
+          "ORGANIZATION_POLICY_RESTRICTED",
+          "TEAM_NOT_FOUND",
+          "TEAM_ARCHIVED",
+          "TEAM_NAME_TAKEN",
+          "ORGANIZATION_CALLING_DISABLED",
+          "USERNAME_TAKEN",
+          "REAUTHENTICATION_REQUIRED",
+          "EMAIL_VERIFICATION_REQUIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -13118,6 +13826,13 @@
             "items": {
               "$ref": "#/components/schemas/MeetingSpaceResponse"
             }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present only on paginated requests (`limit` or `cursor` sent) when another page\nexists: pass it back as `cursor`."
           }
         }
       },
@@ -13720,6 +14435,13 @@
         "properties": {
           "organization": {
             "$ref": "#/components/schemas/OrganizationResponse"
+          },
+          "organizationRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Once the Organizations Service is authoritative: the caller's full role (OWNER,\nADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER."
           },
           "role": {
             "$ref": "#/components/schemas/OrganizationRole"
@@ -15795,11 +16517,21 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays\nstart-only). At most 24 hours after the start."
           },
           "scheduledStartAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "New start; more than 5 minutes in the past is rejected."
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional optimistic-concurrency guard: the conference `version` last read."
           }
         },
         "additionalProperties": false
@@ -16941,6 +17673,273 @@
           },
           "withdrawalMode": {
             "$ref": "#/components/schemas/WithdrawalMode"
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "description": "One workspace context of the caller.",
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/WorkspaceCapabilitySummary"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "`Personal`, or the organization name."
+          },
+          "id": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "ORGANIZATION only."
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;\nnull for PERSONAL and when the legacy directory answers (no provisioning there)."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows\nOWNER, ADMIN and MEMBER). ORGANIZATION only."
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ORGANIZATION only."
+          }
+        }
+      },
+      "WorkspaceAuthority": {
+        "type": "string",
+        "description": "Which store answered: the meeting-service organization directory\n(`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service\n(authoritative).",
+        "enum": [
+          "LEGACY_DIRECTORY",
+          "ORGANIZATIONS_SERVICE"
+        ]
+      },
+      "WorkspaceCapabilities": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces/{workspaceId}/capabilities`.",
+        "required": [
+          "workspaceId",
+          "kind",
+          "authority",
+          "features",
+          "capabilities",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceCapability"
+            },
+            "description": "Every capability of the vocabulary with its decision."
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the answer was computed (it is never cached server-side)."
+          },
+          "features": {
+            "$ref": "#/components/schemas/WorkspaceFeatures"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personalCommunicationsCapabilities": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PERSONAL only: the Communications Hub read that owns personal communications\ncapabilities (`/api/v2/communications/me/capabilities`)."
+          },
+          "policyRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Organization policy revision the answer was computed with (Organizations Service)."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          }
+        }
+      },
+      "WorkspaceCapability": {
+        "type": "object",
+        "description": "One capability decision.",
+        "required": [
+          "capability",
+          "granted",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability name, e.g. `meetings.organization.create`."
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WorkspaceCapabilityReason"
+          }
+        }
+      },
+      "WorkspaceCapabilityReason": {
+        "type": "string",
+        "description": "Why a capability is (not) granted in a workspace.",
+        "enum": [
+          "ALLOWED",
+          "CAPABILITY_NOT_GRANTED",
+          "POLICY_RESTRICTED",
+          "ORGANIZATION_SUSPENDED",
+          "FEATURE_DISABLED"
+        ]
+      },
+      "WorkspaceCapabilitySummary": {
+        "type": "object",
+        "description": "A small summary of what the caller can do in a workspace.",
+        "required": [
+          "granted",
+          "canCreateMeetings",
+          "canInviteMembers",
+          "canAdminister"
+        ],
+        "properties": {
+          "canAdminister": {
+            "type": "boolean",
+            "description": "Organization administration: profile, member management or policies."
+          },
+          "canCreateMeetings": {
+            "type": "boolean",
+            "description": "Meetings can be created in this context."
+          },
+          "canInviteMembers": {
+            "type": "boolean",
+            "description": "Members can be invited (`organization.members.invite`)."
+          },
+          "granted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every capability granted now (default deny)."
+          }
+        }
+      },
+      "WorkspaceFeatures": {
+        "type": "object",
+        "description": "Features the workspace context does not disable. Owner services still apply their\nown policy (stricter wins) and re-verify every request.",
+        "required": [
+          "meetings",
+          "messaging",
+          "calling"
+        ],
+        "properties": {
+          "calling": {
+            "type": "boolean"
+          },
+          "meetings": {
+            "type": "boolean"
+          },
+          "messaging": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkspaceKind": {
+        "type": "string",
+        "description": "Kind of workspace context.",
+        "enum": [
+          "PERSONAL",
+          "ORGANIZATION"
+        ]
+      },
+      "WorkspacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces`.",
+        "required": [
+          "items",
+          "authority"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/WorkspaceAuthority"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workspace"
+            },
+            "description": "PERSONAL first, then organizations ordered by id."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `cursor` for the next page; null on the last page."
           }
         }
       }

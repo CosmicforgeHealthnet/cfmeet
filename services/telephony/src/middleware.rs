@@ -146,16 +146,30 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
     }
 }
 
+/// The request-target path as received (before any `Router::nest` prefix stripping),
+/// which is what a signer binds in `htu`.
+pub(crate) fn received_path(request: &Request) -> String {
+    request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned())
+}
+
 pub async fn require_internal_service(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let (method, path) = (request.method().clone(), received_path(&request));
+    let verified = state
         .service_auth
         .verifier()
-        .verify_headers(request.headers())
-    {
+        .verify_request(&method, &path, request.headers())
+        .await;
+    match verified {
         Ok(ctx) => {
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),

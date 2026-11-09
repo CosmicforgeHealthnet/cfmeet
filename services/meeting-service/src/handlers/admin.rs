@@ -204,7 +204,12 @@ pub async fn list_users(
 /// Update a user (admin only)
 ///
 /// Changes a user's `role` and/or `status`; omitted fields are left unchanged. An admin cannot
-/// change their own role. Requires the admin role.
+/// change their own role. Requires the admin role. Setting `status` to `active` reactivates a
+/// deactivated or suspended account (ACC-026): the user signs in again (every earlier session
+/// stays ended) and the Platform Access principal is mirrored ACTIVE; a Communications Hub
+/// profile that was deactivated stays deactivated (Hub deactivation is terminal). Every role
+/// or status change is
+/// recorded in the account security audit (`ACCOUNT_STATUS_CHANGED`, `ACCOUNT_ROLE_CHANGED`).
 #[utoipa::path(
     patch,
     path = "/api/v1/admin/users/{id}",
@@ -253,18 +258,60 @@ pub async fn update_user(
         let _ = parse_role(new_role)?;
     }
 
+    let previous_role = user.role.clone();
     let mut user: users::ActiveModel = user.into();
 
     if let Some(role) = payload.role {
         user.role = Set(parse_role(&role)?);
     }
 
+    let previous_status = user.status.clone().unwrap();
     if let Some(status) = payload.status {
         user.status = Set(parse_status(&status)?);
     }
 
     user.updated_at = Set(now_utc());
     let user = user.update(&state.db).await?;
+    // ACC-026 / SEC-013: administrator role and status changes are audited.
+    use crate::services::account_security::{self as security, ActorKind, Outcome, SecurityEvent};
+    if user.status != previous_status {
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("ACCOUNT_STATUS_CHANGED", Outcome::Success)
+                .user(user.id)
+                .actor(ActorKind::Admin, Some(auth_context.user_id))
+                .detail(serde_json::json!({
+                    "from": previous_status.as_contract_str(),
+                    "to": user.status.as_contract_str(),
+                    "reactivated": matches!(previous_status, UserStatus::Inactive | UserStatus::Suspended)
+                        && !matches!(user.status, UserStatus::Inactive | UserStatus::Suspended),
+                })),
+        )
+        .await;
+    }
+    if user.role != previous_role {
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("ACCOUNT_ROLE_CHANGED", Outcome::Success)
+                .user(user.id)
+                .actor(ActorKind::Admin, Some(auth_context.user_id))
+                .detail(serde_json::json!({
+                    "from": format_role(&previous_role),
+                    "to": format_role(&user.role),
+                })),
+        )
+        .await;
+    }
+    // Section 14 (ACC-010): a disabled account loses every credential everywhere; any
+    // status change is mirrored onto its Platform Access principal (durable outbox).
+    if user.status != previous_status {
+        if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended) {
+            crate::services::communications::credentials_ended(&state, user.id, "ACCOUNT_DISABLED")
+                .await;
+        } else {
+            let _ = crate::services::communications::deliver_due(&state).await;
+        }
+    }
 
     let response = AdminUserResponse {
         id: user.id,

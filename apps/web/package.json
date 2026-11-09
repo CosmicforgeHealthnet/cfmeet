@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "contracts:generate": "node scripts/generate-contract-types.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.19",
@@ -27,6 +28,7 @@
     "lucide-react": "^0.563.0",
     "next": "16.4.2",
     "next-themes": "^0.4.6",
+    "qrcode-generator": "2.0.4",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",

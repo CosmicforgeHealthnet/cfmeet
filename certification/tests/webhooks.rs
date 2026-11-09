@@ -366,9 +366,44 @@ fn assert_safe(r: &Received, forbidden: &[&str]) {
     let text = String::from_utf8_lossy(&r.body);
     // No E.164 number of any kind can be present ('+' appears in no safe field).
     assert!(!text.contains('+'), "a '+' (telephone number?) in {text}");
+    // Short marker words ("e164", "provider") can occur by chance inside a random
+    // generated id ("whe_4a63...e164..."), so they are matched against the body with its
+    // generated identifiers (envelope `id`, `correlationId`, UUID values) masked. Every
+    // other forbidden value is matched against the whole body.
+    let masked = mask_generated_ids(&v);
     for f in forbidden.iter().filter(|f| !f.is_empty()) {
-        assert!(!text.contains(f), "{f:?} leaked into a webhook: {text}");
+        let haystack = if MARKER_WORDS.contains(f) {
+            masked.as_str()
+        } else {
+            &text[..]
+        };
+        assert!(!haystack.contains(f), "{f:?} leaked into a webhook: {text}");
     }
+}
+
+/// Field-name markers a webhook body must never contain outside generated identifiers.
+const MARKER_WORDS: [&str; 2] = ["e164", "provider"];
+
+/// The body re-serialized with server-generated identifiers replaced by placeholders.
+fn mask_generated_ids(v: &Value) -> String {
+    fn mask(v: &mut Value) {
+        match v {
+            Value::String(s) if is_uuid(s) => *s = "<uuid>".into(),
+            Value::Array(a) => a.iter_mut().for_each(mask),
+            Value::Object(o) => o.values_mut().for_each(mask),
+            _ => {}
+        }
+    }
+    let mut v = v.clone();
+    if let Some(o) = v.as_object_mut() {
+        for k in ["id", "correlationId"] {
+            if o.contains_key(k) {
+                o.insert(k.into(), Value::String("<generated>".into()));
+            }
+        }
+    }
+    mask(&mut v);
+    v.to_string()
 }
 
 /// Every resource id (`data` UUIDs) of the events received on `path`.

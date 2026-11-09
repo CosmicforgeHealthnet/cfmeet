@@ -14,11 +14,11 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.2.0"
+      "description": "cfmeet.meeting-service.http-api 1.5.0"
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.14.0"
+      "description": "cfmeet.calling.http-api 1.16.0"
     },
     {
       "name": "privacy-relay",
@@ -26,19 +26,19 @@
     },
     {
       "name": "messaging",
-      "description": "cfmeet.messaging.http-api 1.14.0"
+      "description": "cfmeet.messaging.http-api 1.16.0"
     },
     {
       "name": "numbering",
-      "description": "cfmeet.numbering.internal-api 1.12.0"
+      "description": "cfmeet.numbering.internal-api 1.13.0"
     },
     {
       "name": "sms",
-      "description": "cfmeet.sms-gateway.http-api 1.2.0"
+      "description": "cfmeet.sms-gateway.http-api 1.3.0"
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.5.0"
+      "description": "cfmeet.developer-platform.http-api 1.6.0"
     },
     {
       "name": "gateway",
@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.1.0"
+      "description": "cfmeet.communications.http-api 1.3.0"
     }
   ],
   "paths": {
@@ -6711,7 +6711,7 @@
       "get": {
         "operationId": "getConversationTimeline",
         "summary": "Call and meeting cards for a conversation",
-        "description": "Versioned per-viewer projection. Each card carries anchorSequence so clients merge it deterministically with the Messaging history they page. Call outcomes come from Calling; stale=true when Calling could not be reached. No message content is copied. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Versioned per-viewer projection. Each card carries anchorSequence so clients merge it deterministically with the Messaging history they page. Call outcomes come from Calling; stale=true when Calling could not be reached. No message content is copied. Tenant, application, environment and acting account come from the existing authenticated CF Meet session. Since 1.2.0 a member who had no Communications profile when a meeting was shared receives its invitation card on first read, unless the share predates the history Messaging lets that member see.",
         "tags": [
           "communications"
         ],
@@ -7048,7 +7048,7 @@
       "post": {
         "operationId": "linkCommunicationsDevice",
         "summary": "Link an existing device",
-        "description": "Ownership is verified with Messaging and Calling for the caller; another user identifiers return 404. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Ownership is verified with Messaging and Calling for the caller; another user identifiers return 404. The device is bound to the sign-in (account session) making this request (1.2.0). Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "communications"
         ],
@@ -7578,7 +7578,7 @@
       "post": {
         "operationId": "revokeCommunicationsDevice",
         "summary": "Revoke a device",
-        "description": "Revokes the Messaging device and Calling endpoint at their owners first; the reference becomes terminally REVOKED. Retry completes a partial failure. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Revokes the Messaging device and Calling endpoint at their owners first; the reference becomes terminally REVOKED. When the device is bound to a sign-in (accountSession.bound), that account session is signed out too (its tokens, session devices and other devices it linked end); revoking the device you are using signs you out. Retry completes a partial failure, including the sign-out. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "communications"
         ],
@@ -8642,7 +8642,7 @@
       "get": {
         "operationId": "getCommunicationsInboxOverlay",
         "summary": "Per-user overlay for the conversation list",
-        "description": "Mute, clear-for-me and latest call/meeting activity per conversation. Messaging owns the conversation list, ordering and unread counts; merge by conversationId. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
+        "description": "Only conversations the viewer is a current member of (checked with Messaging, 1.2.0); a page may hold fewer rows than limit, follow nextCursor. Mute, clear-for-me and latest call/meeting activity per conversation. Messaging owns the conversation list, ordering and unread counts; merge by conversationId. Tenant, application, environment and acting account come from the existing authenticated CF Meet session.",
         "tags": [
           "communications"
         ],
@@ -9494,7 +9494,7 @@
       "get": {
         "operationId": "getCommunicationsCapabilities",
         "summary": "Read actual backend and device-security readiness",
-        "description": "Reflects live Calling flags and Messaging security readiness. Accepted connections establish eligibility; they do not replace MLS device setup. Meetings keep their independent existing authorization. Phone verification is deferred and never required.",
+        "description": "Messaging availability follows MANAGED messaging and reports session-device realtime separately from E2EE readiness (1.2.0). Reflects live Calling flags and Messaging security readiness. Accepted connections establish eligibility; they do not replace MLS device setup. Meetings keep their independent existing authorization. Phone verification is deferred and never required.",
         "tags": [
           "communications"
         ],
@@ -12644,7 +12644,7 @@
           "meetings"
         ],
         "summary": "Read a conference. Callers without authority get the SUMMARY view.",
-        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with only the id, meeting space id and status.",
+        "description": "Works with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings — the scheduled start and end (pre-join countdown).",
         "operationId": "v2_get_conference",
         "parameters": [
           {
@@ -15309,7 +15309,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -15418,7 +15418,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -16268,7 +16268,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -16686,7 +16686,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -19458,7 +19458,7 @@
           "meetings"
         ],
         "summary": "Reschedule one unstarted occurrence (series untouched).",
-        "description": "Sets a new `scheduledStartAt` (required) and `scheduledEndAt` (optional, must be after the\nstart) for a conference still in state CREATED; any other state returns\nCONFERENCE_STATE_CONFLICT. Requires a bearer user token whose role holds `conference.start`. For\nan occurrence of a recurring series only that occurrence moves.",
+        "description": "Sets a new `scheduledStartAt` (required; more than 5 minutes in the past is rejected) for a\nconference still in state CREATED; any other state returns CONFERENCE_STATE_CONFLICT. An omitted\n`scheduledEndAt` keeps the occurrence's duration (the end is never cleared); an explicit one must\nbe after the start and at most 24 hours later. An optional `version` guards against concurrent\nchanges (MEETING_VERSION_CONFLICT). Requires a bearer user token whose role holds\n`conference.start`. For an occurrence of a recurring series only that occurrence moves.",
         "operationId": "v2_reschedule_conference",
         "parameters": [
           {
@@ -19493,8 +19493,18 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "CONFERENCE_STATE_CONFLICT",
+            "description": "CONFERENCE_STATE_CONFLICT / MEETING_VERSION_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -20551,7 +20561,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -20645,13 +20655,164 @@
         ]
       }
     },
+    "/api/v2/me/conferences": {
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "List the caller's occurrences across meeting spaces (agenda / calendar range).",
+        "description": "Returns scheduled occurrences whose start lies in `[from, to)` (default: the next 31 days;\nat most 366 days), ordered by start, across every meeting space the caller owns, is an\nactive member of, holds an active invitation for (bound to the caller's verified email),\nis registered for, or took part in. A machine caller gets its own environment's meetings.\nRecurring occurrences beyond the 30-day materialization horizon are included with\n`materialized: false` and `conferenceId: null`; `occurrenceKey` is stable, so the entry keeps\nits identity once the occurrence is materialized. Filters: `status` and `role` (the caller's\nrelation: OWNER, MEMBER, INVITEE, REGISTRANT, PARTICIPANT, ORGANIZATION), both\ncomma-separated. `organizationId` restricts the agenda to that organization and adds its\norganization-visible meetings; the caller must be a verified member, and an unknown or\nunauthorized organization gets the same PERMISSION_DENIED. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`. Only managers of a space (FULL view) see\nmanagement detail; titles of HEALTHCARE / HIGH_SECURITY spaces are omitted otherwise.",
+        "operationId": "v2_my_conferences",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339, inclusive (default now)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339, exclusive (default from + 31 days, at most 366 days)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Comma-separated ConferenceStatus values",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "Comma-separated AgendaRelation values",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "description": "Organization of which the caller is a verified member",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agenda page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.AgendaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (organizationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_conferences",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
           "meetings"
         ],
         "summary": "Organizations the caller verifiably belongs to.",
-        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token.",
+        "description": "Returns the organizations in which the signed-in user has an active, directory-verified\nmembership, each with the user's role. Requires a user bearer token. Once the Organizations\nService is authoritative the list comes from it (active, non-GUEST memberships of active\norganizations) and each item also carries `organizationRole`.",
         "operationId": "v2_my_organizations",
         "responses": {
           "200": {
@@ -20676,6 +20837,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -20690,14 +20861,205 @@
         ]
       }
     },
+    "/api/v2/me/workspaces": {
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "List the caller's workspaces (Personal and organizations).",
+        "description": "Returns the caller's workspace contexts: `personal` first, then every organization in which\nthe caller holds an ACTIVE membership, ordered by id, each with the caller's role, the\norganization's status (a SUSPENDED organization is listed and grants nothing), its\nprovisioning state and a small capability summary. Workspace context is per request: the\nserver stores no active organization, so organization-scoped calls keep naming their\norganization. Once the Organizations Service is authoritative the list comes from it (all\nroles, including GUEST; capabilities under the organization policy); before that it comes\nfrom the meeting-service organization directory with the rule of `GET\n/api/v2/me/organizations` and `provisioningState` is null. Paginate with `limit` (1-200,\ndefault 50) and the opaque `nextCursor`.",
+        "operationId": "v2_my_workspaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.WorkspacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable; never a partial list)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspaces",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
+    "/api/v2/me/workspaces/{workspaceId}/capabilities": {
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Capabilities of one workspace, derived by the server.",
+        "description": "Returns the features and every capability decision (granted, and why not:\nCAPABILITY_NOT_GRANTED, POLICY_RESTRICTED, ORGANIZATION_SUSPENDED or FEATURE_DISABLED) for the\ncaller in `workspaceId` — `personal`, or an organization id from `GET /api/v2/me/workspaces`.\nComputed on every request from the organization authority (role matrix and effective\norganization policy once the Organizations Service is authoritative); owner services still\nre-verify each operation. Unknown organizations, organizations the caller is not an ACTIVE\nmember of and malformed ids all answer ORGANIZATION_NOT_FOUND. Personal communications\ncapabilities stay with the Communications Hub (`personalCommunicationsCapabilities`).",
+        "operationId": "v2_my_workspace_capabilities",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "description": "`personal`, or an organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.WorkspaceCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_my_workspace_capabilities",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/meeting-spaces": {
       "get": {
         "tags": [
           "meetings"
         ],
         "summary": "List meeting spaces the caller owns or is a member of.",
-        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next upcoming one, else the latest). Owners, hosts\nand co-hosts get the full view, other members the summary view. Not paginated.",
+        "description": "Returns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next unstarted one whose start window is still\nopen, else the latest). Owners, hosts and co-hosts get the full view, other members the summary\nview. Without `limit` and `cursor` the complete list is returned (legacy behaviour); with\neither, one page of `limit` (1-200, default 50) items and `nextCursor` while more exist.",
         "operationId": "v2_list_meeting_spaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50 when paginating)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Spaces",
@@ -20705,6 +21067,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/meetings.MeetingSpaceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
                 }
               }
             }
@@ -20743,8 +21115,22 @@
           "meetings"
         ],
         "summary": "Create a meeting space. The owner is always the authenticated caller.",
-        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`.",
+        "description": "Creates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`. Send an\n`Idempotency-Key` header (1-128 visible ASCII characters, kept 24 hours per caller) to make\nretries safe: a retry with the same key and body returns the same space (header\n`Idempotent-Replayed: true`); the same key with a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_meeting_space",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -20757,7 +21143,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -20795,6 +21181,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -20822,7 +21218,7 @@
           "meetings"
         ],
         "summary": "Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.",
-        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization.",
+        "description": "Callers without management rights receive the SUMMARY view; resolution never implies\nauthorization. An ORGANIZATION_ONLY space is disclosed only to its owner / members, verified\nmembers of its organization and callers with calendar access (invitation, registration,\nparticipation): a signed-out caller gets AUTHENTICATION_REQUIRED, anyone else\nMEETING_NOT_FOUND.",
         "operationId": "v2_get_meeting_space",
         "parameters": [
           {
@@ -20842,6 +21238,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/meetings.MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
                 }
               }
             }
@@ -20881,7 +21287,7 @@
           "meetings"
         ],
         "summary": "Update a meeting space (optimistic concurrency via `version`).",
-        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.",
+        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_update_meeting_space",
         "parameters": [
           {
@@ -20962,7 +21368,7 @@
           "meetings"
         ],
         "summary": "Soft-archive a meeting space (owner only). History is preserved.",
-        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.",
+        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_archive_meeting_space",
         "parameters": [
           {
@@ -20985,7 +21391,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -21117,7 +21523,7 @@
           "meetings"
         ],
         "summary": "Create a one-time scheduled conference occurrence.",
-        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later). Requires a bearer user token whose space role may start conferences\n(`conference.start`).",
+        "description": "Adds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later; a start more than 5 minutes in the past is rejected). Requires a bearer\nuser token whose space role may schedule conferences. Send an `Idempotency-Key` header (1-128\nvisible ASCII characters, kept 24 hours per caller and space) to make retries safe: the same\nkey and body return the same conference (header `Idempotent-Replayed: true`); the same key\nwith a different body is IDEMPOTENCY_CONFLICT.",
         "operationId": "v2_create_conference",
         "parameters": [
           {
@@ -21128,6 +21534,18 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -21143,7 +21561,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created (or replayed for the same Idempotency-Key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -21152,8 +21570,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -21210,7 +21648,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -21314,7 +21752,7 @@
           "meetings"
         ],
         "summary": "Create an invitation. The raw token is returned once and never stored.",
-        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again.",
+        "description": "Issues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
         "operationId": "v2_create_invitation",
         "parameters": [
           {
@@ -21336,7 +21774,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "201": {
@@ -21349,8 +21787,28 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
           "403": {
             "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
             "content": {
               "application/json": {
                 "schema": {
@@ -21708,7 +22166,7 @@
           "meetings"
         ],
         "summary": "Transfer ownership (dedicated, protected operation).",
-        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.",
+        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_transfer_owner",
         "parameters": [
           {
@@ -21979,8 +22437,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "Create or replace the space's recurrence (RFC 5545 RRULE in the space timezone).",
-        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone) and a duration of 1–1440 minutes. An existing active rule is ended and\nits unstarted future occurrences are removed or cancelled before the new rule takes effect;\noccurrences within the scheduling horizon are created right away. Requires permission to\nschedule conferences (owner and host; co-host by default) and v2 meetings enabled for the\naccount. Archived spaces cannot recur.",
+        "summary": "Create or edit the space's recurrence (RFC 5545 RRULE in the space timezone).",
+        "description": "Sets the space's recurring schedule from an RFC 5545 RRULE, a first start time (wall-clock time\nin the space's timezone; it must exist and be unambiguous there) and a duration of 1–1440\nminutes. Editing an active series keeps the same rule id and occurrence keys: future\noccurrences that are still occurrences of the edited rule are kept (with the new duration;\nrescheduled ones keep their own time) together with their exceptions, while occurrences that\nno longer match are removed or cancelled and their exceptions dropped; past occurrences are\nnever touched. Occurrences within the scheduling horizon are created right away. Requires\npermission to schedule conferences (owner and host; co-host by default) and v2 meetings enabled\nfor the account. Archived spaces cannot recur.",
         "operationId": "v2_set_recurrence",
         "parameters": [
           {
@@ -22051,8 +22509,8 @@
         "tags": [
           "meetings"
         ],
-        "summary": "End the recurring series (past and exception occurrences are preserved).",
-        "description": "Ends the space's active recurrence: future unstarted occurrences of the series are removed or\ncancelled, while started or past occurrences and recorded exceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
+        "summary": "End the recurring series (past occurrences are preserved).",
+        "description": "Ends the space's active recurrence: every future unstarted occurrence of the series, including\nrescheduled ones, is removed or cancelled, while started or past occurrences and the recorded\nexceptions are kept. Requires\npermission to schedule conferences (owner and host; co-host by default). Succeeds with 204 even\nwhen there is no active recurrence.",
         "operationId": "v2_end_recurrence",
         "parameters": [
           {
@@ -22541,7 +22999,7 @@
           "meetings"
         ],
         "summary": "Resolve any supported meeting identifier to the canonical space and conference.",
-        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND.",
+        "description": "Accepts a v2 space id, v2 meeting code, legacy meeting id or legacy meeting code and returns the\nmatching space, its canonical conference (the LIVE one, else the next upcoming one, else the\nlatest) and `matchedBy` (V2_ID, V2_CODE, LEGACY_ID or LEGACY_CODE). Authentication is optional.\nResolving does not grant access: callers who cannot manage the space get the summary view only.\nUnknown identifiers return MEETING_NOT_FOUND. An ORGANIZATION_ONLY space resolves only for its\nowner / members, verified members of its organization and callers with calendar access; a\nsigned-out caller gets AUTHENTICATION_REQUIRED (offer sign-in), anyone else MEETING_NOT_FOUND.",
         "operationId": "v2_resolve_identifier",
         "parameters": [
           {
@@ -22561,6 +23019,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/meetings.ResolveResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
                 }
               }
             }
@@ -23645,7 +24113,7 @@
           "calling"
         ],
         "summary": "Open the endpoint's realtime signaling channel (WebSocket)",
-        "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong and closes with code 4001 when the credential expires. Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
+        "description": "Authenticated before the upgrade with the endpoint's signaling credential. Delivery only: the server sends signaling.ready, then the endpoint's realtime signals (cfmeet.calling.realtime-signal, https://schemas.cfmeet.com/calling/realtime/v1.schema.json), answers {\"type\":\"ping\"} with signaling.pong closes with code 4001 when the credential expires and with code 4401 when its authority is revoked (the endpoint revoked, its principal or the minting credential chain no longer valid, or communications authorization withdrawn; re-checked every 5 s and before every delivery). Signals are sent only after the authoritative transaction committed; a lost signal never loses state (recover with GET /v1/calling/invitations and the call API). Commands use HTTP.",
         "security": [
           {
             "calling.signalingCredential": []
@@ -25714,6 +26182,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.create",
         "description": "Scope conversations.create; the acting principal becomes the owner. Context class and security profile are checked against the persisted effective policy: the profile defaults to the context's default (PRIVATE_E2EE where eligible), MANAGED only where the application policy allows it, never a silent fallback (E2EE_NOT_AVAILABLE when encryption cannot be established). DIRECT conversations are deduplicated per principal pair and profile; a live context reference is unique. Idempotency-Key replays the stored response (200).",
         "parameters": [
           {
@@ -25798,7 +26267,7 @@
             "messaging.clientToken": []
           }
         ],
-        "description": "Keyset-paginated, newest first (limit 1-100, cursor). With CF-Acting-Principal: that principal's conversations (messages.read); without: the environment's conversations (conversations.manage).",
+        "description": "Keyset-paginated (limit 1-100, cursor). orderBy=createdAt (default): newest first. orderBy=lastActivity: the inbox order, latest application message first (Section 13, MSG-007); a cursor is valid only with the orderBy that produced it. With CF-Acting-Principal: that principal's conversations with ACTIVE membership (messages.read), each carrying its inbox summary (last activity, last visible message preview metadata, unread and mention counts); without: the environment's conversations (conversations.manage), without summaries.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -25841,6 +26310,19 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "orderBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "lastActivity"
+              ],
+              "default": "createdAt"
             }
           }
         ],
@@ -25962,6 +26444,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE).",
         "parameters": [
           {
@@ -26047,6 +26530,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.write",
         "description": "Scope attachments.write, acting member. Policy-checked (attachments enabled for the environment and context, kind, size, quotas reserved atomically). Returns a signed upload bound to size / digest / type. PRIVATE_E2EE: the client encrypts BEFORE upload; file name, media type and durations are refused (they travel inside MLS). 200: the same pending upload reused.",
         "parameters": [
           {
@@ -26146,6 +26630,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. The uploader, or a member through a message within their history window.",
         "parameters": [
           {
@@ -26230,6 +26715,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. A proxied, bounded read re-authorized on every request (immediate revocation). Responds with the stored bytes, Content-Disposition: attachment, X-Content-Type-Options: nosniff, Cache-Control: no-store and a sandboxing CSP.",
         "parameters": [
           {
@@ -26318,6 +26804,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read. Authorization re-checked now (membership, history window, message ACTIVE, attachment READY); a removed member gets no fresh grant.",
         "parameters": [
           {
@@ -26402,6 +26889,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.write",
         "description": "Scope attachments.write, the uploader. Re-verifies the stored object's size and SHA-256; MANAGED: content-type security and the self-hosted scan (fail closed: VERIFYING while the scanner is unavailable, QUARANTINED when infected). Idempotent.",
         "parameters": [
           {
@@ -26489,6 +26977,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "attachments.read",
         "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
         "parameters": [
           {
@@ -26570,6 +27059,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -26643,6 +27133,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Removes the member (PRIVATE_E2EE: pending MLS removal) and refuses re-adding until unbanned. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -26728,6 +27219,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). Lifts the ban; does not re-add. Audited. A MODERATOR may also do this for MEMBER / READ_ONLY / BOT_SERVICE members.",
         "parameters": [
           {
@@ -26814,6 +27306,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. Durable events after a per-conversation cursor (exclusive), oldest first, within the member's history window; the REST synchronization path of realtime clients.",
         "parameters": [
           {
@@ -26840,7 +27333,8 @@
             "schema": {
               "type": "integer",
               "minimum": 0
-            }
+            },
+            "description": "The canonical replay cursor: events with eventSequence > after. (The WebSocket subscribe frame names the same cursor afterEventSequence; omit it there to resume from the device's stored ack cursor.)"
           },
           {
             "name": "limit",
@@ -26909,6 +27403,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The acting principal accepts its open invitation: it becomes an ACTIVE member with the invited role and a history window starting now (authoritySource INVITATION). No open invitation: NOT_FOUND; expired: CONFLICT / INVITATION_EXPIRED (the invitation is closed); banned meanwhile: PRINCIPAL_BANNED.",
         "parameters": [
           {
@@ -26988,6 +27483,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The acting principal declines its open invitation (state LEFT, reason INVITATION_DECLINED).",
         "parameters": [
           {
@@ -27158,6 +27654,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). The principal must be ACTIVE and messaging-capable in the same environment; re-admission opens a NEW history window (no server-granted history, AD-07). DIRECT membership is fixed. With invite: true the principal is INVITED (201, state INVITED) and becomes a member only when it accepts.",
         "parameters": [
           {
@@ -27344,6 +27841,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (+ acting OWNER / ADMIN). MEMBER ↔ ADMIN; the owner's role is fixed (OWNER_ROLE_FIXED). Audited; emits messaging.member.updated. Roles: ADMIN, MODERATOR, MEMBER, READ_ONLY, BOT_SERVICE (bots: BOT_SERVICE / READ_ONLY only).",
         "parameters": [
           {
@@ -27440,6 +27938,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. Canonical order by sequence, within the member's history window; tombstones carry no content.",
         "parameters": [
           {
@@ -27552,6 +28051,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content.",
         "parameters": [
           {
@@ -27651,6 +28151,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Permalink resolution (scope messages.read): current membership is checked on every resolution; a permalink is never authority.",
         "parameters": [
           {
@@ -27733,6 +28234,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "MANAGED only (PRIVATE_E2EE edits are new ciphertexts with kind EDIT). Scope messages.send; the sender, within the policy's edit window. The superseded version is kept as a sealed revision (never overwritten in place); expectedEditCount turns a concurrent edit into 409 VERSION_CONFLICT.",
         "parameters": [
           {
@@ -27828,6 +28330,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. scope=EVERYONE (default, sender only): a server tombstone for every member, purged after the retention grace unless a legal hold protects it. scope=ME: hidden on the acting principal's own devices.",
         "parameters": [
           {
@@ -27923,6 +28426,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members, within their history window). Counts per reaction; no list of who reacted.",
         "parameters": [
           {
@@ -28010,6 +28514,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (members). MANAGED only: in PRIVATE_E2EE conversations reactions are encrypted application messages (E2EE_REACTIONS_ARE_MESSAGES). Idempotent per principal; emits messaging.reaction.added.",
         "parameters": [
           {
@@ -28106,6 +28611,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (members). Idempotent; emits messaging.reaction.removed.",
         "parameters": [
           {
@@ -28204,6 +28710,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The kept prior versions of an edited MANAGED message (§46), oldest first, for current members; only when the policy's editing.revisionHistoryVisible is true (else 503 FEATURE_DISABLED, reason REVISION_HISTORY_HIDDEN). PRIVATE_E2EE edits are ciphertext messages: 422 CONTENT_REJECTED (E2EE_EDITS_ARE_CIPHERTEXT).",
         "parameters": [
           {
@@ -28291,6 +28798,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members). The carrier state of a bridged message (separate from in-app receipts).",
         "parameters": [
           {
@@ -28378,6 +28886,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members, within their history window). The thread rooted at messageId: reply count, last reply sequence / time and the caller's unread replies (after their read cursor). With threads turned off by policy no reply records a thread root, so the count is 0.",
         "parameters": [
           {
@@ -28465,6 +28974,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only).",
         "parameters": [
           {
@@ -28564,6 +29074,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member: claims (single use) one published KeyPackage of every ACTIVE device of the given ACTIVE members.",
         "parameters": [
           {
@@ -28650,6 +29161,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member: the group's current epoch and pending removals.",
         "parameters": [
           {
@@ -28726,6 +29238,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members; only pins inside their history window).",
         "parameters": [
           {
@@ -28802,6 +29315,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (acting OWNER / ADMIN, NOT_ADMIN otherwise). Pins reference message ids only, so PRIVATE_E2EE content stays opaque. Emits messaging.pin.added. Optional body {expiresAt}: the pin expires then (an expired pin is not listed nor counted; pinning again renews it).",
         "parameters": [
           {
@@ -28893,6 +29407,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send (acting OWNER / ADMIN). Emits messaging.pin.removed.",
         "parameters": [
           {
@@ -28979,6 +29494,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. A monotonic read position (distinct from transport delivery and application acknowledgements); shared as read.cursor.updated only when the privacy policy enables read receipts.",
         "parameters": [
           {
@@ -29065,6 +29581,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting member. Policy: moderation and reporting enabled for the environment and context; rate-limited.",
         "parameters": [
           {
@@ -29151,6 +29668,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting member. MANAGED only (PRIVATE_E2EE: LOCAL_SEARCH_ONLY — search on the device). Membership, history window, ACTIVE messages and delete-for-me honoured; rate-limited; query never logged.",
         "parameters": [
           {
@@ -29252,6 +29770,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members).",
         "parameters": [
           {
@@ -29325,6 +29844,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (acting ADMIN / OWNER). Bridges a MANAGED conversation to one external party (TELEPHONE_ENDPOINT principal) by SMS after the explicit disclosure; never a PRIVATE_E2EE conversation.",
         "parameters": [
           {
@@ -29410,6 +29930,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage (acting ADMIN / OWNER). Closes the carrier side first.",
         "parameters": [
           {
@@ -29496,6 +30017,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read (members). Application messages of others after the read cursor, inside the history window, not hidden.",
         "parameters": [
           {
@@ -29562,6 +30084,10 @@
     },
     "/v1/developer-platform/context": {
       "get": {
+        "tags": [
+          "gateway"
+        ],
+        "summary": "Get the developer platform context",
         "operationId": "getDeveloperPlatformContext",
         "security": [
           {
@@ -29606,9 +30132,6 @@
         "x-cfmeet-route-id": "gateway.getDeveloperPlatformContext",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
-        ],
-        "tags": [
-          "gateway"
         ]
       }
     },
@@ -29619,7 +30142,7 @@
           "calling"
         ],
         "summary": "Administrative audit records",
-        "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope.",
+        "description": "Requires enterprise.config.read. Newest first; optionally one resource. Only the caller's scope. actorPrincipalId names the acting human member for first-party organization requests forwarded by the Meeting Service.",
         "security": [
           {
             "calling.platformCredential": [
@@ -33970,6 +34493,142 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.disableRecordingPolicy",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/enterprise/recordings": {
+      "get": {
+        "operationId": "listRecordings",
+        "tags": [
+          "calling"
+        ],
+        "summary": "List the scope's recordings",
+        "description": "Requires enterprise.recording.read. Recording discovery for compliance review (CAL-017): the recordings of the credential's tenant / application / environment, newest first, keyset-paginated, filtered by Call, participant principal, state and start time. Without principalId the credential must hold enterprise.recording.manage and lists every recording of the scope as a recording administrator; with principalId only recordings of Calls that principal took part in. Integrity metadata only: no object key, bucket or URL (media through POST /v1/enterprise/recordings/{recording_id}/media-access). Every listed recording is access-audited (READ_METADATA, GRANTED, reason LISTED), like a single read. Another scope's recordings are never listed.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "enterprise.recording.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "enterprise.recording.read",
+        "parameters": [
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": false,
+            "description": "Act for this principal: only recordings of Calls it took part in. Without it the credential must hold enterprise.recording.manage and acts as a recording administrator.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "callId",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings of this Call.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "participantPrincipalId",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings of Calls this principal took part in.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings in this processing state.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.calling.enterprise.v1.RecordingState"
+            }
+          },
+          {
+            "name": "startedFrom",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings started at or after this instant (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "description": "Only recordings started strictly before this instant (RFC 3339); after startedFrom.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1-100, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of recordings (newest first).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.enterprise.v1.CallRecordingList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.EnterpriseForbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.ServiceUnavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.listRecordings",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
@@ -38715,6 +39374,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. The application environment's append-only audit trail, newest first.",
         "parameters": [
           {
@@ -38818,6 +39478,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. An upload intent (signed PUT of exactly size bytes with that SHA-256) for the acting principal's own ACTIVE device; at most 3 unfinished intents; size ≤ backups.maxBytes (413 BACKUP_TOO_LARGE). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -38899,6 +39560,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. Metadata of the acting principal's newest READY backup (404 when none). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -38964,6 +39626,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Marks the backup DELETED and queues its object for deletion. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -39037,6 +39700,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. A short-lived signed read of a READY backup object (409 BACKUP_NOT_READY otherwise). Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -39116,6 +39780,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Verifies the uploaded object (size, SHA-256, format magic, header principal = acting principal); READY on success (idempotent), else REJECTED with 422 INTEGRITY_CHECK_FAILED (SIZE_MISMATCH, DIGEST_MISMATCH, NOT_A_BACKUP, WRONG_PRINCIPAL) and the object is deleted. Keeps the newest backups.retainCount READY backups. Opt-in secure backups (Appendix I.3): the object is encrypted on the client with the shared crypto core under a root key only the user holds; the server never receives a key, a recovery code or content and cannot decrypt the object. Only the acting principal's own backups; another principal's are NOT_FOUND. Refused while backups.enabled is false (503 FEATURE_DISABLED BACKUPS_DISABLED) or the BACKUPS kill switch is engaged.",
         "parameters": [
           {
@@ -39195,6 +39860,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: the acting principal's blocks.",
         "parameters": [
           {
@@ -39261,6 +39927,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Blocks direct conversations and direct messages with the principal (either direction); serialized with concurrent sends (no message commits after the block). Never changes Calling or Meeting permissions.",
         "parameters": [
           {
@@ -39349,6 +40016,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send.",
         "parameters": [
           {
@@ -39422,6 +40090,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, acting principal: ends every ACTIVE client session of the principal (logout everywhere); gateways close them after commit.",
         "parameters": [
           {
@@ -39486,6 +40155,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, the session's principal. Terminal; every gateway closes the session's connections after commit.",
         "parameters": [
           {
@@ -39558,6 +40228,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting principal: a short-lived client access token for one of the principal's ACTIVE devices (a new session; never a permanent credential). Scopes are the credential's messages.read / messages.send only.",
         "parameters": [
           {
@@ -39632,6 +40303,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Executed asynchronously; legal holds preserve held items.",
         "parameters": [],
         "responses": {
@@ -39696,6 +40368,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -39759,6 +40432,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Registers the device by its registration KeyPackage: RFC 9420 validation, the server-assigned credential identity and the signed challenge binding prove possession of the device key and freshness. Stores PUBLIC material only, appends a transparency leaf. Replaying the same answer returns the device (200).",
         "parameters": [
           {
@@ -39836,6 +40510,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. A single-use challenge (server nonce, server-assigned device id) for the acting principal, bound to the credential and environment; rate-limited per principal. 503 FEATURE_DISABLED where E2EE device operations are not enabled.",
         "parameters": [
           {
@@ -39897,6 +40572,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Publishes 1–20 KeyPackages of the acting principal's ACTIVE device: validated, bound to the device and its key, never last-resort or registration packages, unique by KeyPackageRef (re-submission is ALREADY_PUBLISHED), bounded per device.",
         "parameters": [
           {
@@ -39989,6 +40665,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send, the device's principal: the device's push handle and preference. Payloads are metadata only (never content, ciphertext or keys).",
         "parameters": [
           {
@@ -40073,6 +40750,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send: disables notifications for the device.",
         "parameters": [
           {
@@ -40146,6 +40824,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Revokes the acting principal's device (terminal), closes its KeyPackages and appends a transparency leaf. Idempotent.",
         "parameters": [
           {
@@ -40228,6 +40907,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: pending Welcomes of one of the acting principal's ACTIVE devices, for conversations it is still an ACTIVE member of.",
         "parameters": [
           {
@@ -40304,6 +40984,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send: marks a Welcome processed.",
         "parameters": [
           {
@@ -40385,6 +41066,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. MANAGED conversations with exportsEnabled only; PRIVATE_E2EE: E2EE_EXPORT_NOT_AVAILABLE.",
         "parameters": [],
         "responses": {
@@ -40449,6 +41131,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -40512,6 +41195,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messaging.export",
         "description": "Scope messaging.export. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. A short-lived signed read with a forced download.",
         "parameters": [
           {
@@ -40578,6 +41262,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The NEW (target) device's request for history held by an existing (source) device of the same principal: a single-use transfer public key and an expiry, signed with the target's device key (verified against its registered key). E2EE devices only (FEATURE_DISABLED where production E2EE is off).",
         "parameters": [
           {
@@ -40654,6 +41339,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The transfers of one of the acting principal's ACTIVE devices (as source or target), newest first.",
         "parameters": [
           {
@@ -40727,6 +41413,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. One transfer of the acting principal.",
         "parameters": [
           {
@@ -40800,6 +41487,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. Either device ends the transfer (e.g. the comparison codes differed); the sealed bytes are deleted.",
         "parameters": [
           {
@@ -40886,6 +41574,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The target opened the history; the sealed bytes are deleted.",
         "parameters": [
           {
@@ -40962,6 +41651,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. The SOURCE device's sealed history (accepted only when its signature verifies under the source device key for exactly this transfer; at most MESSAGING_HISTORY_TRANSFER_MAX_BYTES). Messaging stores ciphertext only.",
         "parameters": [
           {
@@ -41049,6 +41739,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The sealed history, for the TARGET device to verify and open (while SEALED and unexpired).",
         "parameters": [
           {
@@ -41125,6 +41816,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The acting principal's open invitations.",
         "parameters": [
           {
@@ -41196,6 +41888,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. Inclusion proofs (RFC 9162) of a device's log entries against the current tree head and, with fromTreeSize, a consistency proof. The log is UNWITNESSED: verifiable, not anti-equivocation. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
@@ -41275,6 +41968,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [],
         "responses": {
@@ -41327,6 +42021,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Held messages, attachments and metadata are never purged; nothing becomes decryptable.",
         "parameters": [],
         "responses": {
@@ -41391,6 +42086,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -41454,6 +42150,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Application administration (scope conversations.manage, no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. Held deletions resume afterwards.",
         "parameters": [
           {
@@ -41527,6 +42224,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -41590,6 +42288,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. REMOVE_MESSAGE tombstones (MODERATED) then purges; mutes / restrictions are time-bounded.",
         "parameters": [],
         "responses": {
@@ -41654,6 +42353,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. The environment's overrides, their version and the effective policy.",
         "parameters": [],
         "responses": {
@@ -41697,6 +42397,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "conversations.manage",
         "description": "Scope conversations.manage. Replaces the overrides (validated; optimistic concurrency on expectedVersion: POLICY_VERSION_CONFLICT). Audited; existing conversations keep their snapshot.",
         "parameters": [],
         "responses": {
@@ -41761,6 +42462,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read: the acting principal's presence visibility.",
         "parameters": [
           {
@@ -41827,6 +42529,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.send",
         "description": "Scope messages.send. HIDDEN: reported OFFLINE everywhere, indistinguishable from offline; last seen is shared only when the policy allows it and shareLastSeen is true.",
         "parameters": [
           {
@@ -41905,6 +42608,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The ACTIVE devices (public keys) of an ACTIVE messaging principal of the credential's own environment; any other principal is NOT_FOUND. Rate-limited per credential. The tree head is signed with the log's Ed25519 key (Part V G.5); without a configured signing key the route answers 503, never an unsigned head.",
         "parameters": [
           {
@@ -41975,6 +42679,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited.",
         "parameters": [
           {
@@ -42052,6 +42757,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "moderation.manage",
         "description": "Scope moderation.manage. Application administration (no CF-Acting-Principal: refused with ADMINISTRATION_ONLY). Audited. MANAGED text appears only when policy moderation.managedEvidenceAllowed; E2EE evidence only as reporter-disclosed and unverifiable.",
         "parameters": [
           {
@@ -42118,6 +42824,7 @@
             "messaging.clientToken": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read, acting principal: their ACTIVE MANAGED conversations (E2EE conversations counted, never searched).",
         "parameters": [
           {
@@ -42203,6 +42910,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "messages.read",
         "description": "Scope messages.read. The SMS Bridge disclosure and its version (Part V H §106).",
         "responses": {
           "200": {
@@ -42259,6 +42967,7 @@
             "messaging.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "usage.read",
         "description": "Scope usage.read. Totals per usage type and security profile in [from, to) (at most 93 days): accepted messages, stored attachment bytes, bridged SMS segments, realtime connection seconds (recorded when a connection closes), attachment egress bytes (authorized by a grant or served by the proxied read) and MANAGED search queries. Facts only: Messaging does not price or bill.",
         "parameters": [
           {
@@ -42326,6 +43035,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller's acquisitions, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42397,6 +43107,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Provision a reservation that holds the number (202: PROVISIONING until the provider's acquisition is proven; poll GET). In order: the reservation is the caller's and still holds the number (HELD and unexpired, or taken over by an assignment of the scope); eligibility is RE-EVALUATED (KYC, risk, limits, capabilities, the serving provider's requirements) — a pre-eligibility hold never provisions; every capability is supported; the provider hold is read back (HOLD_LOST otherwise). One transaction then records the scoped idempotency key, the acquisition, the number's PROVISIONING and the durable PROVISION command. A provider timeout after possible execution is reconciled from read-back, never resent; a refusal FAILS the acquisition (retryable). PROVISIONED is not an active customer number. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -42488,6 +43199,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "An acquisition of the caller's scope: provisioning status, served capabilities, per-family route configuration and consumer readiness. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42548,6 +43260,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Configure the provider voice / SMS routes of these capabilities' families on the current binding (durable CONFIGURE_* commands; 202). A configuration is CONFIGURED only on the provider's acknowledgement; a response for a superseded configuration or a changed binding never applies. A family is READY only once its consumer (Telephony / SMS Gateway) acknowledged the revision. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42647,6 +43360,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller scope's DCN assignments, newest first (keyset pages). Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42736,6 +43450,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "Assign a PROVISIONED acquisition or a HELD reservation to its legal owner (201, RESERVED). The owner comes from trusted context (organizational classes: the authenticated organization; PERSONAL / PROFESSIONAL: a principal Platform Access resolves ACTIVE in the caller's environment — PRINCIPAL_NOT_FOUND / PRINCIPAL_NOT_ACTIVE / PRINCIPAL_UNVERIFIED otherwise). The eligibility decision must be of the requested class and, for an individual class, about the owner (ELIGIBILITY_SUBJECT_MISMATCH), and is RE-EVALUATED. Targets are bounded by the class (TARGET_NOT_PERMITTED). One transaction records the key, the assignment (REQUESTED → PENDING_ELIGIBILITY → ELIGIBLE → RESERVED), the hold take-over, the routing profile and the optional pool membership. Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42827,6 +43542,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "One DCN assignment of the caller's scope. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42887,6 +43603,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "RESERVED → ACTIVATING → ACTIVE: eligibility re-evaluated (and the owning principal still ACTIVE), the number PROVISIONED and EVERY routed family READY — provider route configured on the current binding AND acknowledged by its consumer (ROUTING_NOT_READY otherwise). Never ACTIVE because a number exists. An ACTIVE assignment is returned as is. Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -42953,6 +43670,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The resolved capabilities of the caller's own assigned number. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43013,6 +43731,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The append-only history of one assignment of the caller's scope. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain for the presented credential; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43073,6 +43792,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Employee offboarding of an EMPLOYEE_DIRECT number (NOT_AN_EMPLOYEE_NUMBER otherwise): unrouted or moved to a replacement — never the departing employee. Ownership is unchanged (organizational). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43152,6 +43872,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The quarantine that followed the release of the caller's assignment. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -43212,6 +43933,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream Q: an auditable release (never a delete) in the mandatory order — grants and SMS submissions stopped, voice and SMS routing removed, organizational resources detached, removal evidence confirmed, provider release (PROVIDER_RELINQUISH), unknown outcomes reconciled, quarantine. 202 with the release; a future `effectiveAt` schedules it. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -43304,6 +44026,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream P: restoration after the owner, KYC / eligibility basis, standing, risk, provider binding, capability truth and route readiness re-check (a failed check is recorded and refused with its rule); RESTORING while the provider RESTORE runs, RESTORED (and `number.restored`) only once it is confirmed. Operator / risk / provider suspensions are lifted by operators only (OPERATOR_RESTORE_REQUIRED). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -43373,6 +44096,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The pinned routing revision, the number's routing revision and per-family readiness. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43431,6 +44155,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "A new routing revision (same class, same owner; targets bounded by the class). Advances the number's routing revision: routing grants bound to the previous revision stop verifying. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43510,6 +44235,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream P: local-first suspension of the caller's ACTIVE number — new caller-identity / SMS-sender grants and inbound resolutions are refused from that commit on, outstanding grants are revoked, the provider routes are disabled through the durable executor; ownership is retained; `number.suspended` is published. Idempotent. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -43589,6 +44315,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The open (else latest) suspension of the caller's assignment. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -43649,6 +44376,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "An internal transfer within the same legal owner (see TransferAssignmentRequest). A different legal owner — an organization's number to a person, a person's number to the employer or to another person — is CROSS_OWNER_TRANSFER_UNSUPPORTED and changes nothing (release / re-acquisition are Workstream Q). Requires scope `numbers.assign`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -43798,6 +44526,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "The supported countries of the caller's inventory class. Requires scope `numbers.search`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "200": {
@@ -43842,6 +44571,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "Number types / classes of a supported country with their capability metadata (generic catalog entries; provider applicability is internal). Requires scope `numbers.search`.",
         "parameters": [
           {
@@ -43902,6 +44632,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "Evaluate and record eligibility (never reserves or provisions). Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [],
         "responses": {
@@ -43972,6 +44703,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "A recorded eligibility decision of the caller's scope. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44041,6 +44773,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Open a KYC case (DRAFT) against the requirements in force; their snapshot is preserved on the case. Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44125,6 +44858,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "A KYC case with its missing requirements and evidence metadata. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44194,6 +44928,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Appeal a rejection or revocation (back to UNDER_REVIEW for a human reviewer). Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44286,6 +45021,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Attach protected evidence (a DRAFT case moves to EVIDENCE_REQUIRED). Refused (EVIDENCE_STORAGE_UNAVAILABLE) while no protected store is configured. Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44378,6 +45114,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "The immutable decision history and appeals of a case. Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44447,6 +45184,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.manage",
         "description": "Submit a case for verification (schedules one verification; an unknown verifier outcome is polled, never re-submitted). Requires scope `numbers.kyc.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44529,6 +45267,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.kyc.read",
         "description": "The KYC requirements in force (fail closed: KYC_REQUIREMENTS_UNKNOWN). Requires scope `numbers.kyc.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44619,6 +45358,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller scope's organizational pools. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "200": {
@@ -44667,6 +45407,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Create an organizational pool (names unique among active pools: POOL_EXISTS). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "responses": {
           "201": {
@@ -44736,6 +45477,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A pool with its current members (usage ASSIGNED while routed, AVAILABLE while unrouted). Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44796,6 +45538,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Add an organization-owned assignment of the scope (POOL_MEMBER_NOT_ORGANIZATIONAL otherwise; an assignment is in at most one pool: POOL_MEMBER_EXISTS). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44875,6 +45618,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "End a current membership (kept as history). Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -44946,6 +45690,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream U: the caller's port requests. Requires scope `numbers.read`.",
         "parameters": [],
         "responses": {
@@ -44992,6 +45737,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream U (NUMBERING_PORTING_ENABLED, else PORTING_DISABLED): a port-in / port-out request with its eligibility check (ownership evidence, KYC, gateway support). Port-out never touches routing before authoritative completion. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45076,6 +45822,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A port request of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -45136,6 +45883,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Cancels a request that was not submitted. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45205,6 +45953,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Adds ownership evidence to a DOCUMENTS_REQUIRED request and re-checks it. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45284,6 +46033,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Submits an eligible request once (an uncertain submission is UNKNOWN_PROVIDER_STATE, resolved by status queries, never resubmitted). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45353,6 +46103,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.assign",
         "description": "Workstream Q: reassignment of a REASSIGNABLE number to the caller (see ReassignmentRequest); the new owner's eligibility, a provider read-back, fresh routes. Requires scope `numbers.assign`.",
         "parameters": [
           {
@@ -45437,6 +46188,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "A release request of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -45497,6 +46249,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "The caller's reservations, newest first. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -45577,6 +46330,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Reserve a number (202: PENDING until the provider hold is confirmed; poll GET /v1/numbers/reservations/{reservationId}). In order: the number is in the caller's inventory class, allocatable with a fresh offer, every requested capability supported; the eligibility basis is a recorded ELIGIBLE decision of the caller's scope for this number's country / type / capabilities (PRODUCTION always), or a pre-eligibility hold where policy permits (SANDBOX / TEST); one transaction then records the scoped idempotency key, the PENDING reservation and the durable RESERVE provider command. Concurrent claims of one number: exactly one wins (others PRECONDITION_FAILED / NOT_ALLOCATABLE, never an oracle on another scope). A provider timeout after possible execution is reconciled from read-back, never retried blindly. Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45668,6 +46422,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "One reservation of the caller's scope, with its hold basis, conversion and provider release state. Requires scope `numbers.read`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -45728,6 +46483,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Cancel a HELD reservation of the caller's scope. A provider hold is never assumed released: the reservation is CANCELLED with providerReleaseState PENDING and a RELEASE_HOLD command gives the hold back (the number returns to inventory only on the provider's evidence or a read-back). A reservation whose hold is still being requested is RESERVATION_BUSY (409); one whose outcome is uncertain is RECONCILIATION_REQUIRED. Requires scope `numbers.manage`. The tenant / application / environment come only from Platform Access's authority chain; other scopes' records are NOT_FOUND.",
         "parameters": [
           {
@@ -45794,6 +46550,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream T: an explainable risk decision of the caller's scope. Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -45854,6 +46611,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.manage",
         "description": "Workstream T: an appeal (appended, PENDING until an operator decides). Requires scope `numbers.manage`.",
         "parameters": [
           {
@@ -45933,6 +46691,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.search",
         "description": "Provider-neutral inventory search of the caller's inventory class (SANDBOX / TEST: synthetic test inventory only; PRODUCTION: real inventory only, a real provider consulted only when live telecom is allowed). Results are observations with freshness, never reservations; reserved, assigned, quarantined or uncertain numbers never appear. The first page of a query may refresh the providers (at most once per query and interval). Bounded: a country is required, pages hold at most 50 results, and each application environment has a per-minute search quota (429 RATE_LIMITED with Retry-After). Requires scope `numbers.search`.",
         "parameters": [
           {
@@ -46062,6 +46821,7 @@
             "numbering.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "numbers.read",
         "description": "Workstream S: the caller's usage per number and kind in [from, to) — quantities only (provider costs are internal evidence, never prices). Requires scope `numbers.read`.",
         "parameters": [
           {
@@ -47733,7 +48493,6 @@
             ]
           }
         ],
-        "x-cfmeet-required-scope": "each requested privacy.contacts.* scope",
         "requestBody": {
           "required": true,
           "content": {
@@ -50388,6 +51147,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "Messages of the environment, newest first (scope sms.read), optionally of one number (`numberResourceId`) or direction.",
         "parameters": [
           {
@@ -50470,6 +51230,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.send",
         "description": "Sends ONE message (scope sms.send, Idempotency-Key required). Validation, segmentation (CONTENT_TOO_LONG above 10 segments), the safety controls (SMS_BLOCKED with a reason, recorded; 429 RATE_LIMITED for rate windows, not recorded), Numbering's single-use SMS_SENDER grant (an arbitrary sender id is impossible; refusal = SMS_BLOCKED SENDER_NOT_AUTHORIZED; Numbering unreachable = 503 NUMBERING_UNAVAILABLE, nothing recorded), then a durable AUTHORIZED transport submitted by the dispatcher. 202 with the message; the same key replays it (200).",
         "parameters": [
           {
@@ -50554,6 +51315,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "One message of the credential's environment (scope sms.read). Another environment's message is NOT_FOUND. Content is returned to its owner only; the remote party is masked.",
         "parameters": [
           {
@@ -50611,6 +51373,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.send",
         "description": "Blocks a recipient for one number or the whole environment (scope sms.send). Idempotent.",
         "requestBody": {
           "required": true,
@@ -50668,6 +51431,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "Transport threads of the environment, most recent first (scope sms.read).",
         "parameters": [
           {
@@ -50744,6 +51508,7 @@
             "sms.customerCredential": []
           }
         ],
+        "x-cfmeet-required-scope": "sms.read",
         "description": "The messages of one thread, newest first (scope sms.read).",
         "parameters": [
           {
@@ -53908,6 +54673,7 @@
           "actorKind",
           "actorServiceAccountId",
           "actorCredentialId",
+          "actorPrincipalId",
           "resourceType",
           "resourceId",
           "operation",
@@ -53942,6 +54708,17 @@
             ]
           },
           "actorCredentialId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorPrincipalId": {
+            "description": "The acting human member's principal (in this scope) when a first-party organization request forwarded by the Meeting Service made the change; null for API credentials, the operator CLI and Calling workers.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
@@ -59435,7 +60212,7 @@
             "$ref": "#/components/schemas/communications.BackendCapability"
           },
           "messaging": {
-            "$ref": "#/components/schemas/communications.BackendCapability"
+            "$ref": "#/components/schemas/communications.MessagingCapability"
           },
           "contacts": {
             "type": "object",
@@ -60420,7 +61197,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "USER_REQUESTED, COMPROMISED, OPERATOR, OWNER_SERVICE or ACCOUNT_SESSION_ENDED (1.2.0: the sign-in that linked the device ended)."
           },
           "version": {
             "type": "integer"
@@ -60428,6 +61206,19 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "accountSession": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.2.0: whether the device is bound to the CF Meet sign-in (account session) that linked it. Signing that session out (POST /api/v2/me/sessions/{sessionId}/revoke, logout) revokes the device; revoking the device signs that session out. The session reference itself is never shown.",
+            "properties": {
+              "bound": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bound"
+            ]
           }
         },
         "required": [
@@ -60503,7 +61294,8 @@
           },
           "effects": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Revocation effects: messagingDevice, callingEndpoint and accountSession (ENDED: the bound sign-in was signed out; NOT_BOUND; UNCHANGED: no Account relay ended it)."
           }
         },
         "required": [
@@ -61142,6 +61934,92 @@
           "meetingCode"
         ]
       },
+      "communications.MessagingCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never implies. With a Messaging version that does not report MANAGED, `available` keeps the 1.1.0 meaning (E2EE readiness) and `managed.available` is false.",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "AVAILABLE",
+              "DISABLED",
+              "MANAGED_NOT_ALLOWED",
+              "DEVICE_SECURITY_SETUP_REQUIRED",
+              "BACKEND_UNAVAILABLE",
+              "ACCOUNT_INACTIVE"
+            ]
+          },
+          "securityReady": {
+            "type": "boolean"
+          },
+          "managed": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "MANAGED_NOT_ALLOWED",
+                  "BACKEND_UNAVAILABLE",
+                  "ACCOUNT_INACTIVE"
+                ]
+              },
+              "realtime": {
+                "type": "string",
+                "enum": [
+                  "SESSION_DEVICE",
+                  "POLLING",
+                  "NONE"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason",
+              "realtime"
+            ]
+          },
+          "privateE2ee": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "DEVICE_SECURITY_SETUP_REQUIRED",
+                  "BACKEND_UNAVAILABLE",
+                  "ACCOUNT_INACTIVE"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "securityReady",
+          "managed",
+          "privateE2ee"
+        ]
+      },
       "communications.NotificationPreferences": {
         "type": "object",
         "additionalProperties": false,
@@ -61299,7 +62177,7 @@
           "status": {
             "type": "string",
             "enum": [
-              "DEFERRED"
+              "PROVIDER_BLOCKED"
             ]
           },
           "required": {
@@ -61312,7 +62190,8 @@
         "required": [
           "status",
           "required"
-        ]
+        ],
+        "description": "Phone verification is provider-gated (ADR 0056 section 8): PROVIDER_BLOCKED until an SMS or verification provider is approved, never required. The same canonical label as the account profile (GET /api/v2/me/profile); DEFERRED was retired in 1.3.0."
       },
       "communications.Privacy": {
         "type": "object",
@@ -62647,6 +63526,8 @@
           "rotatedFromCredentialId",
           "supersededByCredentialId",
           "supersessionValidUntil",
+          "lastAuthenticatedAt",
+          "expiringSoon",
           "createdAt",
           "updatedAt",
           "limits"
@@ -62823,6 +63704,29 @@
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAuthenticatedAt": {
+            "description": "Section 15 (PLT-008): when the credential last authenticated successfully, as recorded by Platform Access (debounced: may lag real use by up to 5 minutes); null when never seen since last-use tracking began.",
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiringSoon": {
+            "description": "Section 15 (PLT-008): true when the credential stops authenticating (expiry, or the end of its rotation overlap) within 14 days — rotate it now. Null only from an older identity authority.",
+            "oneOf": [
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"
@@ -66093,6 +66997,8 @@
           "credential.created",
           "credential.rotated",
           "credential.revoked",
+          "credential.expiring_soon",
+          "credential.expired",
           "production_access.requested",
           "production_access.approved",
           "production_access.rejected"
@@ -66397,6 +67303,196 @@
           }
         },
         "additionalProperties": false
+      },
+      "meetings.AgendaItem": {
+        "type": "object",
+        "description": "One occurrence on the caller's agenda.",
+        "required": [
+          "occurrenceKey",
+          "meetingSpaceId",
+          "materialized",
+          "view",
+          "status",
+          "kind",
+          "scheduledStartAt",
+          "isException",
+          "relations",
+          "meetingSpace"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The conference id; null for a recurring occurrence beyond the materialization\nhorizon (it becomes a conference later, under the same `occurrenceKey`)."
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "isException": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/meetings.ConferenceKind"
+          },
+          "materialized": {
+            "type": "boolean",
+            "description": "False for an occurrence computed from the recurrence rule (not yet materialized)."
+          },
+          "meetingSpace": {
+            "$ref": "#/components/schemas/meetings.AgendaSpace"
+          },
+          "meetingSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurrenceKey": {
+            "type": "string",
+            "description": "Stable occurrence identity within the meeting space (unchanged by materialization)."
+          },
+          "originalStartAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/meetings.AgendaRelation"
+            }
+          },
+          "scheduledEndAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scheduledStartAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "FULL view only."
+          },
+          "status": {
+            "$ref": "#/components/schemas/meetings.ConferenceStatus"
+          },
+          "view": {
+            "$ref": "#/components/schemas/meetings.ResourceView"
+          },
+          "viewerRole": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/meetings.Role"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "meetings.AgendaRelation": {
+        "type": "string",
+        "description": "Why an occurrence is on the caller's agenda.",
+        "enum": [
+          "OWNER",
+          "MEMBER",
+          "INVITEE",
+          "REGISTRANT",
+          "PARTICIPANT",
+          "ORGANIZATION"
+        ]
+      },
+      "meetings.AgendaResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/meetings.AgendaItem"
+            },
+            "description": "Ordered by scheduled start, then meeting space, then occurrence key."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `cursor` for the next page; null on the last page."
+          }
+        }
+      },
+      "meetings.AgendaSpace": {
+        "type": "object",
+        "description": "Meeting-space fields an agenda entry may show.",
+        "required": [
+          "meetingCode",
+          "meetingType",
+          "status",
+          "timezone",
+          "accessPolicy",
+          "requiresPasscode"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/meetings.AccessPolicy"
+          },
+          "meetingCode": {
+            "type": "string"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/meetings.MeetingType"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "FULL view only."
+          },
+          "requiresPasscode": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/meetings.SpaceStatus"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone of the meeting: show times in this zone and in the viewer's zone."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space."
+          }
+        }
       },
       "meetings.AnnouncementResponse": {
         "type": "object",
@@ -68134,6 +69230,13 @@
               }
             ]
           },
+          "sendEmail": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Blueprint Section 11: also email the invitation link to `inviteeEmail` (required\nwith this flag). The result is reported in `emailDelivery`. Default false."
+          },
           "useLimit": {
             "type": [
               "integer",
@@ -68151,6 +69254,20 @@
           "token"
         ],
         "properties": {
+          "emailDelivery": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/meetings.EmailDelivery"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "invitation": {
             "$ref": "#/components/schemas/meetings.InvitationResponse"
           },
@@ -68504,6 +69621,15 @@
         },
         "additionalProperties": false
       },
+      "meetings.EmailDelivery": {
+        "type": "string",
+        "description": "What happened to a requested invitation email.",
+        "enum": [
+          "DISABLED",
+          "ACCEPTED",
+          "FAILED"
+        ]
+      },
       "meetings.ErrorBody": {
         "type": "object",
         "required": [
@@ -68541,6 +69667,7 @@
         "description": "Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).",
         "enum": [
           "MEETING_NOT_FOUND",
+          "SESSION_NOT_FOUND",
           "MEETING_ACCESS_DENIED",
           "MEETING_PASSCODE_REQUIRED",
           "MEETING_PASSCODE_INVALID",
@@ -68624,6 +69751,25 @@
           "CHAT_UNAVAILABLE",
           "CHAT_MIGRATION_REFUSED",
           "SERVICE_UNAVAILABLE",
+          "ORGANIZATION_NOT_FOUND",
+          "MEMBERSHIP_REQUIRED",
+          "ORGANIZATION_SUSPENDED",
+          "ORGANIZATION_ARCHIVED",
+          "LAST_OWNER",
+          "VERSION_CONFLICT",
+          "SLUG_TAKEN",
+          "INVITE_EXPIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROVISIONING_PENDING",
+          "INVITATION_REQUIRED",
+          "ORGANIZATION_POLICY_RESTRICTED",
+          "TEAM_NOT_FOUND",
+          "TEAM_ARCHIVED",
+          "TEAM_NAME_TAKEN",
+          "ORGANIZATION_CALLING_DISABLED",
+          "USERNAME_TAKEN",
+          "REAUTHENTICATION_REQUIRED",
+          "EMAIL_VERIFICATION_REQUIRED",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -69405,6 +70551,13 @@
             "items": {
               "$ref": "#/components/schemas/meetings.MeetingSpaceResponse"
             }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present only on paginated requests (`limit` or `cursor` sent) when another page\nexists: pass it back as `cursor`."
           }
         }
       },
@@ -70007,6 +71160,13 @@
         "properties": {
           "organization": {
             "$ref": "#/components/schemas/meetings.OrganizationResponse"
+          },
+          "organizationRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Once the Organizations Service is authoritative: the caller's full role (OWNER,\nADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER."
           },
           "role": {
             "$ref": "#/components/schemas/meetings.OrganizationRole"
@@ -72082,11 +73242,21 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "description": "New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays\nstart-only). At most 24 hours after the start."
           },
           "scheduledStartAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "New start; more than 5 minutes in the past is rejected."
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional optimistic-concurrency guard: the conference `version` last read."
           }
         },
         "additionalProperties": false
@@ -73228,6 +74398,273 @@
           },
           "withdrawalMode": {
             "$ref": "#/components/schemas/meetings.WithdrawalMode"
+          }
+        }
+      },
+      "meetings.Workspace": {
+        "type": "object",
+        "description": "One workspace context of the caller.",
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/meetings.WorkspaceCapabilitySummary"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "`Personal`, or the organization name."
+          },
+          "id": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/meetings.WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "ORGANIZATION only."
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;\nnull for PERSONAL and when the legacy directory answers (no provisioning there)."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows\nOWNER, ADMIN and MEMBER). ORGANIZATION only."
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ORGANIZATION only."
+          }
+        }
+      },
+      "meetings.WorkspaceAuthority": {
+        "type": "string",
+        "description": "Which store answered: the meeting-service organization directory\n(`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service\n(authoritative).",
+        "enum": [
+          "LEGACY_DIRECTORY",
+          "ORGANIZATIONS_SERVICE"
+        ]
+      },
+      "meetings.WorkspaceCapabilities": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces/{workspaceId}/capabilities`.",
+        "required": [
+          "workspaceId",
+          "kind",
+          "authority",
+          "features",
+          "capabilities",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/meetings.WorkspaceAuthority"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/meetings.WorkspaceCapability"
+            },
+            "description": "Every capability of the vocabulary with its decision."
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the answer was computed (it is never cached server-side)."
+          },
+          "features": {
+            "$ref": "#/components/schemas/meetings.WorkspaceFeatures"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/meetings.WorkspaceKind"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organizationStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personalCommunicationsCapabilities": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PERSONAL only: the Communications Hub read that owns personal communications\ncapabilities (`/api/v2/communications/me/capabilities`)."
+          },
+          "policyRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Organization policy revision the answer was computed with (Organizations Service)."
+          },
+          "provisioningState": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "description": "`personal`, or the organization id."
+          }
+        }
+      },
+      "meetings.WorkspaceCapability": {
+        "type": "object",
+        "description": "One capability decision.",
+        "required": [
+          "capability",
+          "granted",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "description": "Capability name, e.g. `meetings.organization.create`."
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/meetings.WorkspaceCapabilityReason"
+          }
+        }
+      },
+      "meetings.WorkspaceCapabilityReason": {
+        "type": "string",
+        "description": "Why a capability is (not) granted in a workspace.",
+        "enum": [
+          "ALLOWED",
+          "CAPABILITY_NOT_GRANTED",
+          "POLICY_RESTRICTED",
+          "ORGANIZATION_SUSPENDED",
+          "FEATURE_DISABLED"
+        ]
+      },
+      "meetings.WorkspaceCapabilitySummary": {
+        "type": "object",
+        "description": "A small summary of what the caller can do in a workspace.",
+        "required": [
+          "granted",
+          "canCreateMeetings",
+          "canInviteMembers",
+          "canAdminister"
+        ],
+        "properties": {
+          "canAdminister": {
+            "type": "boolean",
+            "description": "Organization administration: profile, member management or policies."
+          },
+          "canCreateMeetings": {
+            "type": "boolean",
+            "description": "Meetings can be created in this context."
+          },
+          "canInviteMembers": {
+            "type": "boolean",
+            "description": "Members can be invited (`organization.members.invite`)."
+          },
+          "granted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every capability granted now (default deny)."
+          }
+        }
+      },
+      "meetings.WorkspaceFeatures": {
+        "type": "object",
+        "description": "Features the workspace context does not disable. Owner services still apply their\nown policy (stricter wins) and re-verify every request.",
+        "required": [
+          "meetings",
+          "messaging",
+          "calling"
+        ],
+        "properties": {
+          "calling": {
+            "type": "boolean"
+          },
+          "meetings": {
+            "type": "boolean"
+          },
+          "messaging": {
+            "type": "boolean"
+          }
+        }
+      },
+      "meetings.WorkspaceKind": {
+        "type": "string",
+        "description": "Kind of workspace context.",
+        "enum": [
+          "PERSONAL",
+          "ORGANIZATION"
+        ]
+      },
+      "meetings.WorkspacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/me/workspaces`.",
+        "required": [
+          "items",
+          "authority"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/meetings.WorkspaceAuthority"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/meetings.Workspace"
+            },
+            "description": "PERSONAL first, then organizations ordered by id."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `cursor` for the next page; null on the last page."
           }
         }
       },
@@ -75145,6 +76582,34 @@
               }
             ],
             "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
+          },
+          "title": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group)."
+          },
+          "avatarRef": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches."
+          },
+          "inbox": {
+            "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationInbox"
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -75249,6 +76714,97 @@
         ],
         "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117)."
       },
+      "messaging.messaging.common.v1.ConversationInbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lastActivityAt",
+          "lastMessage",
+          "unreadCount",
+          "mentionCount"
+        ],
+        "description": "Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content.",
+        "properties": {
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The latest application message (or the creation time); the key of orderBy=lastActivity."
+          },
+          "lastMessage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationLastMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Active application messages from others after the member's read cursor, inside its history window, not hidden for it."
+          },
+          "mentionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+          }
+        }
+      },
+      "messaging.messaging.common.v1.ConversationLastMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "sequence",
+          "senderPrincipalId",
+          "createdAt",
+          "lifecycle",
+          "securityProfile",
+          "attachmentCount",
+          "previewText"
+        ],
+        "description": "Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured).",
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "senderPrincipalId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/messaging.messaging.common.v1.MessageLifecycle"
+          },
+          "securityProfile": {
+            "$ref": "#/components/schemas/messaging.messaging.common.v1.SecurityProfile"
+          },
+          "attachmentCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "previewText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 140
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones."
+          }
+        }
+      },
       "messaging.messaging.common.v1.ConversationPage": {
         "type": "object",
         "additionalProperties": false,
@@ -75268,7 +76824,8 @@
             "oneOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_-]+$"
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "description": "Opaque; valid only with the same orderBy."
               },
               {
                 "type": "null"
@@ -75336,6 +76893,17 @@
             "type": "string",
             "pattern": "^CF-[A-Z2-7]{26}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Section 13: display title (MANAGED only; PRIVATE_E2EE refuses it with CONTENT_REJECTED / DISPLAY_METADATA_MANAGED_ONLY)."
+          },
+          "avatarRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$",
+            "description": "Section 13: opaque avatar reference (MANAGED only)."
           }
         },
         "description": "A tenant / application / environment is never part of a request: it comes from the authenticated credential.",
@@ -78948,6 +80516,15 @@
           },
           "replyToMessageId": {
             "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "mentionedPrincipalIds": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            },
+            "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
           }
         },
         "required": [
@@ -79566,6 +81143,31 @@
             "minimum": 60,
             "maximum": 3153600000,
             "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
+          },
+          "title": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: a new display title; null clears it (MANAGED only, owner)."
+          },
+          "avatarRef": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: a new avatar reference; null clears it (MANAGED only, owner)."
           }
         },
         "description": "Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE)."

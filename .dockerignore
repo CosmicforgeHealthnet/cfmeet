@@ -1,6 +1,7 @@
 # Repository-root Docker context for the Meeting Service image.
 # Send only the Meeting Service, canonical OpenAPI contracts and the shared packages it
-# builds against (service-auth, usage-facts; messaging-crypto is a test-only path dependency).
+# builds against (service-auth, usage-facts, object-storage; messaging-crypto is a test-only
+# path dependency).
 *
 !services/
 !services/meeting-service/
@@ -12,8 +13,12 @@
 !packages/communications-policy/**
 !packages/service-auth/
 !packages/service-auth/**
+!packages/migration-guard/
+!packages/migration-guard/**
 !packages/usage-facts/
 !packages/usage-facts/**
+!packages/object-storage/
+!packages/object-storage/**
 !packages/messaging-crypto/
 !packages/messaging-crypto/**
 

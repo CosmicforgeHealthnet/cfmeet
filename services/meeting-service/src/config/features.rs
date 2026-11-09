@@ -36,6 +36,49 @@ pub(crate) fn parse_allowlist(raw: &str) -> Option<HashSet<Uuid>> {
     (!ids.is_empty()).then_some(ids)
 }
 
+/// What a legacy v1 meeting create (`POST /api/v1/meetings`, `/api/v1/meetings/instant`,
+/// `/api/v1/api/meetings`) does — `FEATURE_LEGACY_MEETING_CREATE_MODE`, Blueprint v1.0
+/// Section 16 (MTG-017 / DATA-008).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LegacyMeetingCreateMode {
+    /// Default: the legacy row is created as before and mirrored into v2 at once through
+    /// the existing idempotent `phase2_backfill` (single-meeting mode), so the v2
+    /// resolver, agenda and admin views see it without waiting for a lazy resolve. The
+    /// mirrored conference stays legacy-managed: it is joined through the legacy join
+    /// routes, as before. Updates and ends refresh the mirror the same way.
+    #[default]
+    Mirror,
+    /// New legacy creates answer `410 LEGACY_WRITE_DISABLED` pointing to `/api/v2`.
+    /// Existing legacy meetings keep their reads, updates and joins.
+    Refuse,
+}
+
+impl LegacyMeetingCreateMode {
+    /// `mirror` (default) or `refuse`; anything else falls back to `mirror` with a warning
+    /// (an unknown value never silently refuses creates).
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|v| v.trim().to_ascii_lowercase()) {
+            None => Self::Mirror,
+            Some(v) if v.is_empty() || v == "mirror" => Self::Mirror,
+            Some(v) if v == "refuse" => Self::Refuse,
+            Some(v) => {
+                tracing::warn!(
+                    value = %v,
+                    "FEATURE_LEGACY_MEETING_CREATE_MODE: unknown value, using 'mirror'"
+                );
+                Self::Mirror
+            }
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mirror => "mirror",
+            Self::Refuse => "refuse",
+        }
+    }
+}
+
 /// All flags default to off (rollout-safe).
 #[derive(Debug, Clone, Default)]
 pub struct FeatureFlags {
@@ -65,6 +108,9 @@ pub struct FeatureFlags {
     /// every state-changing `/api/v1` meeting / participant / chat / third-party meeting
     /// route answers `410 LEGACY_WRITE_DISABLED`; legacy reads and `/api/v2` keep working.
     pub legacy_meeting_write_disabled: bool,
+    /// Legacy v1 create behaviour (`FEATURE_LEGACY_MEETING_CREATE_MODE`, default `mirror`).
+    /// `legacy_meeting_write_disabled` still takes precedence (410 for every legacy write).
+    pub legacy_meeting_create_mode: LegacyMeetingCreateMode,
 }
 
 impl FeatureFlags {
@@ -94,6 +140,11 @@ impl FeatureFlags {
             intelligence_v2_enabled: env_bool("FEATURE_INTELLIGENCE_V2_ENABLED", false),
             quality_telemetry_enabled: env_bool("FEATURE_QUALITY_TELEMETRY_ENABLED", false),
             legacy_meeting_write_disabled: legacy_write_disabled,
+            legacy_meeting_create_mode: LegacyMeetingCreateMode::parse(
+                std::env::var("FEATURE_LEGACY_MEETING_CREATE_MODE")
+                    .ok()
+                    .as_deref(),
+            ),
         }
     }
 
@@ -145,6 +196,8 @@ pub struct MeetingV2Config {
     /// Parts G–I: artefact storage / recording / quality tunables.
     pub artifacts: super::operations::ArtifactConfig,
     pub quality: super::operations::QualityConfig,
+    /// Blueprint Section 11 notifications (all off by default).
+    pub notifications: super::notifications::NotificationConfig,
 }
 
 impl Default for MeetingV2Config {
@@ -165,6 +218,7 @@ impl Default for MeetingV2Config {
             reconciler_presence_grace_secs: 30,
             artifacts: super::operations::ArtifactConfig::default(),
             quality: super::operations::QualityConfig::default(),
+            notifications: super::notifications::NotificationConfig::default(),
         }
     }
 }
@@ -214,6 +268,7 @@ impl MeetingV2Config {
             .max(0),
             artifacts: super::operations::ArtifactConfig::from_env(),
             quality: super::operations::QualityConfig::from_env(),
+            notifications: super::notifications::NotificationConfig::from_env(),
         }
     }
 }
@@ -221,6 +276,29 @@ impl MeetingV2Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_create_mode_defaults_to_mirror_and_never_refuses_by_accident() {
+        assert_eq!(
+            FeatureFlags::default().legacy_meeting_create_mode,
+            LegacyMeetingCreateMode::Mirror
+        );
+        assert_eq!(
+            LegacyMeetingCreateMode::parse(None),
+            LegacyMeetingCreateMode::Mirror
+        );
+        assert_eq!(
+            LegacyMeetingCreateMode::parse(Some(" Refuse ")),
+            LegacyMeetingCreateMode::Refuse
+        );
+        for v in ["", "mirror", "MIRROR", "off", "true", "refused"] {
+            assert_eq!(
+                LegacyMeetingCreateMode::parse(Some(v)),
+                LegacyMeetingCreateMode::Mirror,
+                "{v:?}"
+            );
+        }
+    }
 
     #[test]
     fn defaults_are_rollout_safe() {

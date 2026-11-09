@@ -21,6 +21,7 @@ on:
       - "certification/**"
       - "services/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - "packages/usage-facts/**"
       - "packages/messaging-crypto/**"
       - "packages/contracts/**"
@@ -35,6 +36,7 @@ on:
       - "certification/**"
       - "services/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - "packages/usage-facts/**"
       - "packages/messaging-crypto/**"
       - "packages/contracts/**"
@@ -137,6 +139,7 @@ jobs:
             services/numbering -> target
             services/sms-gateway -> target
             services/privacy-relay -> target
+            services/organizations -> target
             certification -> target
           key: journeys
       - name: Build every service binary (each service is its own cargo workspace)
@@ -145,7 +148,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$CFMEET_BIN_DIR"
           for s in platform-access developer-platform api-gateway meeting-service calling \
-                   messaging numbering sms-gateway privacy-relay; do
+                   messaging numbering sms-gateway privacy-relay organizations; do
             echo "::group::$s"
             (cd "services/$s" && cargo build --workspace --bins --locked)
             find "services/$s/target/debug" -maxdepth 1 -type f -executable \

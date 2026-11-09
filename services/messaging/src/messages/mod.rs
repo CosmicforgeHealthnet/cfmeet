@@ -21,6 +21,7 @@ pub mod e2ee;
 pub mod http;
 pub mod keys;
 pub mod managed;
+pub mod receipts;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
@@ -275,6 +276,142 @@ pub struct SendRequest {
     /// A reply to this earlier message of the conversation (thread metadata, ids only).
     #[serde(default)]
     pub reply_to_message_id: Option<Uuid>,
+    /// Section 13 (MSG-007), MANAGED only: current members this message mentions (ids
+    /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
+    #[serde(default)]
+    pub mentioned_principal_ids: Vec<Uuid>,
+}
+
+/// Most principals one message may mention.
+pub const MAX_MENTIONS: usize = 50;
+
+/// The distinct principals a MANAGED message mentions: current ACTIVE members other than
+/// the sender (anyone else is refused, so mentions never probe who exists).
+pub(crate) async fn mentions_of<C: ConnectionTrait>(
+    db: &C,
+    conversation: &ConversationRow,
+    sender: Uuid,
+    requested: &[Uuid],
+) -> Result<Vec<Uuid>> {
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
+    if conversation.profile() != SecurityProfile::Managed {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "MENTIONS_MANAGED_ONLY",
+        ));
+    }
+    let mut wanted: Vec<Uuid> = requested.iter().copied().filter(|p| *p != sender).collect();
+    wanted.sort();
+    wanted.dedup();
+    if wanted.len() > MAX_MENTIONS {
+        return Err(Error::validation(format!(
+            "at most {MAX_MENTIONS} mentionedPrincipalIds"
+        )));
+    }
+    let members = db::scalar_i64(
+        db,
+        "SELECT count(*) FROM messaging_conversation_members WHERE conversation_id = $1 \
+           AND principal_id = ANY($2) AND state = 'ACTIVE'",
+        vec![conversation.id.into(), wanted.clone().into()],
+    )
+    .await?;
+    if members != wanted.len() as i64 {
+        return Err(Error::validation(
+            "mentionedPrincipalIds must name current members of the conversation",
+        ));
+    }
+    Ok(wanted)
+}
+
+/// Records a new message's mentions (same transaction as the message).
+pub(crate) async fn record_mentions<C: ConnectionTrait>(
+    db: &C,
+    row: &MessageRow,
+    mentions: &[Uuid],
+) -> Result<()> {
+    if mentions.is_empty() {
+        return Ok(());
+    }
+    db::exec(
+        db,
+        "INSERT INTO messaging_message_mentions (message_id, conversation_id, principal_id, created_at) \
+         SELECT $1, $2, p, $3 FROM unnest($4::uuid[]) AS p ON CONFLICT DO NOTHING",
+        vec![
+            row.id.into(),
+            row.conversation_id.into(),
+            row.created_at.into(),
+            mentions.to_vec().into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// MSG-019: an idempotent retry (same `clientMessageId`) is answered before any rate
+/// limit or abuse signal is charged, and only when it repeats the original payload: a
+/// different text or a different attachment set is `IDEMPOTENCY_KEY_REUSED`, never the
+/// original silently returned. Only current members get an answer (anything else falls
+/// through to the full send path and its errors). PRIVATE_E2EE retries keep their
+/// ciphertext comparison in [`e2ee::send`].
+async fn send_replay(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    conversation_id: Uuid,
+    request: &SendRequest,
+) -> Result<Option<(u16, Value)>> {
+    let Ok((conversation, _)) =
+        access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await
+    else {
+        return Ok(None);
+    };
+    if conversation.profile() != SecurityProfile::Managed {
+        return Ok(None);
+    }
+    let Some(text) = request.text.clone() else {
+        return Ok(None);
+    };
+    let Some(existing) = load_by_client_id(
+        &state.db,
+        conversation.id,
+        acting.principal_id,
+        request.client_message_id,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    same_attachments(&state.db, &existing, &request.attachment_ids).await?;
+    managed::same_text(state, &existing, managed::admit(text)?.text()).await?;
+    Ok(Some((200, render(state, &existing, false).await)))
+}
+
+/// The retry names exactly the original attachment set (order-insensitive). A tombstone
+/// has no content left to compare and answers with itself.
+pub(crate) async fn same_attachments<C: ConnectionTrait>(
+    db: &C,
+    existing: &MessageRow,
+    requested: &[Uuid],
+) -> Result<()> {
+    if !existing.is_active() {
+        return Ok(());
+    }
+    let mut stored = if existing.attachment_count > 0 {
+        crate::attachments::message_attachment_ids(db, existing.id).await?
+    } else {
+        Vec::new()
+    };
+    let mut wanted = requested.to_vec();
+    stored.sort();
+    wanted.sort();
+    wanted.dedup();
+    if stored == wanted {
+        Ok(())
+    } else {
+        Err(Error::code(ErrorCode::IdempotencyKeyReused))
+    }
 }
 
 /// Checks shared by both profiles, before the transaction: membership, lifecycle,
@@ -476,8 +613,19 @@ async fn send_checked(
     if request.client_message_id.is_nil() {
         return Err(Error::validation("clientMessageId must not be nil"));
     }
+    if let Some(replayed) = send_replay(state, ctx, acting, conversation_id, &request).await? {
+        return Ok(replayed);
+    }
     let (conversation, _member, effective) =
         send_prelude(state, ctx, acting, conversation_id).await?;
+    if !request.mentioned_principal_ids.is_empty()
+        && conversation.profile() != SecurityProfile::Managed
+    {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "MENTIONS_MANAGED_ONLY",
+        ));
+    }
     if !request.attachment_ids.is_empty() {
         crate::attachments::check_message_attachments(
             state,
@@ -857,7 +1005,7 @@ pub async fn set_read_cursor(
     let st = state.clone();
     let ctx = ctx.clone();
     let acting = acting.clone();
-    let request_ctx = request_context();
+    let window = state.realtime.settings.receipt_window.as_secs_f64();
     state
         .db
         .transaction::<_, Value, Error>(move |txn| {
@@ -890,6 +1038,7 @@ pub async fn set_read_cursor(
                     acting.principal_id,
                     current,
                     effective.privacy.delivery_receipts,
+                    window,
                     now,
                 )
                 .await?;
@@ -918,18 +1067,16 @@ pub async fn set_read_cursor(
                     )
                     .await?
                         == 0;
+                // MSG-018: coalesced per reader (one event per window, highest cursor).
                 if shares && current == request.sequence {
-                    outbox::enqueue_conversation(
+                    receipts::record(
                         txn,
+                        window,
+                        receipts::ReceiptKind::Read,
+                        scope_of(&ctx),
                         conversation.id,
-                        NewEvent {
-                            event_type: "messaging.read-cursor.updated",
-                            aggregate_type: "CONVERSATION",
-                            aggregate_id: conversation.id,
-                            scope: scope_of(&ctx),
-                            payload: json!({ "principal_id": acting.principal_id, "read_sequence": current }),
-                        },
-                        &request_ctx,
+                        acting.principal_id,
+                        current,
                         now,
                     )
                     .await?;
@@ -943,8 +1090,10 @@ pub async fn set_read_cursor(
 
 /// Advances a member's delivery cursor (§52: DELIVERED once a session acknowledged the
 /// message or the member synchronized past it) and, when the policy shares delivery
-/// receipts, records `messaging.delivery-cursor.updated` in the same transaction.
+/// receipts, records `messaging.delivery-cursor.updated` in the same transaction —
+/// coalesced per member inside `window_secs` (MSG-018, [`receipts`]).
 /// Returns the new delivered sequence when it moved.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     txn: &C,
     scope: crate::events::outbox::EventScope,
@@ -952,6 +1101,7 @@ pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     principal_id: Uuid,
     sequence: i64,
     share: bool,
+    window_secs: f64,
     now: DateTime<Utc>,
 ) -> Result<Option<i64>> {
     if sequence <= 0 {
@@ -969,17 +1119,15 @@ pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     .await?
     .map(|r| r.delivered_sequence);
     if let (Some(delivered), true) = (moved, share) {
-        outbox::enqueue_conversation(
+        // MSG-018: coalesced per member (one event per window, highest cursor).
+        receipts::record(
             txn,
+            window_secs,
+            receipts::ReceiptKind::Delivered,
+            scope,
             conversation_id,
-            NewEvent {
-                event_type: "messaging.delivery-cursor.updated",
-                aggregate_type: "CONVERSATION",
-                aggregate_id: conversation_id,
-                scope,
-                payload: json!({ "principal_id": principal_id, "delivered_sequence": delivered }),
-            },
-            &request_context(),
+            principal_id,
+            delivered,
             now,
         )
         .await?;

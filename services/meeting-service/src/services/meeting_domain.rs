@@ -20,7 +20,7 @@ use crate::{
         meeting_core::{AccessAdapterRegistry, AttemptLimiter, Core, DomainCore},
         meeting_space::MeetingSpaceService,
         membership::MembershipService,
-        organizations::{DbOrganizationDirectory, OrganizationService},
+        organizations::OrganizationService,
         recurrence::RecurrenceService,
         rtc_control::RtcControl,
         rtc_provider::{LiveKitProvider, RtcProvider},
@@ -34,6 +34,15 @@ pub struct MeetingDomainDeps {
     pub flags: FeatureFlags,
     pub config: MeetingV2Config,
     pub organizations: SharedOrganizationDirectory,
+    /// Blueprint Section 4: Organizations Service integration (`None` = legacy mode). The
+    /// directory above must be the one built for the same mode
+    /// ([`crate::services::organizations_authority::directory_for`]).
+    pub organization_authority:
+        Option<crate::services::organizations_authority::SharedOrganizationsAuthority>,
+    /// Blueprint Section 12 follow-up: per-organization Enterprise Calling relay
+    /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`, the default).
+    pub organization_calling:
+        Option<crate::services::organization_calling::SharedOrganizationCalling>,
     pub rtc: Arc<dyn RtcProvider>,
     pub adapters: AccessAdapterRegistry,
     /// HEALTHCARE_APPOINTMENT authority (denies everything until configured).
@@ -48,10 +57,26 @@ pub struct MeetingDomainDeps {
 
 impl MeetingDomainDeps {
     pub fn from_env(db: &DatabaseConnection, livekit: &LiveKitConfig) -> Self {
+        // Fail closed: `shadow` / `authoritative` without a working client stops startup.
+        let organization_authority =
+            crate::services::organizations_authority::OrganizationsAuthority::from_env()
+                .unwrap_or_else(|e| panic!("Organizations authority configuration error: {e}"));
+        // Fail closed: `ORGANIZATION_CALLING_SCOPE=organization` without a complete
+        // configuration stops startup; `shared` (default) constructs nothing.
+        let organization_calling =
+            crate::services::organization_calling::OrganizationCalling::from_env(
+                organization_authority.as_ref(),
+            )
+            .unwrap_or_else(|e| panic!("Organization Calling configuration error: {e}"));
         Self {
             flags: FeatureFlags::from_env(),
             config: MeetingV2Config::from_env(),
-            organizations: Arc::new(DbOrganizationDirectory::new(db.clone())),
+            organizations: crate::services::organizations_authority::directory_for(
+                db,
+                organization_authority.as_ref(),
+            ),
+            organization_authority,
+            organization_calling,
             rtc: Arc::new(LiveKitProvider::new(livekit)),
             adapters: AccessAdapterRegistry::default(),
             appointments: match HttpAppointmentAuthorizationAdapter::from_env() {
@@ -121,6 +146,8 @@ pub struct MeetingDomain {
     pub members: MembershipService,
     pub invitations: InvitationService,
     pub compat: CompatService,
+    /// Blueprint Section 10: agenda and ICS export (reads of the v2 scheduling store).
+    pub calendar: crate::services::calendar::CalendarService,
     pub organizations: OrganizationService,
     /// Part E RTC control plane (provider lifecycle, commands, mute).
     pub rtc: RtcControl,
@@ -171,6 +198,8 @@ impl MeetingDomain {
             flags: deps.flags,
             config: deps.config,
             organizations: deps.organizations,
+            organization_authority: deps.organization_authority,
+            organization_calling: deps.organization_calling,
             rtc: deps.rtc,
             adapters: deps.adapters,
             appointments: deps.appointments,
@@ -190,6 +219,7 @@ impl MeetingDomain {
             members: MembershipService::new(core.clone()),
             invitations: InvitationService::new(core.clone()),
             compat: CompatService::new(core.clone()),
+            calendar: crate::services::calendar::CalendarService::new(core.clone()),
             organizations: OrganizationService::new(core.clone()),
             rtc: RtcControl::new(core.clone()),
             rtc_webhooks: RtcWebhookService::new(core.clone()),

@@ -607,8 +607,22 @@ impl RtcControl {
         conference: &conference_sessions::Model,
         participant_id: Uuid,
     ) -> ApiResult<u32> {
+        // One sync per participant at a time. Every read below happens after the lock,
+        // so a sync that started from an older role can never push its grants to the
+        // provider after the sync for a newer role (two concurrent role changes would
+        // otherwise leave the provider on whichever push landed last). The lock is
+        // released when `serial` commits (or rolls back / drops), after the provider push.
+        // Reads use the same connection, so a sync holds one pooled connection at a time.
+        let serial = self.core.db.begin().await?;
+        serial
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT pg_advisory_xact_lock(hashtextextended('meeting_rtc_permissions:'||$1::text,0))",
+                [participant_id.into()],
+            ))
+            .await?;
         let participant =
-            find_scoped_participant(&self.core.db, conference.id, participant_id, false).await?;
+            find_scoped_participant(&serial, conference.id, participant_id, false).await?;
         if participant.admission_state != AdmissionState::Admitted
             || conference.status != ConferenceStatus::Live
         {
@@ -617,13 +631,13 @@ impl RtcControl {
         // Part F: the single effective projection (role ∧ policy ∧ locks), pushed to the
         // participant's current media context room (main or breakout).
         let permissions = crate::services::collaboration::media::effective_media_for(
-            &self.core.db,
+            &serial,
             conference,
             &participant,
         )
         .await?;
         let room = crate::services::collaboration::breakouts::media_context(
-            &self.core.db,
+            &serial,
             conference,
             &participant,
         )
@@ -635,7 +649,7 @@ impl RtcControl {
                 participant_sessions::Column::State
                     .is_in([SessionState::Pending, SessionState::Connected]),
             )
-            .all(&self.core.db)
+            .all(&serial)
             .await?;
         let mut updated = 0;
         for s in sessions {
@@ -662,6 +676,7 @@ impl RtcControl {
                 }
             }
         }
+        serial.commit().await?;
         // Part F: a confirmed grant withdrawal unpublishes the share at the provider;
         // record it so the authoritative view never shows a share that cannot exist.
         if !permissions.screen_share_publish {

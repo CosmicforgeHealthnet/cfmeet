@@ -1,7 +1,6 @@
 # Developer Console — backend API handoff (Part VI Chapter 18)
 
-**Status: `BACKEND_API_READY` · `FRONTEND_IMPLEMENTATION_DEFERRED`.** The console UI
-(`apps/web`) is not implemented or changed by this work.
+**Status: `BACKEND_API_READY` · frontend implemented on `blueprint/s17-developer-portal` (see the last section).**
 
 ## How the console calls the backend
 
@@ -112,3 +111,53 @@ response and request `$defs`.
   APIs under `/internal/v1/operator/**`. They are never available from the customer
   console.
 * There is no ticketing system. The support profile is routing metadata only.
+
+## Blueprint v1.0 Section 15 status (ORG-017)
+
+**ORG-017** ("Developer organization console … is backend-only", P2) is **frontend-owned**
+(disposition `FRONTEND_CORRECTED`). The backend APIs the console needs exist, are served by
+the Developer Platform behind the gateway (`DEVELOPER_SESSION`), and are in
+`packages/contracts/platform-developer/http/v1.openapi.json`:
+
+| Console area | Operation ids |
+|---|---|
+| Self-service organizations | `listOrganizations`, `createOrganization`, `getOrganization`, `updateOrganization`, `closeOrganization` |
+| Members | `listMembers`, `changeMemberRole`, `removeMember` |
+| Invitations | `listInvitations`, `createInvitation`, `revokeInvitation`, `acceptInvitation` |
+| Ownership transfer | `transferOwnership` |
+| Projects, scopes, environments | `listProjects`, `createProject`, `getProject`, `updateProject`, `archiveProject`, `suspendProject`, `resumeProject`, `listProjectScopes`, `grantProjectScope`, `withdrawProjectScope`, `listScopeRegistry`, `listEnvironments`, `createEnvironment`, `getEnvironment`, `suspendEnvironment`, `resumeEnvironment`, `getEnvironmentEntitlements` |
+| Service accounts | `listServiceAccounts`, `createServiceAccount`, `getServiceAccount`, `suspendServiceAccount`, `resumeServiceAccount`, `putServiceAccountLimits` |
+| Credentials | `listCredentials`, `createCredential`, `getCredential`, `rotateCredential`, `revokeCredential`, `suspendCredential`, `resumeCredential`, `putCredentialLimits`, `getCredentialPolicy`, `putCredentialPolicy` |
+| Activity, support | `listActivity`, `getSupportProfile`, `putSupportProfile` |
+
+Section 15 backend changes that the console can use (check the contract version at the
+release SHA): organization creation can no longer leave an orphaned Platform Access tenant
+(ORG-014), an organization rename propagates to the Platform Access tenant (ORG-013), and
+credential reads carry last-used and expiry-warning data (PLT-008).
+
+Still open for the console, outside Section 15:
+
+* the gateway and the Developer Platform must be activated first (PLT-005,
+  [`docs/operations/developer-platform-gateway-activation-checklist.md`](../../operations/developer-platform-gateway-activation-checklist.md));
+* the product decision on one organization switcher (ORG-001 / PLT-010) should come
+  before the console, so the web app does not show two organization models;
+* the organization view does not return `createdBy` or a technical-contact member id
+  (support contacts are in `getSupportProfile`).
+
+## Frontend implementation (Blueprint v1.0 Section 17, branch `blueprint/s17-developer-portal`)
+
+The console is implemented in `apps/web` under `/developers/*` (separate console layout;
+"Develop with CF Meet" entry at `/dashboard/developers`). It is off unless
+`NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED=true` and `NEXT_PUBLIC_DEVELOPER_API_BASE_URL` is a
+valid HTTPS gateway origin; otherwise it shows "Developer Platform not available" and calls
+nothing. It authenticates with the in-memory CF Meet account access token (ACC-019) as the
+session bearer; `tests/developer-portal.test.mjs` pins every operation to this contract and
+the role table to `rbac.rs`. Legacy Settings API keys / webhooks are read-only and
+deprecation-labelled (revoke / delete kept).
+
+Not in the console (recorded gaps): `putBillingAccount` (no billing engine), `putSupportProfile`,
+`putServiceAccountLimits` / `putCredentialLimits` (stricter quotas), `updateProject`,
+`getEnvironment` / `getServiceAccount` / `getCredential` single reads (lists are used),
+`listEnvironmentUsageFacts`, `listPlanAssignments`; invitation tokens are not emailed by the
+backend (the owner hands them over); the members list has no names or emails (user ids only);
+sign-in does not return to `/developers` automatically.

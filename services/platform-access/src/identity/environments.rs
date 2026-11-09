@@ -67,7 +67,14 @@ impl PlatformService {
         application_id: ApplicationId,
         kind: EnvironmentKind,
     ) -> PlatformResult<EnvironmentView> {
-        let application = self.application(application_id).await?;
+        // Read through the caller's connection (the application may be the same
+        // transaction's own write).
+        let application: super::applications::ApplicationView =
+            crate::models::applications::Entity::find_by_id(application_id.as_uuid())
+                .one(db)
+                .await?
+                .map(Into::into)
+                .ok_or(PlatformError::NotFound("application"))?;
         let now = self.clock.now();
         let model = environments::ActiveModel {
             id: Set(EnvironmentId::generate().as_uuid()),

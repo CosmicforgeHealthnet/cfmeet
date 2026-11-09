@@ -34,12 +34,24 @@ pub struct PersonalStack {
     procs: Vec<Service>,
     envs: BTreeMap<String, Vec<(String, String)>>,
 }
+/// A free local port no other service of this test process was given. Ports are chosen
+/// before the services start and released at once, so the kernel can offer the same port
+/// twice across stacks running in parallel (seen in CI: Calling failed with "Address
+/// already in use"); the same guard as `stack::free_port`.
 fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static GIVEN: std::sync::Mutex<std::collections::BTreeSet<u16>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let mut given = GIVEN.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        if given.insert(port) {
+            return port;
+        }
+    }
 }
 fn random() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
@@ -197,6 +209,15 @@ impl PersonalStack {
             self.names.push(db_name.clone());
             db::migrate(&self.bin.join(base), &owner)?;
             if name == "meeting-service" {
+                // Blueprint Section 2: the account-security history is required at startup.
+                db::migrate(&self.bin.join("account-security-migration"), &owner)?;
+                // Blueprint Section 10: the meetings-calendar history is required at startup.
+                db::migrate(&self.bin.join("meetings-calendar-migration"), &owner)?;
+                // Blueprint Sections 9/11: the profile/notifications history is required at startup.
+                db::migrate(&self.bin.join("profile-notifications-migration"), &owner)?;
+                // Blueprint Sections 2-3 hardening: hashed legacy secrets, required at startup.
+                db::migrate(&self.bin.join("account-hardening-migration"), &owner)?;
+                db::migrate(&self.bin.join("organization-integration-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {
@@ -334,6 +355,12 @@ impl PersonalStack {
             ),
             ("CALLING_NEW_CALLS_ENABLED".into(), "true".into()),
             ("CALLING_APP_CALLING_ENABLED".into(), "true".into()),
+            // Hub-launched calls (CL-1) act under the personal scope's own API credential,
+            // re-verified with Platform Access (non-secret id). Section 14 journey.
+            (
+                "CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID".into(),
+                self.customer.credential_id.to_string(),
+            ),
             ("CALLING_MEDIA_PROVIDER".into(), "livekit".into()),
             (
                 "CALLING_LIVEKIT_API_URL".into(),

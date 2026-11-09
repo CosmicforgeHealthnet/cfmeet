@@ -199,4 +199,65 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
             with self.assertRaises(AssertionError):release.public_ingress_config(value)
 
 
+RUNTIME_URL='postgres://meeting_rt:runtime-fixture@cfmeet-core-db:5432/cfmeet_backend'
+MIGRATOR_URL='postgres://meeting_service_migrator:migrator-fixture@cfmeet-core-db:5432/cfmeet_backend'
+
+
+class MeetingServiceMigrationRole(unittest.TestCase):
+    """SEC-018: Meeting-service migrations use a separate migrator URL only when provisioned."""
+    def secrets(self,folder,text=None):
+        if text is not None:(Path(folder)/release.MEETING_MIGRATION_ENV).write_text(text)
+        return patch.object(release.p,'SECRETS',Path(folder))
+
+    def test_without_a_migrator_file_the_runtime_url_is_kept(self):
+        with tempfile.TemporaryDirectory() as folder, self.secrets(folder):
+            self.assertEqual(release.meeting_migration_url({'DATABASE_URL':RUNTIME_URL}),RUNTIME_URL)
+
+    def test_a_provisioned_migrator_url_is_used(self):
+        with tempfile.TemporaryDirectory() as folder, self.secrets(folder,'# migrator\nMEETING_SERVICE_MIGRATION_DATABASE_URL='+MIGRATOR_URL+'\n'):
+            self.assertEqual(release.meeting_migration_url({'DATABASE_URL':RUNTIME_URL}),MIGRATOR_URL)
+
+    def test_a_migrator_url_for_another_database_or_the_runtime_role_is_refused(self):
+        for bad in (MIGRATOR_URL.replace('/cfmeet_backend','/cfmeet_calling'),MIGRATOR_URL.replace('cfmeet-core-db','elsewhere'),
+                MIGRATOR_URL.replace('meeting_service_migrator','meeting_rt'),'mysql://x:y@cfmeet-core-db:5432/cfmeet_backend',''):
+            with tempfile.TemporaryDirectory() as folder, self.secrets(folder,'MEETING_SERVICE_MIGRATION_DATABASE_URL='+bad+'\n'):
+                with self.assertRaises(AssertionError,msg=bad):release.meeting_migration_url({'DATABASE_URL':RUNTIME_URL})
+
+    def test_feature_release_migrates_meeting_service_as_the_migrator(self):
+        c={'Config':{'Env':['DATABASE_URL='+RUNTIME_URL]}}
+        with tempfile.TemporaryDirectory() as folder, self.secrets(folder,'MEETING_SERVICE_MIGRATION_DATABASE_URL='+MIGRATOR_URL+'\n'), \
+             patch.object(release.p,'inspect',return_value=c), patch.object(release,'migrate') as migrate:
+            release.feature_migrate('meeting-service','a'*40)
+        self.assertEqual(migrate.call_args.args[2],MIGRATOR_URL)
+        self.assertTrue(migrate.call_args.kwargs['feature_only'])
+
+    def account_release(self,secret_text=None):
+        import sys
+        sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'deployment'))
+        import backend_runtime
+        c=CommunicationsRuntimePreservation.original(None)
+        c['State']={'Running':True};c['Config']['Env']=['KEEP=original','DATABASE_URL='+RUNTIME_URL]
+        seen=[]
+        def run(*args,input=None):
+            if args[:3]==('docker','image','inspect'):return '[{"Id":"sha256:new"}]'
+            if args[:2]==('docker','run') and '--env-file' in args:
+                seen.append((args[args.index('--entrypoint')+1],Path(args[args.index('--env-file')+1]).read_text()))
+            return ''
+        with tempfile.TemporaryDirectory() as folder, self.secrets(folder,secret_text), patch.object(release.p,'ROOT',Path(folder)), \
+             patch.object(release.p,'inspect',return_value=c), patch.object(release.p,'run',side_effect=run), \
+             patch.object(release.p,'docker_api',side_effect=RuntimeError('stop after migrations')):
+            with self.assertRaises(RuntimeError):backend_runtime.release('ghcr.io/x/meeting:sha','42')
+            self.assertFalse((Path(folder)/'account-releases'/'42'/'migration.private.env').exists())
+        self.assertEqual([x[0] for x in seen][:4],['/app/migration','/app/account-security-migration','/app/meetings-calendar-migration','/app/profile-notifications-migration'])
+        return [x[1] for x in seen]
+
+    def test_account_release_keeps_the_runtime_environment_by_default(self):
+        for env in self.account_release():
+            self.assertEqual(env,'KEEP=original\nDATABASE_URL='+RUNTIME_URL+'\n')
+
+    def test_account_release_migrates_as_the_provisioned_migrator(self):
+        for env in self.account_release('MEETING_SERVICE_MIGRATION_DATABASE_URL='+MIGRATOR_URL+'\n'):
+            self.assertEqual(env,'KEEP=original\nDATABASE_URL='+MIGRATOR_URL+'\n')
+
+
 if __name__=='__main__':unittest.main()

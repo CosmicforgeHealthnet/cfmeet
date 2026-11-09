@@ -38,6 +38,7 @@ pub mod mls;
 pub mod moderation;
 pub mod operations;
 pub mod realtime;
+pub mod reference_reconciliation;
 pub mod safety;
 pub mod search;
 pub mod sms_bridge;

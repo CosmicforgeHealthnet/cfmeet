@@ -32,6 +32,7 @@ use uuid::Uuid;
 
 const CREATE: &str = "meeting-communications.create";
 const READ: &str = "meeting-communications.read";
+const ACCOUNT_READ: &str = "communications-account.read";
 
 fn scope() -> DelegatedPlatformContext {
     DelegatedPlatformContext::new(
@@ -107,6 +108,8 @@ struct Hub {
     read_only: Router,
     /// Receiver granting `meeting-communications.create` only.
     create_only: Router,
+    /// Receiver granting `communications-account.read` only (the Account routes).
+    account_reader: Router,
 }
 
 impl Hub {
@@ -135,6 +138,7 @@ impl Hub {
         let router = router_with(&[CREATE, READ]);
         let read_only = router_with(&[READ]);
         let create_only = router_with(&[CREATE]);
+        let account_reader = router_with(&[ACCOUNT_READ]);
         Some(Self {
             app,
             signer,
@@ -142,6 +146,7 @@ impl Hub {
             router,
             read_only,
             create_only,
+            account_reader,
         })
     }
 
@@ -514,4 +519,49 @@ async fn mt2_resolves_public_references_and_shareability_by_role() {
         )
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+/// SEC-020: the Account-owned internal routes (`/internal/v1/accounts/communications/*`)
+/// answer only the signed Hub holding `communications-account.read`, delegated to the
+/// governed personal scope; any other caller or scope learns nothing about an account.
+#[tokio::test]
+async fn account_routes_require_the_signed_hub_with_the_account_read_permission() {
+    let hub = hub!();
+    let (alice, principal) = hub.account("alice").await;
+    let status = "/internal/v1/accounts/communications/status";
+    let backfill = "/internal/v1/accounts/communications/backfill";
+    let status_body = json!({ "accountReference": format!("cfmeet-user:{}", alice.id) });
+    let backfill_body = json!({ "limit": 1 });
+    for (path, body) in [(status, &status_body), (backfill, &backfill_body)] {
+        // Unsigned (a browser / any unauthenticated caller).
+        let (s, v) = hub
+            .send(&hub.account_reader, path, None, body.clone())
+            .await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "{path}: {v}");
+        assert!(!v.to_string().contains(&principal.to_string()), "{v}");
+        // Signed Hub without the account permission (meeting permissions only).
+        let (s, v) = hub
+            .send(&hub.router, path, Some(hub.scope.clone()), body.clone())
+            .await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{path}: {v}");
+        assert!(!v.to_string().contains(&principal.to_string()), "{v}");
+        // The permission, delegated to another scope: not found, not an oracle.
+        let (s, v) = hub
+            .send(&hub.account_reader, path, Some(scope()), body.clone())
+            .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{path}: {v}");
+        assert!(!v.to_string().contains(&principal.to_string()), "{v}");
+    }
+    // Positive control: the governed scope reads the account's eligibility and link.
+    let (s, v) = hub
+        .send(
+            &hub.account_reader,
+            status,
+            Some(hub.scope.clone()),
+            status_body,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["state"], "ACTIVE", "{v}");
+    assert_eq!(v["principalId"], json!(principal), "{v}");
 }

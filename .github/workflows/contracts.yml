@@ -19,6 +19,10 @@ on:
       - "infra/api-gateway/**"
       - "scripts/swagger/**"
       - "services/meeting-service/src/swagger/**"
+      - "sdks/**"
+      - "apps/web/src/**"
+      - "docs/architecture/first-party-direct-ingress-decision.md"
+      - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
   pull_request:
     paths:
@@ -28,6 +32,10 @@ on:
       - "infra/api-gateway/**"
       - "scripts/swagger/**"
       - "services/meeting-service/src/swagger/**"
+      - "sdks/**"
+      - "apps/web/src/**"
+      - "docs/architecture/first-party-direct-ingress-decision.md"
+      - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
   workflow_dispatch:
 
@@ -101,6 +109,34 @@ jobs:
       - name: complete private engineering catalog is buildable off-repository
         working-directory: .
         run: python3 scripts/swagger/test_private_docs.py
+
+      # FE-015 contract-parity gate (backend half): the generated TypeScript / Dart SDK
+      # sources (operations, models, contract catalogue) are current with the public
+      # contracts. sdk-typescript.yml / sdk-dart.yml run the same check before building.
+      - name: generated SDK types are current with the public contracts (FE-015)
+        working-directory: .
+        run: python3 sdks/generate.py --check
+
+      # Final closure: the frontend endpoint reference is generated from the contracts.
+      - name: frontend endpoint reference is current with the contracts
+        working-directory: .
+        run: python3 scripts/contracts/frontend_reference.py --check
+
+      # FE-018: the first-party direct-ingress decision record lists exactly the
+      # operations public-routes.json EXCLUDES from the gateway (generated block).
+      - name: first-party direct-ingress decision record is current (FE-018)
+        working-directory: .
+        run: |
+          python3 -m unittest scripts/contracts/test_first_party_ingress.py
+          python3 scripts/contracts/first_party_ingress.py --check
+
+      # FE-015 client adoption, REPORT-ONLY (apps/ is owned by the frontend team): does
+      # apps/web import the generated SDK / types, and which contract classes do its calls
+      # hit? Written to the job summary; never fails the workflow.
+      - name: web contract-parity report (report-only, FE-015)
+        working-directory: .
+        continue-on-error: true
+        run: python3 scripts/contracts/web_contract_parity_report.py || true
 
   # The bundles rendered the way a reader meets them: Swagger UI (the version and SRI the
   # Meeting Service serves) in Chromium, the schema host blocked, the whole document

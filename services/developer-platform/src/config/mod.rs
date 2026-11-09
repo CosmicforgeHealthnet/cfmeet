@@ -17,6 +17,13 @@
 //! | `DEVELOPER_PLATFORM_WEBHOOK_REQUEST_TIMEOUT_MS`, `_MAX_ATTEMPTS`, `_AUTO_DISABLE_AFTER` | no | delivery timeout, attempts before dead letter, consecutive failures before automatic disablement |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN` | no | Section 53 migration freeze of customer / console webhook mutations (default `false`) |
 //! | `DEVELOPER_PLATFORM_WEBHOOK_MIGRATION_TRANSFER_KEY` (`_FILE`, `_ID`) | no | the webhook migration transfer key (Section 53 §9.1); unset = secret import / rollback export refused |
+//! | `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED` | no | PLT-008 credential lifecycle webhooks (`credential.expiring_soon` / `credential.expired`; default `true`; acts only with webhooks enabled and Platform Access configured) |
+//! | `DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS` | no | lead times in days, comma-separated, 1–8 distinct values of 1–365 (default `14,7,1`) |
+//! | `DEVELOPER_PLATFORM_CREDENTIAL_EXPIRED_LOOKBACK_DAYS` | no | how long after expiry `credential.expired` is still sent (0–90, default 7) |
+//! | `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS` | no | minimum time between two sweeps across all worker instances (60–86400, default 3600) |
+//! | `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_MAX_ENVIRONMENTS` | no | subscribed environments examined per sweep (1–10000, default 500) |
+//! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS` | no | DATA-017 report-only reference reconciliation logged by the worker (0 = off, else 300–604800; default 86400) |
+//! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT` | no | ids of each kind verified at Platform Access per report (0 = local checks only, max 100000; default 1000) |
 //!
 //! The webhook variables are detailed in [`webhooks`]. Service authentication (`CF_*`) is
 //! read by [`service_auth`]. Error messages never echo a value.
@@ -78,6 +85,12 @@ pub struct DeveloperPlatformConfig {
     pub log_format: LogFormat,
     /// Central customer webhooks (Section 53).
     pub webhooks: crate::webhooks::WebhookSettings,
+    /// Section 15 (PLT-008): credential lifecycle webhooks.
+    pub credential_lifecycle: crate::control::credential_lifecycle::CredentialLifecycleSettings,
+    /// DATA-017: period of the worker's report-only reference reconciliation (None: off).
+    pub reference_reconciliation_interval: Option<Duration>,
+    /// DATA-017: ids of each kind verified at Platform Access per report.
+    pub reference_reconciliation_remote_limit: u64,
 }
 
 impl fmt::Debug for DeveloperPlatformConfig {
@@ -90,6 +103,11 @@ impl fmt::Debug for DeveloperPlatformConfig {
             .field("worker_interval", &self.worker_interval)
             .field("worker_instance_id", &self.worker_instance_id)
             .field("webhooks", &self.webhooks)
+            .field("credential_lifecycle", &self.credential_lifecycle)
+            .field(
+                "reference_reconciliation_interval",
+                &self.reference_reconciliation_interval,
+            )
             .finish_non_exhaustive()
     }
 }
@@ -137,6 +155,59 @@ pub fn valid_instance_id(value: &str) -> bool {
         && b.iter().all(|c| {
             c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-')
         })
+}
+
+/// The PLT-008 credential lifecycle settings (defaults: on, 14/7/1 days, 7-day lookback,
+/// hourly, 500 environments per sweep).
+fn credential_lifecycle(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<crate::control::credential_lifecycle::CredentialLifecycleSettings, ConfigError> {
+    use crate::control::credential_lifecycle::{parse_warning_days, CredentialLifecycleSettings};
+    let defaults = CredentialLifecycleSettings::default();
+    let enabled = match get("DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED").as_deref() {
+        None | Some("true") | Some("1") => true,
+        Some("false") | Some("0") => false,
+        Some(_) => {
+            return Err(ConfigError::invalid(
+                "DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED",
+                "must be `true` or `false`",
+            ))
+        }
+    };
+    let warning_days = match get("DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS") {
+        None => defaults.warning_days,
+        Some(v) => parse_warning_days(&v).ok_or_else(|| {
+            ConfigError::invalid(
+                "DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS",
+                "must be 1-8 distinct comma-separated days between 1 and 365",
+            )
+        })?,
+    };
+    Ok(CredentialLifecycleSettings {
+        enabled,
+        warning_days,
+        expired_lookback: chrono::Duration::days(bounded(
+            get,
+            "DEVELOPER_PLATFORM_CREDENTIAL_EXPIRED_LOOKBACK_DAYS",
+            7,
+            0,
+            90,
+        )?),
+        interval: Duration::from_secs(bounded(
+            get,
+            "DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS",
+            3_600,
+            60,
+            86_400,
+        )? as u64),
+        max_environments: bounded(
+            get,
+            "DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_MAX_ENVIRONMENTS",
+            500,
+            1,
+            10_000,
+        )? as u64,
+    })
 }
 
 impl DeveloperPlatformConfig {
@@ -209,6 +280,30 @@ impl DeveloperPlatformConfig {
             }
         };
         let webhooks = webhooks::from_lookup(&get)?;
+        let credential_lifecycle = credential_lifecycle(&get)?;
+        let reference_reconciliation_interval = match bounded(
+            &get,
+            "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
+            86_400,
+            0,
+            604_800,
+        )? {
+            0 => None,
+            n if n < 300 => {
+                return Err(ConfigError::invalid(
+                    "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
+                    "must be 0 (off) or between 300 and 604800",
+                ))
+            }
+            n => Some(Duration::from_secs(n as u64)),
+        };
+        let reference_reconciliation_remote_limit = bounded(
+            &get,
+            "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT",
+            1_000,
+            0,
+            100_000,
+        )? as u64;
         Ok(Self {
             database_url,
             database_max_connections,
@@ -218,6 +313,9 @@ impl DeveloperPlatformConfig {
             worker_instance_id,
             log_format,
             webhooks,
+            credential_lifecycle,
+            reference_reconciliation_interval,
+            reference_reconciliation_remote_limit,
         })
     }
 
@@ -257,6 +355,36 @@ mod tests {
     }
 
     #[test]
+    fn credential_lifecycle_and_reconciliation_have_sane_defaults() {
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(BASE)).unwrap();
+        let c = &cfg.credential_lifecycle;
+        assert!(c.enabled);
+        assert_eq!(c.warning_days, vec![14, 7, 1]);
+        assert_eq!(c.expired_lookback, chrono::Duration::days(7));
+        assert_eq!(c.interval, Duration::from_secs(3600));
+        assert_eq!(c.max_environments, 500);
+        assert_eq!(
+            cfg.reference_reconciliation_interval,
+            Some(Duration::from_secs(86_400))
+        );
+        assert_eq!(cfg.reference_reconciliation_remote_limit, 1_000);
+        let mut pairs = BASE.to_vec();
+        pairs.extend([
+            ("DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED", "false"),
+            ("DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS", "3, 30"),
+            ("DEVELOPER_PLATFORM_CREDENTIAL_EXPIRED_LOOKBACK_DAYS", "0"),
+            (
+                "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
+                "0",
+            ),
+        ]);
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(&pairs)).unwrap();
+        assert!(!cfg.credential_lifecycle.enabled);
+        assert_eq!(cfg.credential_lifecycle.warning_days, vec![30, 3]);
+        assert_eq!(cfg.reference_reconciliation_interval, None);
+    }
+
+    #[test]
     fn invalid_values_are_refused_without_echo() {
         for (var, value) in [
             ("DEVELOPER_PLATFORM_BIND_ADDRESS", "not-an-address-xyz"),
@@ -265,6 +393,31 @@ mod tests {
             ("DEVELOPER_PLATFORM_WORKER_INTERVAL_MS", "5"),
             ("DEVELOPER_PLATFORM_WORKER_INSTANCE_ID", "Has Space"),
             ("LOG_FORMAT", "xml-format"),
+            (
+                "DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED",
+                "perhaps-yes",
+            ),
+            (
+                "DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS",
+                "14,14,9999",
+            ),
+            (
+                "DEVELOPER_PLATFORM_CREDENTIAL_EXPIRED_LOOKBACK_DAYS",
+                "9191",
+            ),
+            ("DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS", "5"),
+            (
+                "DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_MAX_ENVIRONMENTS",
+                "-3",
+            ),
+            (
+                "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
+                "59",
+            ),
+            (
+                "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT",
+                "-5",
+            ),
         ] {
             let mut pairs = BASE.to_vec();
             pairs.push((var, value));

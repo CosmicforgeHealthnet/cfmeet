@@ -15,6 +15,8 @@ use crate::middleware::request_id::current_request_id;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     MeetingNotFound,
+    /// Blueprint Section 2: an account session that does not exist or is not the caller's.
+    SessionNotFound,
     MeetingAccessDenied,
     MeetingPasscodeRequired,
     MeetingPasscodeInvalid,
@@ -108,8 +110,55 @@ pub enum ErrorCode {
     ChatUnavailable,
     /// The chat migration transition is not allowed now (gate, parity or final state).
     ChatMigrationRefused,
-    /// A required dependency (PostgreSQL) is unreachable; retry later. No state changed.
+    /// A required dependency (PostgreSQL, the Organizations Service) is unreachable; retry
+    /// later. No state changed.
     ServiceUnavailable,
+    // Blueprint Section 4: first-party organizations (relayed from the Organizations Service)
+    /// The organization does not exist or the caller may not see it (non-enumerating).
+    OrganizationNotFound,
+    /// The caller's membership is not active.
+    MembershipRequired,
+    /// The organization is suspended.
+    OrganizationSuspended,
+    /// The organization is archived.
+    OrganizationArchived,
+    /// The change would leave the organization without an OWNER.
+    LastOwner,
+    /// `expectedVersion` is stale; re-read and retry.
+    VersionConflict,
+    /// The organization slug is already in use.
+    SlugTaken,
+    /// The organization invitation has expired.
+    InviteExpired,
+    /// The `Idempotency-Key` was already used with a different request body.
+    IdempotencyConflict,
+    /// The organization's technical provisioning has not finished.
+    ProvisioningPending,
+    /// New members join an organization only by accepting an invitation.
+    InvitationRequired,
+    /// Blueprint Section 12 follow-up: the organization policy (or a feature the
+    /// organization turned off) removes the capability this action needs — the same
+    /// decision `GET /api/v2/me/workspaces/{id}/capabilities` reports as
+    /// `POLICY_RESTRICTED`.
+    OrganizationPolicyRestricted,
+    /// Blueprint Section 6: the team does not exist in this organization (or the team
+    /// membership does not exist in this team).
+    TeamNotFound,
+    /// Blueprint Section 6: the team is archived.
+    TeamArchived,
+    /// Blueprint Section 6: an ACTIVE team of the organization already has this name.
+    TeamNameTaken,
+    /// Per-organization Enterprise Calling is not enabled in this deployment
+    /// (`ORGANIZATION_CALLING_SCOPE=shared`) or not bound for this organization yet.
+    OrganizationCallingDisabled,
+    /// Blueprint Section 9: the requested username belongs to another account.
+    UsernameTaken,
+    /// Blueprint Sections 2-3 (ACC-026): the action needs the current password or a recent
+    /// sign-in.
+    ReauthenticationRequired,
+    /// Blueprint Sections 2-3 (ACC-016): the account's email address must be verified first
+    /// (only where the deployment enforces verification).
+    EmailVerificationRequired,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -120,6 +169,7 @@ impl ErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             ErrorCode::MeetingNotFound => "MEETING_NOT_FOUND",
+            ErrorCode::SessionNotFound => "SESSION_NOT_FOUND",
             ErrorCode::MeetingAccessDenied => "MEETING_ACCESS_DENIED",
             ErrorCode::MeetingPasscodeRequired => "MEETING_PASSCODE_REQUIRED",
             ErrorCode::MeetingPasscodeInvalid => "MEETING_PASSCODE_INVALID",
@@ -203,6 +253,25 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => "CHAT_UNAVAILABLE",
             ErrorCode::ChatMigrationRefused => "CHAT_MIGRATION_REFUSED",
             ErrorCode::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+            ErrorCode::OrganizationNotFound => "ORGANIZATION_NOT_FOUND",
+            ErrorCode::MembershipRequired => "MEMBERSHIP_REQUIRED",
+            ErrorCode::OrganizationSuspended => "ORGANIZATION_SUSPENDED",
+            ErrorCode::OrganizationArchived => "ORGANIZATION_ARCHIVED",
+            ErrorCode::LastOwner => "LAST_OWNER",
+            ErrorCode::VersionConflict => "VERSION_CONFLICT",
+            ErrorCode::SlugTaken => "SLUG_TAKEN",
+            ErrorCode::InviteExpired => "INVITE_EXPIRED",
+            ErrorCode::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            ErrorCode::ProvisioningPending => "PROVISIONING_PENDING",
+            ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
+            ErrorCode::OrganizationPolicyRestricted => "ORGANIZATION_POLICY_RESTRICTED",
+            ErrorCode::TeamNotFound => "TEAM_NOT_FOUND",
+            ErrorCode::TeamArchived => "TEAM_ARCHIVED",
+            ErrorCode::TeamNameTaken => "TEAM_NAME_TAKEN",
+            ErrorCode::OrganizationCallingDisabled => "ORGANIZATION_CALLING_DISABLED",
+            ErrorCode::UsernameTaken => "USERNAME_TAKEN",
+            ErrorCode::ReauthenticationRequired => "REAUTHENTICATION_REQUIRED",
+            ErrorCode::EmailVerificationRequired => "EMAIL_VERIFICATION_REQUIRED",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -211,6 +280,7 @@ impl ErrorCode {
     pub fn status(&self) -> StatusCode {
         match self {
             ErrorCode::MeetingNotFound
+            | ErrorCode::SessionNotFound
             | ErrorCode::ConferenceNotFound
             | ErrorCode::ParticipantNotFound
             | ErrorCode::FeatureDisabled => StatusCode::NOT_FOUND,
@@ -294,6 +364,24 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::ChatMigrationRefused => StatusCode::CONFLICT,
             ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::OrganizationNotFound | ErrorCode::TeamNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::MembershipRequired => StatusCode::FORBIDDEN,
+            ErrorCode::OrganizationSuspended
+            | ErrorCode::OrganizationArchived
+            | ErrorCode::LastOwner
+            | ErrorCode::VersionConflict
+            | ErrorCode::SlugTaken
+            | ErrorCode::IdempotencyConflict
+            | ErrorCode::ProvisioningPending
+            | ErrorCode::InvitationRequired
+            | ErrorCode::OrganizationCallingDisabled
+            | ErrorCode::TeamArchived
+            | ErrorCode::TeamNameTaken
+            | ErrorCode::UsernameTaken => StatusCode::CONFLICT,
+            ErrorCode::OrganizationPolicyRestricted
+            | ErrorCode::ReauthenticationRequired
+            | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
+            ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -561,6 +649,7 @@ mod tests {
     fn every_error_code_has_a_stable_string_and_client_or_server_status() {
         let all = [
             ErrorCode::MeetingNotFound,
+            ErrorCode::SessionNotFound,
             ErrorCode::PermissionDenied,
             ErrorCode::ValidationError,
             ErrorCode::RateLimited,
@@ -571,6 +660,11 @@ mod tests {
             ErrorCode::MethodNotAllowed,
             ErrorCode::ChatUnavailable,
             ErrorCode::ChatMigrationRefused,
+            ErrorCode::OrganizationPolicyRestricted,
+            ErrorCode::OrganizationCallingDisabled,
+            ErrorCode::TeamNotFound,
+            ErrorCode::TeamArchived,
+            ErrorCode::TeamNameTaken,
         ];
         for c in all {
             let s = c.as_str();

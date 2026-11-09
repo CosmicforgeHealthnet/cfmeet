@@ -34,7 +34,7 @@ use crate::{
         actor::ActorContext,
         meeting_core::{
             actor_space_role, conference_authority, find_conference, find_space,
-            is_unique_violation, lock_conference, permission_denied, state_conflict, validation,
+            is_unique_violation, lock_conference, permission_denied, state_conflict,
             ConferenceAuthority, Core,
         },
         meeting_events::{action, audit, emit, event, AuditActor, AuditRecord, OutboxRecord},
@@ -300,20 +300,31 @@ impl ConferenceService {
         space_id: Uuid,
         req: CreateConferenceRequest,
     ) -> ApiResult<conference_sessions::Model> {
+        self.create_occurrence_idempotent(ctx, space_id, req, None)
+            .await
+            .map(|(c, _)| c)
+    }
+
+    /// [`Self::create_occurrence`] with an optional `Idempotency-Key` record (SEC-014).
+    /// Returns the conference and whether it is a replay of an earlier request.
+    pub async fn create_occurrence_idempotent(
+        &self,
+        ctx: &ActorContext,
+        space_id: Uuid,
+        req: CreateConferenceRequest,
+        idempotency: Option<crate::services::idempotency::IdempotencyRequest>,
+    ) -> ApiResult<(conference_sessions::Model, bool)> {
         self.core.require_v2_writer(ctx)?;
-        if let (Some(s), Some(e)) = (req.scheduled_start_at, req.scheduled_end_at) {
-            if e <= s {
-                return Err(validation("scheduledEndAt must be after scheduledStartAt"));
-            }
-            if e - s > Duration::hours(24) {
-                return Err(validation(
-                    "A conference cannot be scheduled for more than 24 hours",
-                ));
+        if let Some(i) = &idempotency {
+            if let Some(id) = crate::services::idempotency::prior(&self.core.db, i).await? {
+                return Ok((find_conference(&self.core.db, id).await?, true));
             }
         }
-        if req.scheduled_end_at.is_some() && req.scheduled_start_at.is_none() {
-            return Err(validation("scheduledEndAt requires scheduledStartAt"));
-        }
+        crate::services::calendar::validate_schedule(
+            req.scheduled_start_at,
+            req.scheduled_end_at,
+            Utc::now(),
+        )?;
         let txn = self.core.db.begin().await?;
         let space = crate::services::meeting_core::lock_space(&txn, space_id).await?;
         if space.status != SpaceStatus::Active {
@@ -346,8 +357,18 @@ impl ConferenceService {
             &AuditActor::from(ctx),
         )
         .await?;
+        if let Some(i) = &idempotency {
+            if !crate::services::idempotency::record(&txn, i, "CONFERENCE", conference.id).await? {
+                // A concurrent request with the same key won: replay its result.
+                txn.rollback().await?;
+                return match crate::services::idempotency::prior(&self.core.db, i).await? {
+                    Some(id) => Ok((find_conference(&self.core.db, id).await?, true)),
+                    None => Err(crate::services::idempotency::in_progress()),
+                };
+            }
+        }
         txn.commit().await?;
-        Ok(conference)
+        Ok((conference, false))
     }
 
     /// Conference plus whether the caller gets the full view.
@@ -750,6 +771,14 @@ impl ConferenceService {
             json!({}),
         )
         .await?;
+        // Blueprint Section 11 (MTG-006): durable cancellation notice, same transaction.
+        crate::services::notifications::record_cancelled(
+            &txn,
+            &self.core.config.notifications,
+            &updated,
+            ctx.user_id(),
+        )
+        .await?;
         if had_room {
             emit(&txn, Self::terminate_command(&updated)).await?;
         }
@@ -771,11 +800,14 @@ impl ConferenceService {
         id: Uuid,
         req: RescheduleConferenceRequest,
     ) -> ApiResult<ConferenceOutcome> {
-        if let Some(end) = req.scheduled_end_at {
-            if end <= req.scheduled_start_at {
-                return Err(validation("scheduledEndAt must be after scheduledStartAt"));
-            }
-        }
+        let now = Utc::now();
+        // Early validation of what the request alone determines (the kept duration is
+        // validated again below once the current schedule is known).
+        crate::services::calendar::validate_schedule(
+            Some(req.scheduled_start_at),
+            req.scheduled_end_at,
+            now,
+        )?;
         let txn = self.core.db.begin().await?;
         let conference = lock_conference(&txn, id).await?;
         Self::legacy_guard(&conference)?;
@@ -783,14 +815,33 @@ impl ConferenceService {
         let authority = self
             .authority_for(&txn, &space, id, ctx, Permission::ConferenceStart)
             .await?;
+        if let Some(expected) = req.version {
+            if expected != conference.version {
+                return Err(ApiError::domain(
+                    ErrorCode::MeetingVersionConflict,
+                    format!(
+                        "Conference was modified (current version {})",
+                        conference.version
+                    ),
+                ));
+            }
+        }
         if conference.status != ConferenceStatus::Created {
             return Err(state_conflict(
                 "Only an unstarted conference can be rescheduled",
             ));
         }
+        // MTG-009: an omitted end keeps the occurrence's duration (never clears it).
+        let new_end = req.scheduled_end_at.or_else(|| {
+            match (conference.scheduled_start_at, conference.scheduled_end_at) {
+                (Some(s), Some(e)) => Some(req.scheduled_start_at + (e - s)),
+                _ => None,
+            }
+        });
+        crate::services::calendar::validate_schedule(Some(req.scheduled_start_at), new_end, now)?;
         let mut am: conference_sessions::ActiveModel = conference.clone().into();
         am.scheduled_start_at = Set(Some(req.scheduled_start_at));
-        am.scheduled_end_at = Set(req.scheduled_end_at);
+        am.scheduled_end_at = Set(new_end);
         if conference.recurrence_rule_id.is_some() {
             am.is_exception = Set(true);
             crate::services::recurrence::record_exception_for_conference(
@@ -798,7 +849,7 @@ impl ConferenceService {
                 &conference,
                 crate::domain::RecurrenceExceptionKind::Rescheduled,
                 Some(req.scheduled_start_at),
-                req.scheduled_end_at,
+                new_end,
                 authority.audit.reference(),
             )
             .await?;
@@ -811,6 +862,15 @@ impl ConferenceService {
             action::CONFERENCE_RESCHEDULE,
             &[event::CONFERENCE_RESCHEDULED],
             json!({ "from": conference.scheduled_start_at, "to": req.scheduled_start_at }),
+        )
+        .await?;
+        // Blueprint Section 11 (MTG-006): durable reschedule notice, same transaction.
+        crate::services::notifications::record_rescheduled(
+            &txn,
+            &self.core.config.notifications,
+            &conference,
+            &updated,
+            ctx.user_id(),
         )
         .await?;
         txn.commit().await?;
@@ -883,7 +943,12 @@ pub fn check_start_window(
             ));
         }
     }
-    if let Some(end) = conference.scheduled_end_at {
+    // A start-only occurrence has the default duration (Section 10): it cannot be started
+    // indefinitely after its start (MTG-010).
+    let end = conference
+        .scheduled_start_at
+        .map(|s| crate::services::calendar::effective_end(s, conference.scheduled_end_at));
+    if let Some(end) = end {
         if now > end + Duration::minutes(policy.late_start_grace_minutes as i64) {
             return Err(ApiError::domain(
                 ErrorCode::ConferenceStateConflict,

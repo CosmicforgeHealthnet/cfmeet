@@ -1571,10 +1571,27 @@ async fn web_messaging_client_in_chromium_across_real_services() {
             .unwrap()
         }
     };
+    // The browser signs in the way the web app does (ACC-019): a real password login with
+    // the account authority, whose refresh token the app keeps in its httpOnly session
+    // cookie. Each browser context makes its own login, so every context holds its own
+    // single-use refresh token (ADR 0057).
+    let password = "Web-e2e-journey-Passw0rd!";
+    let hash = backend::services::auth::hash_password(password).unwrap();
+    for id in [alice.id, bob.id, mallory.id] {
+        app.db
+            .conn
+            .execute(Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "UPDATE users SET password_hash = $1 WHERE id = $2",
+                vec![hash.clone().into(), id.into()],
+            ))
+            .await
+            .unwrap();
+    }
     let users = json!({
-        "alice": { "token": alice.token, "id": alice.id, "email": alice.email, "name": name(alice.id).await },
-        "bob": { "token": bob.token, "id": bob.id, "email": bob.email, "name": name(bob.id).await },
-        "mallory": { "token": mallory.token, "id": mallory.id, "email": mallory.email, "name": name(mallory.id).await },
+        "alice": { "id": alice.id, "email": alice.email, "password": password, "name": name(alice.id).await },
+        "bob": { "id": bob.id, "email": bob.email, "password": password, "name": name(bob.id).await },
+        "mallory": { "id": mallory.id, "email": mallory.email, "password": password, "name": name(mallory.id).await },
     });
     // The Meeting Service as the browser meets it: the real router behind the production
     // CORS policy, on the port the web build targets.
@@ -1603,6 +1620,7 @@ async fn web_messaging_client_in_chromium_across_real_services() {
         .current_dir(&app_dir)
         .env("E2E_WEB_PORT", "3100")
         .env("E2E_USERS", users.to_string())
+        .env("E2E_API_URL", "http://127.0.0.1:18080/api/v1")
         .env("E2E_SECRET", &secret)
         .env("E2E_EVIDENCE", &evidence)
         .status()

@@ -173,7 +173,12 @@ async fn upstream_handler(
         Some((verifier, permission))
             if parts.headers.contains_key("x-cf-service-authorization") =>
         {
-            match verifier.verify_headers(&parts.headers) {
+            // SEC-012: the fake upstream verifies like a real receiver (request binding
+            // per SERVICE_AUTH_REQUEST_BINDING_MODE, single use on mutating methods).
+            match verifier
+                .verify_request(&parts.method, parts.uri.path(), &parts.headers)
+                .await
+            {
                 Ok(ctx) => {
                     if ctx.require_permission(*permission).is_err() {
                         return StatusCode::FORBIDDEN.into_response();
@@ -571,6 +576,8 @@ pub struct Options {
     pub quota: Option<Arc<QuotaEngine>>,
     pub cors: Vec<String>,
     pub controls: RoutingControls,
+    /// Per-token ceiling of end-user traffic (`0`: off).
+    pub token_rate_limit: u64,
 }
 
 impl Default for Options {
@@ -583,6 +590,7 @@ impl Default for Options {
             quota: None,
             cors: vec![],
             controls: RoutingControls::default(),
+            token_rate_limit: 0,
         }
     }
 }
@@ -667,7 +675,8 @@ impl Gateway {
             .with_controls(o.controls)
             .with_upstream_timeout(o.timeout)
             .with_max_body_bytes(o.max_body)
-            .with_cors_allowed_origins(o.cors);
+            .with_cors_allowed_origins(o.cors)
+            .with_token_rate_limit(o.token_rate_limit);
         if let Some(q) = o.quota {
             state = state.with_quota_engine(q);
         }

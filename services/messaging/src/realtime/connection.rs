@@ -98,6 +98,8 @@ pub struct Connection {
     violations: u32,
     last_inbound: Instant,
     last_presence_query: Option<Instant>,
+    /// MSG-018: per conversation, when its receipt cursors were last queried.
+    last_receipts_query: HashMap<Uuid, Instant>,
     policy: EffectivePolicy,
     announced_online: bool,
     /// When the connection opened (usage: connection seconds, recorded on close).
@@ -154,6 +156,7 @@ impl Connection {
             violations: 0,
             last_inbound: Instant::now(),
             last_presence_query: None,
+            last_receipts_query: HashMap::new(),
             policy,
             announced_online: false,
             opened_at,
@@ -410,6 +413,10 @@ impl Connection {
                 Some(c) => self.presence_query(c, rid).await,
                 None => self.invalid(rid).await,
             },
+            "receipts.query" => match uuid_of("conversationId") {
+                Some(c) => self.receipts_query(c, rid).await,
+                None => self.invalid(rid).await,
+            },
             "auth.refresh" => match frame.get("ticket").and_then(Value::as_str) {
                 Some(t) => self.refresh(t.to_string(), rid).await,
                 None => self.invalid(rid).await,
@@ -483,6 +490,21 @@ impl Connection {
                 self.send(error_frame(
                     "CONVERSATION_NOT_ACTIVE",
                     "The conversation's context was revoked.",
+                    rid,
+                ))
+                .await;
+                return Flow::Continue;
+            }
+            // Section 13 (ADR 0049 A1): a session device never receives PRIVATE_E2EE
+            // traffic (no ciphertext, typing or presence of an encrypted conversation).
+            Ok((c, _))
+                if self.session.is_session_device()
+                    && c.profile() == crate::domain::SecurityProfile::PrivateE2ee =>
+            {
+                crate::metrics::inc("messaging_realtime_session_device_e2ee_refused_total", &[]);
+                self.send(error_frame(
+                    "E2EE_DEVICE_REQUIRED",
+                    "End-to-end encrypted conversations need a registered end-to-end encrypted device.",
                     rid,
                 ))
                 .await;
@@ -706,6 +728,7 @@ impl Connection {
             environment_id: self.session.environment_id,
         };
         let share = self.policy.privacy.delivery_receipts;
+        let window = self.state.realtime.settings.receipt_window.as_secs_f64();
         let r = self
             .state
             .db
@@ -721,7 +744,7 @@ impl Connection {
                     )
                     .await?;
                     let delivered = messages::message_sequence_at(txn, conversation, seq).await?;
-                    messages::advance_delivery(txn, scope, conversation, principal, delivered, share, now).await?;
+                    messages::advance_delivery(txn, scope, conversation, principal, delivered, share, window, now).await?;
                     Ok(())
                 })
             })
@@ -862,11 +885,61 @@ impl Connection {
         Flow::Continue
     }
 
+    /// MSG-018: the CURRENT read / delivery cursors of the other members, filtered like
+    /// the receipt events. Receipt events are coalesced (one per member and window), so a
+    /// client that reconnects or resubscribes reads the state here instead of relying on
+    /// the receipts it may have missed.
+    async fn receipts_query(&mut self, conversation: Uuid, rid: Option<&Value>) -> Flow {
+        if !self.subs.contains_key(&conversation) {
+            self.send(error_frame(
+                "NOT_SUBSCRIBED",
+                "Subscribe before querying receipts.",
+                rid,
+            ))
+            .await;
+            return Flow::Continue;
+        }
+        if self
+            .last_receipts_query
+            .get(&conversation)
+            .is_some_and(|t| t.elapsed() < PRESENCE_QUERY_EVERY)
+        {
+            self.send(error_frame(
+                "RATE_LIMITED",
+                "Receipt queries are rate limited.",
+                rid,
+            ))
+            .await;
+            return Flow::Continue;
+        }
+        self.last_receipts_query
+            .insert(conversation, Instant::now());
+        match messages::receipts::snapshot(
+            &self.state.db,
+            self.session.environment_id,
+            conversation,
+            self.session.principal_id,
+        )
+        .await
+        {
+            Ok(snapshot) => {
+                self.send(json!({ "type": "receipts.snapshot", "conversationId": conversation,
+                    "members": snapshot["members"], "truncated": snapshot["truncated"], "requestId": rid }))
+                .await;
+            }
+            Err(e) => {
+                self.api_error(e, rid).await;
+            }
+        }
+        Flow::Continue
+    }
+
     async fn refresh(&mut self, ticket: String, rid: Option<&Value>) -> Flow {
         match sessions::consume_ticket(&self.state, &ticket).await {
             Ok(next)
                 if next.principal_id == self.session.principal_id
                     && next.device_id == self.session.device_id
+                    && next.device_kind == self.session.device_kind
                     && next.environment_id == self.session.environment_id =>
             {
                 self.session = next;
@@ -914,6 +987,8 @@ impl Connection {
                 }
                 self.deliver_until(conversation_id, event_sequence).await
             }
+            // Device events (Welcomes, KeyPackages, device changes) belong to MLS devices.
+            HubEvent::Device { .. } if self.session.is_session_device() => Flow::Continue,
             HubEvent::Device {
                 event_type,
                 reference_id,

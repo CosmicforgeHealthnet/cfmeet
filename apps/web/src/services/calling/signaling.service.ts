@@ -1,5 +1,6 @@
 import axios from "axios";
 import { CALLING_BASE_URL } from "./api";
+import { signalingSocketUrl } from "@/lib/calling/origin.mjs";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import type { AcceptResult, CallHistoryFilters, CallHistoryList, CommandRequest, DeclineResult, MediaCredential, RecoveredInvitationList, SignalingCredential } from "@/types/calling";
 
@@ -18,8 +19,8 @@ export function createSignalingService(credential: SignalingCredential) {
     mediaCredential: async (id: string) =>
       (await api.post<MediaCredential>(`/v1/calling/sessions/${encodeURIComponent(id)}/media-credentials`, {})).data,
     connect: () => {
-      const url = new URL(credential.signalingUrl, CALLING_BASE_URL);
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      // wss:// only in production (CAL-020); the bearer subprotocol never travels over ws://.
+      const url = signalingSocketUrl(credential.signalingUrl, CALLING_BASE_URL, process.env.NODE_ENV === "production");
       return new WebSocket(url, ["cfmeet.signaling.v1", `bearer.${credential.token}`]);
     },
   };

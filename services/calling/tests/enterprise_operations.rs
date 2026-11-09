@@ -620,3 +620,143 @@ async fn telephony_down_degrades_only_sip_paths() {
         CallState::Answered | CallState::Connected
     ));
 }
+
+/// A desk phone's Call answered on the application connects whichever arrives last:
+/// Telephony's bridge + leg evidence, or the answerer's media. Regression (enterprise SIP
+/// certification, call-recording scenario): when the edge bridge was established BEFORE
+/// the member's session joined, the session's join was judged by the two-participant RTC
+/// rule (a desk phone Call has one application participant), so the Call stayed ANSWERED
+/// until the device hung up.
+#[tokio::test]
+async fn a_device_call_connects_when_media_joins_after_the_bridge_evidence() {
+    use common::{
+        privacy::FakePrivacyRelay,
+        telephony::{leg_event, FakePublicMedia, FakeTelephony},
+    };
+    use std::sync::Arc;
+    let telephony = Arc::new(FakeTelephony::healthy());
+    let media = Arc::new(FakePublicMedia::default());
+    let Some(a) = common::app::AppWorld::with_public_network(
+        Arc::new(FakePrivacyRelay::new(Vec::new())),
+        telephony.clone(),
+        Some(media.clone()),
+    )
+    .await
+    else {
+        return;
+    };
+    let e = EnterpriseWorld::around(a).await;
+    let caller = desk(&e, "caller").await;
+    let member = desk(&e, "member").await;
+    e.extension("5410", "ENTERPRISE_MEMBER", member.principal.id())
+        .await;
+    let r = e
+        .admin(
+            Method::POST,
+            "/v1/enterprise/sip-devices",
+            Some(
+                json!({ "deviceRef": "dev-ops-late-media-01", "principalId": caller.principal.id(),
+                         "displayLabel": "Ops desk" }),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let credential = e.a.w.token.credential.id.as_uuid();
+    common::exec(
+        e.h().conn(),
+        &format!(
+            "INSERT INTO call_inbound_owners (tenant_id, application_id, environment_id, \
+               service_account_id, credential_id, enabled, revision, created_at, updated_at) \
+             SELECT tenant_id, application_id, environment_id, service_account_id, id, true, 1, \
+               now(), now() FROM platform_api_credentials WHERE id = '{credential}'"
+        ),
+    )
+    .await
+    .unwrap();
+    let scope = e.a.w.consumer.env(e.a.w.kind);
+    let telephony_leg = Uuid::new_v4();
+    let offer = calling::calls::app::enterprise::EnterpriseDialogOffer {
+        schema_version: "1".into(),
+        telephony_leg_id: telephony_leg,
+        correlation_id: format!("corr_{}", Uuid::new_v4().simple()),
+        scope: calling::calls::app::enterprise::OfferScope {
+            tenant_id: e.a.w.consumer.tenant.id.as_uuid(),
+            application_id: e.a.w.consumer.application.id.as_uuid(),
+            environment_id: scope.id.as_uuid(),
+        },
+        device_ref: "dev-ops-late-media-01".into(),
+        extension: "5410".into(),
+        max_duration_seconds: 600,
+    };
+    let answer = e
+        .h()
+        .state
+        .app
+        .accept_enterprise_offer(&offer)
+        .await
+        .unwrap();
+    let call: Uuid = answer["callId"].as_str().unwrap().parse().unwrap();
+    let device_leg: Uuid = answer["callLegId"].as_str().unwrap().parse().unwrap();
+    // The member answers on the application: Calling asks Telephony for the bridge and
+    // attaches the RTC side with the join code.
+    let invitation =
+        e.a.invitation_for(call, member.phone.endpoint)
+            .await
+            .unwrap();
+    let (_, v) = e.a.state(call).await;
+    let r = e.a.accept(call, invitation, &member.phone, v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(e.a.state(call).await.0, CallState::Answered);
+    let bridges = telephony.bridges();
+    assert_eq!(bridges.len(), 1, "{bridges:?}");
+    assert_eq!(bridges[0]["kind"], "APPLICATION_MEDIA");
+    assert_eq!(bridges[0]["telephonyLegIds"], json!([telephony_leg]));
+    assert_eq!(media.attached.lock().unwrap().len(), 1);
+    let telephony_bridge: Uuid = e
+        .h()
+        .conn()
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT telephony_bridge_id FROM call_public_bridges WHERE call_id = '{call}'"),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index(0)
+        .unwrap();
+    // The edge bridges the device and the media gateway quickly, BEFORE the member's
+    // session joins: LEG_CONNECTED and BRIDGE_ESTABLISHED (one Telephony transaction).
+    let world = &e;
+    let apply = |value: Value| async move {
+        let event: calling::telephony::events::TelephonyEvent =
+            serde_json::from_value(value).unwrap();
+        world
+            .h()
+            .state
+            .app
+            .apply_telephony_event(&event)
+            .await
+            .unwrap()
+            .as_str()
+    };
+    let mut connected = leg_event("LEG_CONNECTED", call, device_leg, telephony_leg, None, 1);
+    connected["direction"] = json!("INBOUND");
+    connected["routeClass"] = json!("ENTERPRISE_INTERNAL");
+    assert_eq!(apply(connected).await, "APPLIED");
+    let established = json!({
+        "schemaVersion": "1", "eventId": Uuid::new_v4(), "eventType": "BRIDGE_ESTABLISHED",
+        "occurredAt": chrono::Utc::now(), "bridgeId": telephony_bridge, "callId": call,
+        "bridgeKind": "APPLICATION_MEDIA", "telephonyLegIds": [telephony_leg],
+        "applicationMedia": true,
+    });
+    assert_eq!(apply(established).await, "APPLIED");
+    assert_eq!(
+        e.a.state(call).await.0,
+        CallState::Answered,
+        "the answerer's media is still required"
+    );
+    // The member's media joins last: that join is the evidence that completes CONNECTED.
+    let session = e.a.session_on(call, member.phone.endpoint).await.unwrap();
+    e.a.connect(call, session).await;
+    assert_eq!(e.a.state(call).await.0, CallState::Connected);
+}

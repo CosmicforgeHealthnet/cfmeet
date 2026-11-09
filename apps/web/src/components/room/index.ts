@@ -11,5 +11,4 @@ export { default as LiveRoom } from "./live-room";
 export { default as FooterControls } from "./footer-controls";
 export { default as VideoGrid } from "./video-grid";
 export { default as PreJoinScreen } from "./pre-join-screen";
-export { ChatProvider } from "./ChatProvider";
-export { useChatContext } from "@/context/ChatContext";
+export { default as ConferenceRoom } from "./ConferenceRoom";

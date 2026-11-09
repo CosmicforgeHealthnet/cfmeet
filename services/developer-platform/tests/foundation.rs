@@ -140,6 +140,9 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         // Plans: customer-facing display metadata and lifecycle.
         "devplat_commercial_plans.display_name",
         "devplat_commercial_plans.status",
+        // Section 15 (PLT-008): the opaque Platform Access id of a credential an expiry
+        // notice was sent for (the deduplication key; no credential data is stored).
+        "devplat_credential_lifecycle_notices.credential_id",
         // Developer Platform display metadata and its own lifecycle (not Platform Access's).
         "devplat_environment_profiles.display_name",
         "devplat_environment_profiles.status",
@@ -151,6 +154,9 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         "devplat_invitations.status",
         "devplat_invitations.token_digest",
         "devplat_organizations.display_name",
+        // Section 15 (ORG-013): a rename not yet propagated to Platform Access (a flag,
+        // never Platform Access's name).
+        "devplat_organizations.platform_name_sync_pending",
         "devplat_project_profiles.display_name",
         "devplat_project_profiles.status",
         "devplat_project_profiles.status_reason",

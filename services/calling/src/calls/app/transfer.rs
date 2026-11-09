@@ -710,6 +710,9 @@ impl AppCallService {
         // Provider enforcement of the retired party's removal.
         self.enforce_removals(&call, retired).await;
         tracing::info!(call_id = %call.id, "application transfer completed");
+        // CAL-001: the retired transferor never counts; the target and the remaining
+        // party (both verified connected) keep the Call — evaluated for completeness.
+        self.evaluate_participation(call.id).await;
         Ok(())
     }
 
@@ -758,6 +761,8 @@ impl AppCallService {
         .await?;
         txn.commit().await?;
         self.publish(pending).await;
+        // CAL-001: a Call returned to CONNECTED / HELD with fewer than two parties ends.
+        self.evaluate_participation(call.id).await;
         Ok(true)
     }
 }

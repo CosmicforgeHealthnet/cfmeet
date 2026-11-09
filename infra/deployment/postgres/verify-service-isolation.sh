@@ -11,8 +11,14 @@
 #     and so on);
 #   * when <SERVICE>_MIGRATION_BIN is set (CALLING_MIGRATION_BIN,
 #     PLATFORM_ACCESS_MIGRATION_BIN, NUMBERING_MIGRATION_BIN, PRIVACY_RELAY_MIGRATION_BIN,
-#     TELEPHONY_MIGRATION_BIN, SMS_GATEWAY_MIGRATION_BIN, MESSAGING_MIGRATION_BIN, DEVELOPER_PLATFORM_MIGRATION_BIN), the service's REAL migrations apply as its migrator role
-#     and the runtime role can read every table they create.
+#     TELEPHONY_MIGRATION_BIN, SMS_GATEWAY_MIGRATION_BIN, MESSAGING_MIGRATION_BIN, DEVELOPER_PLATFORM_MIGRATION_BIN, ORGANIZATIONS_MIGRATION_BIN), the service's REAL migrations apply as its migrator role
+#     and the runtime role can read every table they create;
+#   * <SERVICE>_MIGRATION_BINS (e.g. MEETING_SERVICE_MIGRATION_BINS) is the same for a
+#     service with several histories: a space-separated list of binaries applied in that
+#     order (the release order). An entry prefixed with '?' is optional and skipped when the
+#     binary does not exist; every other entry must exist. Takes precedence over _BIN.
+#
+# Meeting-service (SEC-018) is in the throwaway set like every other service.
 #
 #   verify-service-isolation.sh --admin-url <superuser url>
 set -euo pipefail
@@ -28,7 +34,7 @@ done
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)"
 tag="iso$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')_"
-services=(calling platform-access numbering privacy-relay telephony sms-gateway messaging developer-platform)
+services=(calling platform-access numbering privacy-relay telephony sms-gateway messaging developer-platform organizations meeting-service)
 failures=0
 
 url_for() { # url_for <role> <password> <database>
@@ -70,9 +76,17 @@ for s in "${services[@]}"; do
   mig_url="$(url_for "$mg" "$(cat "$work/$s.migrator")" "$db")"
   rt_url="$(url_for "$rt" "$(cat "$work/$s.runtime")" "$db")"
   env_name="$(echo "$s" | tr 'a-z-' 'A-Z_')_MIGRATION_BIN"
-  bin="${!env_name:-}"
-  if [ -n "$bin" ]; then
-    expect_ok "real migrations apply as the migrator role" env DATABASE_URL="$mig_url" "$bin" up
+  list_name="${env_name}S"
+  bins="${!list_name:-${!env_name:-}}"
+  if [ -n "$bins" ]; then
+    for entry in $bins; do
+      bin="${entry#\?}"
+      if [ ! -x "$bin" ]; then
+        if [ "$bin" != "$entry" ]; then echo "  skip optional $(basename "$bin") (not built)"; else fail "migration binary $bin is missing"; fi
+        continue
+      fi
+      expect_ok "real migrations apply as the migrator role ($(basename "$bin"))" env DATABASE_URL="$mig_url" "$bin" up
+    done
     tables="$(psql "$mig_url" -XAtq -c "SELECT string_agg(format('SELECT 1 FROM %I LIMIT 0', tablename), '; ') FROM pg_tables WHERE schemaname = 'public'")"
     expect_ok "runtime role reads every migrated table" psql "$rt_url" -Xq -v ON_ERROR_STOP=1 -c "$tables"
   fi

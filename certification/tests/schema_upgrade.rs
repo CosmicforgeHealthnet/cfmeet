@@ -50,7 +50,12 @@ fn cases() -> Vec<Case> {
         Case {
             service: "calling",
             bin: "calling-migration",
-            part_vi: &["m20261201_000047_public_event_destinations"],
+            // + Blueprint Section 12 follow-up (enterprise audit acting principal): one
+            // nullable column on the append-only audit; its down only drops that column.
+            part_vi: &[
+                "m20261201_000047_public_event_destinations",
+                "m20261201_000048_enterprise_audit_acting_principal",
+            ],
             seed: Box::leak(
                 format!(
                     "INSERT INTO calling_outbox_events (id, event_id, source_event_id, aggregate_type, aggregate_id, \
@@ -73,13 +78,25 @@ fn cases() -> Vec<Case> {
                     "a published event stays published (never re-sent)",
                     "SELECT count(*) = 1 FROM calling_outbox_events WHERE status = 'PUBLISHED'",
                 ),
+                (
+                    "no existing audit row gains an acting principal",
+                    "SELECT count(*) = 0 FROM enterprise_admin_audit WHERE actor_principal_id IS NOT NULL",
+                ),
             ],
             part_vi_data: None,
         },
         Case {
             service: "messaging",
             bin: "messaging-migration",
-            part_vi: &["m20261201_000029_public_event_destinations"],
+            // + Blueprint Section 13 (session devices, inbox summary): additive columns,
+            // new tables; its down only drops what it added.
+            // + audit MSG-018 / MSG-009: two new tables (receipt coalescing, Hub timeline
+            // versions); its down only drops them.
+            part_vi: &[
+                "m20261201_000029_public_event_destinations",
+                "m20261202_000030_session_devices_inbox",
+                "m20261203_000031_receipt_coalescing_timeline",
+            ],
             seed: "INSERT INTO messaging_webhook_relay (event_id, environment_id, status, attempts, next_attempt_at, \
                      created_at, relayed_at) VALUES \
                    (gen_random_uuid(), gen_random_uuid(), 'RELAYED', 1, now(), now() - interval '2 days', now() - interval '2 days'), \
@@ -181,7 +198,14 @@ fn cases() -> Vec<Case> {
         Case {
             service: "platform-access",
             bin: "platform-access-migration",
-            part_vi: &["m20261120_000004_credential_suspension_production_activation"],
+            // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058) and Section 15
+            // (credential last use, TENANT_RENAMED): all newer than the deployed schema and
+            // upgraded / rolled back together.
+            part_vi: &[
+                "m20261120_000004_credential_suspension_production_activation",
+                "m20261121_000005_first_party_organization_scopes",
+                "m20261122_000006_credential_usage_tenant_rename",
+            ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
                    INSERT INTO platform_applications (id, tenant_id, slug, display_name) VALUES \
@@ -224,15 +248,33 @@ fn cases() -> Vec<Case> {
                     "SELECT count(*) = 0 FROM platform_production_activations",
                 ),
                 (
+                    "no organization scope is created by the upgrade",
+                    "SELECT count(*) = 0 FROM platform_organization_scopes",
+                ),
+                (
+                    "no credential use is invented by the upgrade",
+                    "SELECT count(*) = 0 FROM platform_credential_usage",
+                ),
+                (
                     "credential verifiers, status and validity are untouched",
                     "SELECT count(*) = 1 FROM platform_api_credentials WHERE status = 'ACTIVE' \
                        AND verifier = decode(md5('v1') || md5('v2'), 'hex') AND expires_at > now()",
                 ),
             ],
+            // Data of the newest migration first refuses its own down (so nothing is rolled
+            // back), and the Part VI audit row would refuse 000004's.
             part_vi_data: Some(
                 "INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
                    (gen_random_uuid(), 'operator@cfmeet', 'corr-upgrade-sus', 'CREDENTIAL_SUSPENDED', 'CREDENTIAL', \
-                    '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001')",
+                    '7e000000-0000-4000-8000-000000000005', '7e000000-0000-4000-8000-000000000001'); \
+                 INSERT INTO platform_organization_scopes (organization_ref, capability, tenant_id, application_id, \
+                   environment_id, requested_by, created_at) VALUES \
+                   ('7e000000-0000-4000-8000-0000000000aa', 'primary', '7e000000-0000-4000-8000-000000000001', \
+                    '7e000000-0000-4000-8000-000000000002', '7e000000-0000-4000-8000-000000000003', \
+                    'cfmeet.organizations', now()); \
+                 INSERT INTO platform_access_audit (id, actor, correlation_id, action, target_kind, target_id, tenant_id) VALUES \
+                   (gen_random_uuid(), 'devplat.u-0123456789abcdef0123456789abcdef', 'corr-upgrade-ren', 'TENANT_RENAMED', \
+                    'TENANT', '7e000000-0000-4000-8000-000000000001', '7e000000-0000-4000-8000-000000000001')",
             ),
         },
     ]
@@ -433,6 +475,13 @@ async fn run_case(case: &Case, bin: &std::path::Path, url: &str) -> anyhow::Resu
         anyhow::ensure!(
             refused.is_err(),
             "down must refuse once Part VI data exists"
+        );
+        // The migration's own data guard refused, not the SEC-015 subcommand guard.
+        anyhow::ensure!(
+            refused
+                .as_ref()
+                .is_err_and(|e| !e.to_string().contains("SEC-015: refusing")),
+            "down was refused by the SEC-015 subcommand guard, not by the data guard"
         );
         anyhow::ensure!(
             status(bin, url).iter().all(|(_, s)| s == "Applied"),

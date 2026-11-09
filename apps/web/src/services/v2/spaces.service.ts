@@ -26,10 +26,11 @@ export const spacesService = {
   // -------------------------------------------------------------------------
 
   /**
-   * List all meeting spaces the user has access to
+   * List the meeting spaces the user has access to. Without `cursor`/`limit` the backend
+   * returns every space; with them it pages (`nextCursor`).
    */
-  list: async () => {
-    const response = await apiV2.get<MeetingSpaceListResponse>("/meeting-spaces");
+  list: async (page?: { cursor?: string; limit?: number }) => {
+    const response = await apiV2.get<MeetingSpaceListResponse>("/meeting-spaces", page ? { params: page } : undefined);
     return response.data;
   },
 
@@ -44,8 +45,18 @@ export const spacesService = {
   /**
    * Create a new meeting space
    */
-  create: async (data: CreateMeetingSpaceRequest) => {
-    const response = await apiV2.post<MeetingSpaceResponse>("/meeting-spaces", data);
+  create: async (data: CreateMeetingSpaceRequest, idempotencyKey?: string) => {
+    const response = await apiV2.post<MeetingSpaceResponse>(
+      "/meeting-spaces",
+      data,
+      idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
+    );
+    return response.data;
+  },
+
+  /** The space's schedule (series + one-off occurrences) as an iCalendar file. */
+  calendarFile: async (id: string) => {
+    const response = await apiV2.get<Blob>(`/meeting-spaces/${encodeURIComponent(id)}/calendar.ics`, { responseType: "blob", headers: { Accept: "text/calendar" } });
     return response.data;
   },
 

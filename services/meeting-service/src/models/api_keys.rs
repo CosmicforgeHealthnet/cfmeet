@@ -14,6 +14,11 @@ pub struct Model {
     pub status: ApiKeyStatus,
     pub created_at: DateTime,
     pub updated_at: DateTime,
+    /// PLT-002: SHA-256 verifier (`account_hardening_migrations`); `None` only for rows an
+    /// older image wrote after the migration (healed on first use).
+    pub key_hash: Option<String>,
+    /// Non-secret lookup / display prefix (first 8 characters of the key).
+    pub key_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]

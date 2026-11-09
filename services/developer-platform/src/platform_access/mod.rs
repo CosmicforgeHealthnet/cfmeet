@@ -155,6 +155,16 @@ pub enum DelegationCall {
     GetTenant {
         tenant_id: Uuid,
     },
+    /// Section 15 (ORG-014): the EXTERNAL tenant created under a creation slug.
+    GetTenantBySlug {
+        slug: String,
+    },
+    /// Section 15 (ORG-013): propagates an organization rename (EXTERNAL tenants only).
+    RenameTenant {
+        actor: DelegationActor,
+        tenant_id: Uuid,
+        display_name: String,
+    },
     SetTenantStatus {
         actor: DelegationActor,
         tenant_id: Uuid,
@@ -313,6 +323,22 @@ impl DelegationCall {
                 format!("/internal/v1/delegation/tenants/{tenant_id}"),
                 None,
                 None,
+            ),
+            DelegationCall::GetTenantBySlug { slug } => (
+                Method::GET,
+                format!("/internal/v1/delegation/tenant-slugs/{slug}"),
+                None,
+                None,
+            ),
+            DelegationCall::RenameTenant {
+                actor,
+                tenant_id,
+                display_name,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/tenants/{tenant_id}/display-name"),
+                Some(json!({ "displayName": display_name })),
+                Some(*actor),
             ),
             DelegationCall::SetTenantStatus {
                 actor,

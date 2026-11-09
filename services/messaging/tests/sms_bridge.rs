@@ -454,3 +454,68 @@ async fn sms_bridge_eligibility_follows_the_context_policy() {
         .await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.text);
 }
+
+/// SEC-020: inbound SMS signed by the SMS Gateway for ANOTHER environment's (valid)
+/// delegated scope, naming this environment's bridge, is NOT_FOUND and writes nothing;
+/// the same delivery for the bridge's own scope is accepted (so the refusal is scope,
+/// never validation).
+#[tokio::test]
+async fn inbound_sms_signed_for_another_environment_never_reaches_this_bridge() {
+    let Some((h, _gw)) = harness().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let party = h.principal_of_kind(&c, "TELEPHONE_ENDPOINT");
+    let r = h
+        .post(
+            &c,
+            Some(people[0]),
+            &format!("/v1/conversations/{cid}/sms-bridges"),
+            bridge_body(Uuid::new_v4(), party),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let bridge = r.json["bridgeId"].as_str().unwrap().to_string();
+    let sms_count = format!(
+        "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND sender_principal_id = '{party}'"
+    );
+    let inbound = json!({ "bridgeRef": bridge, "smsMessageId": Uuid::new_v4(), "text": "cross-tenant", "segmentCount": 1 });
+    let peers = peers();
+    let other = h.first_party(false);
+    let r = h
+        .call_internal(
+            &peers.sms_gateway,
+            Method::POST,
+            "/internal/v1/sms-bridge/inbound",
+            Some(inbound.clone()),
+            Some(other.context.scope.delegated()),
+            &[],
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.code()),
+        (StatusCode::NOT_FOUND, "NOT_FOUND"),
+        "{}",
+        r.text
+    );
+    assert!(!r.text.contains(&cid), "{}", r.text);
+    assert_eq!(
+        h.scalar(&sms_count).await,
+        0,
+        "a foreign delivery wrote a message"
+    );
+    let r = h
+        .call_internal(
+            &peers.sms_gateway,
+            Method::POST,
+            "/internal/v1/sms-bridge/inbound",
+            Some(inbound),
+            Some(c.context.scope.delegated()),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(h.scalar(&sms_count).await, 1);
+}

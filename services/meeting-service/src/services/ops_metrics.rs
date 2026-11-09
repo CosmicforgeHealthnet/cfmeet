@@ -1,5 +1,6 @@
 //! Process-wide Parts G/H counters (recording, artefacts, consent, transcription,
-//! intelligence, registration, promotion, backstage, profile authorization).
+//! intelligence, registration, promotion, backstage, profile authorization, the
+//! Organizations authority).
 //!
 //! Exposed through `GET /internal/rtc/metrics` and the Prometheus exporter
 //! (`GET /internal/metrics`). Counters carry no labels and therefore no PII.
@@ -74,6 +75,10 @@ counters!(
     enhanced_audit_records,
     // Parts J–L: migration / compatibility observation
     legacy_writes_rejected,
+    // Blueprint Section 16 (MTG-017 / DATA-008): legacy v1 create mode.
+    legacy_creates_mirrored,
+    legacy_creates_refused,
+    legacy_mirror_failures,
     shadow_reads,
     shadow_mismatches,
     shadow_failures,
@@ -92,6 +97,16 @@ counters!(
     unified_messaging_revocations_done,
     unified_messaging_revocations_failed,
     unified_messaging_cutover_transitions,
+    // Blueprint Section 4: Organizations authority (shadow comparison, fail-closed reads,
+    // relay availability, read-only projection). Label-free; never ids, emails or names.
+    organizations_shadow_comparisons,
+    organizations_shadow_mismatches,
+    organizations_shadow_failures,
+    organizations_shadow_skipped,
+    organizations_authority_failures,
+    organizations_relay_unavailable,
+    organizations_projection_upserts,
+    organizations_projection_failures,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();

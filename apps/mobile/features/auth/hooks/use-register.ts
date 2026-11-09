@@ -1,8 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { authApi } from "../api/auth.api";
-import { getApiError } from "@/lib/api/client";
-import type { RegisterRequest, RegisterResponse } from "../types";
+import { ApiRequestError, decodeApiError } from "@/lib/api/errors";
+import type { RegisterResponse } from "@/lib/api/generated/meeting-service";
+import type { RegisterRequest } from "../types";
 
 export function useRegister() {
   return useMutation({
@@ -10,14 +11,13 @@ export function useRegister() {
       try {
         return await authApi.register(data);
       } catch (error) {
-        const apiError = getApiError(error);
-        throw new Error(apiError.message);
+        throw new ApiRequestError(decodeApiError(error));
       }
     },
-    onSuccess: (response) => {
+    onSuccess: (response, variables) => {
       router.replace({
         pathname: "/verify",
-        params: { email: response.email },
+        params: { email: response.email ?? variables.email },
       });
     },
   });

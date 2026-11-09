@@ -55,6 +55,28 @@ async fn protected_objects_on_a_real_s3_compatible_server() {
         store.get(&key, bytes.len() - 1).await,
         Err(cf_object_storage::StorageError::Integrity)
     ));
+    // Streaming read (Section 16 / SEC-019, meeting artefact hashing): same bound, same
+    // bytes, no buffering in the store.
+    let mut streamed = Vec::new();
+    assert_eq!(
+        store
+            .get_streaming(&key, 1024, |c| streamed.extend_from_slice(c))
+            .await
+            .unwrap(),
+        Some(bytes.len() as u64)
+    );
+    assert_eq!(streamed, bytes);
+    assert!(matches!(
+        store
+            .get_streaming(&key, bytes.len() as u64 - 1, |_| {})
+            .await,
+        Err(cf_object_storage::StorageError::Integrity)
+    ));
+    // Single-part writes report the MD5 ETag on write and head (meeting integrity check).
+    assert!(
+        stored.etag.is_some() && meta.etag == stored.etag,
+        "{stored:?} {meta:?}"
+    );
 
     let read = store
         .signed_read(&key, Duration::from_secs(60), chrono::Utc::now())

@@ -27,6 +27,8 @@ pub struct InternalServiceContext {
     pub(crate) correlation_id: CorrelationId,
     pub(crate) permissions: PermissionSet,
     pub(crate) delegated_platform_context: Option<DelegatedPlatformContext>,
+    /// The token's request binding (`htm` / `htu`) was compared with this request.
+    pub(crate) request_bound: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -80,6 +82,12 @@ impl InternalServiceContext {
 
     pub fn delegated_platform_context(&self) -> Option<&DelegatedPlatformContext> {
         self.delegated_platform_context.as_ref()
+    }
+
+    /// Whether the token was bound to this request (`htm` / `htu` present and verified
+    /// against it). `false` for unbound tokens accepted in `accept` / `off` mode.
+    pub fn is_request_bound(&self) -> bool {
+        self.request_bound
     }
 
     pub fn has_permission(&self, permission: InternalPermission) -> bool {

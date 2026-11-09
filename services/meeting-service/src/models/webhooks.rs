@@ -13,6 +13,9 @@ pub struct Model {
     pub status: WebhookStatus,
     pub created_at: DateTime,
     pub updated_at: DateTime,
+    /// DATA-003: fingerprint of the secret (`account_hardening_migrations`); the secret
+    /// itself is no longer stored for new webhooks.
+    pub secret_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]

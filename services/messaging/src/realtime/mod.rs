@@ -32,6 +32,7 @@ pub mod hub;
 pub mod presence;
 pub mod push;
 pub mod push_adapters;
+pub mod session_devices;
 pub mod sessions;
 pub mod token;
 
@@ -54,6 +55,11 @@ pub const TICKET_PROTOCOL_PREFIX: &str = "cfmeet.ticket.";
 #[derive(Debug, Clone)]
 pub struct RealtimeSettings {
     pub token_ttl: chrono::Duration,
+    /// Blueprint Section 13 (ADR 0049 amendment A1): first-party session devices for
+    /// MANAGED realtime. Independent of (and never implying) E2EE device registration.
+    pub session_devices_enabled: bool,
+    /// Lifetime of a session-device client token (renewed through the relay).
+    pub session_device_token_ttl: chrono::Duration,
     pub ticket_ttl: chrono::Duration,
     /// Browser `Origin`s allowed to open a connection (exact match). Native clients send
     /// no Origin. Empty: browser connections are refused.
@@ -77,12 +83,18 @@ pub struct RealtimeSettings {
     pub typing_ttl: Duration,
     pub drain: Duration,
     pub publisher_interval: Duration,
+    /// MSG-018: read / delivery receipts of one member in one conversation are published
+    /// at most once per window (first advance at once, then the highest cursor when the
+    /// window ends). Zero publishes every advance at once.
+    pub receipt_window: Duration,
 }
 
 impl Default for RealtimeSettings {
     fn default() -> Self {
         Self {
             token_ttl: chrono::Duration::minutes(15),
+            session_devices_enabled: true,
+            session_device_token_ttl: chrono::Duration::minutes(5),
             ticket_ttl: chrono::Duration::seconds(30),
             allowed_origins: Vec::new(),
             require_tls: false,
@@ -102,6 +114,7 @@ impl Default for RealtimeSettings {
             typing_ttl: Duration::from_secs(8),
             drain: Duration::from_secs(10),
             publisher_interval: Duration::from_millis(250),
+            receipt_window: Duration::from_millis(1500),
         }
     }
 }

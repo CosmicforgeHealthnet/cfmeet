@@ -17,6 +17,7 @@ use crate::{
         RecurrenceStatus, Role, SecurityProfile, SpaceStatus, TerminationReason, WaitingRoomPolicy,
     },
     services::meeting_permissions::{MediaPermissions, RolePolicy},
+    services::notifications::EmailDelivery,
     services::{realtime::RealtimeEnvelope, rtc_provider::TrackKind},
 };
 
@@ -272,6 +273,21 @@ pub struct ConferenceSummary {
 #[serde(rename_all = "camelCase")]
 pub struct MeetingSpaceListResponse {
     pub items: Vec<MeetingSpaceResponse>,
+    /// Present only on paginated requests (`limit` or `cursor` sent) when another page
+    /// exists: pass it back as `cursor`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// `GET /api/v2/meeting-spaces` paging (both optional; omitting both keeps the legacy
+/// complete list).
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListMeetingSpacesQuery {
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50 when `cursor` is sent without `limit`).
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -339,6 +355,9 @@ pub struct CreateInvitationRequest {
     /// Default 168 (7 days); capped by server policy.
     pub expires_in_hours: Option<i64>,
     pub use_limit: Option<i32>,
+    /// Blueprint Section 11: also email the invitation link to `inviteeEmail` (required
+    /// with this flag). The result is reported in `emailDelivery`. Default false.
+    pub send_email: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -362,6 +381,11 @@ pub struct CreateInvitationResponse {
     pub invitation: InvitationResponse,
     /// Raw bearer token. Returned exactly once; only its hash is stored.
     pub token: String,
+    /// Only when `sendEmail` was true: DISABLED (notification email is off on this
+    /// deployment), ACCEPTED (queued, subject to the recipient's notification preferences)
+    /// or FAILED (temporary failure; share the link yourself).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_delivery: Option<EmailDelivery>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -388,8 +412,13 @@ pub struct CreateConferenceRequest {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RescheduleConferenceRequest {
+    /// New start; more than 5 minutes in the past is rejected.
     pub scheduled_start_at: DateTime<Utc>,
+    /// New end. Omitted: the occurrence keeps its duration (a start-only occurrence stays
+    /// start-only). At most 24 hours after the start.
     pub scheduled_end_at: Option<DateTime<Utc>>,
+    /// Optional optimistic-concurrency guard: the conference `version` last read.
+    pub version: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -447,6 +476,124 @@ pub struct ConferenceResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ConferenceListResponse {
     pub items: Vec<ConferenceResponse>,
+}
+
+// ---------------------------------------------------------------------------
+// Agenda / first-party calendar (Blueprint Section 10)
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v2/me/conferences` query.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgendaQuery {
+    /// Inclusive lower bound on the scheduled start (RFC 3339). Default: now.
+    pub from: Option<DateTime<Utc>>,
+    /// Exclusive upper bound (RFC 3339). Default: `from` + 31 days; at most 366 days after `from`.
+    pub to: Option<DateTime<Utc>>,
+    /// Comma-separated conference statuses, e.g. `CREATED,LIVE`.
+    pub status: Option<String>,
+    /// Comma-separated relations of the caller (`AgendaRelation`), e.g. `OWNER,INVITEE`.
+    pub role: Option<String>,
+    /// Restrict to one organization's meetings (the caller must be a verified member).
+    pub organization_id: Option<Uuid>,
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u32>,
+}
+
+/// Why an occurrence is on the caller's agenda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgendaRelation {
+    /// The caller (or the calling environment) owns the meeting space.
+    Owner,
+    /// Active member of the meeting space.
+    Member,
+    /// Holder of an active invitation bound to the caller's verified email.
+    Invitee,
+    /// Registered for the webinar.
+    Registrant,
+    /// Took part in (or is waiting for) this conference.
+    Participant,
+    /// Organization meeting visible to a verified member of `organizationId`.
+    Organization,
+}
+
+impl AgendaRelation {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "OWNER" => Self::Owner,
+            "MEMBER" => Self::Member,
+            "INVITEE" => Self::Invitee,
+            "REGISTRANT" => Self::Registrant,
+            "PARTICIPANT" => Self::Participant,
+            "ORGANIZATION" => Self::Organization,
+            _ => return None,
+        })
+    }
+}
+
+/// Meeting-space fields an agenda entry may show.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaSpace {
+    /// Omitted for HEALTHCARE / HIGH_SECURITY spaces unless the caller manages the space.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub meeting_code: String,
+    pub meeting_type: MeetingType,
+    pub status: SpaceStatus,
+    /// IANA timezone of the meeting: show times in this zone and in the viewer's zone.
+    pub timezone: String,
+    pub access_policy: AccessPolicy,
+    pub requires_passcode: bool,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<Uuid>,
+}
+
+/// One occurrence on the caller's agenda.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaItem {
+    /// The conference id; null for a recurring occurrence beyond the materialization
+    /// horizon (it becomes a conference later, under the same `occurrenceKey`).
+    pub conference_id: Option<Uuid>,
+    /// Stable occurrence identity within the meeting space (unchanged by materialization).
+    pub occurrence_key: String,
+    pub meeting_space_id: Uuid,
+    /// False for an occurrence computed from the recurrence rule (not yet materialized).
+    pub materialized: bool,
+    pub view: ResourceView,
+    pub status: ConferenceStatus,
+    pub kind: ConferenceKind,
+    pub scheduled_start_at: DateTime<Utc>,
+    pub scheduled_end_at: Option<DateTime<Utc>>,
+    pub is_exception: bool,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_start_at: Option<DateTime<Utc>>,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    /// FULL view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+    /// The caller's persistent role in the space, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewer_role: Option<Role>,
+    pub relations: Vec<AgendaRelation>,
+    pub meeting_space: AgendaSpace,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaResponse {
+    /// Ordered by scheduled start, then meeting space, then occurrence key.
+    pub items: Vec<AgendaItem>,
+    /// Pass back as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<String>,
 }
 
 /// Provider enforcement state for operations whose media effect is Part E.
@@ -851,6 +998,22 @@ pub struct OrganizationMemberResponse {
     pub status: OrganizationMemberStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Once the Organizations Service is authoritative: the member's full role (OWNER,
+    /// ADMIN, MANAGER, MEMBER or GUEST); `role` then shows MANAGER and GUEST as MEMBER.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_role: Option<String>,
+    /// Once the Organizations Service is authoritative: the membership version, used as
+    /// `expectedVersion` by `PATCH /api/v2/organizations/{id}/members/{userId}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    /// ORG-006: the member's display name (the account's chosen display name, otherwise
+    /// its username), from the account authority. `null` when the account no longer
+    /// exists. The email address is never included: the organization policy has no
+    /// email-visibility setting, so only the display identity is shown.
+    pub display_name: Option<String>,
+    /// ORG-006: the member's username (public handle). `null` when the account no
+    /// longer exists.
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -858,6 +1021,693 @@ pub struct OrganizationMemberResponse {
 pub struct MyOrganizationResponse {
     pub organization: OrganizationResponse,
     pub role: OrganizationRole,
+    /// Once the Organizations Service is authoritative: the caller's full role (OWNER,
+    /// ADMIN, MANAGER or MEMBER); `role` then shows MANAGER as MEMBER.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization_role: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// First-party organizations (Blueprint Section 4; relayed to the Organizations Service)
+//
+// These schemas document the first-party organization routes, which meeting-service
+// relays to the Organizations Service unchanged (Organizations validates every field and
+// enforces every role rule). They are never deserialized here.
+// ---------------------------------------------------------------------------
+
+/// Optional legal registration of an organization (self-declared until an operator
+/// verifies it; never the CF Meet creation time).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationLegalRegistration {
+    /// Up to 200 characters.
+    pub registered_name: Option<String>,
+    /// Up to 100 characters.
+    pub registration_number: Option<String>,
+    /// `YYYY-MM-DD`.
+    pub incorporated_on: Option<String>,
+    /// `SELF_DECLARED` or `VERIFIED` (read-only; set by an operator).
+    pub verification: Option<String>,
+}
+
+/// Organization profile. On update, an omitted field is unchanged and `null` clears it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationProfile {
+    /// Up to 2000 characters.
+    pub description: Option<String>,
+    /// Up to 60 characters.
+    pub organization_type: Option<String>,
+    /// Up to 60 characters.
+    pub industry: Option<String>,
+    /// ISO 3166-1 alpha-2 country code.
+    pub country_code: Option<String>,
+    /// Up to 120 characters.
+    pub city: Option<String>,
+    /// Up to 500 characters.
+    pub operating_address: Option<String>,
+    /// Up to 500 characters.
+    pub logo_ref: Option<String>,
+    /// Up to 254 characters.
+    pub public_contact_email: Option<String>,
+    pub legal_registration: Option<OrganizationLegalRegistration>,
+}
+
+/// `POST /api/v2/organizations`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBusinessOrganizationRequest {
+    /// 1–200 characters.
+    pub name: String,
+    /// 3–63 lowercase letters, digits and `-`, starting and ending with a letter or digit.
+    pub slug: String,
+    pub profile: Option<OrganizationProfile>,
+}
+
+/// `PATCH /api/v2/organizations/{id}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBusinessOrganizationRequest {
+    /// The organization `version` the change is based on (optimistic concurrency).
+    pub expected_version: i64,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub profile: Option<OrganizationProfile>,
+}
+
+/// The caller's own membership, as seen on an organization.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationViewer {
+    pub membership_id: Uuid,
+    /// OWNER, ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: String,
+    /// ACTIVE or SUSPENDED.
+    pub status: String,
+    /// Capabilities the caller holds in this organization (default deny).
+    pub capabilities: Vec<String>,
+}
+
+/// A first-party business organization (the Organizations Service resource).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BusinessOrganization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    /// ACTIVE, SUSPENDED or ARCHIVED.
+    pub lifecycle_status: String,
+    /// NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED.
+    pub provisioning_state: String,
+    /// SELF_SERVICE, PLATFORM_ADMIN or IMPORTED.
+    pub creation_source: String,
+    pub created_by: Option<Uuid>,
+    /// When the organization was created on CF Meet (never an incorporation date).
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub profile: Option<OrganizationProfile>,
+    /// Present when the caller is a member.
+    pub viewer: Option<OrganizationViewer>,
+    pub member_count: Option<i64>,
+    /// `GET /api/v2/organizations/{id}` only: the display name of `createdBy` from the
+    /// account authority (`null` when there is no creator or the account no longer
+    /// exists). Never an email address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_display_name: Option<String>,
+}
+
+/// A page of organizations (platform administrators).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BusinessOrganizationPage {
+    pub items: Vec<BusinessOrganization>,
+    /// Pass as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// One membership of a first-party organization.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BusinessOrganizationMembership {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    pub user_id: Uuid,
+    /// OWNER, ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: String,
+    /// ACTIVE, SUSPENDED or REMOVED.
+    pub status: String,
+    /// CREATOR, INVITATION, IMPORTED, OPERATOR or OWNERSHIP_TRANSFER.
+    pub joined_via: String,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub removed_at: Option<DateTime<Utc>>,
+    pub version: i64,
+}
+
+/// `PATCH /api/v2/organizations/{id}/members/{userId}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBusinessMembershipRequest {
+    /// The membership `version` the change is based on.
+    pub expected_version: i64,
+    /// OWNER, ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: Option<String>,
+    /// ACTIVE, SUSPENDED or REMOVED.
+    pub status: Option<String>,
+}
+
+/// `POST /api/v2/organizations/{id}/ownership-transfer`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationOwnershipTransferRequest {
+    /// The membership that becomes OWNER.
+    pub to_membership_id: Uuid,
+    /// The organization `version` the transfer is based on.
+    pub expected_version: i64,
+}
+
+/// `POST /api/v2/organizations/{id}/invitations`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOrganizationInvitationRequest {
+    /// The invitee's email address; only an account with this verified email can accept.
+    pub email: String,
+    /// ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: String,
+    /// Blueprint Section 11: also email the invitation link to `email` (default false).
+    /// Handled by this relay; the outcome is reported in `emailDelivery`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_email: Option<bool>,
+}
+
+/// An organization invitation. The raw `token` is returned once, at creation only.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationInvitation {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    pub role: String,
+    /// PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED.
+    pub status: String,
+    /// Masked invitee email, e.g. `a***@example.com`.
+    pub invitee_email_hint: String,
+    pub invited_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub decided_at: Option<DateTime<Utc>>,
+    /// One-time invitation token (creation response only; never in URLs or logs).
+    pub token: Option<String>,
+    /// Creation with `sendEmail: true` only: DISABLED, ACCEPTED or FAILED.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_delivery: Option<EmailDelivery>,
+}
+
+/// `POST /api/v2/organization-invitations/accept` and `/decline`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationInvitationTokenRequest {
+    /// The invitation token received by the invitee.
+    pub token: String,
+}
+
+/// Suspend, reactivate or archive an organization.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationLifecycleRequest {
+    /// Optional organization `version` the change is based on.
+    pub expected_version: Option<i64>,
+}
+
+/// `GET /api/v2/organizations/{id}/invitations`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationInvitationList {
+    /// Invitations (masked invitee email; never a token).
+    pub items: Vec<OrganizationInvitation>,
+}
+
+/// Who performed an audited organization change.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationAuditActor {
+    /// USER, OPERATOR or SYSTEM.
+    pub kind: String,
+    pub user_id: Option<Uuid>,
+    /// The service the change came through (for example `cfmeet.meeting-service`).
+    pub service_id: String,
+}
+
+/// One organization audit event (append-only).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationAuditEvent {
+    pub id: Uuid,
+    /// Monotonic sequence number (pass the oldest one seen as `before`).
+    pub seq: i64,
+    pub organization_id: Option<Uuid>,
+    /// Dotted action name, for example `membership.role_changed` or `policy.updated`.
+    pub action: String,
+    pub actor: OrganizationAuditActor,
+    /// The kind of resource changed (organization, membership, invitation, team, policy...).
+    pub target_type: String,
+    pub target_id: Option<Uuid>,
+    /// Value-free change summary (ids, versions, changed field names).
+    #[schema(value_type = Object)]
+    pub summary: serde_json::Value,
+    pub request_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// A page of organization audit events, newest first.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationAuditEventPage {
+    pub items: Vec<OrganizationAuditEvent>,
+    /// Pass as `before` for the next (older) page; null on the last page.
+    pub next_cursor: Option<i64>,
+}
+
+/// The organization's technical scope mapping (ids and verification state only).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationScopeMapping {
+    pub id: Uuid,
+    /// `primary`.
+    pub capability: String,
+    /// PENDING, VERIFYING, READY, FAILED, SUSPENDED or RETIRED.
+    pub mapping_state: String,
+    pub mapping_version: i64,
+    pub tenant_id: Option<Uuid>,
+    pub application_id: Option<Uuid>,
+    pub environment_id: Option<Uuid>,
+    pub verified_at: Option<DateTime<Utc>>,
+    /// ACTIVE or SUSPENDED.
+    pub tenant_status_desired: Option<String>,
+    /// ACTIVE or SUSPENDED.
+    pub tenant_status_applied: Option<String>,
+    pub sync_attempts: i64,
+    pub last_sync_error_class: Option<String>,
+}
+
+/// `GET /api/v2/organizations/{id}/provisioning`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationProvisioning {
+    pub organization_id: Uuid,
+    /// NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED.
+    pub provisioning_state: String,
+    pub workflow_id: Option<Uuid>,
+    /// PENDING, IN_PROGRESS, READY, FAILED or CANCELLED.
+    pub workflow_state: Option<String>,
+    /// The current step (at most 64 characters).
+    pub step: Option<String>,
+    pub attempts: i64,
+    /// The failure class of the last failed attempt.
+    pub last_error_class: Option<String>,
+    pub updated_at: DateTime<Utc>,
+    /// Whether technical provisioning runs in this deployment (while false organizations
+    /// stay PENDING).
+    pub provisioning_enabled: bool,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    pub scopes: Vec<OrganizationScopeMapping>,
+}
+
+// ---------------------------------------------------------------------------
+// Teams and policies (Blueprint Section 6; relayed to the Organizations Service)
+// ---------------------------------------------------------------------------
+
+/// A team of a first-party organization.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationTeam {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    /// 1–120 characters, unique among the organization's ACTIVE teams.
+    pub name: String,
+    /// Up to 500 characters.
+    pub description: Option<String>,
+    pub parent_team_id: Option<Uuid>,
+    /// ACTIVE or ARCHIVED.
+    pub status: String,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub archived_at: Option<DateTime<Utc>>,
+    /// Pass as `expectedVersion` to change or archive the team.
+    pub version: i64,
+    /// ACTIVE team members.
+    pub member_count: i64,
+}
+
+/// A page of teams (id order).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationTeamPage {
+    pub items: Vec<OrganizationTeam>,
+    /// Pass as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// `POST /api/v2/organizations/{id}/teams`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOrganizationTeamRequest {
+    /// 1–120 characters.
+    pub name: String,
+    /// Up to 500 characters.
+    pub description: Option<String>,
+    /// An ACTIVE team of the same organization (nesting is bounded).
+    pub parent_team_id: Option<Uuid>,
+}
+
+/// `PATCH /api/v2/organizations/{id}/teams/{teamId}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOrganizationTeamRequest {
+    /// The team `version` the change is based on.
+    pub expected_version: i64,
+    pub name: Option<String>,
+    /// `null` clears the description.
+    pub description: Option<String>,
+    /// `null` detaches the team from its parent; absent leaves it unchanged.
+    pub parent_team_id: Option<Uuid>,
+}
+
+/// `POST /api/v2/organizations/{id}/teams/{teamId}/archive`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveOrganizationTeamRequest {
+    /// Optional team `version` the archive is based on.
+    pub expected_version: Option<i64>,
+}
+
+/// One team membership. `displayName` / `username` are added by this relay from the
+/// account authority (never an email address).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationTeamMember {
+    /// The team membership id (the `{memberId}` path segment).
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    pub team_id: Uuid,
+    /// The organization membership.
+    pub membership_id: Uuid,
+    pub user_id: Uuid,
+    /// TEAM_MANAGER or TEAM_MEMBER.
+    pub role: String,
+    /// ACTIVE or REMOVED.
+    pub status: String,
+    pub added_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub removed_at: Option<DateTime<Utc>>,
+    /// Pass as `expectedVersion` to change the team role.
+    pub version: i64,
+    /// The member's display name; `null` when the account no longer exists.
+    pub display_name: Option<String>,
+    /// The member's username; `null` when the account no longer exists.
+    pub username: Option<String>,
+}
+
+/// A page of ACTIVE team members (id order).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationTeamMemberPage {
+    pub items: Vec<OrganizationTeamMember>,
+    /// Pass as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// `POST /api/v2/organizations/{id}/teams/{teamId}/members` — exactly one of
+/// `membershipId` and `userId`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddOrganizationTeamMemberRequest {
+    /// An ACTIVE organization membership.
+    pub membership_id: Option<Uuid>,
+    /// A user with an ACTIVE organization membership.
+    pub user_id: Option<Uuid>,
+    /// TEAM_MANAGER (organization MANAGERs, ADMINs and OWNERs only) or TEAM_MEMBER.
+    pub role: String,
+}
+
+/// `PATCH /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOrganizationTeamMemberRequest {
+    /// The team membership `version` the change is based on.
+    pub expected_version: i64,
+    /// TEAM_MANAGER or TEAM_MEMBER.
+    pub role: String,
+}
+
+/// Who may list the organization's members.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyMemberDirectory {
+    /// MEMBERS (default), MANAGERS or ADMINS: the minimum role that may list members.
+    pub visibility: String,
+    /// Colleague discovery hint (default true).
+    pub searchable: bool,
+}
+
+/// External guests.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyGuests {
+    /// GUEST invitations may be created or accepted (default true).
+    pub invitations_allowed: bool,
+}
+
+/// Organization meetings.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyMeetings {
+    /// MEMBERS (default), MANAGERS or ADMINS: the minimum role that may host.
+    pub host_creation: String,
+}
+
+/// Features enabled for the organization (a disabled feature removes its capabilities
+/// for every role).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyFeatures {
+    pub meetings: bool,
+    pub messaging: bool,
+    pub calling: bool,
+}
+
+/// Retention hint.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyRetention {
+    /// 1–3650 days, or `null` for no hint.
+    pub hint_days: Option<i64>,
+}
+
+/// Delegated administration (OWNER-only section).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyDelegatedAdministration {
+    /// MANAGERs may invite MEMBERs and GUESTs (default true).
+    pub managers_may_invite: bool,
+    /// MANAGERs may create teams (default false).
+    pub managers_may_create_teams: bool,
+    /// ADMINs may change policies (default true).
+    pub admins_may_manage_policies: bool,
+}
+
+/// The organization policy document (schema version 1). Defaults equal the role matrix; a
+/// policy only removes capabilities and never touches OWNER administration.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicyDocument {
+    pub member_directory: OrganizationPolicyMemberDirectory,
+    pub guests: OrganizationPolicyGuests,
+    pub meetings: OrganizationPolicyMeetings,
+    pub features: OrganizationPolicyFeatures,
+    pub retention: OrganizationPolicyRetention,
+    pub delegated_administration: OrganizationPolicyDelegatedAdministration,
+}
+
+/// `GET /api/v2/organizations/{id}/policies`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationPolicy {
+    /// Always 1.
+    pub schema_version: i64,
+    pub organization_id: Uuid,
+    /// Pass as `expectedRevision` to change the policy (0: never changed, defaults).
+    pub revision: i64,
+    pub policy: OrganizationPolicyDocument,
+    pub updated_by: Option<Uuid>,
+    pub updated_at: Option<DateTime<Utc>>,
+    /// The Meeting Service profile policy, verbatim (still enforced by the Meeting
+    /// Service).
+    #[schema(value_type = Object)]
+    pub legacy_meeting_profile_policy: serde_json::Value,
+}
+
+/// `PATCH /api/v2/organizations/{id}/policies` (compare-and-swap).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateOrganizationPolicyRequest {
+    /// The policy `revision` the change is based on; a stale one is VERSION_CONFLICT.
+    pub expected_revision: i64,
+    /// A partial policy document merged into the current one (unknown keys refused).
+    #[schema(value_type = Object)]
+    pub policy: serde_json::Value,
+}
+
+// ---------------------------------------------------------------------------
+// Workspace context (Blueprint Section 8, ADR 0056 §5)
+//
+// A workspace is a per-request context: "Personal" or one organization the caller is an
+// ACTIVE member of. The server never stores an "active organization"; every
+// organization-scoped request still names its organization and is re-verified.
+// ---------------------------------------------------------------------------
+
+/// Kind of workspace context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceKind {
+    /// The caller's own personal context (`id` = `personal`).
+    Personal,
+    /// A first-party business organization (`id` = the organization id).
+    Organization,
+}
+
+/// Which store answered: the meeting-service organization directory
+/// (`ORGANIZATIONS_AUTHORITY_MODE` legacy / shadow) or the Organizations Service
+/// (authoritative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceAuthority {
+    LegacyDirectory,
+    OrganizationsService,
+}
+
+/// Why a capability is (not) granted in a workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceCapabilityReason {
+    Allowed,
+    /// The caller's role does not hold it.
+    CapabilityNotGranted,
+    /// The role holds it but the organization policy removes it.
+    PolicyRestricted,
+    /// The organization is suspended: it grants nothing (except what the authority still
+    /// grants its OWNERs, such as `organization.read`).
+    OrganizationSuspended,
+    /// Not available in this deployment (the Organizations Service is not authoritative).
+    FeatureDisabled,
+}
+
+/// A small summary of what the caller can do in a workspace.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapabilitySummary {
+    /// Every capability granted now (default deny).
+    pub granted: Vec<String>,
+    /// Meetings can be created in this context.
+    pub can_create_meetings: bool,
+    /// Members can be invited (`organization.members.invite`).
+    pub can_invite_members: bool,
+    /// Organization administration: profile, member management or policies.
+    pub can_administer: bool,
+}
+
+/// One workspace context of the caller.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    /// `personal`, or the organization id.
+    pub id: String,
+    pub kind: WorkspaceKind,
+    /// `Personal`, or the organization name.
+    pub display_name: String,
+    /// ORGANIZATION only.
+    pub organization_id: Option<Uuid>,
+    /// ORGANIZATION only.
+    pub slug: Option<String>,
+    /// The caller's role (OWNER, ADMIN, MANAGER, MEMBER or GUEST; the legacy directory knows
+    /// OWNER, ADMIN and MEMBER). ORGANIZATION only.
+    pub role: Option<String>,
+    /// ACTIVE or SUSPENDED (a suspended organization grants nothing). ORGANIZATION only.
+    pub organization_status: Option<String>,
+    /// NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED, from the Organizations Service;
+    /// null for PERSONAL and when the legacy directory answers (no provisioning there).
+    pub provisioning_state: Option<String>,
+    pub capabilities: WorkspaceCapabilitySummary,
+}
+
+/// `GET /api/v2/me/workspaces`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePage {
+    /// PERSONAL first, then organizations ordered by id.
+    pub items: Vec<Workspace>,
+    /// Pass back as `cursor` for the next page; null on the last page.
+    pub next_cursor: Option<String>,
+    pub authority: WorkspaceAuthority,
+}
+
+/// `GET /api/v2/me/workspaces` paging.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceListQuery {
+    /// Opaque cursor from a previous page's `nextCursor`.
+    pub cursor: Option<String>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u32>,
+}
+
+/// One capability decision.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapability {
+    /// Capability name, e.g. `meetings.organization.create`.
+    pub capability: String,
+    pub granted: bool,
+    pub reason: WorkspaceCapabilityReason,
+}
+
+/// Features the workspace context does not disable. Owner services still apply their
+/// own policy (stricter wins) and re-verify every request.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFeatures {
+    pub meetings: bool,
+    pub messaging: bool,
+    pub calling: bool,
+}
+
+/// `GET /api/v2/me/workspaces/{workspaceId}/capabilities`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCapabilities {
+    /// `personal`, or the organization id.
+    pub workspace_id: String,
+    pub kind: WorkspaceKind,
+    pub authority: WorkspaceAuthority,
+    pub organization_id: Option<Uuid>,
+    pub role: Option<String>,
+    pub organization_status: Option<String>,
+    pub provisioning_state: Option<String>,
+    /// Organization policy revision the answer was computed with (Organizations Service).
+    pub policy_revision: Option<i64>,
+    pub features: WorkspaceFeatures,
+    /// Every capability of the vocabulary with its decision.
+    pub capabilities: Vec<WorkspaceCapability>,
+    /// PERSONAL only: the Communications Hub read that owns personal communications
+    /// capabilities (`/api/v2/communications/me/capabilities`).
+    pub personal_communications_capabilities: Option<String>,
+    /// When the answer was computed (it is never cached server-side).
+    pub evaluated_at: DateTime<Utc>,
 }
 
 // ---------------------------------------------------------------------------

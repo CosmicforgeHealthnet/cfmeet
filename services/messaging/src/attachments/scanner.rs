@@ -195,9 +195,15 @@ impl GatewayScanner {
         use cf_scan_gateway_contract::{Expected, ScanResponse, Verdict};
         use cf_service_auth::{OutboundServiceRequest, ServiceId};
         let digest = cf_object_storage::sha256_hex(bytes);
-        let signed = match self.signer.sign(&OutboundServiceRequest::new_operation(
-            ServiceId::security_scan(),
-        )) {
+        // SEC-012: bound (when emission is on) to POST on the scan path as sent.
+        let path = reqwest::Url::parse(&self.url)
+            .map(|u| u.path().to_owned())
+            .unwrap_or_default();
+        let signed = match self.signer.sign_request(
+            &OutboundServiceRequest::new_operation(ServiceId::security_scan()),
+            &reqwest::Method::POST,
+            &path,
+        ) {
             Ok(s) => s,
             Err(_) => return ScanOutcome::Unavailable("scan gateway token not signed".into()),
         };

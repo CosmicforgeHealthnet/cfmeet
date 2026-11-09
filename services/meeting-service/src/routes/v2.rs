@@ -14,7 +14,7 @@ use axum::{
 use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
-        artifacts, breakouts, collaboration as collab, compat, conferences, engagement,
+        artifacts, breakouts, calendar, collaboration as collab, compat, conferences, engagement,
         invitations, members, organizations, participants, quality, realtime, spaces, specialized,
     },
     state::AppState,
@@ -96,6 +96,16 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(conferences::list_conferences).post(conferences::create_conference),
         )
         .route("/conferences/:id", get(conferences::get_conference))
+        // Blueprint Section 10: first-party calendar (agenda, RFC 5545 exports)
+        .route("/me/conferences", get(calendar::my_conferences))
+        .route(
+            "/conferences/:id/calendar.ics",
+            get(calendar::conference_calendar),
+        )
+        .route(
+            "/meeting-spaces/:id/calendar.ics",
+            get(calendar::meeting_space_calendar),
+        )
         .route(
             "/conferences/:id/prepare",
             post(conferences::prepare_conference),
@@ -446,6 +456,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::unified_messaging::client_token),
         )
         .route(
+            "/messaging/session-tokens",
+            post(crate::handlers::v2::unified_messaging::session_token),
+        )
+        .route(
             "/messaging/client-sessions/revoke-all",
             post(crate::handlers::v2::unified_messaging::revoke_all_sessions),
         )
@@ -470,6 +484,7 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(crate::handlers::v2::unified_messaging::relay_get)
                 .post(crate::handlers::v2::unified_messaging::relay_post)
                 .put(crate::handlers::v2::unified_messaging::relay_put)
+                .patch(crate::handlers::v2::unified_messaging::relay_patch)
                 .delete(crate::handlers::v2::unified_messaging::relay_delete)
                 .layer(axum::extract::DefaultBodyLimit::max(
                     crate::handlers::v2::unified_messaging::RELAY_MAX_BODY_BYTES,
@@ -487,24 +502,174 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/admin/chat-migration/parity-runs",
             post(crate::handlers::v2::unified_messaging::migration_parity),
         )
-        // Organizations
+        // Organizations (legacy directory; facades + first-party routes over the
+        // Organizations Service once it is authoritative — Blueprint Section 4)
         .route(
             "/admin/organizations",
-            post(organizations::create_organization),
+            post(organizations::create_organization).get(organizations::admin_list_organizations),
         )
         .route(
             "/admin/organizations/:id",
             patch(organizations::update_organization),
         )
         .route(
+            "/organizations",
+            post(organizations::create_business_organization),
+        )
+        .route(
+            "/organizations/:id",
+            get(organizations::get_business_organization)
+                .patch(organizations::update_business_organization),
+        )
+        .route(
             "/organizations/:id/members",
             get(organizations::list_organization_members),
         )
         .route(
+            "/organizations/:id/members/me/leave",
+            post(organizations::leave_organization),
+        )
+        .route(
             "/organizations/:id/members/:user_id",
-            put(organizations::upsert_organization_member),
+            put(organizations::upsert_organization_member)
+                .patch(organizations::update_organization_membership),
+        )
+        .route(
+            "/organizations/:id/ownership-transfer",
+            post(organizations::transfer_organization_ownership),
+        )
+        .route(
+            "/organizations/:id/invitations",
+            get(organizations::list_organization_invitations)
+                .post(organizations::create_organization_invitation),
+        )
+        .route(
+            "/organizations/:id/invitations/:invitation_id/revoke",
+            post(organizations::revoke_organization_invitation),
+        )
+        .route(
+            "/organizations/:id/suspend",
+            post(organizations::suspend_business_organization),
+        )
+        .route(
+            "/organizations/:id/reactivate",
+            post(organizations::reactivate_business_organization),
+        )
+        .route(
+            "/organizations/:id/archive",
+            post(organizations::archive_business_organization),
+        )
+        // Blueprint Section 12 follow-up: per-organization Enterprise Calling relay
+        // (ORGANIZATION_CALLING_SCOPE=organization; 409 ORGANIZATION_CALLING_DISABLED
+        // otherwise).
+        .route(
+            "/organizations/:id/calling/*path",
+            get(crate::handlers::v2::organization_calling::calling_get)
+                .post(crate::handlers::v2::organization_calling::calling_post)
+                .put(crate::handlers::v2::organization_calling::calling_put)
+                .patch(crate::handlers::v2::organization_calling::calling_patch)
+                .delete(crate::handlers::v2::organization_calling::calling_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::services::organization_calling::MAX_BODY_BYTES,
+                )),
+        )
+        // Final closure (J-10): organization-scope Messaging relay and realtime tokens.
+        .route(
+            "/organizations/:id/messaging/relay/*path",
+            get(crate::handlers::v2::organization_messaging::messaging_get)
+                .post(crate::handlers::v2::organization_messaging::messaging_post)
+                .put(crate::handlers::v2::organization_messaging::messaging_put)
+                .patch(crate::handlers::v2::organization_messaging::messaging_patch)
+                .delete(crate::handlers::v2::organization_messaging::messaging_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        )
+        .route(
+            "/organizations/:id/messaging/session-tokens",
+            post(crate::handlers::v2::organization_messaging::messaging_session_token),
+        )
+        .route(
+            "/organizations/:id/messaging/members/resolve",
+            post(crate::handlers::v2::organization_messaging::messaging_resolve_members),
+        )
+        .route(
+            "/organizations/:id/audit-events",
+            get(organizations::list_organization_audit_events),
+        )
+        .route(
+            "/organizations/:id/provisioning",
+            get(organizations::get_organization_provisioning),
+        )
+        // Blueprint Section 17: Section 6 teams and policies (Organizations relay)
+        .route(
+            "/organizations/:id/teams",
+            get(organizations::list_organization_teams)
+                .post(organizations::create_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id",
+            get(organizations::get_organization_team)
+                .patch(organizations::update_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/archive",
+            post(organizations::archive_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members",
+            get(organizations::list_organization_team_members)
+                .post(organizations::add_organization_team_member),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members/:member_id",
+            patch(organizations::update_organization_team_member)
+                .delete(organizations::remove_organization_team_member),
+        )
+        .route(
+            "/organizations/:id/policies",
+            get(organizations::get_organization_policy)
+                .patch(organizations::update_organization_policy),
+        )
+        .route(
+            "/organization-invitations/accept",
+            post(organizations::accept_organization_invitation),
+        )
+        .route(
+            "/organization-invitations/decline",
+            post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        // Blueprint Section 8: workspace context (per request; no switch endpoint)
+        .route(
+            "/me/workspaces",
+            get(crate::handlers::v2::workspaces::my_workspaces),
+        )
+        .route(
+            "/me/workspaces/:workspace_id/capabilities",
+            get(crate::handlers::v2::workspaces::my_workspace_capabilities),
+        )
+        // Blueprint Section 9: the personal account profile
+        .route(
+            "/me/profile",
+            get(crate::handlers::v2::account_profile::get_my_profile)
+                .patch(crate::handlers::v2::account_profile::update_my_profile),
+        )
+        // Blueprint Section 2: account sessions and the security audit
+        .route(
+            "/me/sessions",
+            get(crate::handlers::v2::account_sessions::list_my_sessions),
+        )
+        .route(
+            "/me/sessions/revoke-all",
+            post(crate::handlers::v2::account_sessions::revoke_all_my_sessions),
+        )
+        .route(
+            "/me/sessions/:session_id/revoke",
+            post(crate::handlers::v2::account_sessions::revoke_my_session),
+        )
+        .route(
+            "/admin/audit-events",
+            get(crate::handlers::v2::account_sessions::list_account_audit_events),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::platform_auth::platform_credential,

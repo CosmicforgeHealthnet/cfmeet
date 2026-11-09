@@ -241,7 +241,11 @@ async fn k_legacy_writes_default_on_and_cannot_overwrite_v2_state() {
     let claims = livekit_api::access_token::TokenVerifier::with_api_key("k", "s")
         .verify(token)
         .expect("legacy credential minted by the legacy adapter");
-    assert!(claims.video.room_join && claims.video.room_admin);
+    assert!(claims.video.room_join);
+    assert!(
+        !claims.video.room_admin,
+        "SEC-009: a legacy host credential never carries room_admin"
+    );
     assert!(
         !claims.video.room_record,
         "legacy host token must not grant room_record"

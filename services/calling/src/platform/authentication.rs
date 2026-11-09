@@ -57,6 +57,19 @@ use crate::domain::{
     TenantId,
 };
 
+/// Whether `slug` is the reserved slug Platform Access gives the dedicated FIRST_PARTY
+/// tenant of a first-party business organization (`org-` + 32 lowercase hex, ADR 0058).
+/// Defence in depth for organization-forwarded requests: Platform Access's live
+/// re-verification of the credential and its scope stays the authority.
+pub fn is_organization_tenant_slug(slug: &str) -> bool {
+    slug.strip_prefix("org-").is_some_and(|hex| {
+        hex.len() == 32
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
 /// Why authentication was refused. Logged for operators; never returned to clients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthFailureReason {
@@ -82,6 +95,15 @@ pub enum AuthFailureReason {
     /// The scope is SUSPENDED and the request is not a safety operation (Part H §72).
     ScopeSuspended,
     CorruptAuthorityChain,
+    /// An organization-forwarded request (Meeting Service, `calling-request.act-for-
+    /// organization`) without a NATIVE_CF_USER acting principal in its delegated context.
+    ActingPrincipalMissing,
+    /// An organization-forwarded request whose credential is not in a FIRST_PARTY
+    /// organization tenant (reserved `org-<32 hex>` slug).
+    NotOrganizationScope,
+    /// An organization-forwarded request whose acting principal is unknown, inactive, not
+    /// a NATIVE_CF_USER or outside the credential's tenant / application / environment.
+    ActingPrincipalOutOfScope,
 }
 
 impl AuthFailureReason {
@@ -104,6 +126,9 @@ impl AuthFailureReason {
             Self::ServiceAccountInactive => "service_account_inactive",
             Self::ScopeSuspended => "scope_suspended",
             Self::CorruptAuthorityChain => "corrupt_authority_chain",
+            Self::ActingPrincipalMissing => "acting_principal_missing",
+            Self::NotOrganizationScope => "not_organization_scope",
+            Self::ActingPrincipalOutOfScope => "acting_principal_out_of_scope",
         }
     }
 
@@ -315,6 +340,7 @@ impl CredentialAuthenticator {
                 service_account_id: ServiceAccountId::from_uuid(chain.service_account.id),
                 credential_id: CredentialId::from_uuid(chain.credential.id),
                 scopes: ScopeSet::from_authority(chain.scopes.iter().cloned()),
+                organization_tenant: is_organization_tenant_slug(&chain.tenant.slug),
             },
             request,
         ))

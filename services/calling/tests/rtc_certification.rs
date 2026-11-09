@@ -374,6 +374,44 @@ impl Cert {
         let s2 = self.a.session_on(call, callee.endpoint).await.unwrap();
         (call, caller, callee, s1, s2)
     }
+
+    /// As [`answered`](Self::answered), plus a third "witness" principal that also answered:
+    /// (call, caller session, callee session, witness session). Removing the callee then
+    /// leaves a live two-party Call (a one-to-one Call would end automatically, CAL-001).
+    async fn answered_with_witness(&self, kind: &str, tag: &str) -> (Uuid, Uuid, Uuid, Uuid) {
+        let witness = self.a.principal(&format!("{tag}-witness")).await;
+        let caller = self
+            .a
+            .device(&self.a.w.initiator, &format!("{tag}-caller"))
+            .await;
+        let callee = self
+            .a
+            .device(&self.a.w.recipient, &format!("{tag}-callee"))
+            .await;
+        let third = self.a.device(&witness, &format!("{tag}-witness")).await;
+        let r = self
+            .a
+            .create_call(
+                kind,
+                &self.a.w.initiator,
+                &caller,
+                &[&self.a.w.recipient, &witness],
+                &format!("{tag}-create"),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        for device in [&callee, &third] {
+            let invitation = self.a.invitation_for(call, device.endpoint).await.unwrap();
+            let (_, version) = self.a.state(call).await;
+            let r = self.a.accept(call, invitation, device, version).await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+        let s1 = self.a.session_on(call, caller.endpoint).await.unwrap();
+        let s2 = self.a.session_on(call, callee.endpoint).await.unwrap();
+        let s3 = self.a.session_on(call, third.endpoint).await.unwrap();
+        (call, s1, s2, s3)
+    }
 }
 
 fn room(call: Uuid) -> MediaSessionRef {
@@ -709,6 +747,33 @@ async fn voice_call(cert: &Cert) {
         "rtc certification: quality summary recorded (admitted sessions 2, connected participants 2, reconnects {})",
         summary.metrics.get("session_reconnects").unwrap_or_default()
     );
+    // Section 18 J-11: the same personal call closes in both parties' history — ring,
+    // answer, real media, hold/resume and end above, history here — in one journey.
+    for (principal, direction) in [
+        (cert.a.w.initiator.id().as_uuid(), "OUTBOUND"),
+        (cert.a.w.recipient.id().as_uuid(), "INBOUND"),
+    ] {
+        let r = cert
+            .a
+            .get(&format!("/v1/calls?principalId={principal}"))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let entries: Vec<&Value> = r.json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["callId"] == call.to_string())
+            .collect();
+        assert_eq!(entries.len(), 1, "one history entry per party: {}", r.text);
+        assert_eq!(entries[0]["state"], "ENDED", "{}", r.text);
+        assert_eq!(entries[0]["participation"]["direction"], direction);
+        assert_eq!(
+            entries[0]["participation"]["outcome"], "ANSWERED",
+            "{}",
+            r.text
+        );
+    }
+    println!("rtc certification: J-11 personal call ring -> answer -> media -> hold -> resume -> end -> history: PASS");
     a.quit().await;
     b.quit().await;
 }
@@ -1525,7 +1590,9 @@ async fn video_call_and_removal(cert: &Cert) {
             .await["ok"],
         true
     );
-    // Remove the callee's session: provider disconnect is confirmed.
+    // Remove the callee's session: provider disconnect is confirmed — and the one-to-one
+    // Call, left with a single party, ends by itself (CAL-001): the caller is disconnected
+    // too and the resource is terminated at the provider.
     let (_, version) = cert.a.state(call).await;
     let r = cert
         .a
@@ -1540,10 +1607,20 @@ async fn video_call_and_removal(cert: &Cert) {
             .await["ok"],
         true
     );
-    assert_eq!(cert.provider_identities(call).await.len(), 1);
+    eventually(15, "one-to-one Call ended after the removal", || async {
+        cert.state(call).await == CallState::Ended
+    })
+    .await;
+    assert_eq!(
+        a.cmd(json!({ "cmd": "wait_disconnected", "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    assert!(
+        !cert.lk.reconcile(&room(call)).await.unwrap().exists,
+        "the abandoned Call's resource is terminated, not re-created"
+    );
     let _ = callee;
-    let (_, version) = cert.a.state(call).await;
-    cert.a.command(call, "end", version).await;
     a.quit().await;
     b.quit().await;
 }
@@ -1597,11 +1674,16 @@ async fn joined_callbacks(cert: &Cert, session: Uuid) -> i64 {
 /// real client SDK, cannot bring a removed session back — neither through the gateway
 /// nor around it — and the refusal happens before any media participation.
 async fn refreshed_privileged_token_cannot_reenter(cert: &Cert, round: u32) {
-    // 1-2. An answered app Call; join-only credentials for both sessions.
-    let (call, _caller, _callee, s1, s2) =
-        cert.answered("VOICE", &format!("refresh-{round}")).await;
+    // 1-2. An answered app Call; join-only credentials for both sessions. A third,
+    // connected witness keeps the Call alive after the removal below (CAL-001 would end a
+    // one-to-one Call), so the re-entry is refused for the removed SESSION, not because
+    // the Call ended.
+    let (call, s1, s2, s3) = cert
+        .answered_with_witness("VOICE", &format!("refresh-{round}"))
+        .await;
     let c1 = cert.credential(call, s1).await;
     let c2 = cert.credential(call, s2).await;
+    let c3 = cert.credential(call, s3).await;
     let issued = c2["token"].as_str().unwrap().to_string();
     assert_eq!(c2["url"], cert.cfg.gateway_url());
     let issued_claims = jwt_payload(&issued);
@@ -1620,9 +1702,20 @@ async fn refreshed_privileged_token_cannot_reenter(cert: &Cert, round: u32) {
         b.connect(c2["url"].as_str().unwrap(), &issued).await["ok"],
         true
     );
+    let mut witness = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        witness
+            .connect(c3["url"].as_str().unwrap(), c3["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
     // 4-5. Calling admits them; the provider applies audio publish + subscription.
     eventually(20, "refresh scenario CONNECTED", || async {
         cert.state(call).await == CallState::Connected
+    })
+    .await;
+    eventually(20, "witness admitted", || async {
+        cert.session_admitted(call, s3).await
     })
     .await;
     assert_eq!(
@@ -1759,11 +1852,16 @@ async fn refreshed_privileged_token_cannot_reenter(cert: &Cert, round: u32) {
         "refreshed-token re-entry (round {round}): gateway={} direct={} original={}",
         attempt["error"], direct["error"], original_attempt["error"]
     );
-    for client in [stale, around, original, a, b] {
-        client.quit().await;
-    }
+    assert_eq!(
+        cert.state(call).await,
+        CallState::Connected,
+        "the witness kept the Call"
+    );
     let (_, version) = cert.a.state(call).await;
     cert.a.command(call, "end", version).await;
+    for client in [stale, around, original, a, b, witness] {
+        client.quit().await;
+    }
 }
 
 /// A superseded generation is refused while the current one is admitted; nothing is
@@ -2094,14 +2192,15 @@ async fn unknown_participant_quarantine(cert: &Cert) {
     // It never became a participant or a session.
     let view = cert.a.call_view(call).await;
     assert_eq!(view["participants"].as_array().unwrap().len(), 2);
-    let quarantined = common::scalar_i64(
-        cert.a.h().conn(),
-        &format!(
-            "SELECT count(*) FROM call_media_provider_events WHERE call_id = '{call}' AND outcome = 'QUARANTINED'"
-        ),
-    )
+    // The quarantine row is written when LiveKit's webhook for the leaked join arrives,
+    // which can land after the client call returns: wait for it.
+    let quarantined_sql = format!(
+        "SELECT count(*) FROM call_media_provider_events WHERE call_id = '{call}' AND outcome = 'QUARANTINED'"
+    );
+    eventually(15, "unknown identity quarantined", || async {
+        common::scalar_i64(cert.a.h().conn(), &quarantined_sql).await >= 1
+    })
     .await;
-    assert!(quarantined >= 1);
     let (_, version) = cert.a.state(call).await;
     cert.a.command(call, "cancel", version).await;
     let (_, version) = cert.a.state(call).await;

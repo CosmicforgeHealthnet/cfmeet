@@ -136,21 +136,44 @@ impl State {
                 )
                 .await?;
             if let Some(c) = conversation {
-                // One card per participant who has a Hub profile; never for non-members.
+                // One card per call party (every member: Calling rang them all); never for
+                // non-members. A party without a Hub profile yet gets the card owed to it
+                // when it first reads its timeline or activity (MSG-009).
                 for member in &c.members {
                     let viewer = match self.store.principal(&txn, p.scope(), *member).await {
-                        Ok(v) => v,
-                        Err(Error::NotFound) => continue,
+                        Ok(v) => Some(v),
+                        Err(Error::NotFound) => None,
                         Err(e) => return Err(e),
                     };
                     let data = json!({"kind":input.kind,"origin":origin,"anchorSequence":c.last_sequence,
-                        "initiatorIsViewer":viewer.id==p.id,"state":created["state"],"terminal":false});
+                        "initiatorIsViewer":viewer.as_ref().is_some_and(|v| v.id==p.id),"state":created["state"],"terminal":false});
+                    let Some(viewer) = viewer else {
+                        let mut v = scoped(p.scope());
+                        v.extend([
+                            (*member).into(),
+                            c.id.into(),
+                            format!("call:{call}").into(),
+                            call.into(),
+                            created["createdAt"].as_str().map(str::to_owned).into(),
+                            data.into(),
+                        ]);
+                        execute(&txn,"INSERT INTO communication_pending_call_cards(tenant_id,application_id,environment_id,principal_id,conversation_id,entry_key,call_id,occurred_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,COALESCE($8::timestamptz,now()),$9) ON CONFLICT DO NOTHING",v).await?;
+                        continue;
+                    };
                     execute(&txn,"INSERT INTO communication_timeline_entries(viewer_profile_id,conversation_id,entry_key,kind,source,source_id,occurred_at,source_version,data,refreshed_at) VALUES($1,$2,$3,'CALL','CALLING',$4,COALESCE($5::timestamptz,now()),0,$6,'epoch') ON CONFLICT DO NOTHING",
                         vec![viewer.id.into(),c.id.into(),format!("call:{call}").into(),call.into(),created["createdAt"].as_str().map(str::to_owned).into(),data.into()]).await?;
                     self.store
                         .change(&txn, viewer.id, "TIMELINE", Some(c.id), None)
                         .await?;
                 }
+                self.timeline_nudge(
+                    &txn,
+                    p.scope(),
+                    c.id,
+                    &format!("call:{call}:started"),
+                    "CALL_STARTED",
+                )
+                .await?;
             }
         }
         txn.commit().await?;
@@ -389,15 +412,24 @@ impl State {
                 RETURNING jsonb_build_object('conversation',e.conversation_id,'changed',old.data IS DISTINCT FROM old.data||$3) doc",
                 vec![p.id.into(),id.into(),patch.into(),version.into()]).await?;
             for c in changed.iter().filter(|c| c["changed"] == true) {
+                let conversation = uuid_field(c, "conversation")?;
                 self.store
-                    .change(
-                        &txn,
-                        p.id,
-                        "TIMELINE",
-                        Some(uuid_field(c, "conversation")?),
-                        Some(version),
-                    )
+                    .change(&txn, p.id, "TIMELINE", Some(conversation), Some(version))
                     .await?;
+                // MSG-009: the call's state moved. The other parties' cards of this call
+                // are re-read from Calling under their own delegation at their next read or
+                // sweep (outcomes are per party), and the conversation's members are nudged
+                // once per Calling version, however many viewers observe it.
+                execute(&txn,"UPDATE communication_timeline_entries SET refreshed_at='epoch' WHERE source='CALLING' AND source_id=$1 AND conversation_id=$2 AND viewer_profile_id<>$3 AND source_version<$4",
+                    vec![id.into(),conversation.into(),p.id.into(),version.into()]).await?;
+                self.timeline_nudge(
+                    &txn,
+                    p.scope(),
+                    conversation,
+                    &format!("call:{id}:v{version}"),
+                    "CALL_UPDATED",
+                )
+                .await?;
             }
             txn.commit().await?;
         }
@@ -458,7 +490,9 @@ impl State {
         query: &BTreeMap<String, String>,
     ) -> Result<Value> {
         let (limit, cursor) = timeline_page(query)?;
-        self.conversation(scope, p, conversation, None).await?;
+        let c = self.conversation(scope, p, conversation, None).await?;
+        self.materialize_call_cards(p).await?;
+        self.materialize_meeting_cards(p, &c).await?;
         let (mark, cleared_at) = self.watermark_full(p, conversation).await?;
         let (after_at, after_key) = cursor.unwrap_or_else(|| ("-infinity".into(), String::new()));
         let mut entries:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$1 AND conversation_id=$2 AND (occurred_at,entry_key)>($3::timestamptz,$4) AND NOT (COALESCE((data->>'anchorSequence')::bigint,0)<$5 OR (COALESCE((data->>'anchorSequence')::bigint,0)=$5 AND occurred_at<=$6::timestamptz)) ORDER BY occurred_at,entry_key LIMIT $7",
@@ -493,6 +527,102 @@ impl State {
         )
     }
 
+    /// Section 14 (MSG-009): a meeting shared into a conversation is visible to every
+    /// member, but cards were only written for members who had a Hub profile at that
+    /// moment. A current member opening the timeline gets the missing invitation cards,
+    /// copied from the conversation's existing cards, unless the share predates the
+    /// history Messaging lets this member see (`visibleFromSequence`). Call cards are
+    /// per call party (Calling decides) and are not copied.
+    async fn materialize_meeting_cards(
+        &self,
+        p: &Profile,
+        c: &crate::owners::Conversation,
+    ) -> Result<()> {
+        let visible_from = c.raw["visibleFromSequence"].as_i64().unwrap_or(0);
+        let added = execute(&self.store.db,"INSERT INTO communication_timeline_entries(viewer_profile_id,conversation_id,entry_key,kind,source,source_id,occurred_at,source_version,data)
+            SELECT DISTINCT ON (e.entry_key) $1,e.conversation_id,e.entry_key,e.kind,e.source,e.source_id,e.occurred_at,e.source_version,e.data||jsonb_build_object('sharedByViewer',false)
+            FROM communication_timeline_entries e
+            WHERE e.conversation_id=$2 AND e.kind='MEETING_INVITATION' AND e.viewer_profile_id<>$1
+              AND COALESCE((e.data->>'anchorSequence')::bigint,0)+1>=$3
+              AND NOT EXISTS (SELECT 1 FROM communication_timeline_entries x WHERE x.viewer_profile_id=$1 AND x.conversation_id=$2 AND x.entry_key=e.entry_key)
+            ORDER BY e.entry_key,e.occurred_at
+            ON CONFLICT DO NOTHING",
+            vec![p.id.into(),c.id.into(),visible_from.into()]).await?;
+        if added > 0 {
+            self.store
+                .change(&self.store.db, p.id, "MEETING_LINK", Some(c.id), None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// MSG-009: call cards owed to this viewer because it was a party to a conversation
+    /// call launched before it had a Hub profile. Written once (moved out of the pending
+    /// table in the same statement), due for an immediate refresh from Calling under the
+    /// viewer's own delegation, and announced to the viewer's devices through its feed.
+    /// Only the viewer's own principal is matched; membership is checked by every read
+    /// that shows a card (timeline: the conversation; activity: each card's conversation).
+    pub async fn materialize_call_cards(&self, p: &Profile) -> Result<u64> {
+        let mut v = scoped(p.scope());
+        v.extend([p.principal_id.into(), p.id.into()]);
+        let txn = self.store.begin().await?;
+        let added: Vec<Value> = rows(&txn,"WITH moved AS (DELETE FROM communication_pending_call_cards WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 RETURNING conversation_id,entry_key,call_id,occurred_at,data)
+            INSERT INTO communication_timeline_entries(viewer_profile_id,conversation_id,entry_key,kind,source,source_id,occurred_at,source_version,data,refreshed_at)
+            SELECT $5,conversation_id,entry_key,'CALL','CALLING',call_id,occurred_at,0,data,'epoch' FROM moved
+            ON CONFLICT DO NOTHING RETURNING jsonb_build_object('conversation',conversation_id) doc",v).await?;
+        let mut announced = std::collections::BTreeSet::new();
+        for a in &added {
+            let conversation = uuid_field(a, "conversation")?;
+            if announced.insert(conversation) {
+                self.store
+                    .change(&txn, p.id, "TIMELINE", Some(conversation), None)
+                    .await?;
+            }
+        }
+        txn.commit().await?;
+        Ok(added.len() as u64)
+    }
+
+    /// MSG-009: tells Messaging that a conversation's call / meeting timeline changed, so
+    /// it publishes `timeline.changed` to the conversation's members (realtime and
+    /// replay). `key` names one distinct change (a call started, a Calling version, a
+    /// meeting shared): repeated observations of the same change are deduplicated, and
+    /// each new one bumps the conversation's monotonic timeline version once, in the
+    /// caller's transaction. Without a Messaging owner nothing is queued.
+    pub(crate) async fn timeline_nudge<C: sea_orm::ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: cf_communications_policy::Scope,
+        conversation: Uuid,
+        key: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        if !self.config.messaging_configured {
+            return Ok(false);
+        }
+        let fresh = execute(db,"INSERT INTO communication_timeline_nudges(conversation_id,nudge_key) VALUES($1,$2) ON CONFLICT DO NOTHING",
+            vec![conversation.into(),key.into()]).await?;
+        if fresh == 0 {
+            return Ok(false);
+        }
+        let mut v = vec![conversation.into()];
+        v.extend(scoped(scope));
+        let version: Value = one(db,"INSERT INTO communication_timeline_versions AS t (conversation_id,tenant_id,application_id,environment_id,version) VALUES($1,$2,$3,$4,1) ON CONFLICT (conversation_id) DO UPDATE SET version=t.version+1,updated_at=now() RETURNING jsonb_build_object('version',t.version) doc",v)
+            .await?.ok_or(Error::Unavailable)?;
+        let version = version["version"].as_i64().ok_or(Error::Unavailable)?;
+        self.store
+            .messaging_event(
+                db,
+                scope,
+                "communications.timeline.changed",
+                conversation,
+                version,
+                json!({"conversationId":conversation,"timelineVersion":version,"reason":reason}),
+            )
+            .await?;
+        Ok(true)
+    }
+
     /// U03: the viewer's recent activity cards across conversations they still belong to.
     pub async fn activity(
         &self,
@@ -502,6 +632,7 @@ impl State {
     ) -> Result<Value> {
         let (limit, cursor) = timeline_page(query)?;
         let (before_at, before_key) = cursor.unwrap_or_else(|| ("infinity".into(), "~".into()));
+        self.materialize_call_cards(p).await?;
         const PAGE: &str = "SELECT to_jsonb(e) doc FROM communication_timeline_entries e WHERE viewer_profile_id=$1 AND (occurred_at,entry_key)<($2::timestamptz,$3) ORDER BY occurred_at DESC,entry_key DESC LIMIT $4";
         let page = || {
             vec![

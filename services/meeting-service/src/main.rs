@@ -37,9 +37,26 @@ async fn main() -> anyhow::Result<()> {
         .acquire_timeout(std::time::Duration::from_secs(30))
         .idle_timeout(std::time::Duration::from_secs(300))
         .max_lifetime(std::time::Duration::from_secs(1800))
-        .sqlx_logging(false);
+        .sqlx_logging(false)
+        // DATA-001: legacy tables keep naive `TIMESTAMP` columns that hold UTC. Pin every
+        // session to UTC explicitly (a later `-c` wins over any `options` in the URL), so
+        // `DEFAULT CURRENT_TIMESTAMP`, `now()` comparisons and `AT TIME ZONE` casts never
+        // follow a server or URL default.
+        .map_sqlx_postgres_opts(|o| o.options([("TimeZone", "UTC")]));
     let db = Database::connect(db_opts).await?;
+    backend::utils::datetime::assert_session_utc(&db)
+        .await
+        .expect("database session time zone must be UTC (DATA-001)");
     tracing::info!("✅ Database connected successfully");
+
+    // DATA-011 target rule for the base history: applied ⊇ known, unknown versions fail
+    // closed (the additive histories below follow the same rule).
+    if !migration::base_ready(&db)
+        .await
+        .expect("Base migration readiness")
+    {
+        panic!("Base migrations are pending (migration up)");
+    }
 
     // Load email configuration
     let email_config = match EmailConfig::from_env() {
@@ -127,8 +144,69 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
+    // Blueprint Section 2: account sessions, the revocation epoch and the security audit
+    // live in their own additive history (`account-security-migration up`). Refuse to run
+    // without them rather than silently skipping revocation.
+    if !migration::account_security_ready(&state.db)
+        .await
+        .expect("Account security migration readiness")
+    {
+        panic!("Account security migration is required (account-security-migration up)");
+    }
+
+    // Blueprint Section 10: idempotency records and agenda indexes live in their own
+    // additive history (`meetings-calendar-migration up`).
+    if !migration::meetings_calendar_ready(&state.db)
+        .await
+        .expect("Meetings calendar migration readiness")
+    {
+        panic!("Meetings calendar migration is required (meetings-calendar-migration up)");
+    }
+
+    // Blueprint Sections 9 and 11: profile columns on `users` and notification jobs live
+    // in their own additive history (`profile-notifications-migration up`).
+    if !migration::profile_notifications_ready(&state.db)
+        .await
+        .expect("Profile/notifications migration readiness")
+    {
+        panic!("Profile/notifications migration is required (profile-notifications-migration up)");
+    }
+
+    // Blueprint Sections 2-3 hardening: hashed legacy API keys and webhook secrets live in
+    // their own additive history (`account-hardening-migration up`).
+    if !migration::account_hardening_ready(&state.db)
+        .await
+        .expect("Account hardening migration readiness")
+    {
+        panic!("Account hardening migration is required (account-hardening-migration up)");
+    }
+
+    // Blueprint Section 4: which store answers organization questions (the client
+    // configuration was validated when the meeting domain was built; misconfiguration
+    // stopped startup there).
+    tracing::info!(
+        "Organizations authority mode: {}",
+        state
+            .meeting
+            .core
+            .organization_authority
+            .as_ref()
+            .map(|a| a.mode().as_str())
+            .unwrap_or("legacy")
+    );
+
     state.communications = backend::services::communications::Bridge::from_env()
         .unwrap_or_else(|e| panic!("Communications configuration error: {e}"));
+    // Blueprint Section 11: recipient notification preferences live in the Hub when it is
+    // configured (signed read); otherwise no preference exists.
+    if let Some(bridge) = state.communications.clone() {
+        state.notifier = std::sync::Arc::new(backend::services::notifications::Notifier::new(
+            state.email_service.clone(),
+            std::sync::Arc::new(backend::services::notifications::HubPreferences::new(
+                bridge,
+            )),
+        ));
+    }
     if state.communications.is_some() {
         if !migration::communications_ready(&state.db)
             .await
@@ -171,6 +249,24 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         tracing::info!("ℹ️ Email worker not started (SMTP not configured)");
+        None
+    };
+
+    // Blueprint Section 11: meeting notifications (reschedule/cancel notices, reminders).
+    // Off unless NOTIFICATIONS_EMAIL_ENABLED=true; emails still need the SMTP worker above.
+    let notification_context =
+        backend::services::notifications::NotificationContext::from_state(&state);
+    let _notification_worker = if notification_context.config.email_enabled {
+        if email_config.smtp_host.is_empty() {
+            tracing::warn!(
+                "Notification email is enabled but SMTP is not configured: emails stay queued"
+            );
+        }
+        Some(backend::services::notifications::spawn_worker(
+            notification_context,
+        ))
+    } else {
+        tracing::info!("ℹ️ Notification email disabled (NOTIFICATIONS_EMAIL_ENABLED)");
         None
     };
 
@@ -276,6 +372,41 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
 
+    // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
+    // live in their own additive history (`organization-integration-migration up`).
+    let organization_events =
+        backend::services::organization_events::OrganizationEventsConfig::from_env()
+            .and_then(|c| c.map(|c| c.verifier()).transpose())
+            .unwrap_or_else(|e| panic!("organization events configuration error: {e}"));
+    if organization_events.is_some()
+        && !migration::organization_integration_ready(&state.db)
+            .await
+            .expect("Organization integration migration readiness")
+    {
+        panic!("Organization integration migration is required (organization-integration-migration up)");
+    }
+    let events_router = organization_events
+        .map(|verifier| backend::services::organization_events::router(state.clone(), verifier));
+    if events_router.is_some() {
+        tracing::info!("Organizations event ingress enabled");
+        // Offboarding / restoration of organization-scope principals (needs the signed
+        // Platform Access client of the organization relay).
+        match state.meeting.core.organization_calling.clone() {
+            Some(port) => {
+                backend::services::organization_access::spawn(
+                    state.db.clone(),
+                    port,
+                    std::time::Duration::from_secs(5),
+                );
+                tracing::info!("organization access worker started");
+            }
+            None => tracing::warn!(
+                "organization events are enabled but the organization relay is not configured: \
+                 membership changes are recorded and applied once it is"
+            ),
+        }
+    }
+
     // Build application with routes
     let mut app = Router::new()
         .merge(routes::create_routes(state))
@@ -284,6 +415,9 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
         app = app.merge(bridge);
+    }
+    if let Some(events) = events_router {
+        app = app.merge(events);
     }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

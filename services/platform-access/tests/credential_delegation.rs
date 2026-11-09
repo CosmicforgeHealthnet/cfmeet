@@ -406,3 +406,120 @@ async fn scope_grants_and_production_activation_are_delegated_under_trust_rules(
     .await;
     assert_eq!(w.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+/// One scalar text result.
+async fn text(h: &Harness, sql: String) -> String {
+    h.conn()
+        .query_one(Statement::from_string(DbBackend::Postgres, sql))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index::<String>(0)
+        .unwrap()
+}
+
+/// SEC-020: every delegated credential operation addresses a credential / service account
+/// THROUGH an environment, and Platform Access enforces the membership itself (not only
+/// the Developer Platform): another tenant's credential or service account, named through
+/// this environment's path, is NOT_FOUND for reads AND mutations, and the foreign
+/// credential is left exactly as it was (still authenticating, no successor, no
+/// suspension, no audit). Scope evaluation of the gateway context is equally confined.
+#[tokio::test]
+async fn delegated_credential_operations_never_reach_another_tenants_credential() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("xcred", "EXTERNAL", &["sms.read"]).await;
+    let other = h.consumer("xcred-other", "EXTERNAL", &["sms.read"]).await;
+    let base = format!("/internal/v1/delegation/environments/{}", c.env("SANDBOX"));
+    let other_sa = other.sa("SANDBOX");
+    let (view, secret) = h.issue(other_sa, &["sms.read"]).await;
+    let cred = uuid(&view["id"]);
+    let row =
+        format!("SELECT to_jsonb(c)::text FROM platform_api_credentials c WHERE id = '{cred}'");
+    let of_sa = format!(
+        "SELECT count(*)::text FROM platform_api_credentials WHERE service_account_id = '{other_sa}'"
+    );
+    let suspensions = format!(
+        "SELECT count(*)::text FROM platform_credential_suspensions WHERE credential_id = '{cred}'"
+    );
+    let audit = "SELECT count(*)::text FROM platform_access_audit".to_string();
+    let before = (
+        text(&h, row.clone()).await,
+        text(&h, of_sa.clone()).await,
+        text(&h, suspensions.clone()).await,
+        text(&h, audit.clone()).await,
+    );
+    let attempts = [
+        (Method::GET, format!("{base}/credentials/{cred}"), None),
+        (
+            Method::POST,
+            format!("{base}/credentials/{cred}/rotate"),
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            format!("{base}/credentials/{cred}/revoke"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("{base}/credentials/{cred}/suspend"),
+            Some(json!({ "reasonCode": "CUSTOMER_REQUEST" })),
+        ),
+        (
+            Method::POST,
+            format!("{base}/credentials/{cred}/resume"),
+            None,
+        ),
+        (
+            Method::GET,
+            format!("{base}/service-accounts/{other_sa}/credentials"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("{base}/service-accounts/{other_sa}/credentials"),
+            Some(json!({ "scopes": ["sms.read"] })),
+        ),
+    ];
+    for (method, path, body) in attempts {
+        let r = dp(&h, method.clone(), &path, body).await;
+        assert_eq!(
+            r.status,
+            StatusCode::NOT_FOUND,
+            "{method} {path}: {}",
+            r.body
+        );
+    }
+    let after = (
+        text(&h, row).await,
+        text(&h, of_sa).await,
+        text(&h, suspensions).await,
+        text(&h, audit).await,
+    );
+    assert_eq!(before, after, "the foreign credential changed");
+    assert_eq!(
+        h.authenticate(&secret).await.body["outcome"],
+        "AUTHENTICATED"
+    );
+    // The gateway context of tenant A never evaluates tenant B's credential.
+    let r = h
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(json!({ "credentialId": cred, "requiredScopes": [] })),
+            Some(c.delegated("SANDBOX")),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.body);
+    let r = h
+        .as_calling(
+            Method::POST,
+            "/internal/v1/authorization/evaluate",
+            Some(json!({ "credentialId": cred, "requiredScopes": [] })),
+            Some(other.delegated("SANDBOX")),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+}

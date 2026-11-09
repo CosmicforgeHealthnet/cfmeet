@@ -271,6 +271,108 @@ async fn invitation_digest_purpose_expiry_revocation_usage_and_owner_are_enforce
     not_found(h.state.resolve_invite(&h.scope,&b,json!({"token":expired["payload"].as_str().unwrap().rsplit('/').next().unwrap(),"purpose":"CONNECT"}),Uuid::new_v4()).await);
     h.close().await;
 }
+/// J-02 (final closure): the CF Meet ID QR route `GET me/qr` through the signed dispatch
+/// route the Meeting relay uses. It mints a one-time CONNECT invitation (10 minutes, one use)
+/// whose payload is disclosed exactly once (an idempotent replay never repeats it, the
+/// listing never shows it); the scanner resolves it once; a second scanner learns nothing;
+/// an owner who disabled invitations gets no QR.
+#[tokio::test]
+async fn qr_route_mints_a_one_time_connect_payload_disclosed_once() {
+    let h = Harness::new().await;
+    let owner_account = h.account();
+    let owner = h.profile(&owner_account).await;
+    let scanner = h.profile(&h.account()).await;
+    let late = h.profile(&h.account()).await;
+    let path = "/internal/v1/communications/dispatch";
+    let qr = |key: Uuid| {
+        serde_json::to_value(Dispatch {
+            method: "GET".into(),
+            path: "me/qr".into(),
+            query: Default::default(),
+            body: None,
+            idempotency_key: Some(key),
+            account: owner_account.clone(),
+        })
+        .unwrap()
+    };
+    let key = Uuid::new_v4();
+    let (s, v) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(key),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(
+        (
+            v["purpose"].as_str(),
+            v["maxUses"].as_i64(),
+            v["secretReturned"].as_bool()
+        ),
+        (Some("CONNECT"), Some(1), Some(true))
+    );
+    let payload = v["payload"].as_str().expect("QR payload").to_string();
+    let token = payload.rsplit('/').next().unwrap().to_string();
+    assert!(payload.contains("/connect/"), "{payload}");
+    let expires = chrono::DateTime::parse_from_rfc3339(v["expiresAt"].as_str().unwrap()).unwrap();
+    let ttl = (expires.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+    assert!((590..=600).contains(&ttl), "ten-minute QR, got {ttl}s");
+    // Replay of the same request: same invitation, the secret is not disclosed again.
+    let (s, replay) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(key),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(replay["inviteId"], v["inviteId"]);
+    assert!(replay.get("payload").is_none(), "{replay}");
+    let list = h.state.list_invites(&owner, 10, Uuid::nil()).await.unwrap();
+    assert!(!list.to_string().contains(&token));
+    // The scanner resolves it once; a later scanner learns nothing (one use).
+    let resolve = json!({ "token": token, "purpose": "CONNECT" });
+    let profile = h
+        .state
+        .resolve_invite(&h.scope, &scanner, resolve.clone(), Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(profile["relationship"], "NONE");
+    assert!(
+        profile.get("principalId").is_none(),
+        "no internal id leaks to the scanner"
+    );
+    not_found(
+        h.state
+            .resolve_invite(&h.scope, &late, resolve, Uuid::new_v4())
+            .await,
+    );
+    // Invitations disabled by the owner: no QR is minted.
+    h.state
+        .set_privacy(
+            &owner,
+            json!({ "expectedVersion": 1, "privacy": Privacy {
+                invitation_permissions: communications::model::InvitationPermission::Disabled,
+                ..Privacy::default()
+            } }),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let (s, v) = h
+        .http(
+            &h.account_signer,
+            path,
+            qr(Uuid::new_v4()),
+            h.delegated(&owner_account),
+        )
+        .await;
+    assert_eq!(s, 403, "{v}");
+    h.close().await;
+}
 #[tokio::test]
 async fn concurrent_acceptance_is_unique_and_never_grants_pending_or_foreign_requests() {
     let h = Harness::new().await;
@@ -874,5 +976,162 @@ async fn concurrent_invitation_creation_cannot_survive_disabling_and_reenabling_
             Err(error)=>panic!("unexpected creation result: {error}"),
         }
     }
+    h.close().await;
+}
+
+/// Blueprint Section 11: the Account learns only which recipients turned meeting
+/// notifications off; only the Meeting Service with `communications-preferences.read` may ask.
+#[tokio::test]
+async fn meeting_notification_opt_outs_are_listed_for_the_account_only() {
+    let h = Harness::new().await;
+    let quiet = h.account();
+    let loud = h.account();
+    let quiet_profile = h.profile(&quiet).await;
+    let loud_profile = h.profile(&loud).await;
+    let without_profile = format!("cfmeet-user:{}", Uuid::new_v4());
+    execute(&h.state.store.db,
+        "INSERT INTO communication_notification_preferences(profile_id,meeting_invitations) VALUES($1,false),($2,true)",
+        vec![quiet_profile.id.into(), loud_profile.id.into()]).await.unwrap();
+    let path = "/internal/v1/communications/notification-preferences/resolve";
+    let body = json!({"category":"MEETINGS","accountReferences":[quiet.account_reference,loud.account_reference,without_profile]});
+    let (status, result) = h
+        .http(&h.account_signer, path, body.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["schemaVersion"], 1);
+    assert_eq!(result["optedOut"], json!([quiet.account_reference]));
+    // Any other caller is refused (Calling holds communications-policy.check only).
+    let (status, _) = h
+        .http(&h.calling_signer, path, body.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 403);
+    // Bounded, canonical input only.
+    for bad in [
+        json!({"category":"CALLS","accountReferences":[quiet.account_reference]}),
+        json!({"category":"MEETINGS","accountReferences":[]}),
+        json!({"category":"MEETINGS","accountReferences":["someone@example.com"]}),
+        json!({"category":"MEETINGS","accountReferences":[quiet.account_reference,quiet.account_reference]}),
+        json!({"category":"MEETINGS","accountReferences":[quiet.account_reference],"extra":true}),
+    ] {
+        let (status, _) = h.http(&h.account_signer, path, bad, h.scope.clone()).await;
+        assert_eq!(status, 400);
+    }
+    let many: Vec<String> = (0..101)
+        .map(|_| format!("cfmeet-user:{}", Uuid::new_v4()))
+        .collect();
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            path,
+            json!({"category":"MEETINGS","accountReferences":many}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 400);
+    h.close().await;
+}
+
+/// Section 14 (ACC-010): an account that never opened the Hub still has its Messaging
+/// and Calling credentials revoked. The Hub asks Account for the principal and fans the
+/// revocation out durably, exactly once per Account event.
+#[tokio::test]
+async fn account_revocations_without_a_profile_fan_out_to_owners_by_principal() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let path = "/internal/v1/communications/account-events";
+    let at = chrono::Utc::now();
+    let event = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":3,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":at});
+    let (status, result) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        (result["applied"].clone(), result["fanOut"].clone()),
+        (json!(true), json!("PRINCIPAL"))
+    );
+    let rows: Value = one(&h.state.store.db,
+        "SELECT jsonb_agg(jsonb_build_object('destination',destination,'aggregate',aggregate_id,'payload',payload) ORDER BY destination) doc FROM communication_outbox WHERE event_type='communications.account.changed'",
+        vec![]).await.unwrap().unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, destination) in rows.iter().zip(["CALLING", "MESSAGING"]) {
+        assert_eq!(row["destination"], destination);
+        assert_eq!(row["aggregate"], json!(a.principal_id));
+        assert_eq!(row["payload"]["principalId"], json!(a.principal_id));
+        assert_eq!(
+            row["payload"]["credentialsNotBefore"],
+            json!(at.timestamp())
+        );
+    }
+    // No profile was created as a side effect.
+    let profiles: Value = one(
+        &h.state.store.db,
+        "SELECT jsonb_build_object('n',count(*)) doc FROM communication_profiles",
+        vec![],
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(profiles["n"], 0);
+    // A retry of the same event is a duplicate and enqueues nothing more.
+    let (_, duplicate) = h
+        .http(&h.account_signer, path, event, h.scope.clone())
+        .await;
+    assert_eq!(duplicate["duplicate"], true);
+    // Suspension and deactivation revoke too; a plain reactivation does not.
+    for (state, fans_out) in [("SUSPENDED", true), ("ACCOUNT_CREATED", false)] {
+        let e = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":4,"kind":"STATUS_CHANGED","state":state,"occurredAt":chrono::Utc::now()});
+        let (_, r) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+        assert_eq!(r["applied"], fans_out, "{state}");
+    }
+    let count: Value = one(&h.state.store.db,
+        "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.account.changed'",
+        vec![]).await.unwrap().unwrap();
+    assert_eq!(count["n"], 4);
+    // An account Account has never mapped to a principal has nothing to revoke.
+    let unknown = json!({"eventId":Uuid::new_v4(),"accountReference":format!("cfmeet-user:{}",Uuid::new_v4()),"sourceVersion":1,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+    let (status, r) = h
+        .http(&h.account_signer, path, unknown, h.scope.clone())
+        .await;
+    assert_eq!((status.as_u16(), r["applied"].clone()), (200, json!(false)));
+    // The fan-out is delivered to both owners through the normal leased outbox.
+    assert_eq!(h.state.deliver_due().await.unwrap(), 4);
+    // Account down: the event is not acknowledged, so Account's durable outbox retries.
+    let b = h.account();
+    h.stop_owners();
+    let e = json!({"eventId":Uuid::new_v4(),"accountReference":b.account_reference,"sourceVersion":2,"kind":"SESSION_REVOKED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+    let (status, _) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+    assert_ne!(status, 200);
+    h.close().await;
+}
+
+/// Section 14 (ACC-008): ACCOUNT_SESSION_ENDED carries exactly one well-formed session
+/// reference, and no other kind may carry one.
+#[tokio::test]
+async fn account_session_events_are_shape_checked() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let _p = h.profile(&a).await;
+    let path = "/internal/v1/communications/account-events";
+    let reference = "ab".repeat(32);
+    for (kind, session, ok) in [
+        ("ACCOUNT_SESSION_ENDED", Some(reference.clone()), true),
+        ("ACCOUNT_SESSION_ENDED", None, false),
+        ("ACCOUNT_SESSION_ENDED", Some("AB".repeat(32)), false),
+        ("SESSION_REVOKED", Some(reference.clone()), false),
+    ] {
+        let mut e = json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":1,"kind":kind,"state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now()});
+        if let Some(s) = session {
+            e["accountSessionRef"] = json!(s);
+        }
+        let (status, r) = h.http(&h.account_signer, path, e, h.scope.clone()).await;
+        assert_eq!(status.as_u16() == 200, ok, "{kind} {r}");
+        if ok {
+            assert_eq!(r["devicesRevoked"], 0);
+        }
+    }
+    // A session end never touches the account epoch or activation.
+    let p = h.profile(&a).await;
+    assert!(p.credentials_not_before.is_none());
     h.close().await;
 }

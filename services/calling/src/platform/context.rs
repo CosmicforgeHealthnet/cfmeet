@@ -65,6 +65,12 @@ pub struct PlatformAuthContext {
     service_account_id: ServiceAccountId,
     credential_id: CredentialId,
     scopes: ScopeSet,
+    /// The tenant carries the reserved organization slug (`org-<32 hex>`, ADR 0058).
+    organization_tenant: bool,
+    /// The human member a first-party organization request acts for (Blueprint Section
+    /// 12 follow-up, CAL-007): set ONLY by the organization-forwarded authentication path
+    /// after the principal was resolved inside this context's scope.
+    acting_principal_id: Option<uuid::Uuid>,
     request_id: RequestId,
     correlation_id: CorrelationId,
 }
@@ -81,6 +87,7 @@ pub(crate) struct TrustedAuthority {
     pub service_account_id: ServiceAccountId,
     pub credential_id: CredentialId,
     pub scopes: ScopeSet,
+    pub organization_tenant: bool,
 }
 
 impl PlatformAuthContext {
@@ -99,6 +106,8 @@ impl PlatformAuthContext {
             service_account_id: authority.service_account_id,
             credential_id: authority.credential_id,
             scopes: authority.scopes,
+            organization_tenant: authority.organization_tenant,
+            acting_principal_id: None,
             request_id: request.request_id,
             correlation_id: request.correlation_id,
         }
@@ -150,6 +159,25 @@ impl PlatformAuthContext {
 
     pub fn scopes(&self) -> &ScopeSet {
         &self.scopes
+    }
+
+    /// Whether the tenant is a first-party business organization's dedicated tenant
+    /// (reserved `org-<32 hex>` slug).
+    pub fn is_organization_tenant(&self) -> bool {
+        self.organization_tenant
+    }
+
+    /// The acting human member's principal of an organization-forwarded request (never
+    /// set for directly authenticated or gateway-forwarded requests).
+    pub fn acting_principal_id(&self) -> Option<uuid::Uuid> {
+        self.acting_principal_id
+    }
+
+    /// Records the acting principal (organization-forwarded authentication only, after
+    /// the principal was resolved inside this scope).
+    pub(crate) fn with_acting_principal(mut self, principal_id: uuid::Uuid) -> Self {
+        self.acting_principal_id = Some(principal_id);
+        self
     }
 
     pub fn request_id(&self) -> &RequestId {

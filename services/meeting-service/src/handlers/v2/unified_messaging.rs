@@ -45,8 +45,9 @@ fn integration(state: &AppState) -> ApiResult<&std::sync::Arc<UnifiedMessaging>>
     })
 }
 
-/// A verified CF Meet account whose token revocation was actually checked.
-fn verified_user(actor: &ActorContext) -> ApiResult<Uuid> {
+/// A verified CF Meet account whose token revocation was actually checked (and, where the
+/// deployment enforces it, whose email address is verified: ACC-016).
+fn verified_user(state: &AppState, actor: &ActorContext) -> ApiResult<Uuid> {
     let r = actor.require_registered()?;
     if !r.revocation_checked {
         // The login authority could not confirm the session is not revoked: fail closed.
@@ -55,6 +56,12 @@ fn verified_user(actor: &ActorContext) -> ApiResult<Uuid> {
             "Your session cannot be verified right now; retry shortly",
         ));
     }
+    state
+        .auth_policy
+        .require_verified_email_for_communications(
+            state.require_email_verification,
+            r.verified_email.as_deref(),
+        )?;
     Ok(r.user_id)
 }
 
@@ -65,7 +72,7 @@ async fn relay(
     body: Option<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let um = integration(state)?;
-    let user = verified_user(actor)?;
+    let user = verified_user(state, actor)?;
     let (status, value) = um.bridge(user, op, body).await?;
     Ok((
         StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -204,6 +211,106 @@ pub async fn client_token(
     .await
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionTokenRequest {
+    /// Renew the token of this (still active) session device instead of creating one.
+    #[serde(default)]
+    pub session_device_id: Option<Uuid>,
+    /// A shorter lifetime than Messaging's session-device maximum.
+    #[serde(default)]
+    pub ttl_seconds: Option<i64>,
+}
+
+/// The account session of the presented bearer token and that token's expiry.
+pub(crate) fn account_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(Uuid, i64)> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+        })
+        .map(str::trim)
+        .ok_or_else(|| {
+            ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "A bearer token is required",
+            )
+        })?;
+    let claims = state.jwt_service.verify_token(token).map_err(|_| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Invalid or expired token",
+        )
+    })?;
+    let session = claims.session_id().ok_or_else(|| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Live updates need a session-bound sign-in; sign in again",
+        )
+    })?;
+    Ok((session, claims.exp))
+}
+
+/// Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed).
+///
+/// Blueprint Section 13 (ADR 0049 amendment A1): returns a Messaging client token bound to
+/// a *session device* of the signed-in user. A session device is not an MLS device: it can
+/// only open the realtime gateway and subscribe to MANAGED conversations; it cannot publish
+/// KeyPackages, join MLS groups, receive PRIVATE_E2EE ciphertext, use device-direct REST
+/// operations or count as an end-to-end encrypted device. It is bound to the caller's
+/// account session: the token never outlives the presented access token, every renewal
+/// re-verifies the session, and signing out (this session, everywhere, or a security
+/// revocation) ends it. Send `sessionDeviceId` to renew the same session device (an open
+/// connection then continues with `auth.refresh`). Answers FEATURE_DISABLED while
+/// Messaging has session devices switched off.
+#[utoipa::path(
+    post, path = "/api/v2/messaging/session-tokens", tag = "Messaging (v2)", operation_id = "v2_messaging_session_token",
+    request_body = Object,
+    responses((status = 201, description = "Session-device client token (Messaging contract)", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED (no session-bound sign-in)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn session_token(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    let request: SessionTokenRequest = if body.is_empty() {
+        SessionTokenRequest::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::domain(
+                ErrorCode::ValidationError,
+                "The body may name only sessionDeviceId and ttlSeconds",
+            )
+        })?
+    };
+    let (session, expires) = account_session(&state, &headers)?;
+    let not_after = chrono::DateTime::from_timestamp(expires, 0).ok_or_else(|| {
+        ApiError::domain(
+            ErrorCode::AuthenticationRequired,
+            "Invalid or expired token",
+        )
+    })?;
+    let (status, value) = um
+        .issue_session_token(
+            user,
+            session,
+            not_after,
+            request.session_device_id,
+            request.ttl_seconds,
+        )
+        .await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
+}
+
 /// End every Messaging client session of the caller (all devices).
 ///
 /// Asks the Messaging service to revoke every client session of the signed-in user's principal, on
@@ -238,8 +345,36 @@ pub const RELAY_MAX_BODY_BYTES: usize = 1024 * 1024;
 )]
 pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(um.me(user).await?))
+}
+
+/// The caller's colleague scope (Blueprint Section 4: read from Organizations once it is
+/// authoritative; an unreadable organization contributes nobody).
+async fn colleague_scope(
+    state: &AppState,
+    actor: &ActorContext,
+) -> crate::services::unified_messaging::relay::ColleagueScope {
+    use crate::services::unified_messaging::relay::ColleagueScope;
+    match (
+        state
+            .meeting
+            .core
+            .organization_authority
+            .as_ref()
+            .filter(|a| a.is_authoritative()),
+        actor.registered(),
+    ) {
+        (Some(authority), Some(user)) => ColleagueScope::Users(
+            crate::services::organizations_authority::authoritative_colleagues(
+                authority,
+                user,
+                &actor.verified_organizations,
+            )
+            .await,
+        ),
+        _ => ColleagueScope::Organizations(actor.verified_organizations.clone()),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,9 +402,9 @@ pub async fn directory(
     super::V2Query(q): super::V2Query<DirectoryQuery>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
-        um.directory(user, &actor.verified_organizations, q.q.as_deref())
+        um.directory(user, &colleague_scope(&state, &actor).await, q.q.as_deref())
             .await?,
     ))
 }
@@ -299,9 +434,9 @@ pub async fn resolve(
     V2Json(body): V2Json<ResolveRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
-        um.resolve_colleagues(user, &actor.verified_organizations, &body.user_ids)
+        um.resolve_colleagues(user, &colleague_scope(&state, &actor).await, &body.user_ids)
             .await?,
     ))
 }
@@ -330,14 +465,18 @@ pub async fn principal_names(
     V2Json(body): V2Json<NamesRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     Ok(Json(
-        um.name_principals(user, &actor.verified_organizations, &body.principal_ids)
-            .await?,
+        um.name_principals(
+            user,
+            &colleague_scope(&state, &actor).await,
+            &body.principal_ids,
+        )
+        .await?,
     ))
 }
 
-fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
+pub(crate) fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
     let Some(raw) = raw.filter(|r| !r.is_empty()) else {
         return Ok(vec![]);
     };
@@ -365,7 +504,7 @@ async fn relay_operation(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let um = integration(&state)?;
-    let user = verified_user(&actor)?;
+    let user = verified_user(&state, &actor)?;
     let body =
         if body.is_empty() {
             None
@@ -480,6 +619,33 @@ pub async fn relay_put(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     relay_operation(state, actor, Method::PUT, path, query, headers, body).await
+}
+
+/// Relayed partial update (allowlisted path under `v1/`, e.g. editing a MANAGED message).
+///
+/// Forwards an allowlisted PATCH of the Messaging client API (updating a conversation's
+/// lifecycle, expiry, retention or display title, changing a member's role, or editing a
+/// MANAGED message with its `expectedEditCount`) to the Messaging service, acting as the
+/// caller's own principal, which is never taken from the request. The JSON body (at most
+/// 1 MiB; empty means `{}`) is forwarded as-is; Messaging enforces ownership, roles and
+/// optimistic concurrency. Paths outside the allowlist return ENDPOINT_NOT_FOUND and are
+/// not forwarded. Messaging's status and JSON body are returned unchanged.
+#[utoipa::path(
+    patch, path = "/api/v2/messaging/relay/{path}", tag = "Messaging (v2)", operation_id = "v2_messaging_relay_patch",
+    params(("path" = String, Path, description = "An allowlisted Messaging customer path under v1/")),
+    request_body = Object,
+    responses((status = 200, description = "Messaging contract answer (status relayed)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ENDPOINT_NOT_FOUND (not relayed)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn relay_patch(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path(path): Path<String>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    relay_operation(state, actor, Method::PATCH, path, query, headers, body).await
 }
 
 /// Relayed removal (allowlisted path under `v1/`, e.g. leaving a conversation).

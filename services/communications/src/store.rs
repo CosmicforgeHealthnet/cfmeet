@@ -225,10 +225,25 @@ impl Store {
         version: i64,
         payload: Json,
     ) -> Result<()> {
+        self.scoped_event(db, p.scope(), event_type, aggregate_id, version, payload)
+            .await
+    }
+    /// The same durable fan-out to Calling and Messaging for a scope without a Hub
+    /// profile (Section 14, ACC-010: account revocations of principals that never
+    /// opened the Hub). The payload carries only references and epochs.
+    pub async fn scoped_event<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: Scope,
+        event_type: &str,
+        aggregate_id: Uuid,
+        version: i64,
+        payload: Json,
+    ) -> Result<()> {
         let event = Uuid::new_v4();
         for destination in ["CALLING", "MESSAGING"] {
             let mut v = vec![event.into()];
-            v.extend(scoped(p.scope()));
+            v.extend(scoped(scope));
             v.extend([
                 destination.into(),
                 aggregate_id.into(),
@@ -238,6 +253,29 @@ impl Store {
             ]);
             execute(db,"INSERT INTO communication_outbox(event_id,tenant_id,application_id,environment_id,destination,aggregate_id,aggregate_version,event_type,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",v).await?;
         }
+        Ok(())
+    }
+    /// A durable event for Messaging alone (MSG-009 timeline nudges: Calling has no use
+    /// for them). Same outbox, delivery, retry and dead-letter path as [`Self::scoped_event`].
+    pub async fn messaging_event<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: Scope,
+        event_type: &str,
+        aggregate_id: Uuid,
+        version: i64,
+        payload: Json,
+    ) -> Result<()> {
+        let mut v = vec![Uuid::new_v4().into()];
+        v.extend(scoped(scope));
+        v.extend([
+            "MESSAGING".into(),
+            aggregate_id.into(),
+            version.into(),
+            event_type.into(),
+            payload.into(),
+        ]);
+        execute(db,"INSERT INTO communication_outbox(event_id,tenant_id,application_id,environment_id,destination,aggregate_id,aggregate_version,event_type,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",v).await?;
         Ok(())
     }
     pub async fn idempotency(

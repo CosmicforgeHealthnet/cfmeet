@@ -10,6 +10,7 @@ authorized change window.
 | [`compose.part-vi.yml`](compose.part-vi.yml) | Developer Platform API, worker, one-shot migration job and API Gateway; every rollout control off; secrets mounted as files / secret env files; `/ready` health checks |
 | [`preflight.sh`](preflight.sh) | Read-only gate: `--check-config` of both binaries with the real env files, every control off (`--expect dark`), migrations current (`--migrator-env`: the migration CLI needs the migrator role), `/ready` probes |
 | [`../postgres/provision-service-database.sh`](../postgres/provision-service-database.sh) | `--service developer-platform`: own database, migrator (owner) and runtime (no DDL) roles |
+| [`docs/operations/developer-platform-gateway-activation-checklist.md`](../../../docs/operations/developer-platform-gateway-activation-checklist.md) | PLT-005 activation-readiness checklist: decisions (public host, base URLs), env vars, trust bundles, migrations, DNS/TLS, open blockers |
 
 ## Deployment units
 

@@ -281,6 +281,7 @@ pub async fn send(
     .await?
     {
         replayed(&existing, &ciphertext)?;
+        super::same_attachments(&state.db, &existing, &request.attachment_ids).await?;
         return Ok((200, render(state, &existing, false).await));
     }
     let st = state.clone();

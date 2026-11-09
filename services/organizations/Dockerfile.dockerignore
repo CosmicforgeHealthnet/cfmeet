@@ -1,0 +1,16 @@
+# Build-context filter for services/organizations/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!packages/migration-guard
+!packages/contracts/organizations
+!services/organizations
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/organizations/Dockerfile
+services/organizations/Dockerfile.dockerignore

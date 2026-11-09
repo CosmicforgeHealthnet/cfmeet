@@ -88,6 +88,7 @@
         "communications-profile.suspend",
         "meeting-communications.read",
         "meeting-communications.create",
+        "communications-preferences.read",
         "communication.authorize",
         "communication-context.read",
         "protected-contact.resolve-for-execution",
@@ -148,7 +149,15 @@
         "webhook-migration.export",
         "webhook-migration.import",
         "developer-platform.administer",
-        "security-scan.submit"
+        "security-scan.submit",
+        "organization.read",
+        "organization.write",
+        "organization.act-for-user",
+        "organization.administer",
+        "organization.migrate",
+        "platform-identity.provision-first-party",
+        "calling-request.act-for-organization",
+        "meeting-organization-events.apply"
       ]
     }
   }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { View, Pressable } from "react-native";
-import { Link } from "expo-router";
+import { Link, router } from "expo-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { KeyboardAwareView } from "@/components/layout/keyboard-aware-view";
@@ -156,22 +156,20 @@ export function LoginForm() {
         {/* Divider */}
         <Divider text="OR" />
 
-        {/* Google Sign In */}
+        {/* FE-012 / ACC-012: no inert Google button. The backend's Google flow returns to the
+            web app's callback page only (no mobile redirect target), so mobile cannot complete
+            the one-time-code exchange yet; say so instead of pretending. */}
         <Button
           variant="outline"
           className="w-full rounded-2xl"
-          onPress={() => {
-            // TODO: Implement Google OAuth for mobile
-            toast("Google sign-in coming soon", "default");
-          }}
+          onPress={() => router.push("/join")}
         >
-          <View className="flex-row items-center justify-center gap-2">
-            <Text className="text-lg font-bold text-[#4285F4]">G</Text>
-            <Text className="text-muted-foreground dark:text-muted-foreground-dark">
-              Continue with Google
-            </Text>
-          </View>
+          <Text className="text-foreground dark:text-foreground-dark font-semibold">Join a meeting as a guest</Text>
         </Button>
+        <Text className="mt-3 text-center text-xs text-muted-foreground dark:text-muted-foreground-dark">
+          Signed up with Google? Google sign-in is available in CF Meet on the web; it is not yet available in the
+          mobile app.
+        </Text>
         </AuthCard>
       </KeyboardAwareView>
     </AuthBackground>

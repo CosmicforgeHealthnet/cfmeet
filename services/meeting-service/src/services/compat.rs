@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    domain::{AccessPolicy, AdmissionState, ConferenceStatus, RecordOrigin, Role},
+    domain::{AccessPolicy, AdmissionState, ConferenceStatus, Role},
     error::ApiResult,
     models::{
         conference_participants, conference_sessions, meeting_spaces,
@@ -142,33 +142,43 @@ impl CompatService {
         Err(not_found_space())
     }
 
-    /// Canonical conference: the LIVE one, else the next upcoming unstarted one, else the latest.
+    /// Canonical conference: the LIVE one, else the next unstarted one whose start window
+    /// is still open, else the latest (one shared rule, see `services::calendar`).
     pub async fn canonical_conference(
         &self,
         space_id: Uuid,
     ) -> ApiResult<Option<conference_sessions::Model>> {
-        let all = conference_sessions::Entity::find()
-            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
-            .order_by_asc(conference_sessions::Column::ScheduledStartAt)
-            .all(&self.core.db)
-            .await?;
-        if let Some(live) = all
-            .iter()
-            .filter(|c| c.status == ConferenceStatus::Live)
-            .max_by_key(|c| (c.origin == RecordOrigin::V2, c.started_at))
+        crate::services::calendar::canonical_conference(&self.core.db, space_id, Utc::now()).await
+    }
+
+    /// Blueprint v1.0 Section 16 (MTG-017 / DATA-008): mirror one legacy meeting into v2
+    /// right after a legacy create / update / end, through the same idempotent backfill
+    /// the migration and the lazy resolver use (single-meeting mode). Best effort: the
+    /// legacy write has already committed, and a failed mirror is repaired by the lazy
+    /// resolver or the next admin backfill, so it is logged and counted, never returned.
+    /// No-op unless `FEATURE_LEGACY_MEETING_CREATE_MODE=mirror` (the default).
+    pub async fn mirror_legacy_write(&self, legacy_meeting_id: Uuid) {
+        use crate::services::ops_metrics::{inc, OPS_METRICS as OM};
+        if self.core.flags.legacy_meeting_create_mode
+            != crate::config::LegacyMeetingCreateMode::Mirror
         {
-            return Ok(Some(live.clone()));
+            return;
         }
-        let now = Utc::now();
-        if let Some(next) = all.iter().find(|c| {
-            matches!(
-                c.status,
-                ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
-            ) && c.scheduled_end_at.map(|e| e > now).unwrap_or(true)
-        }) {
-            return Ok(Some(next.clone()));
+        match self.backfill(Some(legacy_meeting_id)).await {
+            Ok(report) if report.mapping_failures == 0 => inc(&OM.legacy_creates_mirrored),
+            Ok(report) => {
+                inc(&OM.legacy_mirror_failures);
+                tracing::warn!(
+                    %legacy_meeting_id,
+                    mapping_failures = report.mapping_failures,
+                    "legacy meeting mirror left the meeting unmapped (lazy resolve retries)"
+                );
+            }
+            Err(e) => {
+                inc(&OM.legacy_mirror_failures);
+                tracing::warn!(%legacy_meeting_id, "legacy meeting mirror failed: {e}");
+            }
         }
-        Ok(all.into_iter().max_by_key(|c| c.created_at))
     }
 
     /// Run the idempotent backfill (all legacy meetings, or one).

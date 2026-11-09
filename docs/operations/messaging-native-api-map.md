@@ -1,6 +1,6 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.14.0 contract.
+Generated from the Account relay and Messaging 1.16.0 contract.
 Canonical SDK contract: **96 operations**; audience-filtered public Swagger:
 **80 operations**; native Account transports: **71 operations**.
 There are no new canonical message/conversation/device endpoints.
@@ -59,8 +59,15 @@ For send/edit use a stable clientMessageId and the same ciphertext on retries; g
 fresh ciphertext only for a new submission. Conversation create forwards a stable
 `Idempotency-Key`. Direct reuse preserves canonical IDs. `expectedVersion` and
 `expectedEditCount` protect updates. Respect 429 and Retry-After; do not reset rate limits.
-Messages page by afterSequence/beforeSequence; conversations use cursor/limit; replay
-uses afterEventSequence. Only committed owner events are delivery evidence. A WebSocket
+Messages page by afterSequence/beforeSequence (threadRootId filters a thread);
+conversations use cursor/limit with lifecycleState/contextClass filters and
+orderBy=createdAt|lastActivity (the inbox order; each item then carries `inbox`: last
+activity, last visible message preview metadata, unread and mention counts; previews
+only for MANAGED). REST replay uses `after` (the relay also accepts the WebSocket
+frame's name `afterEventSequence` and forwards `after`). Every relayed operation takes
+exactly the Messaging contract's query parameters (`scope` on delete, `reason` on member
+removal) and PATCH is relayed (MANAGED edit, member role, conversation update/retention/
+title). Only committed owner events are delivery evidence. A WebSocket
 notice or push is not proof of durable storage; acknowledge monotonic event cursors and
 recover gaps from PostgreSQL-backed history after reconnect.
 
@@ -80,11 +87,17 @@ Managed files need explicit allowed/disclosed context, encryption at rest and a 
 malware scan before READY. Server thumbnails exist only for supported MANAGED images.
 Native clients download from grants; the JSON relay is not a binary-content proxy.
 
-Realtime: obtain a short-lived device-bound client token through the Account bridge,
+Realtime: obtain a short-lived device-bound client token through the Account bridge
+(`POST /api/v2/messaging/client-tokens` for a registered E2EE device) or, for MANAGED
+conversations without any E2EE device (production today), a session-device token
+(`POST /api/v2/messaging/session-tokens`, ADR 0049 amendment A1: realtime only, MANAGED
+subscriptions only, never an E2EE device, bound to the account session; renew it with
+`sessionDeviceId` and `auth.refresh`). Then
 POST `/v1/realtime/tickets` with `Authorization: CF-Client-Token <token>`, then connect to
 `wss://api.cfmeet.com/v1/realtime` using the returned one-use ticket in
 Sec-WebSocket-Protocol, never the URL. Browser origins must match the existing allowlist.
-Typing/presence are ephemeral and privacy-filtered; durable events are replayed by cursor.
+Typing/presence are ephemeral and privacy-filtered; durable events are replayed by cursor
+(omit `afterEventSequence` on subscribe to resume from the device's stored ack cursor).
 Expired/revoked tickets, sessions or devices fail closed.
 
 Push registration uses the device owner; payloads contain routing metadata only.

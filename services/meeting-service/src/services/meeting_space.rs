@@ -4,8 +4,8 @@
 use chrono::Utc;
 use chrono_tz::Tz;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, QueryTrait, Set, TransactionTrait,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -293,6 +293,9 @@ pub struct SpaceView {
     pub latest_conference: Option<conference_sessions::Model>,
 }
 
+/// The organization capability that lets OWNER / ADMIN oversee the organization's meetings (ORG-011).
+pub const MEETINGS_ORGANIZATION_MANAGE: &str = "meetings.organization.manage";
+
 pub struct MeetingSpaceService {
     core: Core,
 }
@@ -308,6 +311,21 @@ impl MeetingSpaceService {
                 return Err(permission_denied(
                     "You are not a verified member of that organization",
                 ));
+            }
+            // Blueprint Section 4 (authoritative): the organization may exist only in the
+            // Organizations Service; upsert the local read-only projection row the
+            // `meeting_spaces.organization_id` foreign key needs.
+            // Blueprint Section 12 follow-up: the organization policy decides, exactly as
+            // the workspace capabilities read reports it (authoritative mode only).
+            crate::services::organization_policy::require_meeting_creation(&self.core, actor, org)
+                .await?;
+            if let Some(authority) = self
+                .core
+                .organization_authority
+                .as_ref()
+                .filter(|a| a.is_authoritative())
+            {
+                authority.ensure_projection(&self.core.db, org).await?;
             }
         }
         Ok(())
@@ -443,7 +461,24 @@ impl MeetingSpaceService {
         ctx: &ActorContext,
         req: CreateMeetingSpaceRequest,
     ) -> ApiResult<meeting_spaces::Model> {
+        self.create_idempotent(ctx, req, None).await.map(|(s, _)| s)
+    }
+
+    /// [`Self::create`] with an optional `Idempotency-Key` record (SEC-014). Returns the
+    /// space and whether it is a replay of an earlier request with the same key.
+    pub async fn create_idempotent(
+        &self,
+        ctx: &ActorContext,
+        req: CreateMeetingSpaceRequest,
+        idempotency: Option<crate::services::idempotency::IdempotencyRequest>,
+    ) -> ApiResult<(meeting_spaces::Model, bool)> {
+        use crate::services::idempotency;
         let owner = self.core.require_v2_writer(ctx)?;
+        if let Some(i) = &idempotency {
+            if let Some(id) = idempotency::prior(&self.core.db, i).await? {
+                return Ok((find_space(&self.core.db, id).await?, true));
+            }
+        }
         let draft = SpaceDraft::from_create(&req);
         if let Some(p) = &req.passcode {
             validate_passcode(p)?;
@@ -463,8 +498,18 @@ impl MeetingSpaceService {
             .await?;
         self.record_created(&txn, &AuditActor::from(ctx), &space, json!({}))
             .await?;
+        if let Some(i) = &idempotency {
+            if !idempotency::record(&txn, i, "MEETING_SPACE", space.id).await? {
+                // A concurrent request with the same key won: replay its result.
+                txn.rollback().await?;
+                return match idempotency::prior(&self.core.db, i).await? {
+                    Some(id) => Ok((find_space(&self.core.db, id).await?, true)),
+                    None => Err(idempotency::in_progress()),
+                };
+            }
+        }
         txn.commit().await?;
-        Ok(space)
+        Ok((space, false))
     }
 
     /// Instant meeting: MeetingSpace + LIVE ConferenceSession in one transaction.
@@ -562,12 +607,26 @@ impl MeetingSpaceService {
             other => other?,
         };
         let pctx = PermissionContext::for_space(&space);
-        let full = viewer_role
+        let mut full = viewer_role
             .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
             .unwrap_or(false);
+        // ORG-011: an organization manager sees the FULL view (incl. `version`) of the
+        // organization's spaces it may configure. Organizations unreachable → SUMMARY.
+        if !full
+            && space
+                .organization_id
+                .is_some_and(|o| ctx.verified_organizations.contains(&o))
+        {
+            full = self
+                .organization_manager(&space, ctx, SpacePermission::Configure)
+                .await
+                .unwrap_or(false);
+        }
 
-        // Fetch the canonical conference (live > upcoming > latest)
-        let latest_conference = self.canonical_conference(space.id).await?;
+        // The canonical conference (live > open upcoming > latest; never a stale one).
+        let latest_conference =
+            crate::services::calendar::canonical_conference(&self.core.db, space.id, Utc::now())
+                .await?;
 
         Ok(SpaceView {
             space,
@@ -577,91 +636,182 @@ impl MeetingSpaceService {
         })
     }
 
-    /// Canonical conference: the LIVE one, else the next upcoming unstarted one, else the latest.
-    async fn canonical_conference(
+    /// The view of a space reached by identifier lookup (`GET /api/v2/meeting-spaces/{id}`,
+    /// `GET /api/v2/resolve/{identifier}`, Hub meeting cards).
+    ///
+    /// Resolving an identifier never implies access. An `ORGANIZATION_ONLY` space is disclosed
+    /// (even as a SUMMARY) only to a caller with standing: an owner / member, a server-verified
+    /// member of its organization, or a caller with calendar access (conference participant
+    /// credential, email-bound invitation, webinar registration, admitted participation,
+    /// owning platform environment). Signed-out callers get AUTHENTICATION_REQUIRED so the
+    /// client can offer sign-in; any other caller gets MEETING_NOT_FOUND, as for an unknown
+    /// code. Invitation-token resolution keeps using [`Self::view_of`]: the token is the grant.
+    pub async fn lookup_view_of(
         &self,
-        space_id: Uuid,
-    ) -> ApiResult<Option<conference_sessions::Model>> {
-        let all = conference_sessions::Entity::find()
-            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
-            .order_by_asc(conference_sessions::Column::ScheduledStartAt)
-            .all(&self.core.db)
-            .await?;
-
-        // Prefer LIVE conference
-        if let Some(live) = all
-            .iter()
-            .filter(|c| c.status == ConferenceStatus::Live)
-            .max_by_key(|c| (c.origin == RecordOrigin::V2, c.started_at))
+        ctx: &ActorContext,
+        space: meeting_spaces::Model,
+    ) -> ApiResult<SpaceView> {
+        let view = self.view_of(ctx, space).await?;
+        if view.space.access_policy != AccessPolicy::OrganizationOnly
+            || view.viewer_role.is_some()
+            || view
+                .space
+                .organization_id
+                .is_some_and(|o| ctx.verified_organizations.contains(&o))
         {
-            return Ok(Some(live.clone()));
+            return Ok(view);
         }
-
-        // Then prefer upcoming unstarted conference
-        let now = Utc::now();
-        if let Some(next) = all.iter().find(|c| {
-            matches!(
-                c.status,
-                ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
-            ) && c.scheduled_end_at.map(|e| e > now).unwrap_or(true)
-        }) {
-            return Ok(Some(next.clone()));
+        let calendar = crate::services::calendar::CalendarService::new(self.core.clone());
+        if calendar
+            .has_access(ctx, &view.space, view.latest_conference.as_ref())
+            .await?
+        {
+            return Ok(view);
         }
-
-        // Otherwise return the latest
-        Ok(all.into_iter().max_by_key(|c| c.created_at))
+        if ctx.registered().is_none() && ctx.platform().is_none() {
+            return Err(ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "Sign in with your organization account to open this meeting",
+            ));
+        }
+        Err(crate::services::meeting_core::not_found_space())
     }
 
-    /// Spaces the actor owns or is an active member of.
-    pub async fn list_for_actor(&self, ctx: &ActorContext) -> ApiResult<Vec<SpaceView>> {
-        if let Some(p) = ctx.platform() {
+    /// Spaces the actor owns or is an active member of, newest first.
+    ///
+    /// MTG-018: a constant number of queries (spaces, memberships, canonical conferences)
+    /// for any page. `page = None` keeps the legacy complete list; `Some((cursor, limit))`
+    /// returns one page and the next cursor.
+    pub async fn list_for_actor(
+        &self,
+        ctx: &ActorContext,
+        page: Option<(Option<String>, u32)>,
+    ) -> ApiResult<(Vec<SpaceView>, Option<String>)> {
+        use crate::services::calendar::SpaceListCursor;
+        let cursor = page
+            .as_ref()
+            .and_then(|(c, _)| c.as_deref())
+            .map(SpaceListCursor::parse)
+            .transpose()?;
+        let limit = page.as_ref().map(|(_, l)| *l as u64);
+        let mut q = meeting_spaces::Entity::find()
+            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
+            .filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::Origin.ne(RecordOrigin::Legacy))
+                    .add(meeting_spaces::Column::LegacyMeetingId.is_not_null()),
+            );
+        let registered = if let Some(p) = ctx.platform() {
             // A machine caller lists exactly its own environment's spaces (the whole live
             // chain must match); user-owned spaces never appear.
-            let spaces = meeting_spaces::Entity::find()
+            q = q
                 .filter(meeting_spaces::Column::PlatformEnvironmentId.eq(p.environment_id))
                 .filter(meeting_spaces::Column::PlatformApplicationId.eq(p.application_id))
                 .filter(meeting_spaces::Column::PlatformTenantId.eq(p.tenant_id))
-                .filter(meeting_spaces::Column::OwnerUserId.is_null())
-                .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
-                .order_by_desc(meeting_spaces::Column::CreatedAt)
-                .all(&self.core.db)
-                .await?;
-            let mut out = Vec::with_capacity(spaces.len());
-            for s in spaces
-                .into_iter()
-                .filter(crate::services::meeting_core::space_is_visible)
-            {
-                out.push(self.view_of(ctx, s).await?);
-            }
-            return Ok(out);
-        }
-        let actor = ctx.require_registered()?;
-        let member_space_ids: Vec<Uuid> = meeting_members::Entity::find()
-            .filter(meeting_members::Column::UserId.eq(actor.user_id))
-            .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
-            .all(&self.core.db)
-            .await?
-            .into_iter()
-            .map(|m| m.meeting_space_id)
-            .collect();
-        let spaces = meeting_spaces::Entity::find()
-            .filter(
+                .filter(meeting_spaces::Column::OwnerUserId.is_null());
+            None
+        } else {
+            let actor = ctx.require_registered()?;
+            let member_spaces = meeting_members::Entity::find()
+                .select_only()
+                .column(meeting_members::Column::MeetingSpaceId)
+                .filter(meeting_members::Column::UserId.eq(actor.user_id))
+                .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
+                .into_query();
+            q = q.filter(
                 sea_orm::Condition::any()
                     .add(meeting_spaces::Column::OwnerUserId.eq(actor.user_id))
-                    .add(meeting_spaces::Column::Id.is_in(member_space_ids)),
-            )
-            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted))
-            .order_by_desc(meeting_spaces::Column::CreatedAt)
-            .all(&self.core.db)
-            .await?;
-        let mut out = Vec::with_capacity(spaces.len());
-        for s in spaces
-            .into_iter()
-            .filter(crate::services::meeting_core::space_is_visible)
-        {
-            out.push(self.view_of(ctx, s).await?);
+                    .add(meeting_spaces::Column::Id.in_subquery(member_spaces)),
+            );
+            Some(actor)
+        };
+        if let Some(c) = &cursor {
+            q = q.filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::CreatedAt.lt(c.created_at()))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(meeting_spaces::Column::CreatedAt.eq(c.created_at()))
+                            .add(meeting_spaces::Column::Id.lt(c.id)),
+                    ),
+            );
         }
-        Ok(out)
+        q = q
+            .order_by_desc(meeting_spaces::Column::CreatedAt)
+            .order_by_desc(meeting_spaces::Column::Id);
+        if let Some(l) = limit {
+            q = q.limit(l + 1);
+        }
+        let mut spaces = q.all(&self.core.db).await?;
+        let next_cursor = match limit {
+            Some(l) if spaces.len() as u64 > l => {
+                spaces.truncate(l as usize);
+                spaces.last().map(SpaceListCursor::of)
+            }
+            _ => None,
+        };
+        let ids: Vec<Uuid> = spaces.iter().map(|s| s.id).collect();
+        // Membership roles of a registered caller for this page (by user or verified email).
+        let mut member_roles: std::collections::HashMap<Uuid, Role> = Default::default();
+        if let Some(actor) = registered {
+            if !ids.is_empty() {
+                let mut who = sea_orm::Condition::any()
+                    .add(meeting_members::Column::UserId.eq(actor.user_id));
+                if let Some(email) = &actor.verified_email {
+                    who = who.add(
+                        sea_orm::Condition::all()
+                            .add(meeting_members::Column::PrincipalType.eq(PrincipalType::Email))
+                            .add(
+                                meeting_members::Column::PrincipalRef
+                                    .eq(email.to_ascii_lowercase()),
+                            ),
+                    );
+                }
+                for m in meeting_members::Entity::find()
+                    .filter(meeting_members::Column::MeetingSpaceId.is_in(ids.clone()))
+                    .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
+                    .filter(who)
+                    .all(&self.core.db)
+                    .await?
+                {
+                    let e = member_roles.entry(m.meeting_space_id).or_insert(m.role);
+                    *e = Role::max(*e, m.role);
+                }
+            }
+        }
+        let mut canonical =
+            crate::services::calendar::canonical_conferences(&self.core.db, &ids, Utc::now())
+                .await?;
+        let views = spaces
+            .into_iter()
+            .map(|space| {
+                let viewer_role = match registered {
+                    None => Some(Role::Owner),
+                    // An unverifiable session on a strict space only gets the summary view.
+                    Some(actor)
+                        if !actor.revocation_checked
+                            && crate::services::meeting_core::requires_verified_revocation(
+                                &space,
+                            ) =>
+                    {
+                        None
+                    }
+                    Some(actor) if space.owner_user_id == Some(actor.user_id) => Some(Role::Owner),
+                    Some(_) => member_roles.get(&space.id).copied(),
+                };
+                let pctx = PermissionContext::for_space(&space);
+                let full = viewer_role
+                    .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
+                    .unwrap_or(false);
+                SpaceView {
+                    latest_conference: canonical.remove(&space.id),
+                    space,
+                    viewer_role,
+                    full,
+                }
+            })
+            .collect();
+        Ok((views, next_cursor))
     }
 
     async fn require_space_permission<C: ConnectionTrait>(
@@ -675,9 +825,62 @@ impl MeetingSpaceService {
         let pctx = PermissionContext::for_space(space);
         match role {
             Some(r) if space_allows(r, permission, &pctx) => Ok(r),
+            _ if self.organization_manager(space, actor, permission).await? => Ok(Role::Owner),
             _ => Err(permission_denied(
                 "You are not permitted to manage this meeting",
             )),
+        }
+    }
+
+    /// ORG-011: an organization's managers oversee its meeting spaces. For a space of an
+    /// organization, a caller without a sufficient space role may still configure, archive
+    /// or reassign it (e.g. when its owner leaves) when the Organizations Service — only in
+    /// authoritative mode — grants them `meetings.organization.manage` for that
+    /// organization now (OWNER / ADMIN while meetings are enabled; the organization must be
+    /// ACTIVE). Join, media and conference controls are never widened. A refusal by
+    /// Organizations keeps the original PERMISSION_DENIED; Organizations unreachable is
+    /// 503 (never an allow).
+    async fn organization_manager(
+        &self,
+        space: &meeting_spaces::Model,
+        actor: &ActorContext,
+        permission: SpacePermission,
+    ) -> ApiResult<bool> {
+        if !matches!(
+            permission,
+            SpacePermission::Configure
+                | SpacePermission::Archive
+                | SpacePermission::TransferOwnership
+        ) {
+            return Ok(false);
+        }
+        let (Some(organization), Some(user), Some(authority)) = (
+            space.organization_id,
+            actor.registered(),
+            crate::services::organization_policy::authoritative(&self.core),
+        ) else {
+            return Ok(false);
+        };
+        match crate::services::workspaces::require_organization_capability(
+            authority,
+            &crate::services::organizations_authority::ActingUser::of(user),
+            organization,
+            crate::services::workspaces::OrganizationFeature::Meetings,
+            Some(MEETINGS_ORGANIZATION_MANAGE),
+        )
+        .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    meeting_space_id = %space.id,
+                    organization_id = %organization,
+                    acting_user_id = %user.user_id,
+                    "organization manager acts on an organization meeting space"
+                );
+                Ok(true)
+            }
+            Err(e) if e.code() == Some(ErrorCode::ServiceUnavailable) => Err(e),
+            Err(_) => Ok(false),
         }
     }
 
@@ -968,6 +1171,13 @@ impl MeetingSpaceService {
         if let Some(org) = draft.organization_id {
             if !ctx.verified_organizations.contains(&org) {
                 draft.organization_id = None;
+            } else {
+                // A copy that stays in the organization is an organization meeting
+                // creation: the organization policy applies (authoritative mode).
+                crate::services::organization_policy::require_meeting_creation(
+                    &self.core, ctx, org,
+                )
+                .await?;
             }
         }
         draft.validate(&self.core.flags)?;

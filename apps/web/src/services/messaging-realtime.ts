@@ -28,6 +28,14 @@ export type MessagingTransportOptions = {
   onEvent: (event: MessagingRealtimeEvent) => void | Promise<void>;
   onSyncRequired: (conversationId: string, frame: Record<string, unknown>) => void;
   onConnectionState?: (state: "connected" | "disconnected" | "auth-required") => void;
+  /** The server confirmed a subscription: where it resumes (its per-device ack cursor when none was sent) and its head. */
+  onSubscribed?: (conversationId: string, afterEventSequence: number, headEventSequence: number) => void;
+  /** Another member started / stopped typing (ephemeral, never acknowledged). */
+  onTyping?: (conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number) => void;
+  /** This account's read position moved on another of its sessions. */
+  onReadCursor?: (conversationId: string, readSequence: number) => void;
+  /** The server ended a subscription (removed from the conversation, policy). */
+  onSubscriptionRevoked?: (conversationId: string, reason: string) => void;
   fetchImpl?: typeof fetch;
   socketFactory?: (url: string, protocols: string[]) => WebSocket;
 };
@@ -72,7 +80,8 @@ function parseTicket(value: unknown): string {
 export class MessagingRealtimeTransport {
   private readonly origin: URL;
   private readonly options: MessagingTransportOptions;
-  private readonly subscriptions = new Map<string, number>();
+  /** Event cursor per conversation; null: resume from the server's stored per-device ack cursor (MSG-018). */
+  private readonly subscriptions = new Map<string, number | null>();
   private socket: WebSocket | null = null;
   private connecting: Promise<void> | null = null;
   private processing: Promise<void> = Promise.resolve();
@@ -84,7 +93,21 @@ export class MessagingRealtimeTransport {
     this.options = options;
   }
   cursor(conversationId: string): number | undefined {
-    return this.subscriptions.get(conversationId);
+    return this.subscriptions.get(conversationId) ?? undefined;
+  }
+  private subscribeFrame(conversationId: string, after: number | null): Record<string, unknown> {
+    return after === null ? { type: "subscribe", conversationId } : { type: "subscribe", conversationId, afterEventSequence: after };
+  }
+  /**
+   * Subscribes WITHOUT a cursor: the server resumes from this device's stored ack cursor (or
+   * its head when it has none) and says where in `subscribed` (MSG-018). A cursor already
+   * known locally is kept (it is never behind the server's ack cursor).
+   */
+  subscribeResume(conversationId: string): void {
+    requireConversation(conversationId);
+    if (this.subscriptions.has(conversationId)) return;
+    this.subscriptions.set(conversationId, null);
+    if (this.socket?.readyState === 1) this.send(this.subscribeFrame(conversationId, null));
   }
   subscribe(conversationId: string, afterEventSequence = 0): void {
     requireConversation(conversationId);
@@ -108,6 +131,28 @@ export class MessagingRealtimeTransport {
   unsubscribe(conversationId: string): void {
     this.subscriptions.delete(conversationId);
     if (this.socket?.readyState === 1) this.send({ type: "unsubscribe", conversationId });
+  }
+  get connected(): boolean {
+    return this.socket?.readyState === 1;
+  }
+  /**
+   * Renews an open connection's authorization (a fresh token, then a single-use ticket sent as
+   * `auth.refresh`), so the socket survives the short session-device token lifetime.
+   */
+  async refreshAuth(): Promise<void> {
+    if (this.socket?.readyState !== 1) return;
+    const grant = await this.options.getAccessToken();
+    if (!grant || grant.tokenType !== "CF-Client-Token" || !grant.token || !(Date.parse(grant.expiresAt) > Date.now())) {
+      throw new MessagingTransportError("A valid Messaging Client Access Token is required");
+    }
+    const request = this.options.fetchImpl ?? fetch;
+    const response = await request(new URL(TICKET_ENDPOINT, this.origin), {
+      method: "POST", credentials: "omit", cache: "no-store", redirect: "error",
+      headers: { Authorization: "CF-Client-Token " + grant.token, Accept: "application/json" },
+    });
+    if (!response.ok) throw new MessagingTransportError("Messaging ticket request failed: HTTP " + response.status);
+    const ticket = parseTicket(await response.json());
+    if (this.socket?.readyState === 1) this.send({ type: "auth.refresh", ticket });
   }
   typing(conversationId: string, started: boolean): void {
     if (!this.subscriptions.has(conversationId)) throw new MessagingTransportError("Not subscribed");
@@ -162,7 +207,7 @@ export class MessagingRealtimeTransport {
         }
         this.options.onConnectionState?.("connected");
         for (const [conversationId, afterEventSequence] of this.subscriptions) {
-          ws.send(JSON.stringify({ type: "subscribe", conversationId, afterEventSequence }));
+          ws.send(JSON.stringify(this.subscribeFrame(conversationId, afterEventSequence)));
         }
         finish();
       }, { once: true });
@@ -194,12 +239,43 @@ export class MessagingRealtimeTransport {
       this.options.onSyncRequired(frame.conversationId, frame);
       return;
     }
+    if (frame.type === "subscribed" && typeof frame.conversationId === "string" &&
+        this.subscriptions.has(frame.conversationId) &&
+        Number.isSafeInteger(frame.afterEventSequence) && (frame.afterEventSequence as number) >= 0) {
+      const after = frame.afterEventSequence as number;
+      const head = Number.isSafeInteger(frame.headEventSequence) ? (frame.headEventSequence as number) : after;
+      // Adopt the server's resume position when none was known locally (MSG-018).
+      if (this.subscriptions.get(frame.conversationId) === null) this.subscriptions.set(frame.conversationId, after);
+      this.options.onSubscribed?.(frame.conversationId, after, head);
+      return;
+    }
+    if (frame.type === "typing" && typeof frame.conversationId === "string" && typeof frame.principalId === "string" &&
+        (frame.state === "started" || frame.state === "stopped") && this.subscriptions.has(frame.conversationId)) {
+      const ttl = Number.isSafeInteger(frame.ttlMs) ? (frame.ttlMs as number) : 6000;
+      this.options.onTyping?.(frame.conversationId, frame.principalId, frame.state, ttl);
+      return;
+    }
+    if (frame.type === "read-cursor.synced" && typeof frame.conversationId === "string" && Number.isSafeInteger(frame.readSequence)) {
+      this.options.onReadCursor?.(frame.conversationId, frame.readSequence as number);
+      return;
+    }
+    if (frame.type === "subscription.revoked" && typeof frame.conversationId === "string") {
+      this.subscriptions.delete(frame.conversationId);
+      this.options.onSubscriptionRevoked?.(frame.conversationId, typeof frame.reason === "string" ? frame.reason : "REVOKED");
+      return;
+    }
+    if (frame.type === "server.draining") {
+      // Reconnect elsewhere; the owner's reconnect loop resumes every subscription.
+      this.socket?.close();
+      return;
+    }
     if (frame.type !== "event" || !frame.event || typeof frame.event !== "object") return;
     const event = frame.event as Record<string, unknown>;
     if (typeof event.eventId !== "string" || typeof event.conversationId !== "string" ||
         !Number.isSafeInteger(event.eventSequence) || (event.eventSequence as number) < 1) return;
     const current = this.subscriptions.get(event.conversationId);
-    if (current === undefined || (event.eventSequence as number) <= current) return;
+    // null: waiting for `subscribed` to say where the server resumes.
+    if (current === undefined || current === null || (event.eventSequence as number) <= current) return;
     if (event.eventSequence !== current + 1) {
       this.options.onSyncRequired(event.conversationId, {
         type: "sync.required", reason: "CLIENT_CURSOR_GAP", afterEventSequence: current,

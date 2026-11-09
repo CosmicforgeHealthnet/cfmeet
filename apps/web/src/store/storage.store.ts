@@ -1,8 +1,6 @@
 import type { UserInfo } from "@/types/auth";
-import type { JoinMeetingData } from "@/types/meeting";
 
 const USER_KEY = "cosmic_user_info";
-const INSTANT_JOIN_KEY = "cosmic_instant_join";
 const PARTICIPANT_TOKEN_KEY = "cosmic_participant_token";
 const V2_JOIN_DATA_KEY = "cosmic_v2_join_data";
 
@@ -29,32 +27,6 @@ export const storageStore = {
   clearUser() {
     if (typeof window !== "undefined") {
       localStorage.removeItem(USER_KEY);
-    }
-  },
-
-  // Instant meeting join data (temporary, used for navigating to room after creating instant meeting)
-  setInstantJoinData(data: JoinMeetingData) {
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(INSTANT_JOIN_KEY, JSON.stringify(data));
-    }
-  },
-
-  getInstantJoinData(): JoinMeetingData | null {
-    if (typeof window !== "undefined") {
-      try {
-        const data = sessionStorage.getItem(INSTANT_JOIN_KEY);
-        return data ? JSON.parse(data) : null;
-      } catch {
-        sessionStorage.removeItem(INSTANT_JOIN_KEY);
-        return null;
-      }
-    }
-    return null;
-  },
-
-  clearInstantJoinData() {
-    if (typeof window !== "undefined") {
-      sessionStorage.removeItem(INSTANT_JOIN_KEY);
     }
   },
 

@@ -18,6 +18,8 @@ on:
     paths:
       - "services/platform-access/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/platform-access.yml"
@@ -25,6 +27,8 @@ on:
     paths:
       - "services/platform-access/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/contracts/**"
       - "infra/deployment/**"
       - ".github/workflows/platform-access.yml"
@@ -117,6 +121,8 @@ jobs:
         run: cargo test --locked --test handoff
       - name: Migrations (up / down / up, schema guards)
         run: cargo test --locked --test migrations
+      - name: FIRST_PARTY organization scopes (Organizations only, idempotent, isolated; ADR 0058)
+        run: cargo test --locked --test organization_scopes
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
@@ -145,9 +151,14 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --locked
 
+      - name: Destructive migration guard (SEC-015)
+        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/platform-access-migration
+
       - name: Migration smoke (up / reset / up)
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/platform_access_migration_smoke
         run: |
           set -euo pipefail
@@ -162,8 +173,9 @@ jobs:
           # The identity hierarchy (8), the change feed, the operator audit, failed-
           # authentication windows, Part III import receipts and credential principal
           # restrictions, Part VI §54/§55 credential suspensions and production
-          # activations — and nothing of any other service.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "15"
+          # activations, the Section 7 FIRST_PARTY organization scopes (ADR 0058), the Section 15 credential last-use table —
+          # and nothing of any other service.
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations'")" = "17"
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'platform_access_seaql_migrations' AND tablename NOT LIKE 'platform\_%'")" = "0"
           # Verifier material lives only in the credential table (never in the change feed).
           # The one exception is the Part III import receipt's integrity checksum

@@ -636,6 +636,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
                 &a.profile,
                 json!({"platform":"ANDROID","chatDeviceId":foreign}),
                 Uuid::new_v4(),
+                None,
             )
             .await,
     );
@@ -646,6 +647,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             &a.profile,
             json!({"platform":"ANDROID","chatDeviceId":own,"callEndpointId":ep}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -658,6 +660,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             &a.profile,
             json!({"platform":"ANDROID","chatDeviceId":own}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -729,6 +732,7 @@ async fn devices_link_only_owned_references_and_revocation_is_terminal() {
             device,
             json!({"reason":"COMPROMISED"}),
             Uuid::new_v4(),
+            None,
         )
         .await
         .unwrap();
@@ -1229,7 +1233,7 @@ async fn owner_side_revocations_reconcile_and_outages_change_nothing() {
     ] {
         let linked = h
             .state
-            .link_device(&sa, &a.profile, body, Uuid::new_v4())
+            .link_device(&sa, &a.profile, body, Uuid::new_v4(), None)
             .await
             .unwrap();
         ids.push(linked["device"]["deviceId"].as_str().unwrap().to_owned());
@@ -1562,5 +1566,866 @@ async fn every_published_communications_operation_is_routed() {
         .await;
     assert_eq!(status, 404);
     assert!(unmatched(&headers), "deferred phone routes are not served");
+    h.close().await;
+}
+
+/// Section 14 (ACC-008, ADR 0057 A1): a device linked from an Account session is bound
+/// to it. Ending that session revokes the device at its owners; revoking the device hands
+/// the bound session back to Account (the relay) to end. The binding is immutable.
+#[tokio::test]
+async fn devices_are_bound_to_the_account_session_that_linked_them() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let sa = h.delegated(&a.account);
+    let (bound_chat, free_chat, second_chat) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    {
+        let mut w = h.world.write().unwrap();
+        for d in [bound_chat, free_chat, second_chat] {
+            w.devices
+                .insert(d, (a.profile.principal_id, "ACTIVE".into()));
+        }
+    }
+    let ep = endpoint(&h, &a);
+    let session = "1f".repeat(32);
+    let other_session = "2e".repeat(32);
+    let bound = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"IOS","chatDeviceId":bound_chat,"callEndpointId":ep}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bound["device"]["accountSession"]["bound"], true);
+    assert!(
+        !bound.to_string().contains(&session),
+        "the reference is never shown"
+    );
+    let free = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"WEB","chatDeviceId":free_chat}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(free["device"]["accountSession"]["bound"], false);
+    let bound_id = bound["device"]["deviceId"].as_str().unwrap().to_owned();
+    assert!(execute(
+        &h.state.store.db,
+        "UPDATE communication_devices SET account_session_ref=$2,version=version+1 WHERE id=$1::uuid",
+        vec![bound_id.clone().into(), other_session.clone().into()]
+    )
+    .await
+    .is_err());
+    let path = "/internal/v1/communications/account-events";
+    let ended = |reference: &str| json!({"eventId":Uuid::new_v4(),"accountReference":a.account.account_reference,"sourceVersion":1,"kind":"ACCOUNT_SESSION_ENDED","state":"ACCOUNT_CREATED","occurredAt":chrono::Utc::now(),"accountSessionRef":reference});
+    let (_, other) = h
+        .http(
+            &h.account_signer,
+            path,
+            ended(&other_session),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(other["devicesRevoked"], 0);
+    // Owner outage: nothing is acknowledged, so Account retries the same event.
+    h.world.write().unwrap().calling_down = true;
+    let event = ended(&session);
+    let (status, _) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_ne!(status, 200);
+    h.world.write().unwrap().calling_down = false;
+    let (status, result) = h
+        .http(&h.account_signer, path, event.clone(), h.scope.clone())
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["devicesRevoked"], 1);
+    let (_, duplicate) = h
+        .http(&h.account_signer, path, event, h.scope.clone())
+        .await;
+    assert_eq!(duplicate["duplicate"], true);
+    {
+        let w = h.world.read().unwrap();
+        assert!(w.revoked_devices.contains(&bound_chat));
+        assert!(!w.revoked_devices.contains(&free_chat));
+        assert_eq!(w.revoked_endpoints, vec![ep]);
+    }
+    let listed = h.state.list_devices(&a.profile).await.unwrap();
+    let states: BTreeMap<String, (String, Value)> = listed["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["deviceId"].as_str().unwrap().to_owned(),
+                (
+                    d["state"].as_str().unwrap().to_owned(),
+                    d["revocationReason"].clone(),
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(
+        states[&bound_id],
+        ("REVOKED".to_owned(), json!("ACCOUNT_SESSION_ENDED"))
+    );
+    assert_eq!(
+        states[free["device"]["deviceId"].as_str().unwrap()].0,
+        "ACTIVE"
+    );
+    // Revoking a bound device: only an Account relay (which sends its own session
+    // reference) receives the bound reference to end that session.
+    let second = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":second_chat}),
+            Uuid::new_v4(),
+            Some(other_session.clone()),
+        )
+        .await
+        .unwrap();
+    let second_id = Uuid::parse_str(second["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let relayed = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            second_id,
+            json!({"reason":"COMPROMISED"}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(relayed["boundAccountSessionRef"], json!(other_session));
+    assert_eq!(relayed["effects"]["accountSession"], "ENDED");
+    // A retry (already revoked) hands the reference back again, so Account can finish.
+    let retry = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            second_id,
+            json!({"reason":"COMPROMISED"}),
+            Uuid::new_v4(),
+            Some(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry["alreadyRevoked"], true);
+    assert_eq!(retry["boundAccountSessionRef"], json!(other_session));
+    // Without the relay's reference nothing about the session is disclosed.
+    let free_id = Uuid::parse_str(free["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let plain = h
+        .state
+        .revoke_device(
+            &sa,
+            &a.profile,
+            free_id,
+            json!({"reason":"USER_REQUESTED"}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(plain.get("boundAccountSessionRef").is_none());
+    assert_eq!(plain["effects"]["accountSession"], "NOT_BOUND");
+    h.close().await;
+}
+
+/// Section 14 (MSG-016): the inbox overlay lists only conversations the viewer still
+/// belongs to; the private preference row is kept, never shown for a left conversation.
+#[tokio::test]
+async fn inbox_lists_only_current_memberships() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let conv = conversation(&h, "GROUP", &[&a, &b], 1);
+    for u in [&a, &b] {
+        h.state
+            .put_conversation_preferences(&h.delegated(&u.account), &u.profile, conv, json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4())
+            .await
+            .unwrap();
+    }
+    let sb = h.delegated(&b.account);
+    let before = h
+        .state
+        .inbox(&sb, &b.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(before["data"].as_array().unwrap().len(), 1);
+    // B leaves the conversation in Messaging.
+    h.world
+        .write()
+        .unwrap()
+        .conversations
+        .get_mut(&conv)
+        .unwrap()
+        .members
+        .retain(|m| *m != b.profile.principal_id);
+    let after = h
+        .state
+        .inbox(&sb, &b.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(after["data"], json!([]));
+    let sa = h.delegated(&a.account);
+    let still = h
+        .state
+        .inbox(&sa, &a.profile, 30, Uuid::nil())
+        .await
+        .unwrap();
+    assert_eq!(still["data"][0]["conversationId"], json!(conv));
+    // A Messaging outage is a dependency failure, never an empty or stale list.
+    h.stop_owners();
+    assert!(matches!(
+        h.state.inbox(&sa, &a.profile, 30, Uuid::nil()).await,
+        Err(Error::Unavailable)
+    ));
+    h.close().await;
+}
+
+/// Section 14 (MSG-009): a member without a Hub profile when a meeting was shared gets
+/// the invitation card once they open the conversation timeline.
+#[tokio::test]
+async fn meeting_cards_reach_members_who_activate_later() {
+    let h = Harness::new().await;
+    let a = user(&h).await;
+    let late = h.account();
+    let id = Uuid::new_v4();
+    h.world.write().unwrap().conversations.insert(
+        id,
+        MockConversation {
+            context: "GROUP".into(),
+            members: vec![a.profile.principal_id, late.principal_id],
+            last_sequence: 4,
+            messages: BTreeMap::new(),
+        },
+    );
+    let sa = h.delegated(&a.account);
+    h.state
+        .instant_meeting(
+            &sa,
+            &a.profile,
+            id,
+            json!({"clientRequestId":Uuid::new_v4()}),
+        )
+        .await
+        .unwrap();
+    let late_profile = h.profile(&late).await;
+    let sl = h.delegated(&late);
+    let timeline = h
+        .state
+        .timeline(&sl, &late_profile, id, &q(&[]))
+        .await
+        .unwrap();
+    let data = timeline["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["kind"], "MEETING_INVITATION");
+    assert_eq!(data[0]["meeting"]["sharedByViewer"], false);
+    assert_eq!(data[0]["anchorSequence"], 4);
+    // Idempotent: reading again adds nothing.
+    let again = h
+        .state
+        .timeline(&sl, &late_profile, id, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(again["data"].as_array().unwrap().len(), 1);
+    h.close().await;
+}
+
+/// Rows of `data` in a list answer.
+fn rows_of(v: &Value) -> usize {
+    v["data"].as_array().unwrap().len()
+}
+
+/// SEC-020: every owner-scoped item id (saved message, list, list member, contact alias,
+/// device, conversation) is unknown to another profile of the same tenant: reads and
+/// mutations by id are `NotFound` (indistinguishable from missing), list reads show none of
+/// the owner's rows, and the owner's rows are unchanged afterwards.
+#[tokio::test]
+async fn another_profile_cannot_read_or_mutate_owner_scoped_items_by_id() {
+    let h = Harness::new().await;
+    let (a, b, mallory) = (user(&h).await, user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let ab = contact_id(&h, &a.profile, &b.profile).await;
+    let (sa, sm) = (h.delegated(&a.account), h.delegated(&mallory.account));
+    let conv = conversation(&h, "DIRECT", &[&a, &b], 10);
+    let m = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .conversations
+        .get_mut(&conv)
+        .unwrap()
+        .messages
+        .insert(m, (8, "VISIBLE".into()));
+    let saved = h
+        .state
+        .save_message(
+            &sa,
+            &a.profile,
+            json!({"conversationId":conv,"messageId":m}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let saved = Uuid::parse_str(saved["savedId"].as_str().unwrap()).unwrap();
+    let created = h
+        .state
+        .create_list(&a.profile, json!({"name":"Family"}), Uuid::new_v4())
+        .await
+        .unwrap();
+    let list = Uuid::parse_str(created["listId"].as_str().unwrap()).unwrap();
+    h.state
+        .set_list_member(&a.profile, list, ab, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    h.state
+        .set_favorite(&a.profile, ab, true, json!({}), Uuid::new_v4())
+        .await
+        .unwrap();
+    let chat_device = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat_device, (a.profile.principal_id, "ACTIVE".into()));
+    let linked = h
+        .state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":chat_device}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    let device = Uuid::parse_str(linked["device"]["deviceId"].as_str().unwrap()).unwrap();
+    let before_list = h
+        .state
+        .get_list(&a.profile, list, 10, Uuid::nil())
+        .await
+        .unwrap();
+
+    // Mallory addresses A's ids directly.
+    let mp = &mallory.profile;
+    not_found(h.state.delete_saved(mp, saved, Uuid::new_v4()).await);
+    not_found(h.state.get_list(mp, list, 10, Uuid::nil()).await);
+    not_found(
+        h.state
+            .patch_list(
+                mp,
+                list,
+                json!({"expectedVersion":before_list["version"],"name":"Pwned"}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .delete_list(
+                mp,
+                list,
+                json!({"expectedVersion":before_list["version"]}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .set_list_member(mp, list, ab, false, Uuid::new_v4())
+            .await,
+    );
+    not_found(h.state.contact_view(mp, ab).await);
+    not_found(h.state.remove_contact(mp, ab, Uuid::new_v4()).await);
+    not_found(
+        h.state
+            .set_favorite(mp, ab, false, json!({}), Uuid::new_v4())
+            .await,
+    );
+    not_found(h.state.common_groups(&sm, mp, ab).await);
+    not_found(
+        h.state
+            .call_contact(
+                &sm,
+                mp,
+                ab,
+                json!({"kind":"VOICE","clientRequestId":Uuid::new_v4(),"endpointId":endpoint(&h,&mallory)}),
+            )
+            .await,
+    );
+    not_found(h.state.device_sync_state(mp, device, None).await);
+    not_found(
+        h.state
+            .device_sync_state(
+                mp,
+                device,
+                Some((json!({"acknowledgedPosition":0}), Uuid::new_v4())),
+            )
+            .await,
+    );
+    not_found(
+        h.state
+            .device_push(&sm, mp, device, None, Uuid::new_v4())
+            .await,
+    );
+    not_found(
+        h.state
+            .revoke_device(
+                &sm,
+                mp,
+                device,
+                json!({"reason":"COMPROMISED"}),
+                Uuid::new_v4(),
+                None,
+            )
+            .await,
+    );
+    // Conversation-scoped reads and writes need a live membership (asked of Messaging).
+    not_found(h.state.put_conversation_preferences(&sm, mp, conv, json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":null,"mediaAutoDownload":"NEVER"}), Uuid::new_v4()).await);
+    not_found(h.state.conversation_media(&sm, mp, conv, 30, None).await);
+    not_found(h.state.conversation_shared_groups(&sm, mp, conv).await);
+    not_found(
+        h.state
+            .conversation_meetings(&sm, mp, conv, 30, Uuid::nil())
+            .await,
+    );
+    not_found(h.state.timeline(&sm, mp, conv, &q(&[])).await);
+
+    // Mallory's own collections show none of A's rows.
+    assert_eq!(
+        rows_of(&h.state.list_saved(&sm, mp, 30, Uuid::nil()).await.unwrap()),
+        0
+    );
+    assert_eq!(rows_of(&h.state.list_lists(mp).await.unwrap()), 0);
+    assert_eq!(rows_of(&h.state.list_favorites(mp).await.unwrap()), 0);
+    assert_eq!(rows_of(&h.state.list_devices(mp).await.unwrap()), 0);
+    assert_eq!(
+        rows_of(&h.state.list_contacts(mp, 30, Uuid::nil()).await.unwrap()),
+        0
+    );
+
+    // A's rows are exactly as they were.
+    assert_eq!(
+        rows_of(
+            &h.state
+                .list_saved(&sa, &a.profile, 30, Uuid::nil())
+                .await
+                .unwrap()
+        ),
+        1
+    );
+    assert_eq!(
+        h.state
+            .get_list(&a.profile, list, 10, Uuid::nil())
+            .await
+            .unwrap(),
+        before_list
+    );
+    assert_eq!(
+        rows_of(&h.state.list_favorites(&a.profile).await.unwrap()),
+        1
+    );
+    assert_eq!(
+        h.state.contact_view(&a.profile, ab).await.unwrap()["relationship"],
+        "CONNECTED"
+    );
+    let devices = h.state.list_devices(&a.profile).await.unwrap();
+    assert_eq!(
+        (
+            devices["data"][0]["deviceId"].clone(),
+            devices["data"][0]["state"].clone()
+        ),
+        (json!(device), json!("ACTIVE"))
+    );
+    assert!(h.world.read().unwrap().revoked_devices.is_empty());
+    h.close().await;
+}
+
+async fn count_for(h: &Harness, sql: &str, profile: Uuid) -> i64 {
+    let v: Value = one(&h.state.store.db, sql, vec![profile.into()])
+        .await
+        .unwrap()
+        .unwrap();
+    v["n"].as_i64().unwrap()
+}
+
+/// SEC-020: the signed delegated scope (tenant / application / environment) is the only
+/// source of the tenant. A profile, an owner service or the operator acting under another
+/// tenant's scope finds no profile of this tenant and changes nothing of it; the same
+/// requests under the right scope do apply (the negatives are not vacuous).
+#[tokio::test]
+async fn another_tenant_scope_reaches_no_profile_and_applies_nothing() {
+    use cf_service_auth::{
+        ApplicationEnvironmentKind, DelegatedPlatformContext, DelegatedPrincipalKind,
+    };
+    const HOLDS: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_operator_holds WHERE profile_id=$1 AND active";
+    const BLOCKS: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_block_bridge WHERE blocker_profile_id=$1";
+    const ACTIVE: &str = "SELECT jsonb_build_object('n',count(*)) doc FROM communication_devices WHERE profile_id=$1 AND state='ACTIVE'";
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    let sa = h.delegated(&a.account);
+    let chat_device = Uuid::new_v4();
+    h.world
+        .write()
+        .unwrap()
+        .devices
+        .insert(chat_device, (a.profile.principal_id, "ACTIVE".into()));
+    h.state
+        .link_device(
+            &sa,
+            &a.profile,
+            json!({"platform":"ANDROID","chatDeviceId":chat_device}),
+            Uuid::new_v4(),
+            None,
+        )
+        .await
+        .unwrap();
+    let other = DelegatedPlatformContext::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        ApplicationEnvironmentKind::Test,
+        Uuid::new_v4(),
+    );
+    let x_account = h.account();
+    let x_scope = other
+        .clone()
+        .with_initiating_principal(x_account.principal_id, DelegatedPrincipalKind::NativeCfUser);
+    let x = h.state.ensure_profile(&x_scope, &x_account).await.unwrap();
+    assert_ne!(x.scope(), a.profile.scope());
+    let a_id = h.public_id(&a.profile).await;
+
+    // A user of the other tenant cannot discover or request A, directly or over dispatch.
+    not_found(
+        h.state
+            .send_request(&x_scope, &x, json!({"cfMeetId":a_id}), Uuid::new_v4())
+            .await,
+    );
+    let dispatch = |path: String| {
+        serde_json::to_value(Dispatch {
+            method: "GET".into(),
+            path,
+            query: Default::default(),
+            body: None,
+            idempotency_key: None,
+            account: x_account.clone(),
+        })
+        .unwrap()
+    };
+    let route = "/internal/v1/communications/dispatch";
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            route,
+            dispatch(format!("profiles/{a_id}")),
+            x_scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 404);
+    let (status, body) = h
+        .http(
+            &h.account_signer,
+            route,
+            dispatch("contacts".into()),
+            x_scope.clone(),
+        )
+        .await;
+    assert_eq!((status.as_u16(), rows_of(&body)), (200, 0));
+
+    // Owner-service policy reads under the other scope know neither principal.
+    let call = check(Action::DirectCall, &a.profile, &b.profile);
+    assert!(h.state.check_policy(&h.scope, &call).await.unwrap().allowed);
+    let (status, body) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/policy/check",
+            serde_json::to_value(&call).unwrap(),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(
+        (status.as_u16(), body["allowed"].clone()),
+        (200, json!(false))
+    );
+    let (status, _) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/principals/resolve",
+            json!({"actorPrincipalId":x.principal_id,"cfMeetId":a_id}),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 404);
+
+    // Owner events and the operator hold under the other scope change nothing here.
+    let devices = "/internal/v1/communications/events/devices";
+    let revoke = json!({"eventId":Uuid::new_v4(),"eventType":"device.revoked","resourceId":chat_device,"sourceVersion":1,"principalId":a.profile.principal_id});
+    let (status, body) = h
+        .http(&h.calling_signer, devices, revoke, other.clone())
+        .await;
+    assert_eq!((status.as_u16(), body["rows"].clone()), (200, json!(0)));
+    let (status, body) = h
+        .http(
+            &h.calling_signer,
+            "/internal/v1/communications/block-events",
+            json!({"eventId":Uuid::new_v4(),"actorPrincipalId":a.profile.principal_id,"targetPrincipalId":b.profile.principal_id,"sourceVersion":1,"blocked":true}),
+            other.clone(),
+        )
+        .await;
+    assert_eq!(
+        (status.as_u16(), body["applied"].clone()),
+        (200, json!(false))
+    );
+    let suspend = "/internal/v1/communications/admin/suspend";
+    let hold = json!({"cfMeetId":a_id,"active":true,"reason":"ABUSE"});
+    let (status, _) = h
+        .http(&h.operator, suspend, hold.clone(), other.clone())
+        .await;
+    assert_eq!(status.as_u16(), 404);
+    let id = a.profile.id;
+    assert_eq!(
+        (
+            count_for(&h, HOLDS, id).await,
+            count_for(&h, BLOCKS, id).await,
+            count_for(&h, ACTIVE, id).await
+        ),
+        (0, 0, 1)
+    );
+    assert!(h.state.check_policy(&h.scope, &call).await.unwrap().allowed);
+
+    // The same owner event and hold under the right scope do apply.
+    let revoke = json!({"eventId":Uuid::new_v4(),"eventType":"device.revoked","resourceId":chat_device,"sourceVersion":1,"principalId":a.profile.principal_id});
+    let (status, body) = h
+        .http(&h.calling_signer, devices, revoke, h.scope.clone())
+        .await;
+    assert_eq!((status.as_u16(), body["rows"].clone()), (200, json!(1)));
+    let (status, _) = h.http(&h.operator, suspend, hold, h.scope.clone()).await;
+    assert_eq!(status.as_u16(), 200);
+    assert_eq!(
+        (
+            count_for(&h, HOLDS, id).await,
+            count_for(&h, ACTIVE, id).await
+        ),
+        (1, 0)
+    );
+    h.close().await;
+}
+
+/// Timeline nudges of one conversation: (version, reason) in version order, MESSAGING only.
+async fn nudges(h: &Harness, conv: Uuid) -> Vec<(i64, String)> {
+    let v: Value = one(&h.state.store.db,
+        "SELECT COALESCE(jsonb_agg(jsonb_build_array(aggregate_version,payload->>'reason',destination,payload->'timelineVersion') ORDER BY aggregate_version),'[]') doc \
+         FROM communication_outbox WHERE event_type='communications.timeline.changed' AND aggregate_id=$1",
+        vec![conv.into()]).await.unwrap().unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            assert_eq!(n[2], "MESSAGING", "timeline nudges go to Messaging only");
+            assert_eq!(n[3], n[0], "payload version = event version");
+            (n[0].as_i64().unwrap(), n[1].as_str().unwrap().to_owned())
+        })
+        .collect()
+}
+
+/// Audit MSG-009: (1) a conversation call reaches every call party, including members who
+/// had no Hub profile when it was launched — the owed card is written once, the first
+/// time they read their timeline or activity, and never for anyone else; (2) every
+/// distinct timeline change (call started, each Calling state version, meeting shared) is
+/// announced to Messaging exactly once with a monotonic per-conversation version, however
+/// many viewers observe it or however often a request is replayed; (3) the nudges are
+/// delivered through the durable owner outbox.
+#[tokio::test]
+async fn call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let (late, later) = (h.account(), h.account());
+    let outsider = user(&h).await;
+    let conv = Uuid::new_v4();
+    h.world.write().unwrap().conversations.insert(
+        conv,
+        MockConversation {
+            context: "GROUP".into(),
+            members: vec![
+                a.profile.principal_id,
+                b.profile.principal_id,
+                late.principal_id,
+                later.principal_id,
+            ],
+            last_sequence: 9,
+            messages: BTreeMap::new(),
+        },
+    );
+    let sa = h.delegated(&a.account);
+    let request = Uuid::new_v4();
+    let launch = json!({"kind":"VOICE","clientRequestId":request,"endpointId":endpoint(&h, &a)});
+    let call = h
+        .state
+        .call_conversation(&sa, &a.profile, conv, launch.clone())
+        .await
+        .unwrap();
+    let call_id = Uuid::parse_str(call["callId"].as_str().unwrap()).unwrap();
+    assert_eq!(nudges(&h, conv).await, vec![(1, "CALL_STARTED".into())]);
+    // A replayed launch creates no card, owed card or nudge.
+    let replay = h
+        .state
+        .call_conversation(&sa, &a.profile, conv, launch)
+        .await
+        .unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(nudges(&h, conv).await.len(), 1);
+    let pending = |principal: Uuid| {
+        let db = h.state.store.db.clone();
+        async move {
+            let v: Value = one(&db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_pending_call_cards WHERE principal_id=$1",
+                vec![principal.into()]).await.unwrap().unwrap();
+            v["n"].as_i64().unwrap()
+        }
+    };
+    assert_eq!(
+        (
+            pending(late.principal_id).await,
+            pending(later.principal_id).await
+        ),
+        (1, 1)
+    );
+
+    // The late party activates and opens the conversation: its card is there, once.
+    let late_profile = h.profile(&late).await;
+    let sl = h.delegated(&late);
+    for _ in 0..2 {
+        let t = h
+            .state
+            .timeline(&sl, &late_profile, conv, &q(&[]))
+            .await
+            .unwrap();
+        let data = t["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1, "{t}");
+        assert_eq!(data[0]["kind"], "CALL");
+        assert_eq!(data[0]["sourceId"], json!(call_id));
+        assert_eq!(data[0]["anchorSequence"], 9);
+        assert_eq!(data[0]["call"]["initiatedByViewer"], false);
+    }
+    assert_eq!(pending(late.principal_id).await, 0);
+    // The other late party gets it from Activity too (no timeline read needed).
+    let later_profile = h.profile(&later).await;
+    let activity = h
+        .state
+        .activity(&h.delegated(&later), &later_profile, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(activity["data"].as_array().unwrap().len(), 1, "{activity}");
+    assert_eq!(activity["data"][0]["sourceId"], json!(call_id));
+    assert_eq!(pending(later.principal_id).await, 0);
+    // Owed cards are matched by principal only: nobody else gains one, and a non-member
+    // still cannot read the conversation's timeline.
+    assert_eq!(
+        h.state
+            .materialize_call_cards(&outsider.profile)
+            .await
+            .unwrap(),
+        0
+    );
+    not_found(
+        h.state
+            .timeline(
+                &h.delegated(&outsider.account),
+                &outsider.profile,
+                conv,
+                &q(&[]),
+            )
+            .await,
+    );
+
+    // Calling state versions: each one is nudged once, whichever and however many
+    // viewers observe it (the sweep reads all four parties' cards).
+    h.state.reconcile_call_cards(20).await.unwrap();
+    assert_eq!(
+        nudges(&h, conv).await,
+        vec![(1, "CALL_STARTED".into()), (2, "CALL_UPDATED".into())],
+        "the first Calling observation (version 1) is announced once"
+    );
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("NO_ANSWER".into(), true, 3, "MISSED".into()));
+    // B reads first: B's card changes, the other parties' cards become due at once
+    // (outcomes are per party) and the conversation is nudged for version 3.
+    let sb = h.delegated(&b.account);
+    execute(&h.state.store.db, "UPDATE communication_timeline_entries SET refreshed_at=now()-interval '10 seconds' WHERE source_id=$1 AND viewer_profile_id=$2",
+        vec![call_id.into(), b.profile.id.into()]).await.unwrap();
+    let tb = h
+        .state
+        .timeline(&sb, &b.profile, conv, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(tb["data"][0]["call"]["outcome"], "MISSED");
+    let due: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_timeline_entries WHERE source_id=$1 AND viewer_profile_id<>$2 AND refreshed_at='epoch'",
+        vec![call_id.into(), b.profile.id.into()]).await.unwrap().unwrap();
+    assert_eq!(
+        due["n"], 3,
+        "the other parties re-read Calling at their next read"
+    );
+    h.state.reconcile_call_cards(20).await.unwrap();
+    h.state.reconcile_call_cards(20).await.unwrap();
+    let ta = h
+        .state
+        .timeline(&sa, &a.profile, conv, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(ta["data"][0]["call"]["terminal"], true);
+    assert_eq!(
+        nudges(&h, conv).await,
+        vec![
+            (1, "CALL_STARTED".into()),
+            (2, "CALL_UPDATED".into()),
+            (3, "CALL_UPDATED".into())
+        ]
+    );
+
+    // A meeting shared into the conversation: one nudge; a replayed request none.
+    let share = json!({"clientRequestId":Uuid::new_v4()});
+    h.state
+        .instant_meeting(&sa, &a.profile, conv, share.clone())
+        .await
+        .unwrap();
+    h.state
+        .instant_meeting(&sa, &a.profile, conv, share)
+        .await
+        .unwrap();
+    let all = nudges(&h, conv).await;
+    assert_eq!(all.len(), 4, "{all:?}");
+    assert_eq!(all[3], (4, "MEETING_SHARED".into()));
+    // Another conversation keeps its own version line.
+    let other = conversation(&h, "DIRECT", &[&a, &b], 1);
+    h.state
+        .call_conversation(
+            &sa,
+            &a.profile,
+            other,
+            json!({"kind":"VIDEO","clientRequestId":Uuid::new_v4(),"endpointId":endpoint(&h, &a)}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(nudges(&h, other).await, vec![(1, "CALL_STARTED".into())]);
+    // Delivered through the durable owner outbox (Messaging's events route).
+    h.state.deliver_due().await.unwrap();
+    let undelivered: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.timeline.changed' AND state<>'DELIVERED'",
+        vec![]).await.unwrap().unwrap();
+    assert_eq!(undelivered["n"], 0);
     h.close().await;
 }

@@ -134,7 +134,7 @@ pub async fn readiness(HttpState(s): HttpState<State>) -> Result<Json<Value>> {
             "calling":if s.config.calling_configured {"CONFIGURED"} else {"NOT_CONFIGURED"},
             "messaging":if s.config.messaging_configured {"CONFIGURED"} else {"NOT_CONFIGURED"},
             "meetings":"CONFIGURED"},
-        "phoneVerification":"DEFERRED","outbox":outbox}),
+        "phoneVerification":"PROVIDER_BLOCKED","outbox":outbox}),
     ))
 }
 

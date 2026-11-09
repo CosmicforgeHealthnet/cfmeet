@@ -381,3 +381,123 @@ async fn dom02_without_email_verification_only_provider_verified_emails_count() 
         StatusCode::OK
     );
 }
+
+/// Regression (certification `organization_lifecycle.rs` J-07): an ORGANIZATION_ONLY space is
+/// not disclosed — not even as a SUMMARY — by identifier lookup to signed-out callers,
+/// unrelated users or members of another organization, while its owner, its organization's
+/// members, invited guests and invitation-token holders keep access, and other access
+/// policies keep their public summary.
+#[tokio::test]
+async fn org04_organization_only_space_is_not_disclosed_to_outsiders() {
+    let app = app!();
+    let admin = app.admin("platform").await;
+    let owner = app.user("org-owner").await;
+    let insider = app.user("insider").await;
+    let outsider = app.user("outsider").await;
+    let rival = app.user("rival-owner").await;
+    let guest = app.user("invited-guest").await;
+    let acme = create_org(&app, &admin, "acme-disclosure", &owner).await;
+    let _globex = create_org(&app, &admin, "globex-disclosure", &rival).await;
+    let (s, v) = set_member(&app, &owner, acme, insider.id, "MEMBER", "ACTIVE").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (space_id, conference_id) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "Board handover", "accessPolicy": "ORGANIZATION_ONLY", "organizationId": acme }),
+        )
+        .await;
+    let (s, space) = app
+        .get(
+            format!("/api/v2/meeting-spaces/{space_id}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{space}");
+    let meeting_code = space["meetingCode"].as_str().unwrap().to_string();
+    let lookups = [
+        format!("/api/v2/meeting-spaces/{space_id}"),
+        format!("/api/v2/meeting-spaces/{meeting_code}"),
+        format!("/api/v2/resolve/{meeting_code}"),
+        format!("/api/v2/resolve/{space_id}"),
+    ];
+
+    for uri in &lookups {
+        for (who, user) in [("owner", &owner), ("organization member", &insider)] {
+            let (s, v) = app.get(uri, Auth::Bearer(&user.token)).await;
+            assert_eq!(s, StatusCode::OK, "{who} reads {uri}: {v}");
+        }
+        for (who, user) in [
+            ("outsider", &outsider),
+            ("other organization", &rival),
+            ("guest before invitation", &guest),
+        ] {
+            let (s, v) = app.get(uri, Auth::Bearer(&user.token)).await;
+            assert_eq!(s, StatusCode::NOT_FOUND, "{who} must not read {uri}: {v}");
+            assert_eq!(code(&v), "MEETING_NOT_FOUND", "{who} {uri}: {v}");
+            assert!(
+                !v.to_string().contains("Board handover"),
+                "no title leak to {who}: {v}"
+            );
+            assert!(
+                !v.to_string().contains(&conference_id.to_string()),
+                "no conference leak to {who}"
+            );
+        }
+        let (s, v) = app.get(uri, Auth::None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "signed out {uri}: {v}");
+        assert!(
+            !v.to_string().contains("Board handover"),
+            "no title leak when signed out: {v}"
+        );
+    }
+
+    // An email-bound invitation lets the invited guest see the summary; the raw token still
+    // resolves for a signed-out holder.
+    let (s, inv) = app
+        .post(
+            format!("/api/v2/meeting-spaces/{space_id}/invitations"),
+            Auth::Bearer(&owner.token),
+            json!({ "inviteeEmail": guest.email }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{inv}");
+    let token = inv["token"].as_str().unwrap().to_string();
+    let (s, v) = app.get(&lookups[0], Auth::Bearer(&guest.token)).await;
+    assert_eq!(s, StatusCode::OK, "invited guest: {v}");
+    assert_eq!(v["view"], "SUMMARY", "{v}");
+    let (s, v) = app
+        .post(
+            format!("/api/v2/invitations/{token}/resolve"),
+            Auth::None,
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "token holder: {v}");
+
+    // A removed member loses access with the membership.
+    let (s, v) = set_member(&app, &owner, acme, insider.id, "MEMBER", "REMOVED").await;
+    assert!(s.is_success(), "remove member: {v}");
+    let (s, v) = app.get(&lookups[0], Auth::Bearer(&insider.token)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "removed member: {v}");
+
+    // Other policies are unchanged: an outsider still gets the public SUMMARY of a personal
+    // AUTHENTICATED meeting.
+    let personal = app
+        .create_space(
+            &owner,
+            json!({ "title": "Personal catch-up", "accessPolicy": "AUTHENTICATED" }),
+        )
+        .await;
+    let (s, v) = app
+        .get(
+            format!(
+                "/api/v2/meeting-spaces/{}",
+                personal["id"].as_str().unwrap()
+            ),
+            Auth::Bearer(&outsider.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["view"], "SUMMARY", "{v}");
+}

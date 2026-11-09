@@ -8,14 +8,18 @@ on:
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
-      # Once apps/web consumes generated types from packages/contracts, add:
-      # - "packages/contracts/**"
+      # apps/web consumes types generated from the served contract (FE-015).
+      - "packages/contracts/**"
+      # Pinned by tests/developer-portal.test.mjs (role table mirror).
+      - "services/developer-platform/src/domain/rbac.rs"
   pull_request:
     paths:
       - "apps/web/**"
       - ".github/workflows/frontend.yml"
-      # Once apps/web consumes generated types from packages/contracts, add:
-      # - "packages/contracts/**"
+      # apps/web consumes types generated from the served contract (FE-015).
+      - "packages/contracts/**"
+      # Pinned by tests/developer-portal.test.mjs (role table mirror).
+      - "services/developer-platform/src/domain/rbac.rs"
   workflow_dispatch:
 
 concurrency:
@@ -50,6 +54,58 @@ jobs:
       # through Meeting Service's verified-login bridge, never an internal credential.
       - name: Messaging client session bridge tests
         run: node --experimental-strip-types --test tests/messaging-session.test.mjs
+
+      # MANAGED sync (edits / tombstones / event replay / timeline merge), the durable
+      # offline queue (idempotent sends) and the Communications Hub rules incl. MSG-018
+      # ack-cursor resume (Section 17 web communications).
+      - name: Messaging MANAGED sync, outbox and Communications tests
+        run: node --experimental-strip-types --test tests/messaging-managed-sync.test.mjs tests/messaging-outbox.test.mjs tests/communications-core.test.mjs
+
+      # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
+      - name: Contract types are fresh
+        run: node scripts/generate-contract-types.mjs --check
+
+      # ACC-019 / SEC-021: account session (memory access token, httpOnly SameSite=Strict
+      # refresh cookie, single-flight cross-tab refresh, legacy cookie migration) and a static
+      # guard: no account token is written to script-readable storage.
+      - name: Account session tests
+        run: node --experimental-strip-types --test tests/account-session.test.mjs
+
+      # Section 17 account + organization administration: capability gating (default deny),
+      # workspace context, stable error envelopes, optimistic-concurrency bodies.
+      - name: Account and organization administration tests
+        run: node --experimental-strip-types --test tests/organization-admin.test.mjs
+
+      # Organization-scope Messaging (final closure, J-10): organization paths, refusal
+      # explanations and the colleague rules of the organization Messages view.
+      - name: Organization Messaging tests
+        run: node --experimental-strip-types --test tests/organization-messaging.test.mjs
+
+      # Developer Portal (Section 17 / ORG-017): operations pinned to the Developer Platform
+      # contract, session-bearer only (never cfmk_ in the browser), role table equal to
+      # services/developer-platform rbac.rs, one-time secret and navigation rules.
+      - name: Developer Portal tests
+        run: node --experimental-strip-types --test tests/developer-portal.test.mjs
+
+      # Section 17 web calling: the adapter's authorization (party control, participant-bound
+      # recording / abuse, self-service voicemail / forwarding, dev-mode and https guards),
+      # the client rules (control permissions, media reconnect state machine, credential
+      # lifetime, incoming-call presentation) and parity with the served contracts (CAL-022).
+      - name: Calling adapter, client rules and contract tests
+        run: |
+          node --test tests/calling-adapter.test.mjs tests/calling-origin.test.mjs tests/calling-contract.test.mjs
+          node --experimental-strip-types --test tests/calling-logic.test.mjs
+
+      # Section 17 meetings + calendar: meeting-zone time conversion (America/New_York,
+      # Europe/Rome, Africa/Lagos, DST gap/overlap), agenda ranges and opaque-cursor
+      # pagination, occurrence controls, artefact fields (FE-007), the pre-join contract
+      # (FE-001) and the v2-only conference-keyed room (FE-014 / MTG-019 / FE-017).
+      - name: Meetings, calendar and pre-join tests
+        run: |
+          node --experimental-strip-types --test tests/meetings-calendar.test.mjs
+          node --experimental-strip-types --test tests/prejoin-room.test.mjs
+          node --experimental-strip-types --test tests/scheduling-v2.test.mjs
+          node --experimental-strip-types --test tests/meeting-spaces-v2.test.mjs
 
       # The CSP builder (nonce scripts, Trusted Types, no plugins / framing) and a static
       # guard: no DOM XSS sink (innerHTML, dangerouslySetInnerHTML, eval, ...) in src/.

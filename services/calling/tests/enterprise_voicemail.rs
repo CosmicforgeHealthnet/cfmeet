@@ -484,6 +484,12 @@ async fn no_answer_records_a_message_on_the_same_call() {
     assert_eq!(vm.message_state(message).await, "RECORDING:");
     assert_eq!(vm.outcome(call).await, "VOICEMAIL:");
     assert_eq!(e.a.state(call).await.0, CallState::Ringing);
+    // CAL-001: one human plus a server capture while the Call still rings — past the
+    // participation grace (and well inside the recording deadline) the abandoned-call
+    // reaper leaves it alone.
+    e.h().clock.advance(chrono::Duration::seconds(61));
+    assert_eq!(e.h().state.app.reap_abandoned_calls(100).await.unwrap(), 0);
+    assert_eq!(e.a.state(call).await.0, CallState::Ringing);
     let started = vm.capture.started();
     assert_eq!(started.len(), 1);
     assert_eq!(started[0].capture_id, message);

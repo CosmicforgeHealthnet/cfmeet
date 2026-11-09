@@ -21,6 +21,32 @@
       ]
     },
     {
+      "id": "organizations-maintenance",
+      "owner": "organizations",
+      "source": "src/worker.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/worker.rs::the_maintenance_pass_expires_invitations_and_sweeps_nonces_and_idempotency",
+        "tests/worker.rs::outbox_leases_are_exclusive_and_failures_back_off",
+        "tests/worker.rs::an_enabled_dispatcher_delivers_each_pending_event",
+        "tests/worker.rs::the_worker_loop_runs_until_shutdown"
+      ]
+    },
+    {
+      "id": "organizations-provisioning",
+      "owner": "organizations",
+      "source": "src/provisioning.rs",
+      "entry": "run_once",
+      "tests": [
+        "tests/provisioning.rs::two_organizations_get_distinct_triples_ready_only_after_server_side_verification",
+        "tests/provisioning.rs::duplicate_requests_and_replays_create_one_workflow_one_scope_and_no_duplicate_events",
+        "tests/provisioning.rs::platform_access_unavailable_backs_off_then_fails_and_an_operator_retry_recovers",
+        "tests/provisioning.rs::partial_platform_access_success_with_a_local_failure_resumes_with_the_same_triple",
+        "tests/provisioning.rs::suspension_during_provisioning_and_lifecycle_follow_the_tenant_fail_closed",
+        "tests/provisioning.rs::split_brain_mappings_and_drift_are_refused_and_reported"
+      ]
+    },
+    {
       "id": "messaging-kt-rollback-monitor",
       "owner": "messaging",
       "source": "src/operations.rs",
@@ -260,6 +286,46 @@
         "tests/webhooks.rs::concurrent_workers_and_crash_recovery_deliver_each_once",
         "tests/webhooks.rs::permanent_failures_and_exhaustion_dead_letter_and_replays_keep_the_event_id",
         "tests/webhooks.rs::shadow_mode_records_deliveries_and_sends_nothing"
+      ]
+    },
+    {
+      "id": "developer-platform-credential-lifecycle-webhooks",
+      "owner": "developer-platform",
+      "source": "src/control/credential_lifecycle.rs",
+      "entry": "sweep_once",
+      "tests": [
+        "tests/credential_lifecycle.rs::expiry_thresholds_emit_one_notice_each_through_the_webhook_outbox",
+        "tests/credential_lifecycle.rs::notices_are_deduplicated_across_workers_and_crash_recovery",
+        "tests/credential_lifecycle.rs::outages_and_failed_deliveries_are_retried",
+        "tests/credential_lifecycle.rs::subscriptions_need_the_credentials_scope_and_the_worker_sweeps_once_per_interval"
+      ]
+    },
+    {
+      "id": "developer-platform-reference-reconciliation",
+      "owner": "developer-platform",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "full_report",
+      "tests": [
+        "tests/reference_reconciliation.rs::local_and_remote_reference_breaks_are_reported_and_nothing_is_deleted",
+        "tests/reference_reconciliation.rs::local_scope_checks_cover_every_holder"
+      ]
+    },
+    {
+      "id": "messaging-reference-reconciliation",
+      "owner": "messaging",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "report",
+      "tests": [
+        "tests/reference_reconciliation.rs::invalid_foreign_references_are_reported_and_nothing_is_deleted"
+      ]
+    },
+    {
+      "id": "numbering-reference-reconciliation",
+      "owner": "numbering",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "report",
+      "tests": [
+        "tests/reference_reconciliation.rs::invalid_foreign_references_are_reported_and_nothing_is_deleted"
       ]
     },
     {

@@ -31,7 +31,7 @@ use std::{
 use axum::{
     body::Body,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -217,9 +217,21 @@ impl Outcome {
     }
 }
 
-async fn scan(State(app): State<Arc<App>>, headers: HeaderMap, body: Body) -> Response {
+async fn scan(
+    State(app): State<Arc<App>>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     let started = Instant::now();
-    let ctx = match app.verifier.verify_headers(&headers) {
+    // SEC-012: bound to this request (method + path; the scan route is not nested) and
+    // single-use; the registry's own per-client replay check below stays.
+    let verified = app
+        .verifier
+        .verify_request(&method, uri.path(), &headers)
+        .await;
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(e) => {
             app.metrics.inc(

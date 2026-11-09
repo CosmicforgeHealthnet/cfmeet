@@ -147,6 +147,19 @@ impl RedisService {
         Ok(value)
     }
 
+    /// Atomically read and delete a key: single-use values (OAuth state, exchange codes)
+    /// cannot be consumed twice. A script rather than GETDEL works on every Redis version.
+    pub async fn take(&self, key: &str) -> ApiResult<Option<String>> {
+        let mut conn = self.get_conn().await?;
+        redis::Script::new(
+            "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]) end; return v",
+        )
+        .key(key)
+        .invoke_async::<_, Option<String>>(&mut conn)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Redis take error: {}", e)))
+    }
+
     /// Delete a key
     pub async fn del(&self, key: &str) -> ApiResult<bool> {
         let mut conn = self.get_conn().await?;

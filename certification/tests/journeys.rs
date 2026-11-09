@@ -355,6 +355,51 @@ async fn external_developer_sandbox_journey() {
         )
         .await;
     status(&r, 200, "entitlements with the credential");
+
+    // J-01 / J-13 (final closure): a session revoked at the account authority is refused
+    // by the Developer Platform console in another process (session bridge, fail closed):
+    // the developer signs out at the Meeting Service, then the same session reaches no
+    // console data through the gateway. The platform credential is a separate authority
+    // and keeps working.
+    let console = gw.get("/v1/organizations", session).await;
+    status(&console, 200, "console before sign-out");
+    let r = stack
+        .http
+        .post(format!(
+            "{}/api/v1/auth/logout",
+            stack.url(stack::MEETING_SERVICE)
+        ))
+        .bearer_auth(&sb.user.session)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "sign out: {}", r.status());
+    let mut refused = None;
+    for _ in 0..50 {
+        let r = gw.get("/v1/organizations", session).await;
+        if r.status == 401 {
+            refused = Some(r);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let refused = refused.expect("the Developer Platform refuses a session revoked at Meeting");
+    assert!(
+        !refused.text.contains(&sb.organization_id.to_string()),
+        "no console data after revocation"
+    );
+    let r = gw
+        .get(
+            &format!("/v1/environments/{}/entitlements", sb.environment_id),
+            cred,
+        )
+        .await;
+    status(
+        &r,
+        200,
+        "the platform credential is unaffected by the human sign-out",
+    );
     stack.teardown().await;
 }
 

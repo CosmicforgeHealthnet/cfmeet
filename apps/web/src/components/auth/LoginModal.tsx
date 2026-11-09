@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -13,16 +13,23 @@ import { useLogin } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
 import { authService } from "@/services/auth.service";
-import { cookieStore } from "@/store";
+import { accountSession } from "@/lib/auth/session";
+import { normalizeAccountStatus, signInNotice } from "@/lib/account/account-core";
+import { safeReturnPath } from "@/lib/organizations/organization-core";
+
+/** `?next=` — only allow-listed same-origin paths (open-redirect safe). */
+const noSubscription = () => () => {};
+
+const returnPath = () =>
+  (typeof window !== "undefined" && safeReturnPath(new URLSearchParams(window.location.search).get("next"))) || "/dashboard";
 
 const LoginModal = () => {
   const router = useRouter();
   const login = useLogin();
 
   useEffect(() => {
-    const token = cookieStore.getAccessToken();
-    if (token) {
-      router.push("/dashboard");
+    if (accountSession.hasSession()) {
+      router.push(returnPath());
     }
   }, [router]);
 
@@ -32,6 +39,9 @@ const LoginModal = () => {
   });
   const [rememberMe, setRememberMe] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Why the user is here (password changed, signed out everywhere, session ended).
+  const search = useSyncExternalStore(noSubscription, () => window.location.search, () => "");
+  const notice = signInNotice(new URLSearchParams(search).get("reason"));
 
   const handleChange =
     (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,12 +79,14 @@ const LoginModal = () => {
       {
         onSuccess: (response) => {
           // Check user status and redirect accordingly
-          if (response.user.status === "pendingverification") {
+          // ACC-022: legacy (`pendingverification`) and canonical (`pending_verification`) spellings.
+          const status = normalizeAccountStatus(response.user.status);
+          if (status === "pending_verification") {
             router.push(
               `/verify?email=${encodeURIComponent(trimmedForm.email)}`,
             );
-          } else if (response.user.status === "active") {
-            router.push("/dashboard");
+          } else if (status === "active") {
+            router.push(returnPath());
           } else {
             // Handle other statuses (e.g., inactive)
             setErrors({
@@ -97,6 +109,12 @@ const LoginModal = () => {
     <div className="relative z-10 bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
       {/* Header */}
       <AuthHeader title="Welcome Back" subtitle="Log in to your account." />
+
+      {notice && !errors.general && (
+        <div role="status" className="bg-muted border border-border text-sm rounded-lg px-4 py-2 mb-3">
+          {notice}
+        </div>
+      )}
 
       {/* General Error */}
       {errors.general && (

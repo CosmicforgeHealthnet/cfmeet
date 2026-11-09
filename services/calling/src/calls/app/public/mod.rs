@@ -275,11 +275,17 @@ pub(crate) async fn is_public_outbound<C: ConnectionTrait>(
         .unwrap_or(false))
 }
 
-/// Whether the Call has protected public parties (it is executed by Telephony).
-pub(crate) async fn is_public<C: ConnectionTrait>(db: &C, call_id: Uuid) -> CallResult<bool> {
+/// Whether the Call's media path is executed by Telephony and so connects only on its
+/// bridge + leg evidence: a Call with protected public parties, or (Part F) an
+/// enterprise SIP device's Call, whose dialog is a bound PRIVATE_NETWORK leg. Such a Call
+/// has a single application participant: the two-participant RTC evidence never holds.
+pub(crate) async fn is_network_executed<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+) -> CallResult<bool> {
     let row = db
         .query_one(stmt(
-            "SELECT EXISTS (SELECT 1 FROM call_public_parties WHERE call_id = $1)",
+            "SELECT EXISTS (SELECT 1 FROM call_public_parties WHERE call_id = $1)                OR EXISTS (SELECT 1 FROM call_legs WHERE call_id = $1                  AND leg_kind = 'PRIVATE_NETWORK' AND execution_binding_ref IS NOT NULL)",
             vec![call_id.into()],
         ))
         .await?;

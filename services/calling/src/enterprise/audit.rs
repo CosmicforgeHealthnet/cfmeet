@@ -2,7 +2,8 @@
 //!
 //! Every administrative change appends one `enterprise_admin_audit` row in the SAME
 //! transaction as the change: who (service account / credential from the authenticated
-//! context), the scope, the resource type and id, the operation, old / new version, the
+//! context, plus the acting human member's principal for a first-party organization
+//! request forwarded by the Meeting Service — CAL-007), the scope, the resource type and id, the operation, old / new version, the
 //! request / correlation ids, the time and a bounded detail object of safe values only
 //! (ids, enumerations, counts, booleans — never a secret, a telephone number, a DTMF
 //! digit or an object key). The table is append-only (trigger).
@@ -103,6 +104,7 @@ pub(crate) async fn record<C: ConnectionTrait>(
         actor.kind.as_str().into(),
         actor.service_account_id.map(|s| s.as_uuid()).into(),
         actor.credential_id.map(|c| c.as_uuid()).into(),
+        actor.acting_principal_id.into(),
         fact.resource.as_str().into(),
         fact.resource_id.into(),
         fact.operation.as_str().into(),
@@ -116,9 +118,9 @@ pub(crate) async fn record<C: ConnectionTrait>(
     exec(
         db,
         "INSERT INTO enterprise_admin_audit (id, tenant_id, application_id, environment_id, \
-         actor_kind, actor_service_account_id, actor_credential_id, resource_type, resource_id, \
-         operation, old_version, new_version, request_id, correlation_id, details, occurred_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+         actor_kind, actor_service_account_id, actor_credential_id, actor_principal_id, resource_type, \
+         resource_id, operation, old_version, new_version, request_id, correlation_id, details, occurred_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
         values,
     )
     .await?;
@@ -152,6 +154,7 @@ struct AuditRow {
     actor_kind: String,
     actor_service_account_id: Option<Uuid>,
     actor_credential_id: Option<Uuid>,
+    actor_principal_id: Option<Uuid>,
     resource_type: String,
     resource_id: Uuid,
     operation: String,
@@ -171,6 +174,8 @@ pub struct AuditRecordView {
     pub actor_kind: String,
     pub actor_service_account_id: Option<Uuid>,
     pub actor_credential_id: Option<Uuid>,
+    /// The acting human member's principal (first-party organization requests only).
+    pub actor_principal_id: Option<Uuid>,
     pub resource_type: String,
     pub resource_id: Uuid,
     pub operation: String,
@@ -200,7 +205,7 @@ impl EnterpriseService {
         let limit = page.limit()?;
         let mut values = scope_values(scope);
         let mut sql = String::from(
-            "SELECT id, seq, actor_kind, actor_service_account_id, actor_credential_id, resource_type, resource_id, \
+            "SELECT id, seq, actor_kind, actor_service_account_id, actor_credential_id, actor_principal_id, resource_type, resource_id, \
              operation, old_version, new_version, request_id, correlation_id, details, occurred_at \
              FROM enterprise_admin_audit \
              WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3",
@@ -233,6 +238,7 @@ impl EnterpriseService {
                     actor_kind: r.actor_kind,
                     actor_service_account_id: r.actor_service_account_id,
                     actor_credential_id: r.actor_credential_id,
+                    actor_principal_id: r.actor_principal_id,
                     resource_type: r.resource_type,
                     resource_id: r.resource_id,
                     operation: r.operation,

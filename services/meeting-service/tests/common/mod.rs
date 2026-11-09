@@ -46,7 +46,6 @@ use backend::{
         },
         meeting_domain::MeetingDomainDeps,
         meeting_permissions::MediaPermissions,
-        organizations::DbOrganizationDirectory,
         rtc_provider::{
             JoinCredentialRequest, JoinCredentials, LiveKitProvider, RoomInfo, RoomSpec, RtcError,
             RtcParticipant, RtcParticipantRef, RtcProvider, RtcResult, RtcRoomRef, TrackKind,
@@ -146,6 +145,25 @@ async fn template(admin: &str) -> String {
             migration::Migrator::up(&tmpl, None)
                 .await
                 .expect("migrations apply");
+            // Blueprint Section 2: every running image requires the account-security history.
+            migration::AccountSecurityMigrator::up(&tmpl, None)
+                .await
+                .expect("account security migrations apply");
+            migration::MeetingsCalendarMigrator::up(&tmpl, None)
+                .await
+                .expect("meetings calendar migrations apply");
+            // Blueprint Sections 9/11: profile columns and notification jobs.
+            migration::ProfileNotificationsMigrator::up(&tmpl, None)
+                .await
+                .expect("profile/notifications migrations apply");
+            // Blueprint Sections 2-3 hardening: hashed legacy API keys / webhook secrets.
+            migration::AccountHardeningMigrator::up(&tmpl, None)
+                .await
+                .expect("account hardening migrations apply");
+            // Final closure: Organizations event inbox, fences, member access.
+            migration::OrganizationIntegrationMigrator::up(&tmpl, None)
+                .await
+                .expect("organization integration migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -250,6 +268,8 @@ impl Drop for TestDb {
 pub struct FakeRtc {
     pub issued: AtomicUsize,
     pub other_calls: AtomicUsize,
+    /// SEC-009: `(room, media identity, reason)` of every provider removal.
+    pub removed: std::sync::Mutex<Vec<(String, String, String)>>,
     pub fail_issue: std::sync::atomic::AtomicBool,
     pub last_permissions: std::sync::Mutex<Option<MediaPermissions>>,
 }
@@ -287,8 +307,13 @@ impl RtcProvider for FakeRtc {
             expires_at: Utc::now() + chrono::Duration::from_std(req.ttl).unwrap(),
         })
     }
-    async fn remove_participant(&self, _p: &RtcParticipantRef, _reason: &str) -> RtcResult<()> {
+    async fn remove_participant(&self, p: &RtcParticipantRef, reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
+        self.removed.lock().unwrap().push((
+            p.room_name.clone(),
+            p.media_identity.clone(),
+            reason.to_string(),
+        ));
         Ok(())
     }
     async fn update_permissions(
@@ -423,6 +448,14 @@ pub struct TestOptions {
     pub unified_messaging: Option<backend::services::unified_messaging::SharedGateway>,
     /// Part VI §51: the platform credential receiver (gateway-forwarded machine callers).
     pub platform: Option<backend::services::platform::PlatformReceiver>,
+    /// Blueprint Section 4: the Organizations Service integration (`shadow` /
+    /// `authoritative`); `None` = legacy mode. Ignored when `organizations` is non-empty.
+    pub organizations_authority:
+        Option<backend::services::organizations_authority::SharedOrganizationsAuthority>,
+    /// Blueprint Section 12 follow-up: the per-organization Enterprise Calling relay
+    /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`).
+    pub organization_calling:
+        Option<backend::services::organization_calling::SharedOrganizationCalling>,
 }
 
 impl Default for TestOptions {
@@ -446,6 +479,8 @@ impl Default for TestOptions {
             reuse_storage: None,
             unified_messaging: None,
             platform: None,
+            organizations_authority: None,
+            organization_calling: None,
         }
     }
 }
@@ -584,6 +619,48 @@ impl TestApp {
         Self::on_with_lk(db, opts, None)
     }
 
+    /// Blueprint Section 11: replace the notification transport / preference source (the
+    /// in-process `RecordingMail`; never a real SMTP server) and rebuild the router.
+    pub fn with_notifier(
+        mut self,
+        notifier: Arc<backend::services::notifications::Notifier>,
+    ) -> Self {
+        self.state.notifier = notifier;
+        self.router = routes::create_routes(self.state.clone())
+            .route_layer(axum::middleware::from_fn(route_coverage::record));
+        self
+    }
+
+    /// Blueprint Sections 2-3 hardening: replace the account-security runtime policy (as
+    /// if read from these environment variables) and rebuild the router.
+    pub fn with_auth_env(mut self, vars: &[(&str, &str)]) -> Self {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        self.state.auth_policy = Arc::new(
+            backend::services::account_security::AuthPolicy::from_lookup(|k| {
+                vars.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+            }),
+        );
+        self.router = routes::create_routes(self.state.clone())
+            .route_layer(axum::middleware::from_fn(route_coverage::record));
+        self
+    }
+
+    /// Meeting v2 test tunables with Section 11 notification email switched on.
+    pub fn notifications_config() -> MeetingV2Config {
+        MeetingV2Config {
+            passcode_hash_cost: 4,
+            passcode_max_attempts: 5,
+            notifications: backend::config::notifications::NotificationConfig {
+                email_enabled: true,
+                ..Default::default()
+            },
+            ..MeetingV2Config::default()
+        }
+    }
+
     /// Like [`TestApp::on`], starting the mock LiveKit server when `opts.rtc` asks for it.
     pub async fn on_with_provider(db: TestDb, opts: TestOptions) -> Self {
         let lk = match opts.rtc {
@@ -671,7 +748,10 @@ impl TestApp {
             Arc::new(AllowListAdapter(opts.custom_allow.clone())),
         );
         let organizations: SharedOrganizationDirectory = if opts.organizations.is_empty() {
-            Arc::new(DbOrganizationDirectory::new(db.conn.clone()))
+            backend::services::organizations_authority::directory_for(
+                &db.conn,
+                opts.organizations_authority.as_ref(),
+            )
         } else {
             Arc::new(StaticOrganizationDirectory {
                 memberships: opts.organizations,
@@ -720,6 +800,8 @@ impl TestApp {
             artifacts: artifact_backends,
             telemetry: opts.telemetry.clone().unwrap_or_else(|| sink.clone()),
             organizations,
+            organization_authority: opts.organizations_authority.clone(),
+            organization_calling: opts.organization_calling.clone(),
             rtc: provider,
             adapters,
             appointments: opts.appointments.unwrap_or_else(|| {
@@ -853,6 +935,7 @@ impl TestApp {
             created_at: Set(now),
             updated_at: Set(now),
             last_login: Set(None),
+            ..Default::default()
         }
         .insert(&self.db.conn)
         .await

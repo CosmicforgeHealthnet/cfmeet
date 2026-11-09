@@ -855,6 +855,34 @@
               }
             ],
             "description": "Appendix K: false — no read receipts in this conversation; null — the environment policy decides."
+          },
+          "title": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: display title of a MANAGED conversation (always null for PRIVATE_E2EE, whose name belongs inside the MLS group)."
+          },
+          "avatarRef": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches."
+          },
+          "inbox": {
+            "$ref": "#/components/schemas/messaging.common.v1.ConversationInbox"
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -903,6 +931,97 @@
             }
           }
         ]
+      },
+      "messaging.common.v1.ConversationInbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lastActivityAt",
+          "lastMessage",
+          "unreadCount",
+          "mentionCount"
+        ],
+        "description": "Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content.",
+        "properties": {
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The latest application message (or the creation time); the key of orderBy=lastActivity."
+          },
+          "lastMessage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/messaging.common.v1.ConversationLastMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Active application messages from others after the member's read cursor, inside its history window, not hidden for it."
+          },
+          "mentionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+          }
+        }
+      },
+      "messaging.common.v1.ConversationLastMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "sequence",
+          "senderPrincipalId",
+          "createdAt",
+          "lifecycle",
+          "securityProfile",
+          "attachmentCount",
+          "previewText"
+        ],
+        "description": "Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured).",
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "senderPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/messaging.common.v1.MessageLifecycle"
+          },
+          "securityProfile": {
+            "$ref": "#/components/schemas/messaging.common.v1.SecurityProfile"
+          },
+          "attachmentCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "previewText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 140
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones."
+          }
+        }
       },
       "messaging.common.v1.Error": {
         "type": "object",
@@ -1349,6 +1468,18 @@
           "BOT_SERVICE"
         ],
         "description": "§30: OWNER (the owner), ADMIN, MODERATOR (moderates MEMBER / READ_ONLY / BOT_SERVICE members: remove, ban, unban; no role or ownership administration), MEMBER, READ_ONLY (reads its history window, sends no messages: READ_ONLY_MEMBER), BOT_SERVICE (BOT_OR_SERVICE principals only)."
+      },
+      "messaging.common.v1.MessageLifecycle": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "DELETED",
+          "MODERATED",
+          "EXPIRED",
+          "PURGED",
+          "HIDDEN_FOR_YOU"
+        ],
+        "description": "ACTIVE carries content; every other state is a tombstone without content. HIDDEN_FOR_YOU: deleted on the reader's own devices only."
       },
       "messaging.common.v1.Protocol": {
         "type": "string",

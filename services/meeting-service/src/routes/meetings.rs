@@ -5,20 +5,38 @@ use crate::{
 };
 use axum::{
     middleware,
-    routing::{get, post},
+    routing::{get, post, MethodRouter},
     Router,
 };
+
+/// Layers a legacy create route: the create policy (`FEATURE_LEGACY_MEETING_CREATE_MODE`)
+/// inside, deprecation headers outside (so a 410 refusal carries them too).
+pub fn legacy_create(route: MethodRouter<AppState>, state: &AppState) -> MethodRouter<AppState> {
+    route
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::legacy_write::legacy_create_guard,
+        ))
+        .layer(middleware::from_fn(
+            crate::middleware::deprecation::legacy_meeting_create,
+        ))
+}
 
 /// Creates meeting routes
 ///
 /// Protected routes use auth middleware, public routes (join) do not.
+#[allow(deprecated)]
 pub fn meeting_routes(state: AppState) -> Router<AppState> {
     Router::new()
-        // Protected routes (require authentication)
-        .route("/instant", post(meetings::create_instant_meeting))
+        // Protected routes (require authentication). The two creates carry the Section 16
+        // create policy (refuse / mirror) and deprecation headers (MTG-017 / DATA-008).
+        .route(
+            "/instant",
+            legacy_create(post(meetings::create_instant_meeting), &state),
+        )
         .route(
             "/",
-            get(meetings::list_meetings).post(meetings::create_meeting),
+            legacy_create(post(meetings::create_meeting), &state).get(meetings::list_meetings),
         )
         .route(
             "/:id",

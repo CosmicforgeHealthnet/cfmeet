@@ -23,6 +23,9 @@ pub struct AppState {
     pub otp_service: Arc<OtpService>,
     pub token_blacklist: Arc<TokenBlacklistService>,
     pub rate_limiter: Arc<RateLimiterService>,
+    /// Blueprint Section 2 account-security runtime policy (OAuth token delivery,
+    /// browser binding, trusted client-address header).
+    pub auth_policy: Arc<crate::services::account_security::AuthPolicy>,
     /// Frontend/Hosted UI URL for generating join links
     pub app_url: String,
     /// Google OAuth Client ID
@@ -42,6 +45,9 @@ pub struct AppState {
     /// Part VI §51: receiver of API Gateway–forwarded platform credential requests
     /// (`None`: platform access off — every service token on `/api/v2` is refused).
     pub platform: Option<crate::services::platform::PlatformReceiver>,
+    /// Blueprint Section 11: notification transport (the existing email queue) and the
+    /// recipient preference source (Communications Hub when configured).
+    pub notifier: Arc<crate::services::notifications::Notifier>,
 }
 
 impl AppState {
@@ -79,16 +85,22 @@ impl AppState {
         let token_blacklist = Arc::new(TokenBlacklistService::new(redis.clone()));
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
 
+        let email_service = Arc::new(EmailService::new(redis.clone(), email_config));
+        let notifier = Arc::new(crate::services::notifications::Notifier::new(
+            email_service.clone(),
+            Arc::new(crate::services::notifications::NoPreferenceStore),
+        ));
         Self {
             communications: None,
             db,
             jwt_service: Arc::new(JwtService::new(app_config.jwt_secret.clone())),
-            email_service: Arc::new(EmailService::new(redis.clone(), email_config)),
+            email_service,
             legacy_rtc: Arc::new(LiveKitService::new(livekit_config)),
             redis,
             otp_service,
             token_blacklist,
             rate_limiter,
+            auth_policy: Arc::new(crate::services::account_security::AuthPolicy::from_env()),
             app_url: app_config.app_url.clone(),
             google_client_id: app_config.google_client_id.clone(),
             google_client_secret: app_config.google_client_secret.clone(),
@@ -98,6 +110,7 @@ impl AppState {
             organization_directory,
             realtime,
             platform: None,
+            notifier,
         }
     }
 

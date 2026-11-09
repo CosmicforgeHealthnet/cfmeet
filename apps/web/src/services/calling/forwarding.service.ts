@@ -1,68 +1,33 @@
 /**
- * Call Forwarding API service.
- * Manages call forwarding rules and destinations.
+ * Self-service call forwarding (CAL-006) through the same-origin adapter, which binds the
+ * rules to the signed-in principal and verifies ownership before changes.
  */
 
 import callingApi from "./api";
+import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import type {
+  CreateForwardingRuleRequest,
   ForwardingRule,
   ForwardingRuleList,
-  CreateForwardingRuleRequest,
   UpdateForwardingRuleRequest,
 } from "@/types/calling";
 
+const mutation = () => ({ headers: { "Idempotency-Key": newIdempotencyKey() } });
+
 export const forwardingService = {
-  /**
-   * List all forwarding rules
-   */
-  list: async (): Promise<ForwardingRuleList> => {
-    const response = await callingApi.get<ForwardingRuleList>(
-      "/v1/enterprise/forwarding-rules"
-    );
-    return response.data;
-  },
+  list: async (): Promise<ForwardingRuleList> =>
+    (await callingApi.get<ForwardingRuleList>("/v1/enterprise/forwarding-rules", { params: { status: "ACTIVE" } })).data,
 
-  /**
-   * Get a specific forwarding rule
-   */
-  get: async (ruleId: string): Promise<ForwardingRule> => {
-    const response = await callingApi.get<ForwardingRule>(
-      `/v1/enterprise/forwarding-rules/${encodeURIComponent(ruleId)}`
-    );
-    return response.data;
-  },
+  create: async (body: CreateForwardingRuleRequest): Promise<ForwardingRule> =>
+    (await callingApi.post<ForwardingRule>("/v1/enterprise/forwarding-rules", body, mutation())).data,
 
-  /**
-   * Create a new forwarding rule
-   */
-  create: async (body: CreateForwardingRuleRequest): Promise<ForwardingRule> => {
-    const response = await callingApi.post<ForwardingRule>(
-      "/v1/enterprise/forwarding-rules",
-      body
-    );
-    return response.data;
-  },
+  update: async (ruleId: string, body: UpdateForwardingRuleRequest): Promise<ForwardingRule> =>
+    (await callingApi.patch<ForwardingRule>(`/v1/enterprise/forwarding-rules/${encodeURIComponent(ruleId)}`, body, mutation())).data,
 
-  /**
-   * Update a forwarding rule's target or settings
-   */
-  update: async (
-    ruleId: string,
-    body: UpdateForwardingRuleRequest
-  ): Promise<ForwardingRule> => {
-    const response = await callingApi.patch<ForwardingRule>(
-      `/v1/enterprise/forwarding-rules/${encodeURIComponent(ruleId)}`,
-      body
-    );
-    return response.data;
-  },
-
-  /**
-   * Delete (disable) a forwarding rule
-   */
-  delete: async (ruleId: string): Promise<void> => {
-    await callingApi.delete(
-      `/v1/enterprise/forwarding-rules/${encodeURIComponent(ruleId)}`
-    );
+  /** Disables the rule (Calling keeps it as DISABLED). */
+  remove: async (ruleId: string, expectedVersion: number): Promise<void> => {
+    await callingApi.delete(`/v1/enterprise/forwarding-rules/${encodeURIComponent(ruleId)}`, {
+      params: { expectedVersion }, ...mutation(),
+    });
   },
 };

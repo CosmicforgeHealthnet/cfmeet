@@ -1396,3 +1396,223 @@ async fn request_bodies_must_be_json_objects() {
         accepted.join("\n")
     );
 }
+
+/// Every operation of the contract authenticated by a platform credential, reads included.
+fn platform_operations() -> Vec<(Method, String)> {
+    let doc = contract();
+    let mut out = Vec::new();
+    for (path, item) in doc["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            let method = match method.as_str() {
+                "get" => Method::GET,
+                "post" => Method::POST,
+                "put" => Method::PUT,
+                "patch" => Method::PATCH,
+                "delete" => Method::DELETE,
+                _ => continue,
+            };
+            if op["security"][0].get("platformCredential").is_some() {
+                out.push((method, path.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// Tenant B (External) with every scope and generous limits.
+async fn other_tenant_with_every_scope(p: &Provisioned, slug: &str) -> String {
+    let h = p.h();
+    let b = h.consumer(slug, TenantClassification::External).await;
+    for scope in ALL_TEST_SCOPES {
+        h.platform
+            .grant_application_scope(b.application.id, scope)
+            .await
+            .unwrap();
+    }
+    let token = credential(h, &b, p.d.e.a.w.kind, ALL_TEST_SCOPES).await;
+    token.secret.expose_once().to_string()
+}
+
+/// The request body of the cross-tenant probe: shaped so that, for an operation of the
+/// caller's own scope, it would reach the resource lookup.
+fn cross_tenant_body(method: &Method, template: &str) -> Option<Value> {
+    if *method == Method::GET || *method == Method::DELETE {
+        return None;
+    }
+    Some(if template.ends_with("/members") {
+        json!({ "expectedVersion": 1, "members": [] })
+    } else if template.ends_with("/read-state") {
+        json!({ "expectedVersion": 1, "readState": "READ" })
+    } else if template.ends_with("/media-access") || template.ends_with("/recordings") {
+        json!({})
+    } else {
+        json!({ "expectedVersion": 1 })
+    })
+}
+
+/// The path with every resource id replaced by a fresh one (an id that exists nowhere).
+fn with_unknown_ids(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            let (id, rest) = segment.split_once('?').unwrap_or((segment, ""));
+            match Uuid::parse_str(id) {
+                Ok(_) if rest.is_empty() => Uuid::new_v4().to_string(),
+                Ok(_) => format!("{}?{rest}", Uuid::new_v4()),
+                Err(_) => segment.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// SEC-020 (tenant isolation, all id-addressed customer operations): for EVERY
+/// platform-credential operation of the contract whose path names a resource id — reads
+/// and mutations, every resource family — another tenant holding every scope is answered
+/// exactly as for an id that exists nowhere (same status, same normalized error; never a
+/// success; no owner id in the response), and nothing in the database changes.
+#[tokio::test]
+async fn another_tenant_reaches_no_id_addressed_operation_and_learns_nothing() {
+    let Some(p) = provision().await else {
+        return;
+    };
+    let conn = p.h().conn().clone();
+    let b = other_tenant_with_every_scope(&p, "isolation-b").await;
+    let owned: Vec<String> = p.ids.values().map(Uuid::to_string).collect();
+    let ops: Vec<(Method, String)> = platform_operations()
+        .into_iter()
+        .filter(|(_, t)| t.contains('{'))
+        .collect();
+    assert!(
+        ops.len() >= 70,
+        "the contract lists {} id-addressed customer operations",
+        ops.len()
+    );
+    let before = snapshot(&conn).await;
+    let mut failures = Vec::new();
+    let mut not_found = 0;
+    for (method, template) in &ops {
+        let key = format!("{method} {template}");
+        let query = if CLASSIFIED
+            .iter()
+            .any(|(k, probe)| *k == key && *probe == Probe::Query)
+        {
+            "?expectedVersion=1"
+        } else {
+            ""
+        };
+        let path = format!(
+            "{}{query}",
+            p.path(&template.replace("{version_number}", "1"))
+        );
+        let unknown_path = with_unknown_ids(&path);
+        assert_ne!(path, unknown_path, "{key}");
+        let body = cross_tenant_body(method, template);
+        let r = p
+            .h()
+            .request(method.clone(), &path, Some(&b), body.clone())
+            .await;
+        let u = p
+            .h()
+            .request(method.clone(), &unknown_path, Some(&b), body)
+            .await;
+        if r.status.is_success() {
+            failures.push(format!("{key}: another tenant succeeded: {}", r.text));
+        }
+        if r.status != u.status || r.normalized_error() != u.normalized_error() {
+            failures.push(format!(
+                "{key}: distinguishable from an unknown id: {} {} vs {} {}",
+                r.status, r.text, u.status, u.text
+            ));
+        }
+        if let Some(id) = owned.iter().find(|id| r.text.contains(id.as_str())) {
+            failures.push(format!("{key}: the response names the owner's id {id}"));
+        }
+        if r.status == StatusCode::NOT_FOUND {
+            not_found += 1;
+        }
+    }
+    let diff = changed(&before, &snapshot(&conn).await);
+    assert!(
+        diff.is_empty(),
+        "another tenant's requests changed {diff:?}"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // Most operations reach the scoped lookup (404); the rest are refused identically
+    // for a foreign and an unknown id by input validation first.
+    assert!(
+        not_found * 2 > ops.len(),
+        "only {not_found} of {} operations answered 404",
+        ops.len()
+    );
+}
+
+/// SEC-020 (tenant isolation, listings and client-supplied filters): every customer
+/// listing read by another tenant holding every scope — plain, and with the owner's
+/// principal or resource ids as filters — names none of the owner's resources, while the
+/// owner's own listings do (the probe is not vacuous).
+#[tokio::test]
+async fn another_tenants_listings_and_filters_never_show_the_owners_resources() {
+    let Some(p) = provision().await else {
+        return;
+    };
+    let b = other_tenant_with_every_scope(&p, "isolation-lists").await;
+    let owned: Vec<String> = p.ids.values().map(Uuid::to_string).collect();
+    let principal = json!(p.d.a().w.initiator.id());
+    let principal = principal.as_str().unwrap().to_string();
+    // Control: the owner sees its own resources in its listings.
+    for (path, id) in [
+        ("/v1/enterprise/departments", "department_id"),
+        ("/v1/webhooks", "webhook_id"),
+        ("/v1/enterprise/ring-groups", "ring_group_id"),
+    ] {
+        let r = p.h().request(Method::GET, path, Some(&p.full), None).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.text);
+        assert!(r.text.contains(&p.ids[id].to_string()), "{path}");
+    }
+    let lists: Vec<String> = platform_operations()
+        .into_iter()
+        .filter(|(m, t)| *m == Method::GET && !t.contains('{'))
+        .map(|(_, t)| t)
+        .collect();
+    assert!(lists.len() >= 20, "{lists:?}");
+    let mut failures = Vec::new();
+    let mut ok = 0;
+    for list in &lists {
+        for path in [
+            list.clone(),
+            format!("{list}?principalId={principal}"),
+            format!("{list}?resourceId={}", p.ids["policy_id"]),
+            format!("{list}?mailboxId={}", p.ids["mailbox_id"]),
+            format!("{list}?callId={}", p.ids["call_id"]),
+        ] {
+            let r = p.h().request(Method::GET, &path, Some(&b), None).await;
+            if r.status.is_server_error() {
+                failures.push(format!("{path}: {} {}", r.status, r.text));
+            }
+            if r.status == StatusCode::OK {
+                ok += 1;
+            }
+            // A filter value may be echoed; any OTHER owner id is a leak.
+            if let Some(id) = owned
+                .iter()
+                .find(|id| !path.contains(id.as_str()) && r.text.contains(id.as_str()))
+            {
+                failures.push(format!("{path}: names the owner's id {id}: {}", r.text));
+            }
+        }
+    }
+    // The audit trail of the owner's policy, asked for by id, is empty for tenant B.
+    let r = p
+        .h()
+        .request(
+            Method::GET,
+            &format!("/v1/enterprise/audit?resourceId={}", p.ids["policy_id"]),
+            Some(&b),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["records"].as_array().unwrap().len(), 0, "{}", r.text);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(ok >= lists.len(), "only {ok} listing reads answered 200");
+}

@@ -2,6 +2,9 @@
 /// facade history. Other subcommands keep the standard CLI for the original history.
 #[async_std::main]
 async fn main() {
+    // SEC-015: refuse down / fresh / refresh / reset outside a non-production APP_ENV
+    // unless CF_MIGRATION_ALLOW_DESTRUCTIVE names the subcommand. Runs before any .env load.
+    cf_migration_guard::enforce_from_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "up" {
         use sea_orm_migration::MigratorTrait;

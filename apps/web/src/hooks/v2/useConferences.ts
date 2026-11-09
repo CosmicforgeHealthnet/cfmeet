@@ -84,8 +84,9 @@ export function useCreateConference(spaceId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data?: CreateConferenceRequest) =>
-      conferencesService.create(spaceId, data),
+    /** `idempotencyKey`: one UUID per user action, so a retried submit returns the same occurrence. */
+    mutationFn: (input?: { data?: CreateConferenceRequest; idempotencyKey?: string }) =>
+      conferencesService.create(spaceId, input?.data, input?.idempotencyKey),
     onSettled: async () => {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["v2", "spaces"] }), queryClient.invalidateQueries({ queryKey: ["v2", "conferences"] }), queryClient.invalidateQueries({ queryKey: ["v2", "members"] })]);
     },

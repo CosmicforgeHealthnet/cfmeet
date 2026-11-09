@@ -4,7 +4,12 @@ use axum::{extract::State, http::StatusCode, Json};
 use uuid::Uuid;
 
 use super::{views, V2OptionalJson, V2Path};
-use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::AppState};
+use crate::{
+    dto::v2::*,
+    error::{ApiError, ApiResult, ErrorCode},
+    services::actor::ActorContext,
+    state::AppState,
+};
 
 /// Create an invitation. The raw token is returned once and never stored.
 ///
@@ -13,14 +18,19 @@ use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::
 /// (1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants
 /// `role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user
 /// token with invite authority in the space (a role allowed to admit participants); store the token
-/// from the response, it cannot be retrieved again.
+/// from the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)
+/// the link is also emailed to the invitee when notification email is enabled on the deployment;
+/// `emailDelivery` reports the outcome and at most a configured number of invitation emails per
+/// hour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/invitations", tag = "Invitations (v2)", operation_id = "v2_create_invitation",
     params(("id" = Uuid, Path, description = "Meeting space id")),
-    request_body = CreateInvitationRequest,
+    request_body = Option<CreateInvitationRequest>,
     responses(
         (status = 201, description = "Created", body = CreateInvitationResponse),
+        (status = 400, description = "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED (incl. role above grant authority)", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (invitation emails per hour)", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -30,12 +40,64 @@ pub async fn create_invitation(
     V2Path(id): V2Path<Uuid>,
     V2OptionalJson(req): V2OptionalJson<CreateInvitationRequest>,
 ) -> ApiResult<(StatusCode, Json<CreateInvitationResponse>)> {
+    use crate::services::notifications::{self as notify, EmailDelivery};
+    let send_email = req.send_email.unwrap_or(false);
+    let ctx = notify::NotificationContext::from_state(&state);
+    // Blueprint Section 11: decide before creating, so a refused email never leaves a
+    // half-done request behind.
+    let mut budget_ok = true;
+    if send_email {
+        if req
+            .invitee_email
+            .as_deref()
+            .is_none_or(|e| e.trim().is_empty())
+        {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "sendEmail requires inviteeEmail",
+            ));
+        }
+        // Machine callers (gateway environments) cannot make CF Meet send email.
+        if actor.platform().is_some() {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "sendEmail is available to signed-in CF Meet users only",
+            ));
+        }
+        let user = actor.require_registered()?;
+        if ctx.config.email_enabled {
+            match notify::invitation_email_budget(&state, user.user_id).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Err(ApiError::domain(
+                        ErrorCode::RateLimited,
+                        "Too many invitation emails; try again later or share the link",
+                    ))
+                }
+                Err(()) => budget_ok = false,
+            }
+        }
+    }
     let (inv, token) = state.meeting.invitations.create(&actor, id, req).await?;
+    let email_delivery = if !send_email {
+        None
+    } else if !ctx.config.email_enabled {
+        Some(EmailDelivery::Disabled)
+    } else if !budget_ok {
+        Some(EmailDelivery::Failed)
+    } else {
+        let inviter = actor
+            .registered()
+            .map(|r| r.display_name.clone())
+            .unwrap_or_default();
+        Some(notify::send_meeting_invitation(&ctx, &inviter, &inv, &token).await)
+    };
     Ok((
         StatusCode::CREATED,
         Json(CreateInvitationResponse {
             invitation: views::invitation(&inv),
             token,
+            email_delivery,
         }),
     ))
 }

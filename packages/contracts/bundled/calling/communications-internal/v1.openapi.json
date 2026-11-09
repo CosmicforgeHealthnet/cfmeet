@@ -1,0 +1,1497 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet calling private Communications integration",
+    "version": "1.1.0",
+    "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 Calling owner interfaces (CL-1 … CL-5). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+  },
+  "tags": [
+    {
+      "name": "Communications integration",
+      "description": "Narrow owner-authenticated metadata and policy interfaces."
+    }
+  ],
+  "paths": {
+    "/internal/v1/communications/blocks/check": {
+      "post": {
+        "operationId": "checkCallingCommunicationsBlocks",
+        "summary": "Read canonical domain blocks",
+        "description": "Read canonical domain blocks. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission calling-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blocked"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pair"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/calls": {
+      "post": {
+        "operationId": "launchCallingCommunicationsCall",
+        "summary": "Start an app call for the delegated user (CL-1)",
+        "description": "Start an app call for the delegated user (CL-1). Runs the same domain path as customer POST /v1/calls for an application call: the personal policy check runs before idempotent replay, the initiator endpoint must be an ACTIVE endpoint of the initiator, principal categories, blocks, the group limit (CALLING_MAX_GROUP_PARTICIPANTS), routing and ringing all apply. The call is attributed to the scope's configured launch credential (CALLING_COMMUNICATIONS_LAUNCH_CREDENTIAL_ID), re-verified live with Platform Access; unset, rejected, suspended or lacking calls.write it fails closed (503). Idempotent per (initiator, idempotencyKey) in a namespace distinct from customer Idempotency-Key values: a replay returns the first call with replayed=true; the same key with a different request is 409 IDEMPOTENCY_CONFLICT. Private signed service traffic only; the delegated tenant, application and environment must be the governed personal scope (any other scope is 404). Permission calling-communications.launch is granted only by the receiving service trust policy to cfmeet.communications (other callers 403). initiatorPrincipalId must equal the delegated NATIVE_CF_USER initiating principal; otherwise 403. Responses carry no credential, media, provider, recording or contact data.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.launch",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationsLaunchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Initiator endpoint not an ACTIVE endpoint of the initiator, unknown principal, or delegated scope not governed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Personal policy or block refusal (TARGET_UNAVAILABLE), idempotency conflict, participant limit or call-state conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Communications policy, launch authority, media provider or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunicationsLaunch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/calls/history": {
+      "post": {
+        "operationId": "readCallingCommunicationsHistory",
+        "summary": "Read one page of the delegated user's call history (CL-3)",
+        "description": "Read one page of the delegated user's call history (CL-3). Same entries, newest-first order and keyset cursor as the canonical history query GET /v1/calls?principalId (missed filters MISSED / not MISSED). Private signed service traffic only; the delegated tenant, application and environment must be the governed personal scope (any other scope is 404). Permission calling-communications.read is granted only by the receiving service trust policy to cfmeet.communications (other callers 403). principalId must equal the delegated NATIVE_CF_USER initiating principal; otherwise 403. Responses carry no credential, media, provider, recording or contact data.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationsHistoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegated scope is not the governed personal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunicationsHistory"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/calls/participation": {
+      "post": {
+        "operationId": "readCallingCommunicationsParticipation",
+        "summary": "Read the delegated user's entries for given calls (CL-2)",
+        "description": "Read the delegated user's entries for given calls (CL-2). Returns only calls of the scope in which the principal is a participant; other ids are silently omitted. Entries are the canonical history derivation (ParticipantOutcome, counterparts) of GET /v1/calls?principalId. Private signed service traffic only; the delegated tenant, application and environment must be the governed personal scope (any other scope is 404). Permission calling-communications.read is granted only by the receiving service trust policy to cfmeet.communications (other callers 403). principalId must equal the delegated NATIVE_CF_USER initiating principal; otherwise 403. Responses carry no credential, media, provider, recording or contact data.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationsParticipationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegated scope is not the governed personal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunicationsParticipation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/capabilities": {
+      "post": {
+        "operationId": "readCallingCommunicationsCapabilities",
+        "summary": "Read actual backend capability",
+        "description": "Read actual backend capability. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission calling-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capability"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Principal"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/endpoints/revoke": {
+      "post": {
+        "operationId": "revokeCallingCommunicationsEndpoint",
+        "summary": "Revoke the delegated user's endpoint (CL-5)",
+        "description": "Revoke the delegated user's endpoint (CL-5). The canonical endpoint revoke of DELETE /v1/calling/endpoints/{endpointId}: idempotent, and a newly revoked endpoint's live ring offers are cancelled. Private signed service traffic only; the delegated tenant, application and environment must be the governed personal scope (any other scope is 404). Permission calling-communications.apply is granted only by the receiving service trust policy to cfmeet.communications (other callers 403). principalId must equal the delegated NATIVE_CF_USER initiating principal; otherwise 403. Responses carry no credential, media, provider, recording or contact data.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationsEndpointRevocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Endpoint unknown or not owned by the delegated user, or delegated scope not governed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunicationsEndpoint"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/endpoints/verify": {
+      "post": {
+        "operationId": "verifyCallingCommunicationsEndpoint",
+        "summary": "Verify the delegated user's endpoint (CL-4)",
+        "description": "Verify the delegated user's endpoint (CL-4). owned is false (status and endpointKind null) for an unknown endpoint or another principal's endpoint, never distinguished. Private signed service traffic only; the delegated tenant, application and environment must be the governed personal scope (any other scope is 404). Permission calling-communications.read is granted only by the receiving service trust policy to cfmeet.communications (other callers 403). principalId must equal the delegated NATIVE_CF_USER initiating principal; otherwise 403. Responses carry no credential, media, provider, recording or contact data.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.read",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationsEndpointVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request (unknown field, bound or format).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, no delegated context, or a principal other than the delegated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegated scope is not the governed personal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallingError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunicationsEndpoint"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/events": {
+      "post": {
+        "operationId": "applyCallingCommunicationsEvent",
+        "summary": "Deduplicate restrictive Hub metadata events",
+        "description": "Deduplicate restrictive Hub metadata events. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission calling-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "calling-communications.apply",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommittedEvent"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer EdDSA service JWT from cf-service-auth; audience, runtime, request IDs, scope, expiration and receiver-granted permission are verified."
+      }
+    },
+    "schemas": {
+      "Blocked": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blocked"
+        ]
+      },
+      "CallingError": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Calling's error envelope (the owner's existing envelope and status).",
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^req_[0-9a-f]{32}$"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Capability": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "AVAILABLE",
+              "DISABLED",
+              "DEVICE_SECURITY_SETUP_REQUIRED"
+            ]
+          },
+          "securityReady": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "reason"
+        ]
+      },
+      "CommittedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "aggregateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^communications[.][a-z.]+$",
+            "maxLength": 80
+          },
+          "data": {
+            "type": "object",
+            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media."
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "eventId",
+          "aggregateId",
+          "version",
+          "type",
+          "data"
+        ]
+      },
+      "CommunicationsCallEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "VIDEO"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The Call's answer time; absent until it was answered."
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Absent until the Call ended."
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "From CONNECTED to the end of the Call; absent while it lasts or if it never connected."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "INCOMING",
+              "OUTGOING"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ANSWERED",
+              "NOT_ANSWERED",
+              "MISSED",
+              "DECLINED",
+              "ANSWERED_ELSEWHERE",
+              "RINGING",
+              "NOT_REACHED",
+              "IN_PROGRESS"
+            ]
+          },
+          "missed": {
+            "type": "boolean"
+          },
+          "counterpartPrincipalIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "callId",
+          "kind",
+          "state",
+          "terminal",
+          "version",
+          "createdAt",
+          "direction",
+          "outcome",
+          "missed",
+          "counterpartPrincipalIds"
+        ]
+      },
+      "CommunicationsEndpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpointId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "principalId",
+          "endpointId"
+        ]
+      },
+      "CommunicationsEndpointRevocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "alreadyRevoked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "revoked",
+          "alreadyRevoked"
+        ]
+      },
+      "CommunicationsEndpointVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "owned": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ACTIVE",
+              "REVOKED",
+              null
+            ]
+          },
+          "endpointKind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "owned",
+          "status",
+          "endpointKind"
+        ]
+      },
+      "CommunicationsHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque nextCursor of a previous page."
+          },
+          "missed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "principalId",
+          "limit"
+        ]
+      },
+      "CommunicationsHistoryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "data": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CommunicationsCallEntry"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data",
+          "nextCursor"
+        ]
+      },
+      "CommunicationsLaunch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[ -~]{1,200}$"
+          },
+          "initiatorPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "initiatorEndpointId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetPrincipalIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Distinct, never the initiator; at most CALLING_MAX_GROUP_PARTICIPANTS - 1 (enforced by the domain)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "VIDEO"
+            ]
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "initiatorPrincipalId",
+          "initiatorEndpointId",
+          "targetPrincipalIds",
+          "kind"
+        ]
+      },
+      "CommunicationsLaunchResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "VIDEO"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "callId",
+          "state",
+          "kind",
+          "version",
+          "createdAt",
+          "replayed"
+        ]
+      },
+      "CommunicationsParticipation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "principalId",
+          "callIds"
+        ]
+      },
+      "CommunicationsParticipationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "calls": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/CommunicationsCallEntry"
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "calls"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "AUTHENTICATION_REQUIRED",
+                  "PERMISSION_DENIED",
+                  "NOT_FOUND",
+                  "VALIDATION_ERROR",
+                  "VERSION_CONFLICT",
+                  "IDEMPOTENCY_CONFLICT",
+                  "REQUEST_PENDING",
+                  "RATE_LIMITED",
+                  "RECENT_AUTHENTICATION_REQUIRED",
+                  "COMMUNICATIONS_UNAVAILABLE"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ]
+      },
+      "EventReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "duplicate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "applied",
+          "duplicate"
+        ]
+      },
+      "Pair": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actorPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "actorPrincipalId",
+          "targetPrincipalId"
+        ]
+      },
+      "Principal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "principalId"
+        ]
+      }
+    }
+  }
+}

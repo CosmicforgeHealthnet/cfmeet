@@ -1,14 +1,17 @@
 name: Build CF Meet core service images
 
 # Build-only workflow. Never deploys, migrates, starts containers, changes VPS
-# configuration, or publishes production ingress. Core-service cutover is
-# separately authorized after isolated database, trust, and health validation.
+# configuration, or publishes production ingress. Production use is exclusively through
+# cfmeet-coordinated-release.yml, which calls this workflow for the release SHA, verifies
+# every image's revision label and transfers the exact images to the VPS.
+# An image that already exists for this SHA with the matching revision label is reused.
 on:
   push:
     branches: [main]
     paths:
       - ".github/workflows/cfmeet-core-images.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [platform-access, messaging, calling, communications, meeting-service, api-gateway, security-scan-gateway]
+        service: [platform-access, organizations, messaging, calling, communications, numbering, privacy-relay, sms-gateway, telephony, meeting-service, developer-platform, api-gateway, security-scan-gateway]
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v4
@@ -56,8 +59,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Reuse an existing image of this exact revision
+        id: existing
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          if docker pull -q "$IMAGE_REF" >/dev/null 2>&1; then
+            revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_REF")
+            if [[ "$revision" == "$GITHUB_SHA" ]]; then
+              echo "reuse=true" >> "$GITHUB_OUTPUT"
+              echo "Reused ${IMAGE_REF} (revision verified)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::warning::Existing tag has revision '$revision'; rebuilding"
+          fi
+          echo "reuse=false" >> "$GITHUB_OUTPUT"
+
       - name: Build and publish from service-specific Dockerfile
         id: build
+        if: steps.existing.outputs.reuse != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,9 +94,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=core-${{ matrix.service }}
 
       - name: Record immutable published reference
+        if: steps.existing.outputs.reuse != 'true'
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
           echo "Digest ${{ steps.build.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "Published ${IMAGE_REF}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "Deployment is deliberately disabled; do not activate until service databases, signed trust bundles, keys, health checks and rollback have been prepared." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Deployment happens only through cfmeet-coordinated-release.yml (gated, verified, with rollback)." >> "${GITHUB_STEP_SUMMARY}"

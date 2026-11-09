@@ -6,6 +6,8 @@ import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
 import MobileSidebar from "./MobileSidebar";
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { useSessionWatch } from "@/lib/auth/use-session-watch";
 
 const subscribeToHydration = () => () => {};
 const getHydrated = () => true;
@@ -19,6 +21,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const { data: user, isLoading, error } = useProfile();
   const mounted = useSyncExternalStore(subscribeToHydration, getHydrated, getServerHydrated);
+  useSessionWatch();
 
   useEffect(() => {
     // If not loading and no user (either error like 401 Guest, or just no session), redirect
@@ -46,16 +49,18 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Desktop sidebar */}
-      <div className="hidden md:block">
-        <AppSidebar />
+    <WorkspaceProvider>
+      <div className="flex h-screen bg-background overflow-hidden">
+        {/* Desktop sidebar */}
+        <div className="hidden md:block">
+          <AppSidebar />
+        </div>
+
+        <main className="flex-1 bg-background overflow-y-auto">{children}</main>
+
+        {/* Mobile slide-in sidebar */}
+        <MobileSidebar />
       </div>
-
-      <main className="flex-1 bg-background overflow-y-auto">{children}</main>
-
-      {/* Mobile slide-in sidebar */}
-      <MobileSidebar />
-    </div>
+    </WorkspaceProvider>
   );
 }

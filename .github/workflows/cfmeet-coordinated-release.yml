@@ -1,0 +1,239 @@
+name: CF Meet coordinated production release
+
+# The single production release path for every CF Meet backend service (Meeting Service,
+# Platform Access, Organizations, Messaging, Calling, Communications, Numbering, Privacy
+# Relay, SMS Gateway, Telephony, Developer Platform, API Gateway; the shared scan gateway
+# is upgraded only where it is already deployed). Dispatch only, main only, and the
+# dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
+# for that SHA, their revision label is verified, and they are transferred to the VPS over
+# SSH; infra/calling/production/coordinated_release.py then performs the operation there.
+# Runbook: docs/operations/coordinated-production-release.md.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation (read the runbook first; activation steps are separate owner approvals)'
+        type: choice
+        required: true
+        default: inspect
+        options: [inspect, backup, provision, release, verify, rollback, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing]
+      release_sha:
+        description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
+        type: string
+        required: true
+      confirm:
+        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate (main, exact SHA, green CI)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require main and the dispatched SHA
+        env:
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Production operations run from main only"; exit 1; }
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::release_sha must be a full lowercase SHA"; exit 1; }
+          # inspect is read-only and rollback restores the recorded previous containers;
+          # every other operation acts on exactly the main head it was dispatched on.
+          if [[ "$OPERATION" != inspect && "$OPERATION" != rollback && "$RELEASE_SHA" != "$GITHUB_SHA" ]]; then
+            echo "::error::release_sha ($RELEASE_SHA) must equal the main head ($GITHUB_SHA)"; exit 1
+          fi
+
+      - name: Require green main CI for this SHA
+        if: inputs.operation != 'inspect' && inputs.operation != 'rollback'
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = process.env.RELEASE_SHA;
+            // Service CI and the cross-service certifications of runbook §0 P1. A workflow
+            // that ran on this push must be green; a path-filtered one that did not run must
+            // have its latest completed main run green (its inputs did not change).
+            const required = [
+              'backend.yml', 'platform-access.yml', 'organizations.yml', 'messaging.yml', 'calling.yml',
+              'communications-hub.yml', 'numbering.yml', 'privacy-relay.yml', 'sms-gateway.yml',
+              'telephony.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
+              'contracts.yml', 'service-boundaries.yml', 'dependency-security.yml', 'migration-guard.yml',
+              'backup-restore-drill.yml', 'certification.yml', 'unified-messaging-e2e.yml',
+              'enterprise-calling-certification.yml', 'communications-e2e.yml'
+            ];
+            const ignored = new Set(['Deploy Backend', 'CF Meet coordinated production release']);
+            const deadline = Date.now() + 70 * 60 * 1000;
+            let stable = 0;
+            while (Date.now() < deadline) {
+              const { data: main } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
+              if (main.commit.sha !== sha) {
+                core.setFailed('Main advanced past ' + sha + '; dispatch again on the new head');
+                return;
+              }
+              const all = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, head_sha: sha, event: 'push', per_page: 100
+              });
+              const runs = all.filter(r => r.head_sha === sha && r.event === 'push' &&
+                r.head_branch === 'main' && !ignored.has(r.name));
+              const bad = runs.filter(r => r.status === 'completed' &&
+                !['success', 'skipped', 'neutral'].includes(r.conclusion));
+              if (bad.length) {
+                core.setFailed('Main CI failed: ' + bad.map(r => r.name + ': ' + r.conclusion).join(', '));
+                return;
+              }
+              const pending = runs.filter(r => r.status !== 'completed');
+              if (pending.length) {
+                stable = 0;
+                core.info('Waiting for: ' + pending.map(r => r.name).join(', '));
+              } else if (++stable >= 2) {
+                // A second clean inventory: late-registered push workflows are included.
+                const ran = new Set(runs.map(r => r.path.split('/').pop()));
+                for (const file of required.filter(f => !ran.has(f))) {
+                  const { data } = await github.rest.actions.listWorkflowRuns({
+                    owner, repo, workflow_id: file, branch: 'main', status: 'completed', per_page: 1
+                  });
+                  const last = data.workflow_runs[0];
+                  if (!last || last.conclusion !== 'success') {
+                    core.setFailed(file + ' did not run for ' + sha + ' and its latest main run is not green');
+                    return;
+                  }
+                  core.info(file + ': not triggered by this push; latest main run ' + last.html_url + ' succeeded');
+                }
+                core.info('All ' + runs.length + ' main push workflows green for ' + sha);
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            core.setFailed('Timed out waiting for green main CI for ' + sha);
+
+  images:
+    name: Build or reuse release images
+    needs: gate
+    if: inputs.operation == 'release'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/cfmeet-core-images.yml
+
+  production:
+    name: ${{ inputs.operation }} on the production VPS
+    needs: [gate, images]
+    if: ${{ always() && needs.gate.result == 'success' && (needs.images.result == 'success' || needs.images.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 180
+    # One production change at a time: shared with deploy-backend.yml's deploy job and every
+    # mutating cfmeet-calling-production.yml operation. A running release is never cancelled.
+    # (The CI gate and image builds run before the lock is taken.)
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Offline release tests (resource gate, grants, order, rollback, secrecy)
+        run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
+
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Authenticate for release images
+        if: inputs.operation == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify, record and transfer the exact release images
+        if: inputs.operation == 'release'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          IMAGE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12)
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          # The VPS module resolves images under this owner; refuse any other.
+          [[ "$owner" == cosmicforgehealthnet ]]
+          [[ "$IMAGE_SHA" == "$GITHUB_SHA" ]]
+          available=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "df -k --output=avail / | tail -n1")
+          [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 10485760 )) || { echo "::error::Less than 10 GiB free on the VPS"; exit 1; }
+          manifest="$RUNNER_TEMP/registry.json"
+          printf '{}' > "$manifest"
+          for service in platform-access organizations messaging calling communications numbering privacy-relay sms-gateway telephony meeting-service developer-platform api-gateway security-scan-gateway; do
+            image="ghcr.io/$owner/cfmeet-$service:$IMAGE_SHA"
+            docker pull -q "$image"
+            revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
+            [[ "$revision" == "$IMAGE_SHA" ]] || { echo "::error::$service image revision $revision is not $IMAGE_SHA"; exit 1; }
+            docker image inspect "$image" | python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); v=json.loads(p.read_text()); m=json.load(sys.stdin)[0]; v[sys.argv[2]]={"imageId":m["Id"],"registryDigests":m.get("RepoDigests",[]),"revision":m["Config"]["Labels"]["org.opencontainers.image.revision"]}; p.write_text(json.dumps(v,indent=1,sort_keys=True))' "$manifest" "$service"
+            expected_id=$(docker image inspect --format '{{.Id}}' "$image")
+            cached_id=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "docker image inspect --format '{{.Id}}' '$image' 2>/dev/null" || true)
+            if [[ "$cached_id" == "$expected_id" ]]; then
+              echo "$service: exact image already on the VPS"
+            else
+              docker save "$image" | gzip -1 | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" 'gzip -dc | docker load -q'
+              loaded_id=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "docker image inspect --format '{{.Id}}' '$image'")
+              [[ "$loaded_id" == "$expected_id" ]] || { echo "::error::$service image id differs after transfer"; exit 1; }
+            fi
+          done
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > '/opt/cfmeet-core/coordinated/registry-$IMAGE_SHA.json'" < "$manifest"
+          { echo '### Release images'; echo '```json'; cat "$manifest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the operation on the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40)
+          [[ "$OPERATION" =~ ^[a-z][a-z-]{1,40}$ ]]
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$CONFIRM" =~ ^[a-z,-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, comma and hyphen"; exit 1; }
+          run_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          remote="/opt/cfmeet-core/coordinated-releases/$GITHUB_SHA"
+          cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "cd '$remote' && python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordinated-release-${{ inputs.operation }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coordinated-release.log
+          if-no-files-found: ignore

@@ -17,6 +17,8 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /src
 COPY packages/service-auth packages/service-auth
+# SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
+COPY packages/migration-guard packages/migration-guard
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts packages/usage-facts
 COPY packages/webhooks packages/webhooks
@@ -35,6 +37,7 @@ WORKDIR /app
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform ./developer-platform
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform-worker ./developer-platform-worker
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform-migration ./developer-platform-migration
+COPY --from=builder /src/services/developer-platform/target/release/developer-platform-reconcile-references ./developer-platform-reconcile-references
 USER devplat
 ENV DEVELOPER_PLATFORM_BIND_ADDRESS=0.0.0.0:8098 \
     LOG_FORMAT=json

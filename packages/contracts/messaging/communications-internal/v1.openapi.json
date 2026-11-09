@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.1.0",
-    "description": "Private backend interfaces for Sections 4\u20137 and the Sections 9\u201323 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
+    "version": "1.3.0",
+    "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
     {
@@ -488,7 +488,7 @@
       "post": {
         "operationId": "readMessagingCommunicationsConversationAccess",
         "summary": "Read the delegated user's current access to one conversation",
-        "description": "Read the delegated user's current access to one conversation. A non-member and an unknown conversation are the same member:false answer; a message before the member's history window, of another kind or unknown is NOT_FOUND. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Read the delegated user's current access to one conversation. A non-member and an unknown conversation are the same member:false answer; a message before the member's history window, of another kind or unknown is NOT_FOUND. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -606,7 +606,7 @@
       "post": {
         "operationId": "listMessagingCommunicationsConversationAttachments",
         "summary": "List attachment metadata visible to the delegated member",
-        "description": "List attachment metadata visible to the delegated member. Only attachments of ACTIVE application messages inside the member's history window, after afterSequence and not hidden for the member, newest first. PRIVATE_E2EE attachments are always ENCRYPTED and are never decrypted, inspected or scanned. A non-member is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "List attachment metadata visible to the delegated member. Only attachments of ACTIVE application messages inside the member's history window, after afterSequence and not hidden for the member, newest first. PRIVATE_E2EE attachments are always ENCRYPTED and are never decrypted, inspected or scanned. A non-member is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -724,7 +724,7 @@
       "post": {
         "operationId": "readMessagingCommunicationsStorageSummary",
         "summary": "Read the storage the delegated user's uploads occupy",
-        "description": "Read the storage the delegated user's uploads occupy. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Read the storage the delegated user's uploads occupy. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -842,7 +842,7 @@
       "post": {
         "operationId": "verifyMessagingCommunicationsDevice",
         "summary": "Verify that a Messaging device belongs to the delegated user",
-        "description": "Verify that a Messaging device belongs to the delegated user. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Verify that a Messaging device belongs to the delegated user. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -960,7 +960,7 @@
       "post": {
         "operationId": "revokeMessagingCommunicationsDevice",
         "summary": "Revoke one of the delegated user's Messaging devices",
-        "description": "Revoke one of the delegated user's Messaging devices. Runs the canonical device revocation (key transparency, MLS removal, sessions and push). A device the user does not own is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Revoke one of the delegated user's Messaging devices. Runs the canonical device revocation (key transparency, MLS removal, sessions and push). A device the user does not own is 404. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -1078,7 +1078,7 @@
       "post": {
         "operationId": "applyMessagingCommunicationsDevicePush",
         "summary": "Register or remove the push registration of the delegated user's device",
-        "description": "Register or remove the push registration of the delegated user's device. registration is exactly the customer push-registration body and runs the canonical registration; the handle is passed through and never echoed or logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Register or remove the push registration of the delegated user's device. registration is exactly the customer push-registration body and runs the canonical registration; the handle is passed through and never echoed or logged. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.apply is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -1196,7 +1196,7 @@
       "post": {
         "operationId": "readMessagingCommunicationsPushStatus",
         "summary": "Read push delivery configuration and the delegated user's device push state",
-        "description": "Read push delivery configuration and the delegated user's device push state. pushServices reports what this deployment can deliver to (NOT_CONFIGURED without credentials); failure classes never carry delivery error text. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9\u201323 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
+        "description": "Read push delivery configuration and the delegated user's device push state. pushServices reports what this deployment can deliver to (NOT_CONFIGURED without credentials); failure classes never carry delivery error text. Private signed service traffic only; the delegated tenant, application and environment must match the verified Platform Access authority. Permission messaging-communications.read is granted only by the receiving service trust policy. Replayed JWT hops are refused by the Hub; events and commands additionally deduplicate their durable identities. Failures never grant communications. Sections 9–23 owner interface: the signed delegated context must carry the governed personal scope (any other scope is 404) and principalId must equal its NATIVE_CF_USER initiating principal (otherwise 403).",
         "tags": [
           "Communications integration"
         ],
@@ -1350,6 +1350,36 @@
           },
           "securityReady": {
             "type": "boolean"
+          },
+          "managed": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.2.0: MANAGED personal messaging, independent of E2EE readiness. available: sending enabled and a DIRECT or GROUP context allows MANAGED; realtime SESSION_DEVICE when session devices are enabled (MESSAGING_SESSION_DEVICES_ENABLED) and client tokens can be signed, otherwise POLLING. available / securityReady / reason keep their PRIVATE_E2EE meaning.",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED",
+                  "MANAGED_NOT_ALLOWED"
+                ]
+              },
+              "realtime": {
+                "type": "string",
+                "enum": [
+                  "SESSION_DEVICE",
+                  "POLLING"
+                ]
+              }
+            },
+            "required": [
+              "available",
+              "reason",
+              "realtime"
+            ]
           }
         },
         "required": [
@@ -1386,7 +1416,7 @@
           },
           "data": {
             "type": "object",
-            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media."
+            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media. 1.3.0 (MSG-009): type communications.timeline.changed carries exactly {conversationId, timelineVersion, reason} with aggregateId = conversationId and version = timelineVersion (reason CALL_STARTED, CALL_UPDATED or MEETING_SHARED); Messaging records messaging.timeline.changed in the conversation's stream once per higher version (a conversation outside the delegated scope is acknowledged without effect; a malformed one is refused with 400)."
           }
         },
         "required": [

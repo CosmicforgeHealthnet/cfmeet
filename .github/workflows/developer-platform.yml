@@ -14,6 +14,8 @@ on:
     paths:
       - "services/developer-platform/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/usage-facts/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
@@ -23,6 +25,8 @@ on:
     paths:
       - "services/developer-platform/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
+      - "scripts/migrations/assert_destructive_guard.sh"
       - "packages/usage-facts/**"
       - "packages/webhooks/**"
       - "packages/contracts/**"
@@ -122,9 +126,14 @@ jobs:
           key: build
       - name: cargo build
         run: cargo build --workspace --locked
+      - name: Destructive migration guard (SEC-015)
+        run: bash ../../scripts/migrations/assert_destructive_guard.sh target/debug/developer-platform-migration
+
       - name: Migration smoke (up / reset / up)
         env:
           PGPASSWORD: postgres
+          # SEC-015: reset is a guarded destructive subcommand; CI is non-production.
+          APP_ENV: test
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/developer_platform_migration_smoke
         run: |
           set -euo pipefail
@@ -155,7 +164,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          test "$(docker run --rm --entrypoint /bin/ls cfmeet-developer-platform:ci /app | tr '\n' ' ')" = "developer-platform developer-platform-migration developer-platform-worker "
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-developer-platform:ci /app | tr '\n' ' ')" = "developer-platform developer-platform-migration developer-platform-reconcile-references developer-platform-worker "
           if docker run --rm --entrypoint /bin/sh cfmeet-developer-platform:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi

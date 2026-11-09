@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * React Query hooks for call forwarding rules management.
+ * React Query hooks for the signed-in user's own call forwarding rules (CAL-006).
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,68 +11,29 @@ import type { CreateForwardingRuleRequest, UpdateForwardingRuleRequest } from "@
 export const forwardingKeys = {
   all: ["calling", "forwarding"] as const,
   lists: () => [...forwardingKeys.all, "list"] as const,
-  detail: (id: string) => [...forwardingKeys.all, "detail", id] as const,
 };
 
-/**
- * List all forwarding rules
- */
 export function useForwardingRules() {
-  return useQuery({
-    queryKey: forwardingKeys.lists(),
-    queryFn: () => forwardingService.list(),
-    staleTime: 1000 * 60,
+  return useQuery({ queryKey: forwardingKeys.lists(), queryFn: () => forwardingService.list(), staleTime: 60_000, retry: false });
+}
+
+function useForwardingMutation<T>(mutationFn: (input: T) => Promise<unknown>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    retry: false,
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: forwardingKeys.all }),
   });
 }
 
-/**
- * Get a specific forwarding rule
- */
-export function useForwardingRule(ruleId: string) {
-  return useQuery({
-    queryKey: forwardingKeys.detail(ruleId),
-    queryFn: () => forwardingService.get(ruleId),
-    enabled: !!ruleId,
-  });
-}
-
-/**
- * Create a new forwarding rule
- */
 export function useCreateForwardingRule() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: CreateForwardingRuleRequest) => forwardingService.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: forwardingKeys.all });
-    },
-  });
+  return useForwardingMutation((data: CreateForwardingRuleRequest) => forwardingService.create(data));
 }
 
-/**
- * Update a forwarding rule
- */
-export function useUpdateForwardingRule(ruleId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: UpdateForwardingRuleRequest) =>
-      forwardingService.update(ruleId, data),
-    onSuccess: (data) => {
-      queryClient.setQueryData(forwardingKeys.detail(ruleId), data);
-      queryClient.invalidateQueries({ queryKey: forwardingKeys.lists() });
-    },
-  });
+export function useUpdateForwardingRule() {
+  return useForwardingMutation(({ ruleId, body }: { ruleId: string; body: UpdateForwardingRuleRequest }) => forwardingService.update(ruleId, body));
 }
 
-/**
- * Delete (disable) a forwarding rule
- */
 export function useDeleteForwardingRule() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (ruleId: string) => forwardingService.delete(ruleId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: forwardingKeys.all });
-    },
-  });
+  return useForwardingMutation(({ ruleId, expectedVersion }: { ruleId: string; expectedVersion: number }) => forwardingService.remove(ruleId, expectedVersion));
 }

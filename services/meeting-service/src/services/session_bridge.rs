@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use crate::{
     config::env_bool,
-    models::users::{self, AuthType, UserRole, UserStatus},
+    models::users::{self, UserRole, UserStatus},
     state::AppState,
 };
 
@@ -115,7 +115,18 @@ struct VerifyBody {
 }
 
 async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
-    let ctx = match s.verifier.verify_headers(request.headers()) {
+    // SEC-012: bound to this request (method + received path); single-use (POST).
+    let method = request.method().clone();
+    let path = request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned());
+    let verified = s
+        .verifier
+        .verify_request(&method, &path, request.headers())
+        .await;
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(e) => {
             tracing::warn!(
@@ -161,7 +172,7 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
     let Ok(claims) = s.app.jwt_service.verify_token(token) else {
         return invalid();
     };
-    if claims.role == "guest" {
+    if claims.role == "guest" || !claims.is_kind(crate::services::auth::TokenKind::Access) {
         return invalid();
     }
     // Revocation must be CHECKED: an unreachable store fails closed here.
@@ -194,13 +205,31 @@ async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
     if user.status != UserStatus::Active || user.role == UserRole::Guest {
         return invalid();
     }
-    let email_verified = user.auth_type == AuthType::Google
-        || (user.status == UserStatus::Active && s.app.require_email_verification);
+    // ACC-002: logout, password reset/change and deactivation end bridge sessions too.
+    match crate::services::account_security::authorize_user_token(
+        &s.app,
+        &claims,
+        user.id,
+        crate::services::auth::TokenKind::Access,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(crate::error::ApiError::Unauthorized(_)) => return invalid(),
+        Err(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                Some(&rid),
+            )
+        }
+    }
+    let email_verified = user.email_verified(s.app.require_email_verification);
     tracing::info!(caller = %ctx.authenticated_service(), "session bridge: session verified");
     let mut r = Json(json!({
         "outcome": "VERIFIED",
         "userId": user.id,
-        "displayName": user.username,
+        "displayName": user.presentation_name(),
         "verifiedEmail": email_verified.then(|| user.email.to_ascii_lowercase()),
     }))
     .into_response();

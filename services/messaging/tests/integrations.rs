@@ -1047,3 +1047,191 @@ async fn privacy_relay_context_authority_gates_and_withdraws_conversations() {
         "AUTHORITY_SUSPENDED"
     );
 }
+
+// ------------------------------------------------------------------------------------
+// SEC-020 tenant-isolation sweep: a VALID delegated scope of another environment never
+// reaches this environment's rows (the forged / missing / external scopes are proven
+// above and in tests/authorization_matrix.rs).
+// ------------------------------------------------------------------------------------
+
+/// (lifecycle code, ACTIVE messages) of a conversation.
+async fn active_state(h: &Harness, cid: &str) -> (i64, i64) {
+    (
+        lifecycle_code(h, cid).await,
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND lifecycle = 'ACTIVE'"
+        ))
+        .await,
+    )
+}
+
+/// Meeting lifecycle, legacy import and moderation (`messaging-meeting.sync`) signed for
+/// another first-party environment address this environment's meeting conversation and
+/// message by id: NOT_FOUND each time, and the conversation, its messages and its
+/// lifecycle are unchanged (member sync is proven in
+/// `meeting_conversations_resolve_idempotently_and_follow_meeting_membership`).
+#[tokio::test]
+async fn meeting_sync_signed_for_another_environment_never_reaches_this_one() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    h.meeting_policy(&c, json!({})).await;
+    let host = h.principal_of_kind(&c, "NATIVE_CF_USER");
+    let r = h.resolve_meeting(&c, host, "conference:isolation").await;
+    let cid = r.json["conversation"]["conversationId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{}", r.text))
+        .to_string();
+    let sent = h
+        .as_meeting(
+            &c,
+            Method::POST,
+            &format!("/internal/v1/delegated/v1/conversations/{cid}/messages"),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "isolated" })),
+            Some(host),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    let mid = sent.json["messageId"].as_str().unwrap().to_string();
+    let before = active_state(&h, &cid).await;
+    assert_eq!(before, (1, 1));
+
+    let foreign = h.first_party(true);
+    h.meeting_policy(&foreign, json!({})).await;
+    let foreign_host = h.principal_of_kind(&foreign, "NATIVE_CF_USER");
+    let calls = [
+        (
+            format!("/internal/v1/meeting-conversations/{cid}/lifecycle"),
+            json!({ "lifecycleState": "CLOSED", "sourceVersion": 99 }),
+        ),
+        (
+            format!("/internal/v1/meeting-conversations/{cid}/legacy-imports"),
+            json!({ "legacySource": "meeting.isolation", "messages": [
+                { "legacyMessageId": "x-1", "senderPrincipalId": foreign_host, "text": "injected", "sentAt": "2026-10-01T09:00:00Z" }
+            ] }),
+        ),
+        (
+            format!("/internal/v1/meeting-conversations/{cid}/messages/{mid}/moderation"),
+            json!({ "action": "REMOVE" }),
+        ),
+    ];
+    for (path, body) in calls {
+        let r = h
+            .as_meeting(&foreign, Method::POST, &path, Some(body), None)
+            .await;
+        assert_eq!(
+            (r.status, r.code()),
+            (StatusCode::NOT_FOUND, "NOT_FOUND"),
+            "{path}: {}",
+            r.text
+        );
+        assert!(!r.text.contains(&mid), "{path} leaked the message id");
+    }
+    assert_eq!(
+        active_state(&h, &cid).await,
+        before,
+        "foreign meeting sync changed state"
+    );
+}
+
+/// The delegated customer mirror (`/internal/v1/delegated/v1/...`) signed for another
+/// first-party environment, with that environment's own signed user, never reads,
+/// lists or writes this environment's conversation (IDOR by id): NOT_FOUND, absent from
+/// the list, and no message is written.
+#[tokio::test]
+async fn delegated_mirror_signed_for_another_environment_never_reaches_this_one() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    h.meeting_policy(&c, json!({})).await;
+    let host = h.principal_of_kind(&c, "NATIVE_CF_USER");
+    let created = h
+        .create_conversation(&c, host, json!({ "contextClass": "GROUP" }))
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.text);
+    let cid = created.json["conversationId"].as_str().unwrap().to_string();
+    let before = active_state(&h, &cid).await;
+
+    let foreign = h.first_party(true);
+    h.meeting_policy(&foreign, json!({})).await;
+    let intruder = h.principal_of_kind(&foreign, "NATIVE_CF_USER");
+    let peers = peers();
+    let signed = foreign.context.scope.delegated().with_initiating_principal(
+        intruder,
+        cf_service_auth::DelegatedPrincipalKind::NativeCfUser,
+    );
+    let mirror = |path: &str| format!("/internal/v1/delegated/v1/conversations{path}");
+    for (method, path, body) in [
+        (Method::GET, mirror(&format!("/{cid}")), None),
+        (Method::GET, mirror(&format!("/{cid}/messages")), None),
+        (Method::GET, mirror(&format!("/{cid}/members")), None),
+        (
+            Method::POST,
+            mirror(&format!("/{cid}/messages")),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "injected" })),
+        ),
+    ] {
+        let r = h
+            .call_internal(
+                &peers.meeting,
+                method.clone(),
+                &path,
+                body,
+                Some(signed.clone()),
+                &[],
+            )
+            .await;
+        assert_eq!(
+            (r.status, r.code()),
+            (StatusCode::NOT_FOUND, "NOT_FOUND"),
+            "{method} {path}: {}",
+            r.text
+        );
+    }
+    let list = h
+        .call_internal(
+            &peers.meeting,
+            Method::GET,
+            &mirror(""),
+            None,
+            Some(signed),
+            &[],
+        )
+        .await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.text);
+    assert!(!list.text.contains(&cid), "listed: {}", list.text);
+    assert_eq!(active_state(&h, &cid).await, before);
+}
+
+/// A context-authority REVOCATION signed for another environment (same namespace and
+/// reference) never withdraws this environment's conversation bound to that context.
+#[tokio::test]
+async fn context_authority_of_another_environment_never_withdraws_this_ones_conversations() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(false);
+    h.meeting_policy(&c, json!({})).await;
+    let alice = h.principal(&c);
+    assert_eq!(relay_apply(&h, &c, "ACTIVE", 1).await.json["applied"], true);
+    let r = relay_create(&h, &c, alice).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let cid = r.json["conversationId"].as_str().unwrap().to_string();
+
+    let other = h.first_party(false);
+    let r = relay_apply(&h, &other, "REVOKED", 2).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["conversationsAffected"], 0, "{}", r.text);
+    assert_eq!(lifecycle_code(&h, &cid).await, 1, "still ACTIVE");
+    // ... and this environment's own authority is untouched.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_context_authorities WHERE environment_id = '{}' AND state = 'ACTIVE'",
+            c.context.scope.environment_id
+        ))
+        .await,
+        1
+    );
+}
