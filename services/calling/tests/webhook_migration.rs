@@ -1149,3 +1149,115 @@ async fn a_receivers_retry_after_is_honoured() {
         .unwrap();
     assert!(delay >= 15, "next attempt in {delay}s");
 }
+
+/// INV-002: `GET /internal/v1/webhook-migration/attempts` on its own — authentication,
+/// the export permission, page-request validation, and a complete, ordered, cursor-chained
+/// export of every recorded attempt (a failed first attempt and its successful retry).
+#[tokio::test]
+async fn the_attempts_export_pages_every_attempt_in_order_for_the_exporter_only() {
+    let Some(w) = World::new(settings()).await else {
+        return;
+    };
+    const ATTEMPTS: &str = "/internal/v1/webhook-migration/attempts";
+    // Authentication and permission come before anything else.
+    let r = w.h().request(Method::GET, ATTEMPTS, None, None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
+    for peer in [
+        w.h().peers.api_gateway.clone(),
+        w.h().peers.messaging.clone(),
+    ] {
+        let r = w.internal(&peer, Method::GET, ATTEMPTS, None).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    }
+    // Page-request validation.
+    for query in [
+        "limit=0",
+        "limit=501",
+        "limit=ten",
+        "cursor=not-a-cursor",
+        "includeSecrets=true",
+    ] {
+        let path = format!("{ATTEMPTS}?{query}");
+        let r = w.dp(Method::GET, &path, None).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{query}: {}", r.text);
+        assert_eq!(r.json["error"]["code"], "VALIDATION_ERROR", "{query}");
+    }
+    // Empty export.
+    let r = w.dp(Method::GET, ATTEMPTS, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.headers["cache-control"], "no-store");
+    assert!(r.json["data"].as_array().unwrap().is_empty());
+    assert!(r.json["nextCursor"].is_null());
+
+    // Two calls, each first refused (503) then delivered on retry: four attempts.
+    let rx = Receiver::start().await;
+    w.subscribe(&rx.url, &["call.requested"]).await;
+    w.call().await;
+    w.call().await;
+    w.publish().await;
+    rx.script(&[503, 503]);
+    w.deliver().await;
+    w.h().clock.advance(chrono::Duration::hours(7));
+    w.deliver().await;
+    let stored: i64 = w
+        .one("SELECT count(*)::text FROM webhook_delivery_attempts")
+        .await
+        .parse()
+        .unwrap();
+    assert_eq!(stored, 4, "two failed attempts and two retries");
+
+    // Page by page (one row per page), the export holds every attempt exactly once in
+    // (delivery, attempt number) order.
+    let mut rows = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let path = match &cursor {
+            None => format!("{ATTEMPTS}?limit=1"),
+            Some(c) => format!("{ATTEMPTS}?limit=1&cursor={c}"),
+        };
+        let r = w.dp(Method::GET, &path, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let page = r.json["data"].as_array().unwrap();
+        assert_eq!(page.len(), 1);
+        rows.extend(page.iter().cloned());
+        pages += 1;
+        match r.json["nextCursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+        assert!(pages <= 4, "the cursor chain terminates");
+    }
+    assert_eq!(rows.len(), 4);
+    let keys: Vec<(String, i64)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r["deliveryId"].as_str().unwrap().to_string(),
+                r["attemptNumber"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(keys, sorted, "deterministic order, no duplicates");
+    let deliveries: std::collections::BTreeSet<&str> = keys.iter().map(|k| k.0.as_str()).collect();
+    assert_eq!(deliveries.len(), 2);
+    for d in deliveries {
+        let per: Vec<&Value> = rows.iter().filter(|r| r["deliveryId"] == d).collect();
+        assert_eq!(per.len(), 2, "{d}");
+        assert_eq!(per[0]["attemptNumber"], 1);
+        assert_eq!(per[0]["httpStatus"], 503);
+        assert_eq!(per[1]["attemptNumber"], 2);
+        assert_eq!(per[1]["httpStatus"], 200);
+        assert_ne!(per[0]["outcome"], per[1]["outcome"]);
+        assert!(per[1]["startedAt"].is_string() && per[1]["finishedAt"].is_string());
+    }
+    // One full page equals the paged chain.
+    let r = w
+        .dp(Method::GET, &format!("{ATTEMPTS}?limit=500"), None)
+        .await;
+    assert_eq!(r.json["data"].as_array().unwrap(), &rows);
+    assert!(r.json["nextCursor"].is_null());
+}
