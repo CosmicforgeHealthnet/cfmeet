@@ -34,12 +34,24 @@ pub struct PersonalStack {
     procs: Vec<Service>,
     envs: BTreeMap<String, Vec<(String, String)>>,
 }
+/// A free local port no other service of this test process was given. Ports are chosen
+/// before the services start and released at once, so the kernel can offer the same port
+/// twice across stacks running in parallel (seen in CI: Calling failed with "Address
+/// already in use"); the same guard as `stack::free_port`.
 fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static GIVEN: std::sync::Mutex<std::collections::BTreeSet<u16>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let mut given = GIVEN.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        if given.insert(port) {
+            return port;
+        }
+    }
 }
 fn random() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
