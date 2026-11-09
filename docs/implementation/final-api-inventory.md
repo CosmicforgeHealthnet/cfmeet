@@ -28,7 +28,7 @@ Source of truth: the served OpenAPI contracts in `packages/contracts/` (each ser
 | Telephony | `cfmeet.telephony.internal-http-api` | 1.2.0 | internal | 17 | 0 |
 | **Total** | | | | **1,055** | **8** |
 
-Not counted above (no OpenAPI path object): 5 realtime WebSocket endpoints (Messaging `/v1/realtime`, Meeting conference realtime, Calling signaling, plus their ticketed variants) and the Meeting Service internal routes served outside its public contract (`/internal/v1/user-sessions/verify`, **`/internal/v1/organization-events`**, `/internal/rtc/*`).
+Not counted above (no OpenAPI path object): the 5 realtime WebSocket endpoints counted by the audit inventory (Messaging realtime, Meeting conference realtime, Calling signaling; unchanged by the closure) and the Meeting Service internal routes served outside its public contract (`/internal/v1/user-sessions/verify`, **`/internal/v1/organization-events`**, `/internal/rtc/*`).
 
 ## 2. Public routes by gateway class (`route-manifest.json`)
 
