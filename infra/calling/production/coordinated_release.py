@@ -252,6 +252,8 @@ FLAGS = (
     'DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL', 'DEVELOPER_PLATFORM_WEBHOOKS_ENABLED',
     'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED',
     'API_GATEWAY_WEBSOCKETS_ENABLED', 'API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED', 'API_GATEWAY_CENTRAL_USAGE_ENABLED',
+    'FEATURE_CONFERENCE_REALTIME_ENABLED', 'FEATURE_WEBINAR_MODE_ENABLED', 'FEATURE_QUALITY_TELEMETRY_ENABLED',
+    'FEATURE_HEALTHCARE_PROFILE_ENABLED', 'MESSAGING_SESSION_DEVICES_ENABLED', 'EMAIL_VERIFICATION_ENFORCEMENT',
 ) + tuple(sorted(p.SAFE_ENV))
 SECRET_HINT = re.compile(r'(SECRET|PASSWORD|TOKEN|KEY|PEPPER|DATABASE_URL|REDIS_URL|CREDENTIAL|DSN)', re.I)
 
@@ -1445,6 +1447,27 @@ def activate_developer_platform(sha, run_id, confirm):
                          'CF_DEVELOPER_PLATFORM_BASE_URL': private_url(SERVICES['developer-platform']['tls'])})])
 
 
+def first_party_feature_changes(meeting_env):
+    """The supported first-party features that depend on nothing external. Notification email
+    only when the Meeting Service already carries real SMTP credentials. The healthcare profile is
+    a compliance decision and is never switched here."""
+    meeting = {'FEATURE_CONFERENCE_REALTIME_ENABLED': 'true', 'FEATURE_WEBINAR_MODE_ENABLED': 'true',
+               'FEATURE_QUALITY_TELEMETRY_ENABLED': 'true'}
+    if all(mail_presence(meeting_env).values()):
+        meeting['NOTIFICATIONS_EMAIL_ENABLED'] = 'true'
+    # MANAGED realtime only: session devices never acquire E2EE privileges.
+    return [('messaging', {'MESSAGING_SESSION_DEVICES_ENABLED': 'true'}), ('meeting-service', meeting)]
+
+
+def activate_first_party_features(sha, run_id, confirm):
+    if env_of('messaging').get('MESSAGING_E2EE_DEVICES_ENABLED') == 'true':
+        raise RuntimeError('PRIVATE_E2EE devices are on in production; refusing to change Messaging')
+    changes = first_party_feature_changes(env_of('meeting-service'))
+    if 'NOTIFICATIONS_EMAIL_ENABLED' not in changes[1][1]:
+        emit('notificationEmail', 'not enabled: SMTP credentials are not configured on the Meeting Service')
+    apply_activation('activate-first-party-features', sha, run_id, changes)
+
+
 # --- API Gateway public routing (host nginx, api.cfmeet.com) -----------------------------------
 
 # Only the Developer Platform families: every other public family keeps its existing direct
@@ -1588,6 +1611,7 @@ ACTIVATIONS = {
     'activate-enterprise-calling': (('org-cutover-authoritative',), activate_enterprise_calling),
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
+    'activate-first-party-features': ((), activate_first_party_features),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback') + tuple(ACTIVATIONS)
 

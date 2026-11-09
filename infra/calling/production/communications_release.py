@@ -669,12 +669,22 @@ def release(sha,run_id):
         if record['replacements'] or record.get('newHub'):rollback(record)
         raise
 
-def verify(sha,run_id):
+def accepted_images(sha):
+    """Image ids of the release accepted for `sha`: this tool's own release record, or a
+    completed coordinated release of the same SHA (which replaced these services in place,
+    keeping their configuration) and its verified image manifest."""
     report=json.loads((WORK/'production-evidence.json').read_text())
-    assert report['sha']==sha,'Requested source is not the recorded release'
+    if report['sha']==sha:return report['images']
+    import coordinated_release as coordinated
+    assert coordinated.last_release(sha),'Requested source is not the recorded release'
+    manifest=coordinated.registry(sha)
+    return {service:manifest[coordinated.image_of(service)]['imageId'] for service in PORTS}
+
+def verify(sha,run_id):
+    images=accepted_images(sha)
     for service in PORTS:
         name=OWNERS.get(service,'cfmeet-communications');wait(name,service)
-        assert p.inspect(name)['Image']==report['images'][service],'Running image differs from accepted release'
+        assert p.inspect(name)['Image']==images[service],'Running image differs from accepted release'
     import communications_acceptance
     scope=json.loads((WORK/'production-context.private.json').read_text())
     scope['token']=credential(scope)

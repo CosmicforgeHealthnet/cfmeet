@@ -465,6 +465,18 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, '8450'):
             cr.tls_routes(conf.replace('8443', '8450'))
 
+    def test_first_party_features_never_touch_providers_e2ee_or_healthcare(self):
+        changes = dict(cr.first_party_feature_changes({}))
+        self.assertEqual(changes['messaging'], {'MESSAGING_SESSION_DEVICES_ENABLED': 'true'})
+        self.assertNotIn('NOTIFICATIONS_EMAIL_ENABLED', changes['meeting-service'])
+        self.assertNotIn('FEATURE_HEALTHCARE_PROFILE_ENABLED', changes['meeting-service'])
+        with_mail = dict(cr.first_party_feature_changes({'SMTP_HOST': 'h', 'SMTP_USERNAME': 'u', 'SMTP_PASSWORD': 'p'}))
+        self.assertEqual(with_mail['meeting-service']['NOTIFICATIONS_EMAIL_ENABLED'], 'true')
+        envs = {'messaging': {'MESSAGING_E2EE_DEVICES_ENABLED': 'false', **changes['messaging']},
+                'meeting-service': dict(changes['meeting-service'])}
+        self.assertEqual(cr.safe_default_violations(envs), [])
+        self.assertEqual(cr.ACTIVATIONS['activate-first-party-features'][0], ())
+
     def test_workflow_offers_exactly_these_operations(self):
         try:
             import yaml
