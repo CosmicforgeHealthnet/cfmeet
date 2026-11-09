@@ -11314,7 +11314,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Update a meeting space (optimistic concurrency via `version`).",
-        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.",
+        "description": "Partially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_update_meeting_space",
         "parameters": [
           {
@@ -11389,7 +11389,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Soft-archive a meeting space (owner only). History is preserved.",
-        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.",
+        "description": "Archives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_archive_meeting_space",
         "parameters": [
           {
@@ -12179,7 +12179,7 @@
           "Meeting Spaces (v2)"
         ],
         "summary": "Transfer ownership (dedicated, protected operation).",
-        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.",
+        "description": "Makes another active registered (non-guest) user the owner of an active space. Only the current\nowner (or a platform administrator) may transfer, and the request must carry the space's current\n`version`. The new owner's existing membership is replaced by ownership. The previous owner\nstays on as a HOST member unless `retainPreviousOwner` is false.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
         "operationId": "v2_transfer_owner",
         "parameters": [
           {

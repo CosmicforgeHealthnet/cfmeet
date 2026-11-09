@@ -3971,3 +3971,140 @@ async fn org006_teams_and_policies_need_the_organizations_service() {
         assert_eq!(v["error"]["code"], "FEATURE_DISABLED");
     }
 }
+
+/// ORG-011: an organization's managers oversee its meeting spaces. OWNER / ADMIN (holding
+/// `meetings.organization.manage` from Organizations) may configure, reassign and archive an
+/// organization meeting space they neither own nor belong to; a plain MEMBER, an outsider
+/// and managers of another organization may not; personal spaces are never affected; the
+/// grant disappears with `features.meetings` and with a suspended organization.
+#[tokio::test]
+async fn org011_organization_managers_oversee_organization_meeting_spaces() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("org-owner").await;
+    let admin = app.user("org-admin").await;
+    let employee = app.user("employee").await;
+    let colleague = app.user("colleague").await;
+    let outsider = app.user("outsider").await;
+    let rival = app.user("rival-admin").await;
+    let org = fake.add_org(
+        "org011",
+        &[
+            (owner.id, "OWNER"),
+            (admin.id, "ADMIN"),
+            (employee.id, "MEMBER"),
+            (colleague.id, "MEMBER"),
+        ],
+    );
+    let _other = fake.add_org("org011-rival", &[(rival.id, "ADMIN")]);
+    let (s, v) = create_org_space(
+        &app,
+        &employee,
+        org,
+        json!({ "title": "Team sync", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let space = uuid(&v["id"]);
+    let personal = uuid(
+        &app.create_space(&employee, json!({ "title": "Personal" }))
+            .await["id"],
+    );
+    let version = |v: &Value| v["version"].as_i64().unwrap();
+    let patch = |who: &User, id: Uuid, ver: i64, title: &str| {
+        let (app, token, title) = (&app, who.token.clone(), title.to_string());
+        async move {
+            app.call(
+                Method::PATCH,
+                &format!("/api/v2/meeting-spaces/{id}"),
+                Auth::Bearer(&token),
+                Some(json!({ "version": ver, "title": title })),
+            )
+            .await
+        }
+    };
+
+    // Not managers: a plain member, an outsider and another organization's admin.
+    for who in [&colleague, &outsider, &rival] {
+        let (s, e) = patch(who, space, version(&v), "Hijacked").await;
+        assert_eq!(
+            (s, code(&e)),
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+            "{e}"
+        );
+    }
+
+    // The organization ADMIN configures the organization's meeting.
+    let (s, updated) = patch(&admin, space, version(&v), "Team sync (renamed by admin)").await;
+    assert_eq!(s, StatusCode::OK, "{updated}");
+    assert_eq!(updated["title"], "Team sync (renamed by admin)");
+
+    // ...but never a member's personal meeting.
+    let (_, p) = app
+        .get(
+            format!("/api/v2/meeting-spaces/{personal}"),
+            Auth::Bearer(&employee.token),
+        )
+        .await;
+    let (s, e) = patch(&admin, personal, version(&p), "Not yours").await;
+    assert_eq!(
+        (s, code(&e)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{e}"
+    );
+
+    // The employee leaves: the OWNER reassigns the meeting to a colleague.
+    let (s, moved) = app
+        .post(
+            &format!("/api/v2/meeting-spaces/{space}/owner-transfer"),
+            Auth::Bearer(&owner.token),
+            json!({ "newOwnerUserId": colleague.id, "version": version(&updated), "retainPreviousOwner": false }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{moved}");
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_spaces WHERE id = '{space}' AND owner_user_id = '{}'",
+            colleague.id
+        ))
+        .await,
+        1
+    );
+
+    // Meetings switched off for the organization: the oversight goes with it.
+    fake.set_policy(
+        org,
+        json!({ "revision": 2,
+                "features": { "meetings": false, "messaging": true, "calling": true },
+                "restrict": {} }),
+    );
+    let (s, e) = patch(&admin, space, version(&moved), "Off").await;
+    assert_eq!(
+        (s, code(&e)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{e}"
+    );
+    fake.set_policy(org, default_policy());
+
+    // Suspended organization: no oversight.
+    fake.set_org_status(org, "SUSPENDED");
+    let (s, e) = patch(&admin, space, version(&moved), "Suspended").await;
+    assert_eq!(
+        (s, code(&e)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{e}"
+    );
+    fake.set_org_status(org, "ACTIVE");
+
+    // The ADMIN archives the organization's meeting.
+    let (s, archived) = app
+        .post(
+            &format!("/api/v2/meeting-spaces/{space}/archive"),
+            Auth::Bearer(&admin.token),
+            json!({ "version": version(&moved) }),
+        )
+        .await;
+    assert!(s.is_success(), "{archived}");
+    assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
+}

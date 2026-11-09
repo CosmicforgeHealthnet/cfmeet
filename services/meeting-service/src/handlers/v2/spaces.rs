@@ -198,6 +198,8 @@ pub async fn resolve_identifier(
 /// can be set or cleared with `clearPasscode`; changing the timezone re-anchors an active
 /// recurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;
 /// use the owner-transfer endpoint.
+/// Organization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative
+/// mode) may also do this for their organization's meeting spaces (ORG-011).
 #[utoipa::path(
     patch, path = "/api/v2/meeting-spaces/{id}", tag = "Meeting Spaces (v2)", operation_id = "v2_update_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -227,6 +229,8 @@ pub async fn update_meeting_space(
 /// kept. Only the owner (or a platform administrator) may archive. The optional body `version` is
 /// checked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an
 /// already-archived space returns it unchanged.
+/// Organization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative
+/// mode) may also do this for their organization's meeting spaces (ORG-011).
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/archive", tag = "Meeting Spaces (v2)", operation_id = "v2_archive_meeting_space",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -286,6 +290,8 @@ pub async fn duplicate_meeting_space(
 /// owner (or a platform administrator) may transfer, and the request must carry the space's current
 /// `version`. The new owner's existing membership is replaced by ownership. The previous owner
 /// stays on as a HOST member unless `retainPreviousOwner` is false.
+/// Organization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative
+/// mode) may also do this for their organization's meeting spaces (ORG-011).
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/owner-transfer", tag = "Meeting Spaces (v2)", operation_id = "v2_transfer_owner",
     params(("id" = Uuid, Path, description = "Meeting space id")),

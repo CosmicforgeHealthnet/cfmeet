@@ -293,6 +293,9 @@ pub struct SpaceView {
     pub latest_conference: Option<conference_sessions::Model>,
 }
 
+/// The organization capability that lets OWNER / ADMIN oversee the organization's meetings (ORG-011).
+pub const MEETINGS_ORGANIZATION_MANAGE: &str = "meetings.organization.manage";
+
 pub struct MeetingSpaceService {
     core: Core,
 }
@@ -604,9 +607,21 @@ impl MeetingSpaceService {
             other => other?,
         };
         let pctx = PermissionContext::for_space(&space);
-        let full = viewer_role
+        let mut full = viewer_role
             .map(|r| space_allows(r, SpacePermission::ViewMembers, &pctx))
             .unwrap_or(false);
+        // ORG-011: an organization manager sees the FULL view (incl. `version`) of the
+        // organization's spaces it may configure. Organizations unreachable → SUMMARY.
+        if !full
+            && space
+                .organization_id
+                .is_some_and(|o| ctx.verified_organizations.contains(&o))
+        {
+            full = self
+                .organization_manager(&space, ctx, SpacePermission::Configure)
+                .await
+                .unwrap_or(false);
+        }
 
         // The canonical conference (live > open upcoming > latest; never a stale one).
         let latest_conference =
@@ -810,9 +825,62 @@ impl MeetingSpaceService {
         let pctx = PermissionContext::for_space(space);
         match role {
             Some(r) if space_allows(r, permission, &pctx) => Ok(r),
+            _ if self.organization_manager(space, actor, permission).await? => Ok(Role::Owner),
             _ => Err(permission_denied(
                 "You are not permitted to manage this meeting",
             )),
+        }
+    }
+
+    /// ORG-011: an organization's managers oversee its meeting spaces. For a space of an
+    /// organization, a caller without a sufficient space role may still configure, archive
+    /// or reassign it (e.g. when its owner leaves) when the Organizations Service — only in
+    /// authoritative mode — grants them `meetings.organization.manage` for that
+    /// organization now (OWNER / ADMIN while meetings are enabled; the organization must be
+    /// ACTIVE). Join, media and conference controls are never widened. A refusal by
+    /// Organizations keeps the original PERMISSION_DENIED; Organizations unreachable is
+    /// 503 (never an allow).
+    async fn organization_manager(
+        &self,
+        space: &meeting_spaces::Model,
+        actor: &ActorContext,
+        permission: SpacePermission,
+    ) -> ApiResult<bool> {
+        if !matches!(
+            permission,
+            SpacePermission::Configure
+                | SpacePermission::Archive
+                | SpacePermission::TransferOwnership
+        ) {
+            return Ok(false);
+        }
+        let (Some(organization), Some(user), Some(authority)) = (
+            space.organization_id,
+            actor.registered(),
+            crate::services::organization_policy::authoritative(&self.core),
+        ) else {
+            return Ok(false);
+        };
+        match crate::services::workspaces::require_organization_capability(
+            authority,
+            &crate::services::organizations_authority::ActingUser::of(user),
+            organization,
+            crate::services::workspaces::OrganizationFeature::Meetings,
+            Some(MEETINGS_ORGANIZATION_MANAGE),
+        )
+        .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    meeting_space_id = %space.id,
+                    organization_id = %organization,
+                    acting_user_id = %user.user_id,
+                    "organization manager acts on an organization meeting space"
+                );
+                Ok(true)
+            }
+            Err(e) if e.code() == Some(ErrorCode::ServiceUnavailable) => Err(e),
+            Err(_) => Ok(false),
         }
     }
 
