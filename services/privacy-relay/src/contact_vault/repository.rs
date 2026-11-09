@@ -343,17 +343,51 @@ pub async fn lock_missing_fingerprint<C: ConnectionTrait>(
     version: &str,
     limit: u64,
 ) -> RelayResult<Vec<ContactRow>> {
-    db::all(
+    // `FOR UPDATE SKIP LOCKED` does not re-evaluate the `NOT EXISTS` once it acquires a
+    // row lock, so a row a concurrent backfill finished (and committed) between our
+    // snapshot and our lock can come back. Such rows are dropped, and the query is run
+    // again: a new statement sees that commit and moves on to the next missing rows.
+    for _ in 0..5 {
+        let rows: Vec<ContactRow> = db::all(
+            conn,
+            &format!(
+                "SELECT {CONTACT_COLUMNS} FROM protected_contacts c \
+                 WHERE c.disabled_at IS NULL AND NOT EXISTS ( \
+                   SELECT 1 FROM contact_fingerprints f WHERE f.contact_reference = c.id AND f.fingerprint_key_version = $1) \
+                 ORDER BY c.id LIMIT $2 FOR UPDATE SKIP LOCKED"
+            ),
+            vec![version.into(), (limit as i64).into()],
+        )
+        .await?;
+        let mut fresh = Vec::with_capacity(rows.len());
+        for row in rows {
+            if !has_fingerprint(conn, row.id, version).await? {
+                fresh.push(row);
+            }
+        }
+        if !fresh.is_empty() || missing_fingerprint_count(conn, version).await? == 0 {
+            return Ok(fresh);
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Whether `contact` already has a fingerprint under `version`. Called after
+/// `lock_missing_fingerprint` locked the row: that statement's `NOT EXISTS` is not
+/// re-evaluated when a lock is acquired, so a concurrent backfill that committed in
+/// between is only visible to a new statement.
+pub async fn has_fingerprint<C: ConnectionTrait>(
+    conn: &C,
+    contact: Uuid,
+    version: &str,
+) -> RelayResult<bool> {
+    Ok(db::scalar_i64(
         conn,
-        &format!(
-            "SELECT {CONTACT_COLUMNS} FROM protected_contacts c \
-             WHERE c.disabled_at IS NULL AND NOT EXISTS ( \
-               SELECT 1 FROM contact_fingerprints f WHERE f.contact_reference = c.id AND f.fingerprint_key_version = $1) \
-             ORDER BY c.id LIMIT $2 FOR UPDATE SKIP LOCKED"
-        ),
-        vec![version.into(), (limit as i64).into()],
+        "SELECT count(*)::bigint FROM contact_fingerprints WHERE contact_reference = $1 AND fingerprint_key_version = $2",
+        vec![contact.into(), version.into()],
     )
-    .await
+    .await?
+        > 0)
 }
 
 /// Enabled contacts without a fingerprint under `version`.
