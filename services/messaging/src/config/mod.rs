@@ -56,8 +56,11 @@
 //! | `MESSAGING_PUBLIC_EVENTS_DESTINATION` | no | receivers of relayed public events (Part VI §53): `calling` (default — Calling's platform-event ingress, today's customer webhook delivery, unchanged), `developer-platform` (the central event ingestion only; `CF_DEVELOPER_PLATFORM_BASE_URL`) or `both` (dual publication for shadow comparison; each receiver's outcome is recorded on the relay row, a retry re-sends only to the receiver that has not accepted) |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
-//! Service authentication (`CF_*`) is read by [`service_auth`].
+//! Service authentication (`CF_*`) is read by [`service_auth`]. With
+//! `MESSAGING_REALTIME_REDIS_URL` set, the SEC-012 service-token replay guard is shared by
+//! all replicas through that Redis ([`replay_guard`]).
 
+pub mod replay_guard;
 pub mod service_auth;
 
 use std::{fmt, net::SocketAddr, time::Duration};

@@ -218,11 +218,13 @@ fn presented(state: &AppState, request: &Request) -> Presented {
     if !route_pattern(request).starts_with(GATEWAY_ROUTE_PREFIX) {
         return Presented::Refused("service_token_outside_gateway_routes");
     }
-    let token = match state
-        .service_auth
-        .verifier()
-        .verify_headers(request.headers())
-    {
+    // SEC-012: bound to this request (method + received path); the single-use step
+    // (`admit_once`) runs in `require_customer` before the request is admitted.
+    let token = match state.service_auth.verifier().verify_request_binding(
+        request.method(),
+        &received_path(request),
+        request.headers(),
+    ) {
         Ok(token) => token,
         Err(error) => {
             let d = &error.diagnostics;
@@ -257,6 +259,7 @@ pub async fn require_customer(
     next: Next,
 ) -> Response {
     let presented = presented(&state, &request);
+    let method = request.method().clone();
     let context = match &presented {
         // The gateway's operation (signed correlation id), caused by its forwarding hop.
         Presented::Gateway(forwarded) => RequestContext {
@@ -288,6 +291,21 @@ pub async fn require_customer(
                 }
                 Presented::Gateway(forwarded) => {
                     let Forwarded { token, delegated } = *forwarded;
+                    // SEC-012: a token on a mutating request is single-use.
+                    if let Err(error) = state
+                        .service_auth
+                        .verifier()
+                        .admit_once(&method, &token)
+                        .await
+                    {
+                        let reason = error.failure.as_str();
+                        crate::metrics::inc(
+                            "numbering_customer_auth_refused_total",
+                            &[("reason", reason)],
+                        );
+                        tracing::warn!(reason, "gateway service token rejected");
+                        return ApiError::Code(ErrorCode::AuthenticationFailed).into_response();
+                    }
                     let outcome = state
                         .authority
                         .authenticate_delegated(&delegated, token.correlation_id())
@@ -392,16 +410,30 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
     }
 }
 
+/// The request-target path as received (before any `Router::nest` prefix stripping),
+/// which is what a signer binds in `htu`.
+pub(crate) fn received_path(request: &Request) -> String {
+    request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned())
+}
+
 pub async fn require_internal_service(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let (method, path) = (request.method().clone(), received_path(&request));
+    let verified = state
         .service_auth
         .verifier()
-        .verify_headers(request.headers())
-    {
+        .verify_request(&method, &path, request.headers())
+        .await;
+    match verified {
         Ok(ctx) => {
             // Same operation (signed correlation id), caused by the upstream hop.
             let context = RequestContext {

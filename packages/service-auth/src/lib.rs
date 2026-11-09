@@ -24,6 +24,7 @@
 //! [`DelegatedPlatformContext`] (safe customer identifiers asserted by that service) —
 //! and, inside each service, its own customer and participant identity types.
 
+pub mod binding;
 pub mod claims;
 pub mod clock;
 pub mod contact_delegation;
@@ -36,6 +37,7 @@ pub mod jwt;
 pub mod keys;
 pub mod number_grant;
 pub mod permissions;
+pub mod replay;
 pub mod signer;
 pub mod trust;
 pub mod verifier;
@@ -43,6 +45,9 @@ pub mod verifier;
 #[cfg(feature = "client")]
 pub mod client;
 
+pub use binding::{
+    canonical_request_path, RequestBinding, RequestBindingEmission, RequestBindingMode,
+};
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use contact_delegation::{
     ContactAccess, ContactAccessToken, ContactDelegationFailure, ContactDelegationSigner,
@@ -54,6 +59,7 @@ pub use identity::{services, RuntimeEnvironment, ServiceId};
 pub use ids::{CorrelationId, KeyId, RequestId, TokenId};
 pub use keys::{PublicJwk, ServiceSigningKey};
 pub use permissions::{InternalPermission, PermissionSet};
+pub use replay::{InMemoryReplayGuard, ReplayGuard, ReplayKey, ReplayStoreError, ReplayVerdict};
 pub use signer::{
     OutboundServiceRequest, ServiceToken, ServiceTokenSigner, SignError, SignedServiceRequest,
     TokenTtl,

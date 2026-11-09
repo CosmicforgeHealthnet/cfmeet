@@ -142,8 +142,19 @@ pub async fn platform_credential(
     let Some(receiver) = state.platform.clone() else {
         return refuse("platform_access_disabled", &route);
     };
-    // 3.
-    let caller = match receiver.verifier.verify_headers(headers) {
+    // 3. SEC-012: bound to this request (method + received path, before nest
+    // stripping); single-use on mutating methods.
+    let received = request
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|u| u.0.path().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let method = request.method().clone();
+    let verified = receiver
+        .verifier
+        .verify_request(&method, &received, headers)
+        .await;
+    let caller = match verified {
         Ok(c) => c,
         Err(e) => {
             let d = &e.diagnostics;

@@ -232,11 +232,18 @@ pub async fn require_gateway_caller(
         })
         .await;
     }
-    let ctx = match state
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let (method, path) = (
+        request.method().clone(),
+        super::middleware::received_path(&request),
+    );
+    let verified = state
         .service_auth
         .verifier()
-        .verify_headers(request.headers())
-    {
+        .verify_request(&method, &path, request.headers())
+        .await;
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(e) => {
             tracing::warn!(

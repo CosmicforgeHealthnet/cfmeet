@@ -7,7 +7,7 @@ use crate::{
 };
 use axum::{
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, OriginalUri, Path, Query, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{any, post},
@@ -557,26 +557,51 @@ pub fn internal_routes() -> Router<AppState> {
 pub const INSTANT_MEETING_PATH: &str = "/internal/v1/communications/meetings/instant";
 /// MT-2 (Sections 9–23): the Hub resolves a meeting code to public references.
 pub const RESOLVE_MEETING_PATH: &str = "/internal/v1/communications/meetings/resolve";
-fn internal_scope<'a>(state: &'a AppState, headers: &HeaderMap) -> ApiResult<&'a Bridge> {
+/// The HTTP request a service token is presented on (SEC-012 request binding): its
+/// method and its path as received (before nest stripping).
+struct Hop {
+    method: Method,
+    path: String,
+}
+
+impl Hop {
+    fn of(method: Method, uri: &OriginalUri) -> Self {
+        Self {
+            method,
+            path: uri.0.path().to_owned(),
+        }
+    }
+}
+
+async fn internal_scope<'a>(
+    state: &'a AppState,
+    hop: &Hop,
+    headers: &HeaderMap,
+) -> ApiResult<&'a Bridge> {
     verified_scope(
         state,
+        hop,
         headers,
         cf_service_auth::InternalPermission::CommunicationsAccountRead,
     )
+    .await
     .map(|(bridge, _)| bridge)
 }
 /// Signed caller with `permission` in this receiver's trust policy, delegated to the
 /// governed personal scope (any other scope is 404). Returns the delegated initiating
 /// principal when the hop carries one.
-fn verified_scope<'a>(
+async fn verified_scope<'a>(
     state: &'a AppState,
+    hop: &Hop,
     headers: &HeaderMap,
     permission: cf_service_auth::InternalPermission,
 ) -> ApiResult<(&'a Bridge, Option<(Uuid, DelegatedPrincipalKind)>)> {
     let bridge = state.communications.as_deref().ok_or_else(unavailable)?;
+    // SEC-012: bound to this request; single-use on mutating methods.
     let ctx = bridge
         .verifier
-        .verify_headers(headers)
+        .verify_request(&hop.method, &hop.path, headers)
+        .await
         .map_err(|_| ApiError::Unauthorized("Internal authentication failed".into()))?;
     ctx.require_permission(permission)
         .map_err(|_| ApiError::Forbidden("Internal permission denied".into()))?;
@@ -609,12 +634,13 @@ fn account_id(reference: &str) -> ApiResult<Uuid> {
 /// Anything else is 403 — the Hub never acts for another user.
 async fn delegated_actor(
     state: &AppState,
+    hop: &Hop,
     headers: &HeaderMap,
     permission: cf_service_auth::InternalPermission,
     principal_id: Uuid,
     account_reference: &str,
 ) -> ApiResult<ActorContext> {
-    let (bridge, initiating) = verified_scope(state, headers, permission)?;
+    let (bridge, initiating) = verified_scope(state, hop, headers, permission).await?;
     if initiating != Some((principal_id, DelegatedPrincipalKind::NativeCfUser)) {
         return Err(denied());
     }
@@ -673,11 +699,14 @@ struct InstantMeeting {
 /// (account, key): a replay returns the first meeting and never creates another.
 async fn instant_meeting(
     State(state): State<AppState>,
+    method: Method,
+    uri: OriginalUri,
     headers: HeaderMap,
     Json(body): Json<InstantMeeting>,
 ) -> ApiResult<Json<Value>> {
     let actor = delegated_actor(
         &state,
+        &Hop::of(method, &uri),
         &headers,
         cf_service_auth::InternalPermission::MeetingCommunicationsCreate,
         body.principal_id,
@@ -760,11 +789,14 @@ struct ResolveMeeting {
 /// owner or a host of the space.
 async fn resolve_meeting(
     State(state): State<AppState>,
+    method: Method,
+    uri: OriginalUri,
     headers: HeaderMap,
     Json(body): Json<ResolveMeeting>,
 ) -> ApiResult<Json<Value>> {
     let actor = delegated_actor(
         &state,
+        &Hop::of(method, &uri),
         &headers,
         cf_service_auth::InternalPermission::MeetingCommunicationsRead,
         body.principal_id,
@@ -807,10 +839,12 @@ struct AccountStatus {
 }
 async fn account_status(
     State(state): State<AppState>,
+    method: Method,
+    uri: OriginalUri,
     headers: HeaderMap,
     Json(body): Json<AccountStatus>,
 ) -> ApiResult<Json<Value>> {
-    let bridge = internal_scope(&state, &headers)?;
+    let bridge = internal_scope(&state, &Hop::of(method, &uri), &headers).await?;
     let id = body
         .account_reference
         .strip_prefix("cfmeet-user:")
@@ -842,10 +876,12 @@ struct Backfill {
 }
 async fn backfill(
     State(state): State<AppState>,
+    method: Method,
+    uri: OriginalUri,
     headers: HeaderMap,
     Json(body): Json<Backfill>,
 ) -> ApiResult<Json<Value>> {
-    let bridge = internal_scope(&state, &headers)?;
+    let bridge = internal_scope(&state, &Hop::of(method, &uri), &headers).await?;
     if !(1..=100).contains(&body.limit) {
         return Err(ApiError::domain(
             ErrorCode::ValidationError,

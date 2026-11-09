@@ -32,10 +32,18 @@ use cf_service_auth::{InternalPermission, OutboundServiceRequest, ServiceId};
 let hop = OutboundServiceRequest::new_operation(ServiceId::privacy_relay());
 signer.sign(&hop)?.apply_to(&mut headers);
 
-// inbound
-let caller = verifier.verify_headers(&headers)?;          // InternalServiceContext
+// outbound, bound to the HTTP request (htm / htu when SERVICE_AUTH_REQUEST_BINDING=emit)
+signer.sign_request(&hop, &Method::POST, "/internal/v1/x")?.apply_to(&mut headers);
+
+// inbound (HTTP receivers): request binding per SERVICE_AUTH_REQUEST_BINDING_MODE and
+// single use of the token on POST / PUT / PATCH / DELETE
+let caller = verifier.verify_request(&method, received_path, &headers).await?;
 caller.require_permission(InternalPermission::CommunicationAuthorize)?;
 ```
+
+Request binding (SEC-012): optional `bnd` / `htm` / `htu` claims, canonical path rule in
+`src/binding.rs`, jti replay guard in `src/replay.rs`; rollout runbook
+[`docs/operations/service-token-request-binding.md`](../../docs/operations/service-token-request-binding.md).
 
 The optional `client` feature adds `InternalServiceClient` (reqwest + rustls): targets by
 audience from configuration, `/internal/v1/` paths only, HTTPS outside `local` / `test`,

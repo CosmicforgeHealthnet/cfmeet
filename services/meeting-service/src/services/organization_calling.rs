@@ -424,7 +424,11 @@ impl OrganizationCalling {
         }
         let signed = self
             .signer
-            .sign(&OutboundServiceRequest::new_operation(audience).with_delegated_context(context))
+            .sign_request(
+                &OutboundServiceRequest::new_operation(audience).with_delegated_context(context),
+                &method,
+                url.path(),
+            )
             .map_err(|_| "signing failed")?;
         // A fresh header map: nothing from the inbound request is forwarded except what is
         // added here explicitly. No customer credential exists on this path.

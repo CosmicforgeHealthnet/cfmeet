@@ -46,8 +46,20 @@ async fn main() -> anyhow::Result<()> {
         LogFormat::Pretty => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
     // Fail closed on malformed keys, bundles or targets before touching the network.
+    // SEC-012: with the realtime Redis configured, the service-token replay guard is
+    // shared by every replica (process-local otherwise).
+    let replay_guard = config.realtime_redis_url.as_ref().map(|url| {
+        use secrecy::ExposeSecret;
+        Arc::new(
+            messaging::config::replay_guard::RedisReplayGuard::new(
+                url.expose_secret(),
+                cf_service_auth::InMemoryReplayGuard::process_default(),
+            )
+            .unwrap_or_else(|e| fatal("MESSAGING_REALTIME_REDIS_URL", e)),
+        ) as Arc<dyn cf_service_auth::ReplayGuard>
+    });
     let service_auth = settings
-        .load(Arc::new(cf_service_auth::SystemClock))
+        .load_with_replay_guard(Arc::new(cf_service_auth::SystemClock), replay_guard)
         .unwrap_or_else(|e| fatal("service authentication configuration error", e));
     let tree_heads = Arc::new(
         config
