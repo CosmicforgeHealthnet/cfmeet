@@ -72,8 +72,9 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // Section 12 follow-up operations (per-organization Enterprise Calling relay GET /
     // POST / PUT / PATCH / DELETE) + 6 final-closure operations (organization-scope
     // Messaging relay GET / POST / PUT / PATCH / DELETE and its session tokens) + 11
-    // Section 17 ORG-006 operations (teams, team members and policies relay).
-    assert_eq!(probed, 205, "all v2 operations probed");
+    // Section 17 ORG-006 operations (teams, team members and policies relay) + the
+    // organization Messaging member resolution.
+    assert_eq!(probed, 206, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

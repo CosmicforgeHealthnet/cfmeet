@@ -588,6 +588,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::organization_messaging::messaging_session_token),
         )
         .route(
+            "/organizations/:id/messaging/members/resolve",
+            post(crate::handlers::v2::organization_messaging::messaging_resolve_members),
+        )
+        .route(
             "/organizations/:id/audit-events",
             get(organizations::list_organization_audit_events),
         )

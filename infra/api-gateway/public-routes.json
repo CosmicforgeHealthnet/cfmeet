@@ -2734,6 +2734,13 @@
     },
     {
       "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/members/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/organizations/{id}/teams",
       "class": "EXCLUDED",

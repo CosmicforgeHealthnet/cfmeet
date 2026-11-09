@@ -884,6 +884,54 @@ impl OrganizationCalling {
     }
 }
 
+impl OrganizationCalling {
+    /// The organization-scope Messaging principals of the given accounts, for adding
+    /// colleagues to organization conversations: only ACTIVE members of THIS organization
+    /// are answered (each principal ensured in the organization environment); anyone else
+    /// is silently omitted, so the answer reveals nothing about non-members or accounts.
+    /// The caller must itself pass the organization Messaging gate. At most 50 ids.
+    pub async fn messaging_resolve_members(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        user_ids: &[Uuid],
+    ) -> ApiResult<Value> {
+        if user_ids.is_empty() || user_ids.len() > 50 {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "userIds must name between 1 and 50 accounts",
+            ));
+        }
+        let (_, scope, binding, _, _) = self
+            .messaging_scope(db, authority, actor, organization)
+            .await?;
+        let mut people = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for user in user_ids.iter().copied().filter(|u| seen.insert(*u)) {
+            let memberships = authority
+                .resolve_memberships(user)
+                .await
+                .map_err(|e| match e {
+                    AuthorityError::Refused(reply) => relayed_error(&reply),
+                    AuthorityError::Unavailable(_) => unavailable(),
+                })?;
+            let active = memberships.iter().any(|m| {
+                m.organization_id == organization
+                    && m.status == "ACTIVE"
+                    && m.organization_status == "ACTIVE"
+            });
+            if !active {
+                continue;
+            }
+            let principal = self.principal_for(db, &scope, binding, user).await?;
+            people.push(json!({ "userId": user, "principalId": principal }));
+        }
+        Ok(json!({ "people": people }))
+    }
+}
+
 fn messaging_unavailable() -> ApiError {
     ApiError::domain(
         ErrorCode::ServiceUnavailable,

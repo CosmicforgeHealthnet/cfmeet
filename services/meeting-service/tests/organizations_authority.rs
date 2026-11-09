@@ -3487,6 +3487,46 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
             .await,
         1
     );
+    // Colleague resolution: only ACTIVE members of THIS organization get their
+    // organization-scope principal; an outsider is silently omitted.
+    let outsider = w.app.user("org-messaging-resolve-outsider").await;
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &format!("/api/v2/organizations/{}/messaging/members/resolve", w.org),
+            Auth::Bearer(&w.member.token),
+            Some(json!({ "userIds": [w.owner.id, outsider.id] })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        v["people"],
+        json!([{ "userId": w.owner.id, "principalId": w.peers.state.principal }])
+    );
+    let (s, _) = w
+        .app
+        .call(
+            Method::POST,
+            &format!("/api/v2/organizations/{}/messaging/members/resolve", w.org),
+            Auth::Bearer(&outsider.token),
+            Some(json!({ "userIds": [w.owner.id] })),
+        )
+        .await;
+    assert!(
+        s == StatusCode::NOT_FOUND || s == StatusCode::FORBIDDEN,
+        "a non-member resolves nobody: {s}"
+    );
+    let (s, _) = w
+        .app
+        .call(
+            Method::POST,
+            &format!("/api/v2/organizations/{}/messaging/members/resolve", w.org),
+            Auth::Bearer(&w.member.token),
+            Some(json!({ "userIds": [] })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
     // A path outside the allowlist is never forwarded.
     let before = w.messaging_records().len();
     let (s, v) = w

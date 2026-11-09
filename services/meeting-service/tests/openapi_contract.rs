@@ -145,6 +145,10 @@ fn every_v2_route_is_documented() {
             "post",
             "/api/v2/organizations/{id}/messaging/session-tokens",
         ),
+        (
+            "post",
+            "/api/v2/organizations/{id}/messaging/members/resolve",
+        ),
         // Section 17 (ORG-006): Section 6 teams and policies through the Organizations relay
         ("get", "/api/v2/organizations/{id}/teams"),
         ("post", "/api/v2/organizations/{id}/teams"),

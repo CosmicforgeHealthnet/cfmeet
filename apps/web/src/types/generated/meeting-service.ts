@@ -3732,6 +3732,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/invitations": "v2_create_organization_invitation",
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
+  "POST /api/v2/organizations/{id}/messaging/members/resolve": "v2_organization_messaging_resolve_members",
   "POST /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_post",
   "POST /api/v2/organizations/{id}/messaging/session-tokens": "v2_organization_messaging_session_token",
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",

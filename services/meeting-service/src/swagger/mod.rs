@@ -244,6 +244,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::organization_messaging::messaging_patch,
         crate::handlers::v2::organization_messaging::messaging_delete,
         crate::handlers::v2::organization_messaging::messaging_session_token,
+        crate::handlers::v2::organization_messaging::messaging_resolve_members,
         crate::handlers::v2::account_profile::get_my_profile,
         crate::handlers::v2::account_profile::update_my_profile,
         crate::handlers::v2::account_sessions::list_my_sessions,

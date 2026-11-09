@@ -289,3 +289,56 @@ pub async fn messaging_session_token(
         .await?;
     Ok(respond(status, value))
 }
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveMembersRequest {
+    pub user_ids: Vec<Uuid>,
+}
+
+/// Resolve organization colleagues to their organization-scope Messaging principals.
+///
+/// For adding colleagues to organization conversations: answers `{people: [{userId,
+/// principalId}]}` for the accounts that are ACTIVE members of this organization (their
+/// principal is created in the organization's scope on first use); any other account is
+/// silently omitted, so nothing is learned about non-members. The caller must be an active
+/// member of an active organization whose policy allows Messaging. 1 to 50 ids.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/messaging/members/resolve", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_resolve_members",
+    params(("id" = String, Path, description = "Organization id")),
+    request_body = Object,
+    responses((status = 200, description = "Organization members' principals in the organization scope", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "ORGANIZATION_POLICY_RESTRICTED / MEMBERSHIP_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope), (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn messaging_resolve_members(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    actor.require_registered()?;
+    let core = &state.meeting.core;
+    let (Some(relay), Some(authority)) = (
+        core.organization_calling.as_ref(),
+        organization_policy::authoritative(core),
+    ) else {
+        return Err(disabled());
+    };
+    let organization = organization_id(&id)?;
+    let request: ResolveMembersRequest = serde_json::from_slice(&body).map_err(|_| {
+        ApiError::domain(
+            ErrorCode::ValidationError,
+            "The body must be {\"userIds\": [...]}",
+        )
+    })?;
+    let value = relay
+        .messaging_resolve_members(
+            &state.db,
+            authority,
+            &actor,
+            organization,
+            &request.user_ids,
+        )
+        .await?;
+    Ok(respond(200, value))
+}

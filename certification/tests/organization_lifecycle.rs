@@ -479,7 +479,6 @@ async fn organization_lifecycle_across_real_services() {
     .await;
     status(&r, 201, "owner creates an organization conversation");
     let conversation = r.body["conversationId"].as_str().unwrap().to_string();
-    // The employee's organization principal exists once they used the relay.
     let r = org_messaging(
         &stack,
         org,
@@ -490,9 +489,32 @@ async fn organization_lifecycle_across_real_services() {
     )
     .await;
     status(&r, 200, "employee lists organization conversations");
-    let employee_org_principal = principal_in(&stack, employee.id, scope.environment)
-        .await
-        .expect("employee principal in the organization environment");
+    // The owner resolves the colleague to their organization-scope principal as the apps
+    // do (only active members of this organization are answered).
+    let r = meeting(
+        &stack,
+        Method::POST,
+        &format!("/api/v2/organizations/{org}/messaging/members/resolve"),
+        &owner,
+        Some(json!({ "userIds": [employee.id, stranger.id] })),
+    )
+    .await;
+    status(&r, 200, "resolve organization colleagues");
+    let people = r.body["people"].as_array().unwrap().clone();
+    assert_eq!(
+        people.len(),
+        1,
+        "a non-member is never resolved: {}",
+        r.text
+    );
+    assert_eq!(people[0]["userId"], json!(employee.id));
+    let employee_org_principal =
+        Uuid::parse_str(people[0]["principalId"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        principal_in(&stack, employee.id, scope.environment).await,
+        Some(employee_org_principal),
+        "the same principal the relay acts as"
+    );
     let r = org_messaging(
         &stack,
         org,
