@@ -24,10 +24,11 @@ Registered routes that have no contract of their own are covered by declared
 counts as referenced only by a literal of its full mirror path, or by a placeholder
 suffix in a file that also names the mirror prefix.
 
-The gate fails when a contract's untested count rises above the frozen ``BASELINE`` (a
-new route needs a test), when a contract with untested operations is missing from the
-baseline, or when a mirror rule no longer matches the router source. A count below the
-baseline passes with a hint to lower it. Standard library only, no network.
+The frozen ``BASELINE`` is empty (INV-002 closed): every operation of every contract must
+be referenced by a test, so the gate fails as soon as one operation is untested (a new
+route needs a test), when a ``BASELINE`` entry is added for a contract that no longer
+needs it, or when a mirror / sweep rule no longer matches its source. Standard library
+only, no network.
 
 Usage::
 
@@ -80,35 +81,15 @@ def mirror_key(contract_id: str) -> str:
     return f"{contract_id}#delegated-mirror"
 
 
-# Untested operations per contract, frozen after the Section 16 tests (INV-002). The
-# audit counted 200 of 1,066 registered operations; with this script's per-contract view
-# the count was 146 of 1,128 before Section 16 (meeting-service http-api 16, the
-# Messaging delegated mirror 82) and 48 after it. Lower an entry when tests are added;
-# never raise one - add a test for the new operation instead.
-BASELINE: dict[str, int] = {
-    "cfmeet.api-gateway.http-api": 0,
-    "cfmeet.calling.communications-internal": 0,
-    "cfmeet.calling.http-api": 1,
-    "cfmeet.communications.communications-internal": 4,
-    "cfmeet.communications.http-api": 0,
-    "cfmeet.developer-platform.http-api": 1,
-    "cfmeet.developer-platform.internal-api": 13,
-    "cfmeet.meeting-service.communications-internal": 1,
-    "cfmeet.meeting-service.http-api": 0,
-    "cfmeet.messaging.communications-internal": 0,
-    "cfmeet.messaging.http-api": 0,
-    "cfmeet.messaging.http-api#delegated-mirror": 0,
-    "cfmeet.messaging.internal-api": 0,
-    "cfmeet.numbering.internal-api": 20,
-    "cfmeet.organizations.internal-api": 0,
-    "cfmeet.platform-access.internal-api": 3,
-    "cfmeet.platform.internal-http": 0,
-    "cfmeet.privacy-relay.http-api": 0,
-    "cfmeet.privacy-relay.internal-api": 0,
-    "cfmeet.sms-gateway.http-api": 0,
-    "cfmeet.sms-gateway.internal-api": 0,
-    "cfmeet.telephony.internal-http-api": 5,
-}
+# Untested operations per contract. INV-002: the audit counted 200 of 1,066 registered
+# operations without a test; this script's per-contract view counted 146 of 1,128 before
+# Section 16, 48 after it, and 0 once the internal / operator routes got their own tests
+# (platform-access tests/operator_reads.rs, communications tests/operator_routes.rs,
+# calling tests/webhook_migration.rs, developer-platform tests/operator_commands.rs and
+# tests/webhook_migration_routes.rs, numbering tests/operator_http.rs). The baseline is
+# therefore EMPTY: an untested operation fails the gate. Do not add an entry to make a new
+# route pass - add a test that exercises it.
+BASELINE: dict[str, int] = {}
 
 LITERAL_PATTERNS = (
     re.compile(r'r#+"(.*?)"#+', re.S),
@@ -365,7 +346,10 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         return 1
     if not args.json:
-        print("PASS: no contract has more untested operations than its frozen baseline.")
+        if BASELINE:
+            print("PASS: no contract has more untested operations than its frozen baseline.")
+        else:
+            print("PASS: every operation of every contract is referenced by a test (BASELINE is empty).")
     return 0
 
 
