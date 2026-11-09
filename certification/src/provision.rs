@@ -286,10 +286,20 @@ impl Operator {
     }
 
     pub async fn service_account(&self, environment: Uuid) -> anyhow::Result<Uuid> {
+        self.named_service_account(environment, "backend").await
+    }
+
+    /// A service account with an explicit name (names are unique per environment, so a
+    /// second account in the same environment needs its own name).
+    pub async fn named_service_account(
+        &self,
+        environment: Uuid,
+        name: &str,
+    ) -> anyhow::Result<Uuid> {
         Ok(self
             .pa_created(
                 &format!("/admin/environments/{environment}/service-accounts"),
-                json!({ "name": "backend", "description": "certification" }),
+                json!({ "name": name, "description": "certification" }),
             )
             .await?
             .uuid("/id"))

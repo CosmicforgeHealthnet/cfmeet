@@ -329,7 +329,7 @@ async fn enable_calling(stack: &Stack, org: Uuid, scope: Scope) {
         .await
         .expect("grant Calling scopes in the organization scope");
     let sa = operator
-        .service_account(scope.environment)
+        .named_service_account(scope.environment, "calling")
         .await
         .expect("Calling service account in the organization scope");
     let (credential, _secret) = operator.credential(sa, &scopes).await.expect("credential");
