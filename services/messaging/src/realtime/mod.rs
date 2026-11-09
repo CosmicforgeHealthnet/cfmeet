@@ -83,6 +83,10 @@ pub struct RealtimeSettings {
     pub typing_ttl: Duration,
     pub drain: Duration,
     pub publisher_interval: Duration,
+    /// MSG-018: read / delivery receipts of one member in one conversation are published
+    /// at most once per window (first advance at once, then the highest cursor when the
+    /// window ends). Zero publishes every advance at once.
+    pub receipt_window: Duration,
 }
 
 impl Default for RealtimeSettings {
@@ -110,6 +114,7 @@ impl Default for RealtimeSettings {
             typing_ttl: Duration::from_secs(8),
             drain: Duration::from_secs(10),
             publisher_interval: Duration::from_millis(250),
+            receipt_window: Duration::from_millis(1500),
         }
     }
 }

@@ -788,6 +788,13 @@ impl MessagingConfig {
             typing_ttl: Duration::from_secs(8),
             drain: secs("MESSAGING_REALTIME_DRAIN_SECONDS", 10, 0, 300)?,
             publisher_interval: Duration::from_millis(250),
+            receipt_window: Duration::from_millis(bounded(
+                &get,
+                "MESSAGING_RECEIPT_COALESCE_WINDOW_MS",
+                1_500,
+                0,
+                10_000,
+            )? as u64),
         };
         let push_provider = match get("MESSAGING_PUSH_PROVIDER").as_deref() {
             None | Some("none") => PushProviderKind::None,

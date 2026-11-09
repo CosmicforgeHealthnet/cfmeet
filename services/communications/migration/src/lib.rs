@@ -100,14 +100,80 @@ impl MigrationTrait for DeviceSessions {
         ))
     }
 }
-/// Apply the foundation history, then the unified history, then the device-session one.
+/// Audit closure MSG-009: pending call cards for call parties without a profile at
+/// launch, and deduplicated, version-monotonic timeline nudges for Messaging. A FOURTH
+/// separate history for the same rollback-safety reason as the others: the previous image
+/// checks exactly the foundation, unified and device-session histories. Never merge them.
+pub struct TimelineRealtimeMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for TimelineRealtimeMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(TimelineRealtime)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_timeline_realtime_seaql_migrations").into_iden()
+    }
+}
+struct TimelineRealtime;
+impl MigrationName for TimelineRealtime {
+    fn name(&self) -> &str {
+        "m20261109_000001_timeline_realtime"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for TimelineRealtime {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/004_timeline_realtime.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Apply the foundation history, then the unified, device-session and timeline-realtime
+/// ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(db, None).await?;
     UnifiedMigrator::up(db, None).await?;
-    DeviceSessionMigrator::up(db, None).await
+    DeviceSessionMigrator::up(db, None).await?;
+    TimelineRealtimeMigrator::up(db, None).await
 }
-/// Everything this image needs: the Sections 9-23 histories plus the Section 14 one.
+/// Everything this image needs: the Sections 9-23 histories, the Section 14 one and the
+/// MSG-009 timeline-realtime one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    if !device_session_ready(db).await? {
+        return Ok(false);
+    }
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_timeline_realtime_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_timeline_realtime_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == TimelineRealtime.name())
+}
+/// Readiness the previous (Section 14) image checks: foundation, unified and
+/// device-session histories exactly.
+pub async fn device_session_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     if !unified_ready(db).await? {
         return Ok(false);
     }
