@@ -76,6 +76,11 @@ jobs:
       - name: Account and organization administration tests
         run: node --experimental-strip-types --test tests/organization-admin.test.mjs
 
+      # Organization-scope Messaging (final closure, J-10): organization paths, refusal
+      # explanations and the colleague rules of the organization Messages view.
+      - name: Organization Messaging tests
+        run: node --experimental-strip-types --test tests/organization-messaging.test.mjs
+
       # Developer Portal (Section 17 / ORG-017): operations pinned to the Developer Platform
       # contract, session-bearer only (never cfmk_ in the browser), role table equal to
       # services/developer-platform rbac.rs, one-time secret and navigation rules.

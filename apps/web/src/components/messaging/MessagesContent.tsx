@@ -21,6 +21,7 @@ import { mergeTimeline, type TimelineCard } from "@/lib/messaging/managed-store"
 import { useMessagingDirectory, useMessagingDevices, useRegisterMessagingDevice, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
 import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubContacts, useHubInbox } from "@/hooks/v2/useCommunications";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import OrganizationMessages from "@/components/messaging/OrganizationMessages";
 import { organizationsService } from "@/services/v2/organizations.service";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import { messagingErrorMessage } from "@/lib/messaging/errors";
@@ -746,7 +747,26 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   );
 }
 
+/**
+ * Messages: the selected workspace decides the scope. Personal shows the account's personal
+ * conversations (this device's engine); an organization workspace shows that
+ * organization's own conversations (organization-scope Messaging, J-10), never mixed.
+ */
 export default function MessagesContent() {
+  const workspace = useWorkspace();
+  if (workspace.kind === "ORGANIZATION" && workspace.organizationId) {
+    return (
+      <OrganizationMessages
+        key={workspace.organizationId}
+        organizationId={workspace.organizationId}
+        organizationName={workspace.workspace?.displayName ?? null}
+      />
+    );
+  }
+  return <PersonalMessages />;
+}
+
+function PersonalMessages() {
   const engine = useEngine();
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const params = useSearchParams();
