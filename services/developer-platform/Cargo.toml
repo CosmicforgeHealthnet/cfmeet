@@ -21,6 +21,11 @@ path = "src/main.rs"
 name = "developer-platform-worker"
 path = "src/bin/developer-platform-worker.rs"
 
+# DATA-017: report-only reconciliation of the foreign references this service holds.
+[[bin]]
+name = "developer-platform-reconcile-references"
+path = "src/bin/developer-platform-reconcile-references.rs"
+
 [dependencies]
 developer-platform-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).

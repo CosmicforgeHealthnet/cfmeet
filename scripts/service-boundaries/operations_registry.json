@@ -289,6 +289,46 @@
       ]
     },
     {
+      "id": "developer-platform-credential-lifecycle-webhooks",
+      "owner": "developer-platform",
+      "source": "src/control/credential_lifecycle.rs",
+      "entry": "sweep_once",
+      "tests": [
+        "tests/credential_lifecycle.rs::expiry_thresholds_emit_one_notice_each_through_the_webhook_outbox",
+        "tests/credential_lifecycle.rs::notices_are_deduplicated_across_workers_and_crash_recovery",
+        "tests/credential_lifecycle.rs::outages_and_failed_deliveries_are_retried",
+        "tests/credential_lifecycle.rs::subscriptions_need_the_credentials_scope_and_the_worker_sweeps_once_per_interval"
+      ]
+    },
+    {
+      "id": "developer-platform-reference-reconciliation",
+      "owner": "developer-platform",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "full_report",
+      "tests": [
+        "tests/reference_reconciliation.rs::local_and_remote_reference_breaks_are_reported_and_nothing_is_deleted",
+        "tests/reference_reconciliation.rs::local_scope_checks_cover_every_holder"
+      ]
+    },
+    {
+      "id": "messaging-reference-reconciliation",
+      "owner": "messaging",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "report",
+      "tests": [
+        "tests/reference_reconciliation.rs::invalid_foreign_references_are_reported_and_nothing_is_deleted"
+      ]
+    },
+    {
+      "id": "numbering-reference-reconciliation",
+      "owner": "numbering",
+      "source": "src/reference_reconciliation.rs",
+      "entry": "report",
+      "tests": [
+        "tests/reference_reconciliation.rs::invalid_foreign_references_are_reported_and_nothing_is_deleted"
+      ]
+    },
+    {
       "id": "artifact-worker",
       "owner": "calling",
       "source": "src/calls/app/enterprise/voicemail.rs",

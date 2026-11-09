@@ -18,7 +18,7 @@
 | ACC-026 | PARTIAL: Hub profile reactivation (the Hub's deliberate terminal-deactivation trigger) | Self-deactivation needs the current password or a sign-in within 10 minutes; administrator reactivation (`PATCH /api/v1/admin/users/{id}` `status: active`) documented; both audited (§5.2) |
 | DATA-010 | OWNER_DECISION: retention periods | No retention period for the open tables is decided in the repository docs, so no purge job was added; the policy table with proposed values is §6.1. The decided ones (Calling ADR 0030, Telephony, Privacy Relay, Messaging, Hub nonces, Section 11 notification jobs 30 days) were already implemented |
 | DATA-012 | ENGINEERING_COMPLETE (documented canonical type and conversions; no unification was additive without new owner histories) | §6.2 |
-| DATA-017 | PARTIAL: remote existence checks at the owning service | Report-only reconciliation of every foreign id the meeting-service holds (`reconcile_references`, §6.3); messaging / developer-platform / numbering sweepers remain |
+| DATA-017 | ENGINEERING_COMPLETE (report only, never repairs) | Report-only reconciliation of the foreign ids held by the meeting-service (`reconcile_references`), Messaging (`messaging-reconcile-references`), Numbering (`numbering-reconcile-references`) and the Developer Platform (`developer-platform-reconcile-references`, plus the worker's periodic report with remote existence checks at Platform Access) (§6.3) |
 
 ## 2. Legacy secrets at rest (PLT-002, SEC-006, DATA-003)
 
@@ -132,7 +132,17 @@ Canonical: **`TIMESTAMPTZ` at the authority, integer Unix seconds (UTC, truncate
 
 ### 6.3 DATA-017 reconciliation (report only)
 
-`cargo run --bin reconcile_references` (or `backend::services::reference_reconciliation::report`) reads one READ ONLY snapshot and prints JSON: per foreign-id holder (Platform Access principals/environments/tenants, Messaging conversations) the rows, distinct ids and local-invariant anomalies — principal links without an account, chat owners / members / pending revocations using principals this service never mapped, a Platform Access environment seen with more than one tenant/application. Exit 1 when anomalies exist; nothing is repaired. `remoteVerification: NOT_PERFORMED` — existence at the owner (Platform Access `/internal/v1/identity/changes`, as Calling's projection consumes it; Messaging conversation reads) is the next step, as are sweepers in messaging, developer-platform and numbering.
+`cargo run --bin reconcile_references` (or `backend::services::reference_reconciliation::report`) reads one READ ONLY snapshot and prints JSON: per foreign-id holder (Platform Access principals/environments/tenants, Messaging conversations) the rows, distinct ids and local-invariant anomalies — principal links without an account, chat owners / members / pending revocations using principals this service never mapped, a Platform Access environment seen with more than one tenant/application. Exit 1 when anomalies exist; nothing is repaired. `remoteVerification: NOT_PERFORMED` — existence at the owner (Platform Access `/internal/v1/identity/changes`, as Calling's projection consumes it; Messaging conversation reads) is the next step for the meeting-service.
+
+The same report shape (`service`, `checks[]` with `name` / `owner` / `heldIn` / `rows` / `distinctForeignIds` / `anomalies` / `status`, total `anomalies`, `remoteVerification`; exit 0 consistent, 1 anomalies, 2-4 usage / connection / query failure) is served by:
+
+| Service | Command | Local invariants checked (anomalies) | Remote |
+|---|---|---|---|
+| Messaging | `cargo run --bin messaging-reconcile-references` (`messaging::reference_reconciliation::report`) | an environment recorded under more than one tenant / application; a member in another environment than its conversation; a client session whose scope / principal differs from its device's; an SMS bridge whose scope differs from its conversation's; a Privacy Relay-controlled conversation still open after its authority was REVOKED (or ACTIVE while SUSPENDED). Inventory: member / owner / device principals, bridged Numbering number resources | NOT_PERFORMED |
+| Numbering | `cargo run --bin numbering-reconcile-references` (`numbering::reference_reconciliation::report`) | an environment recorded under more than one tenant / application (14 holders); an ORGANIZATION-owned number whose owner reference is not the organization (tenant) in assignments, history and release requests; a PRINCIPAL owner reference equal to a tenant / application / environment id; history naming another owner than its assignment. Inventory: reservation / routing-grant principals, KYC subjects, Privacy Relay lease holders | NOT_PERFORMED |
+| Developer Platform | `developer-platform-reconcile-references` (in the image) and the worker every `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS` (default 86400; 0 = off; logged, `devplat_worker_schedules`) | an environment recorded under more than one tenant / application; an environment profile whose tenant is not its project's; subscriptions, webhook events, quota restrictions, usage facts and credential lifecycle notices whose environment is known under another tenant / application; a LIVE production environment that is not a known environment of the request's project. Inventory: workspace member accounts (Meeting Service) | with service authentication configured: each organization, project and environment read at Platform Access (`DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT`, default 1000 of each): `MISSING` (404) / `MISMATCHED` (other parent) findings, `PARTIAL` when Platform Access does not answer |
+
+Nothing is written by any of them (READ ONLY transactions; the Developer Platform worker records only its schedule row). An anomaly is for an operator to investigate with the owning service.
 
 ## 7. TLS (SEC-017) — documentation only
 
@@ -166,6 +176,6 @@ Rollback: redeploy the previous image (it ignores the new nullable columns and t
 * SEC-017: lineage inventory on the VPS.
 * ACC-026: Hub reactivation (Hub migration + product decision).
 * ACC-016, DATA-010: owner decisions.
-* DATA-017: remote existence checks and sweepers in other services.
+* DATA-017: remote existence checks for the meeting-service, Messaging and Numbering reports (the Developer Platform's are built).
 * PLT-002/DATA-003: the dated cleanup step (§2.4).
 * SEC-015 follow-up: data-refusing `down()`s for older migrations.

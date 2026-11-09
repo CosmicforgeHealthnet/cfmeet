@@ -60,14 +60,22 @@ async fn main() -> anyhow::Result<()> {
         );
         None
     };
+    // Section 15 (PLT-008) credential lifecycle webhooks (with webhooks and Platform
+    // Access) and the DATA-017 report-only reference reconciliation.
+    let jobs = developer_platform::worker::PeriodicJobs {
+        credential_lifecycle: config.credential_lifecycle.clone(),
+        reference_reconciliation_interval: config.reference_reconciliation_interval,
+        reference_reconciliation_remote_limit: config.reference_reconciliation_remote_limit,
+    };
     let mut stopped = stop_rx;
-    developer_platform::worker::run_with_platform(
+    developer_platform::worker::run_with_jobs(
         db,
         config.worker_instance_id,
         runtime,
         config.worker_interval,
         webhooks,
         platform,
+        jobs,
         async move {
             let _ = stopped.wait_for(|s| *s).await;
         },
