@@ -55,6 +55,12 @@ jobs:
       - name: Messaging client session bridge tests
         run: node --experimental-strip-types --test tests/messaging-session.test.mjs
 
+      # MANAGED sync (edits / tombstones / event replay / timeline merge), the durable
+      # offline queue (idempotent sends) and the Communications Hub rules incl. MSG-018
+      # ack-cursor resume (Section 17 web communications).
+      - name: Messaging MANAGED sync, outbox and Communications tests
+        run: node --experimental-strip-types --test tests/messaging-managed-sync.test.mjs tests/messaging-outbox.test.mjs tests/communications-core.test.mjs
+
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh
         run: node scripts/generate-contract-types.mjs --check

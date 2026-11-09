@@ -7,6 +7,7 @@
 import { identityApi } from "./api";
 import { CryptoClient } from "./crypto-client";
 import { currentMessagingEngine } from "./engine";
+import { clearAllOutboxes } from "./outbox";
 
 async function erase(): Promise<void> {
   // The Messages page of this tab holds the device (and its lock): it signs out itself.
@@ -33,6 +34,12 @@ async function erase(): Promise<void> {
 }
 
 export async function signOutMessaging(timeoutMs = 5000): Promise<void> {
-  if (typeof window === "undefined" || typeof Worker === "undefined" || !("indexedDB" in window)) return;
+  if (typeof window === "undefined") return;
+  // Queued MANAGED sends and the session-device id never outlive the sign-in.
+  clearAllOutboxes();
+  try {
+    for (const k of Object.keys(window.sessionStorage ?? {})) if (k.startsWith("cfmeet.messaging.session-device.")) window.sessionStorage.removeItem(k);
+  } catch {}
+  if (typeof Worker === "undefined" || !("indexedDB" in window)) return;
   await Promise.race([erase().catch(() => {}), new Promise<void>((r) => setTimeout(r, timeoutMs))]);
 }

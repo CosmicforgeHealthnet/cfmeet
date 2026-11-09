@@ -52,14 +52,6 @@ function client({ token = "login-token", expired = false, refreshFails = false }
         }
         return response;
       } }),
-      post: async (url, body) => {
-        refreshes++;
-        assert.equal(url, "http://localhost:8080/api/v1/auth/refresh");
-        assert.equal(body.refresh_token, "refresh-token");
-        await new Promise((resolve) => setImmediate(resolve));
-        if (refreshFails) throw new Error("Refresh refused");
-        return { data: { access_token: "new-login", refresh_token: "new-refresh" } };
-      },
     },
   });
   const service = load("../src/services/v2/messaging.service.ts", {
@@ -152,7 +144,7 @@ test("the frontend permits every backend end-user relay operation and its query 
     const body = block.slice(start, index - 1);
     const method = body.match(/Method::(\w+)/)[1];
     const segments = body.match(/&\[([\s\S]*?)\]/)[1];
-    const path = "v1/" + [...segments.matchAll(/Lit\("([^"]+)"\)|\bId\b/g)].map((m) => m[1] || id).join("/");
+    const path = "v1/" + [...segments.matchAll(/Lit\("([^"]+)"\)|\bId\b|\bReaction\b/g)].map((m) => m[1] || (m[0] === "Reaction" ? "%F0%9F%91%8D" : id)).join("/");
     assert.equal(routes.isMessagingRelayRoute(method, path), true, `${method} ${path}`);
     const rest = body.slice(body.indexOf(segments) + segments.length + 1);
     const query = rest.includes("PAGE") ? ["limit", "cursor"] : rest.includes("MESSAGES") ? ["afterSequence", "beforeSequence", "limit"] : [...rest.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
@@ -188,8 +180,11 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
   }
   const engineModule = load("../src/lib/messaging/engine.ts", {
     "@/services/messaging-realtime": { MessagingRealtimeTransport: Transport },
-    "@/services/messaging-session": { messagingClientAccessToken: () => ({}) },
+    "@/services/messaging-session": { messagingClientAccessToken: () => ({}), messagingSessionDeviceToken: () => ({}) },
     "./api": {},
+    "./managed-store": load("../src/lib/messaging/managed-store.ts"),
+    "./outbox": load("../src/lib/messaging/outbox.ts"),
+    "./routes": routes,
     "./errors": errors,
     "@/services/v2/messaging.service": { messagingService: {
       me: async () => ({ principalId: id, tenantId: id, applicationId: id, environmentId: id }),
