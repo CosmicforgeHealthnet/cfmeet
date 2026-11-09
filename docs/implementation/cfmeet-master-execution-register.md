@@ -152,7 +152,7 @@ Release steps to enable (owner-gated): PA migration 000005, Organizations migrat
 
 - ORG-014: developer-organization provisioning keeps a provisioning row; a failed Platform Access step is compensated and the worker reconciles leftovers through PA `GET /internal/v1/delegation/tenant-slugs/{slug}`.
 - ORG-013: PA tenant rename endpoint; Developer Platform syncs display names (sync flag recorded per organization).
-- PLT-008 (partial): `platform_credential_usage` records last authentication; credential reads return `lastAuthenticatedAt` and `expiringSoon`. The expiry webhook is not built.
+- PLT-008: `platform_credential_usage` records last authentication; credential reads return `lastAuthenticatedAt` and `expiringSoon`; the Developer Platform worker emits `credential.expiring_soon` / `credential.expired` webhooks (9bb7f35e).
 - PLT-009: PA `GET /internal/v1/admin/audit`, Developer Platform operator organization and activity reads, `devplat_operator_audit`; [operator/admin consolidation map](../operations/operator-admin-consolidation-map.md).
 - PLT-011: 147 `x-cfmeet-required-scope` annotations (messaging contract 1.16.0, numbering 1.13.0, SMS gateway 1.3.0); [gateway scope pre-check](../api/gateway-scope-precheck.md). Messaging session-device operations are EXCLUDED from the gateway.
 - PLT-012: optional per-token limit `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` (default 0, off); stale config comment fixed.

@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 25 | 15 | 58 |
+| `CLOSED` | 2 | 16 | 26 | 16 | 60 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,7 +28,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 2 | 6 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 3 | 1 | 4 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
@@ -37,9 +37,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 |---|---|---|---|
 | INV-002 | P2 | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain ( |
 | MSG-009 | P2 | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no  | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
-| PLT-008 | P2 | Credential lifecycle lacks last-used tracking and expiry warnings | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
 | SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
-| DATA-017 | P3 | Cross-service references are opaque (no FKs) — need reconciliation coverage | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
 | MSG-018 | P3 | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversat | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
 
 ## All findings
@@ -99,7 +97,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | DATA-012 | P3 | BACKEND | Inconsistent type for the same concept (`credentials_not_before`) | `CLOSED` | fb490003 |
 | DATA-014 | P3 | BACKEND | Migration numbering/dating anomalies | `CLOSED` | 781a5624 |
 | DATA-016 | P2 | BACKEND | Missing business/identity fields on `users` | `OWNER_DECISION` | PARTIAL: profile fields and email_verified_at done; deleted_at DEFERRED_BY_OWNER (D-6) |
-| DATA-017 | P3 | BACKEND | Cross-service references are opaque (no FKs) — need reconciliation coverage | `BACKEND_FOLLOW_UP` | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
+| DATA-017 | P3 | BACKEND | Cross-service references are opaque (no FKs) — need reconciliation coverage | `CLOSED` | 9bb7f35e (developer-platform: src/reference_reconciliation.rs, bin developer-platform-reconcile-references, worker job, remote checks at Platform Access) + 5eae90cf (messaging + numbering: src/reference_reconciliation.rs, bins *-reconcile-references); tests tests/reference_reconciliation.rs in each service (missing/invalid refs reported, nothing deleted); report only |
 | FE-001 | P1 | FRONTEND | Web (and mobile) pre-join reads a PreJoinResponse shape the backend does not return; consent-required joins cannot succe | `FRONTEND_REMAINING` | PARTIAL: web pre-join consumes access.*/consents.* and sends consents; mobile in s17-mobile |
 | FE-005 | P1 | FRONTEND | Mobile guest join never keeps the participant credential and re-POSTs join every 3 s while waiting | `FRONTEND_CORRECTED` | 25001ae4 mobile guest join keeps the participant credential |
 | FE-006 | P1 | FRONTEND | Mobile build config hard-codes a private LAN IP over cleartext HTTP, overriding env | `FRONTEND_CORRECTED` | 57407e77 env-driven HTTPS base URL (FE-002..006) |
@@ -175,7 +173,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | PLT-005 | P1 | INFRASTRUCTURE | API Gateway and Developer Platform are not deployed; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | `EXTERNAL_BLOCKED` | EXTERNAL: activation checklist done; needs internal-TLS decision and deployment approval |
 | PLT-006 | P2 | SHARED_CONTRACT | Three Swagger renderers publish contradictory "public" surfaces; calling's Swagger UI is unhardened | `CLOSED` | 3a90d077 (merged 8920d20c) |
 | PLT-007 | P2 | SHARED_CONTRACT | Contract quality gates and the private catalogue skip the Developer Platform, Gateway and Communications contracts | `CLOSED` | 90c2397e, f07b1b39 |
-| PLT-008 | P2 | BACKEND | Credential lifecycle lacks last-used tracking and expiry warnings | `BACKEND_FOLLOW_UP` | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
+| PLT-008 | P2 | BACKEND | Credential lifecycle lacks last-used tracking and expiry warnings | `CLOSED` | c53b6084 (last use, expiringSoon); 9bb7f35e: credential.expiring_soon / credential.expired worker sweep (services/developer-platform/src/control/credential_lifecycle.rs, worker.rs; migration m20261203_000014; catalog + webhook schema); tests services/developer-platform/tests/credential_lifecycle.rs (thresholds, dedupe, crash recovery, outage + delivery retry, scope authz, schedule) |
 | PLT-009 | P2 | BACKEND | Operator/admin plane is fragmented, partly unaudited, has no UI, and audit trails are write-only | `CLOSED` | c53b6084 (merged ffd4c4c5) |
 | PLT-011 | P3 | SHARED_CONTRACT | Gateway scope pre-check absent for 153 credential routes | `CLOSED` | c53b6084 (merged ffd4c4c5); CI: api-gateway 42382697686 |
 | PLT-012 | P3 | INFRASTRUCTURE | Gateway rate limiting covers only platform-credential traffic; stale config comment | `CLOSED` | c53b6084 (merged ffd4c4c5) |

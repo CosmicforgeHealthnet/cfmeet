@@ -62,9 +62,14 @@ block-events ingest, legacy API keys (see API inventory §4).
 | SEC-012 | P2 | Bind service tokens to the request (`htm` method / `htu` path claims) and add a shared `jti` replay cache on mutating routes. Design: (1) receivers accept and verify the optional claims via a `verify_request(method, path, headers)` API (claims are a closed set, so receivers must ship first); (2) signers emit them behind a flag; (3) receivers require them. Touches every service's verifier and signer (~50 sites) and needs a staged deployment. Mitigations today: private network, TLS, audience + ≤ 300 s lifetime, request/correlation-id binding, replay checks in the Hub and scan gateway. |
 | INV-002 | P2 | automated tests for the 48 internal / operator operations still under the frozen coverage baseline |
 | MSG-009 | P2 | realtime nudge for timeline cards; call cards for members without a profile at launch |
-| PLT-008 | P2 | credential expiry webhook (last-use and `expiringSoon` already served) |
-| DATA-017 | P3 | reconciliation sweepers for Messaging, Developer Platform and Numbering foreign references |
 | MSG-018 | P3 | server-side receipt-event coalescing (client half done) |
+
+Closed since this report was first written:
+
+| Finding | Sev | Closure evidence |
+|---|---|---|
+| PLT-008 | P2 | 9bb7f35e: credential.expiring_soon / credential.expired worker sweep (services/developer-platform/src/control/credential_lifecycle.rs, worker.rs; migration m20261203_000014; catalog + webhook schema); tests services/developer-platform/tests/credential_lifecycle.rs (thresholds, dedupe, crash recovery, outage + delivery retry, scope authz, schedule) |
+| DATA-017 | P3 | 9bb7f35e (developer-platform: src/reference_reconciliation.rs, bin developer-platform-reconcile-references, worker job, remote checks at Platform Access) + 5eae90cf (messaging + numbering: src/reference_reconciliation.rs, bins *-reconcile-references); tests tests/reference_reconciliation.rs in each service (missing/invalid refs reported, nothing deleted); report only; runbook docs/operations/hardening-sections-2-3.md §6.3 |
 
 ## 7. Owner and external gates (kept disabled; not reported as live)
 
