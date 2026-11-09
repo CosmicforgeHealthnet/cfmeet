@@ -1156,3 +1156,340 @@ async fn organization_lifecycle_across_real_services() {
     let _ = socket.close().await;
     stack.teardown().await;
 }
+
+/// A signed Organizations operator call (`organization.migrate` / `.administer`).
+async fn org_operator(stack: &Stack, method: Method, path: &str, body: Option<Value>) -> Resp {
+    signed(
+        stack,
+        services::OPERATOR_CONSOLE,
+        ServiceId::organizations(),
+        stack.url(stack::ORGANIZATIONS),
+        method,
+        path,
+        None,
+        vec![("x-cf-operator".into(), "cfmeet-certification".into())],
+        body,
+    )
+    .await
+}
+
+/// J-17 (final closure): the Organizations cutover rehearsal across REAL processes —
+/// legacy Meeting Service data → read-only export → idempotent import into the real
+/// Organizations Service → reconciliation (counts, checksum, zero mismatches) → shadow
+/// period (Meeting stays the only writer; comparisons with zero mismatches; first-party
+/// writes refused) → authoritative switch (same canonical ids and memberships, nothing
+/// lost) → rollback to legacy before any Organizations write (the runbook's no-split-brain
+/// rule): the legacy tables still answer with the same data.
+#[tokio::test]
+async fn organizations_cutover_shadow_and_rollback_rehearsal() {
+    let Some(config) = StackConfig::from_env().expect("certification prerequisites") else {
+        return;
+    };
+    let internal_token = format!("cert-internal-{}", tag());
+    let options = StackOptions::default()
+        .with_organizations()
+        .set(
+            stack::MEETING_SERVICE,
+            "ORGANIZATIONS_AUTHORITY_MODE",
+            "legacy",
+        )
+        .set(
+            stack::MEETING_SERVICE,
+            "ORGANIZATION_CALLING_SCOPE",
+            "shared",
+        )
+        .set(
+            stack::MEETING_SERVICE,
+            "ORGANIZATION_EVENTS_ENABLED",
+            "false",
+        )
+        .set(
+            stack::MEETING_SERVICE,
+            "INTERNAL_API_TOKEN",
+            internal_token.clone(),
+        );
+    let mut stack = Stack::start_with(config, options)
+        .await
+        .expect("certification stack (legacy Meeting) starts");
+    let meeting_url = stack.url(stack::MEETING_SERVICE).to_string();
+    let redis = stack.config.redis_url.clone();
+    let owner = register_user(&meeting_url, &redis, &stack.http, &email("legacy-owner"))
+        .await
+        .unwrap();
+    let member = register_user(&meeting_url, &redis, &stack.http, &email("legacy-member"))
+        .await
+        .unwrap();
+    // A platform administrator (operator role set in the account database, then a fresh
+    // sign-in so the session carries it).
+    let admin_email = email("platform-admin");
+    let admin = register_user(&meeting_url, &redis, &stack.http, &admin_email)
+        .await
+        .unwrap();
+    let db = stack.db(stack::MEETING_SERVICE).await.unwrap();
+    db.execute_unprepared(&format!(
+        "UPDATE users SET role = 'admin' WHERE id = '{}'",
+        admin.id
+    ))
+    .await
+    .unwrap();
+    let password = "Cert-Admin-Pw9!-rehearsal";
+    // A known password through the real recovery flow (the reset code the mailer reads).
+    let r = send(
+        &stack,
+        Method::POST,
+        format!("{meeting_url}/api/v1/auth/forgot-password"),
+        None,
+        vec![],
+        Some(json!({ "email": admin_email })),
+    )
+    .await;
+    assert!((200..300).contains(&r.status), "{}", r.text);
+    let code = cfmeet_certification::redis::get(
+        &redis,
+        &format!("otp:reset:{}", admin_email.to_lowercase()),
+    )
+    .await
+    .unwrap()
+    .expect("reset code");
+    let r = send(&stack, Method::POST, format!("{meeting_url}/api/v1/auth/reset-password"), None, vec![],
+        Some(json!({ "email": admin_email, "token": code, "new_password": password, "confirm_password": password }))).await;
+    status(&r, 200, "set the administrator's password");
+    let login = send(
+        &stack,
+        Method::POST,
+        format!("{meeting_url}/api/v1/auth/login"),
+        None,
+        vec![],
+        Some(json!({ "email": admin_email, "password": password })),
+    )
+    .await;
+    status(&login, 200, "administrator signs in");
+    let admin = User {
+        id: admin.id,
+        email: admin_email.clone(),
+        session: login.body["access_token"].as_str().unwrap().to_string(),
+    };
+
+    // ---- Legacy data, written by the Meeting Service (the only writer before cutover).
+    let slug = format!("legacy-{}", tag());
+    let r = meeting(
+        &stack,
+        Method::POST,
+        "/api/v2/admin/organizations",
+        &admin,
+        Some(json!({ "name": "Legacy Clinic", "slug": slug, "ownerUserId": owner.id })),
+    )
+    .await;
+    status(
+        &r,
+        201,
+        "legacy organization created by the platform administrator",
+    );
+    let org = Uuid::parse_str(r.body["id"].as_str().unwrap()).unwrap();
+    let r = meeting(
+        &stack,
+        Method::PUT,
+        &format!("/api/v2/organizations/{org}/members/{}", member.id),
+        &owner,
+        Some(json!({ "role": "MEMBER", "status": "ACTIVE" })),
+    )
+    .await;
+    status(&r, 200, "legacy membership");
+    // First-party Organizations routes are off in legacy mode.
+    let r = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/organizations/{org}/teams"),
+        &owner,
+        None,
+    )
+    .await;
+    status(
+        &r,
+        404,
+        "first-party routes are FEATURE_DISABLED in legacy mode",
+    );
+
+    // ---- Export (read-only snapshot) with the Meeting Service's own export binary.
+    let export = std::process::Command::new(stack.config.bin_dir.join("export_organizations"))
+        .env("DATABASE_URL", &stack.db_urls[stack::MEETING_SERVICE])
+        .output()
+        .expect("export binary runs");
+    assert!(
+        export.status.success(),
+        "export: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let document: Value = serde_json::from_slice(&export.stdout).expect("export document");
+    assert!(document["organizations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|o| o["id"] == json!(org)));
+    let checksum = document["checksum"].as_str().unwrap().to_string();
+
+    // ---- Import (organization.migrate operator) and reconciliation.
+    let r = org_operator(
+        &stack,
+        Method::POST,
+        "/internal/v1/migration/import",
+        Some(document.clone()),
+    )
+    .await;
+    status(&r, 200, "import the export");
+    let again = org_operator(
+        &stack,
+        Method::POST,
+        "/internal/v1/migration/import",
+        Some(document.clone()),
+    )
+    .await;
+    status(&again, 200, "the import is idempotent");
+    let rec = org_operator(
+        &stack,
+        Method::GET,
+        "/internal/v1/migration/reconciliation",
+        None,
+    )
+    .await;
+    status(&rec, 200, "reconciliation");
+    assert_eq!(
+        rec.body["checksum"],
+        json!(checksum),
+        "row checksum equals the export's: {}",
+        rec.text
+    );
+    assert_eq!(
+        rec.body["mismatches"],
+        json!([]),
+        "zero mismatches: {}",
+        rec.text
+    );
+    println!("ORG_CUTOVER STEP export/import/reconciliation checksum {checksum}");
+
+    // ---- Shadow period: Meeting stays the only writer; comparisons, zero mismatches.
+    stack
+        .restart(
+            stack::MEETING_SERVICE,
+            &[("ORGANIZATIONS_AUTHORITY_MODE", "shadow")],
+        )
+        .await
+        .expect("shadow restart");
+    for user in [&owner, &member] {
+        for _ in 0..3 {
+            let r = meeting(&stack, Method::GET, "/api/v2/me/organizations", user, None).await;
+            status(&r, 200, "legacy directory read in shadow mode");
+            assert!(r.text.contains(&org.to_string()), "{}", r.text);
+        }
+    }
+    let r = meeting(
+        &stack,
+        Method::POST,
+        "/api/v2/organizations",
+        &owner,
+        Some(json!({ "name": "Split brain", "slug": format!("split-{}", tag()) })),
+    )
+    .await;
+    status(&r, 404, "no Organizations write is possible in shadow mode");
+    let mut comparisons = 0;
+    for _ in 0..60 {
+        let m = send(
+            &stack,
+            Method::GET,
+            format!("{}/internal/rtc/metrics", stack.url(stack::MEETING_SERVICE)),
+            None,
+            vec![("x-internal-token".into(), internal_token.clone())],
+            None,
+        )
+        .await;
+        status(&m, 200, "operations counters");
+        comparisons = m.body["operations"]["organizations_shadow_comparisons"]
+            .as_i64()
+            .unwrap_or(0);
+        let mismatches = m.body["operations"]["organizations_shadow_mismatches"]
+            .as_i64()
+            .unwrap_or(-1);
+        assert_eq!(mismatches, 0, "shadow mismatches: {}", m.text);
+        if comparisons >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(comparisons >= 2, "shadow comparisons ran: {comparisons}");
+    println!("ORG_CUTOVER STEP shadow comparisons={comparisons} mismatches=0");
+
+    // ---- Authoritative switch: the same canonical organization and memberships.
+    stack
+        .restart(
+            stack::MEETING_SERVICE,
+            &[("ORGANIZATIONS_AUTHORITY_MODE", "authoritative")],
+        )
+        .await
+        .expect("authoritative restart");
+    let r = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/organizations/{org}"),
+        &owner,
+        None,
+    )
+    .await;
+    status(&r, 200, "the organization after cutover");
+    assert_eq!(r.body["id"], json!(org), "the canonical id is preserved");
+    assert_eq!(r.body["creationSource"], "IMPORTED");
+    let members = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/organizations/{org}/members"),
+        &owner,
+        None,
+    )
+    .await;
+    status(&members, 200, "members after cutover");
+    for u in [owner.id, member.id] {
+        assert!(
+            members.text.contains(&u.to_string()),
+            "membership of {u} preserved: {}",
+            members.text
+        );
+    }
+    let r = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/organizations/{org}"),
+        &member,
+        None,
+    )
+    .await;
+    status(&r, 200, "the member keeps access after cutover");
+    println!("ORG_CUTOVER STEP authoritative: id and memberships preserved");
+
+    // ---- Rollback before any Organizations write (runbook section 7): legacy again, the
+    // local tables still answer with the same data; nothing was lost on either side.
+    stack
+        .restart(
+            stack::MEETING_SERVICE,
+            &[("ORGANIZATIONS_AUTHORITY_MODE", "legacy")],
+        )
+        .await
+        .expect("rollback restart");
+    for user in [&owner, &member] {
+        let r = meeting(&stack, Method::GET, "/api/v2/me/organizations", user, None).await;
+        status(&r, 200, "legacy directory after rollback");
+        assert!(r.text.contains(&org.to_string()), "{}", r.text);
+    }
+    let audit = org_operator(
+        &stack,
+        Method::GET,
+        "/internal/v1/migration/reconciliation",
+        None,
+    )
+    .await;
+    assert_eq!(
+        audit.body["checksum"],
+        json!(checksum),
+        "Organizations unchanged by the rehearsal"
+    );
+    println!("ORGANIZATION_CUTOVER_REAL_E2E: export import reconciliation shadow authoritative rollback (J-17): PASS");
+    stack.teardown().await;
+}
