@@ -23,6 +23,7 @@ pub mod domain;
 pub mod http;
 pub mod ledger;
 pub mod platform_access;
+pub mod reference_reconciliation;
 pub mod session;
 pub mod state;
 pub mod webhooks;

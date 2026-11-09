@@ -17,6 +17,7 @@
 
 pub mod activity;
 pub mod commercial;
+pub mod credential_lifecycle;
 pub mod credentials;
 pub mod entitlements;
 pub mod idempotency;
