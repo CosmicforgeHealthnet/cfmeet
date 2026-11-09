@@ -399,6 +399,10 @@ async fn organization_lifecycle_across_real_services() {
     // ---- J-04: creation, canonical identity, truthful provisioning.
     let (org, scope) = organization(&stack, &owner, "Lagos General").await;
 
+    println!(
+        "ORG_LIFECYCLE STEP J-04 created {org}, provisioned scope env {}",
+        scope.environment
+    );
     // ---- J-05: e-mail-bound invitation, acceptance, workspace list.
     let inv = meeting(
         &stack,
@@ -466,6 +470,7 @@ async fn organization_lifecycle_across_real_services() {
     .await;
     status(&r, 404, "non-member read");
 
+    println!("ORG_LIFECYCLE STEP J-05 invitation accepted, membership {membership}");
     // ---- J-10 (part 1): organization conversation in the organization's own scope.
     let sa = enable_messaging(&stack, org, scope).await;
     let r = org_messaging(
@@ -657,6 +662,7 @@ async fn organization_lifecycle_across_real_services() {
     status(&r, 201, "employee's conversation in the other scope");
     let personal_conversation = r.body["conversationId"].as_str().unwrap().to_string();
 
+    println!("ORG_LIFECYCLE STEP J-10a organization conversation {conversation}: 2 messages, realtime subscribed");
     // ---- J-10 (part 2): offboarding.
     let r = meeting(
         &stack,
@@ -765,6 +771,7 @@ async fn organization_lifecycle_across_real_services() {
     status(&list, 200, "owner reads after the removal");
     assert_eq!(texts(&list), ["handover at 7", "acknowledged"]);
 
+    println!("ORG_LIFECYCLE STEP J-10b removal: relay refused, PRINCIPAL_INACTIVE, realtime closed, other scope still sends");
     // ---- J-14: organization suspension fails closed; reactivation restores.
     let r = meeting(
         &stack,
@@ -829,6 +836,9 @@ async fn organization_lifecycle_across_real_services() {
     )
     .await;
 
+    println!(
+        "ORG_LIFECYCLE STEP J-14 suspended (relay refused, AUTHORITY_SUSPENDED) and reactivated"
+    );
     // ---- J-06: a second organization with an overlapping member; nothing crosses.
     let (org_b, scope_b) = organization(&stack, &employee, "Abuja Clinic").await;
     let inv = meeting(
@@ -918,6 +928,7 @@ async fn organization_lifecycle_across_real_services() {
         (Some("OWNER"), Some("ADMIN"))
     );
 
+    println!("ORG_LIFECYCLE STEP J-06 second organization {org_b}: no conversation crosses, roles OWNER/ADMIN");
     // ---- J-19: delivery evidence — signed outbox delivery, nothing dead-lettered, the
     // removal applied by the consumer exactly once.
     let r = signed(
@@ -955,6 +966,11 @@ async fn organization_lifecycle_across_real_services() {
     ))).await.unwrap().unwrap().try_get_by_index::<Option<String>>(0).unwrap();
     assert_eq!(access.as_deref(), Some("REMOVED"));
 
+    println!(
+        "ORG_LIFECYCLE STEP J-19 delivered={} dead=0, removal applied once",
+        meeting_dest["delivered"]
+    );
+    println!("ORGANIZATION_LIFECYCLE_REAL_E2E: J-04 J-05 J-06 J-10 J-14 J-19: PASS");
     let _ = socket.close().await;
     stack.teardown().await;
 }
