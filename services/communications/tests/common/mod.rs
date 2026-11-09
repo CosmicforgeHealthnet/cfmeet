@@ -384,7 +384,7 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
                 .and_then(|c| Uuid::parse_str(c).ok());
             let rest: Vec<&Account> = accounts
                 .values()
-                .filter(|a| after.map_or(true, |c| a.principal > c))
+                .filter(|a| after.is_none_or(|c| a.principal > c))
                 .collect();
             let page: Vec<Value> = rest
                 .iter()
