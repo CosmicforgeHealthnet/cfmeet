@@ -27,7 +27,11 @@ Confirmed open gaps (checked in code, not only in reports):
 | W1 | Organizations event delivery (producer + Meeting ingress) | `blueprint/final-org-events` | CODE COMPLETE, local tests green; branch CI running | `1ca9b010`, `7c759c09`, `04f8c5ce`, `2b945505` | 32/33 on `7c759c09` (Meeting fmt + guard array, fixed in `2b945505`); rerun pending |
 | W2a | Organization offboarding worker | same | CODE COMPLETE, local tests green | `7c759c09` | as W1 |
 | W2b | Organization-scope Messaging relay + realtime tokens | same | CODE COMPLETE, local tests green | `04f8c5ce`, `f129f442` | pending |
-| W3 | Real-process organization lifecycle certification (J-04/05/06/10/14/17/19) | — | NEXT | — | — |
+| W3 | Real-process organization lifecycle certification (J-04/05/06/07/10/12/14/17/19) | same | J-04/05/06/10/14/19 passed in CI (42536543145); J-17 passed (42543307766); J-07 found a real ICS export bug (fixed `bde8e596`); full rerun pending | `3aa7a562`…`bde8e596` | pending on `bde8e596` |
+| W4 | Account / contact / phone gaps (J-01/02/03/13) | same | CODE COMPLETE: positive password reset, QR route, PROVIDER_BLOCKED label, DP console session revocation | `5dbf9772`, `adf25521`, `6f71808b` | pending |
+| W5 | Section 17 recovered work: web Messages/Contacts, ORG-006 teams/policies relay, organization Messages web view, member resolve | same | CODE COMPLETE, local tests green | `62104239`, `f2ea1ab2`, `77fcd86b`, `ca4072cc` | pending |
+| W6 | RTC Egress capture on staging builds (J-12 media) | same | PASSED (42541119111) | `rtc capture workflow` | done |
+| W7 | Documents C (API inventory) and G (activation runbook) | same | DRAFTED | `250d6dd7`, `3b41cc2f` | n/a |
 
 ## 3. Workstream records
 
