@@ -4,9 +4,13 @@ name: CF Meet RTC voicemail and recording Egress certification
 # Uses ONLY isolated CI test credentials. No production deployment/keys.
 on:
   push:
-    branches: [main]
+    # Final closure: also certify capture on staging builds that change Calling or the
+    # LiveKit / Egress configuration (it was main-only, so staging CI never captured).
+    branches: [main, staging]
     paths:
       - ".github/workflows/cfmeet-rtc-capture-certification.yml"
+      - "services/calling/**"
+      - "infra/livekit/**"
   workflow_dispatch:
 
 permissions: { contents: read }
