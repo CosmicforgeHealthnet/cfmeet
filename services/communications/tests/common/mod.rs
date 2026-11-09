@@ -57,6 +57,8 @@ pub struct World {
     pub push_status: Option<Value>,
     pub revoked_devices: Vec<Uuid>,
     pub revoked_endpoints: Vec<Uuid>,
+    /// Replaces the Account's backfill page (malformed-owner tests).
+    pub backfill_page: Option<Value>,
 }
 #[derive(Clone)]
 pub struct MockConversation {
@@ -371,6 +373,27 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
             }
             None => json!({"active":false,"version":0}),
         },
+        // The Account's backfill page: accounts ordered by principal id after `cursor`.
+        "/internal/v1/accounts/communications/backfill" => {
+            if let Some(page) = s.world.read().unwrap().backfill_page.clone() {
+                return Json(page).into_response();
+            }
+            let limit = body["limit"].as_u64().unwrap_or(0) as usize;
+            let after = body["cursor"]
+                .as_str()
+                .and_then(|c| Uuid::parse_str(c).ok());
+            let rest: Vec<&Account> = accounts
+                .values()
+                .filter(|a| after.is_none_or(|c| a.principal > c))
+                .collect();
+            let page: Vec<Value> = rest
+                .iter()
+                .take(limit)
+                .map(|a| json!({"accountReference":a.reference,"principalId":a.principal,"displayName":"Backfilled member"}))
+                .collect();
+            let next = (rest.len() > limit).then(|| rest[limit - 1].principal);
+            json!({"accounts":page,"nextCursor":next})
+        }
         "/internal/v1/communications/blocks/check" => json!({"blocked":*s.blocked.read().unwrap()}),
         "/internal/v1/communications/capabilities" => {
             json!({"available":false,"reason":"DEVICE_SECURITY_SETUP_REQUIRED","securityReady":false,"privateField":"MUST_NOT_REACH_CONSUMER"})

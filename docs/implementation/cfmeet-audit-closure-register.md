@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 25 | 15 | 58 |
+| `CLOSED` | 2 | 16 | 26 | 15 | 59 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,14 +28,13 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 2 | 6 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 3 | 2 | 5 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
 
 | Finding | Sev | Title | Remaining |
 |---|---|---|---|
-| INV-002 | P2 | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain ( |
 | MSG-009 | P2 | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no  | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
 | PLT-008 | P2 | Credential lifecycle lacks last-used tracking and expiry warnings | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
 | SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
@@ -112,7 +111,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | FE-019 | P3 | FRONTEND | Mobile error decoding ignores the v2 error envelope and mislabels every 401 | `FRONTEND_CORRECTED` | 57407e77 mobile v2 error envelope |
 | FE-021 | P2 | PRODUCT_DECISION | Mobile covers only auth plus a broken legacy meeting flow; no spaces, conferences, messaging, calling or organizations | `FRONTEND_CORRECTED` | 57407e77 mobile spaces, conferences, organizations, chats |
 | INV-001 | P3 | SHARED_CONTRACT | No CI gate proves gateway manifest upstream paths exist in the upstream routers (all 572 resolve today, by static extrac | `CLOSED` | 782c3c86 |
-| INV-002 | P2 | BACKEND | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service auth/API- | `BACKEND_FOLLOW_UP` | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain (untested 146 -> 48 of 1,128) |
+| INV-002 | P2 | BACKEND | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service auth/API- | `CLOSED` | baseline emptied (scripts/contracts/operation_test_coverage.py BASELINE = {}; 0 of 1,151 untested; unit test pins it); the 40 operations still untested at closure time (48 at Section 16, 8 since covered) now have route-level authz / validation / failure / success tests: platform-access tests/operator_reads.rs (3 ops, 3 tests), communications tests/operator_routes.rs (2 ops, 4 tests), calling tests/webhook_migration.rs (1 op, 1 test), developer-platform tests/operator_commands.rs (5 ops, 5 tests) and tests/webhook_migration_routes.rs (9 ops, 4 tests), numbering tests/operator_http.rs (20 ops, 5 tests); 3900b3db, 18f14dd0, f71fb728, de76d5ab, cca0d321, 86955834 |
 | MSG-001 | P1 | SHARED_CONTRACT | REST event replay uses `afterEventSequence` but Messaging only accepts `after`; web realtime recovery never advances and | `CLOSED` | 4c257004 (merged 51c5903a); CI: meeting-service 42368524444, messaging 42368522195 |
 | MSG-002 | P1 | BACKEND | Meeting relay mounts GET/POST/PUT/DELETE only: every allowlisted PATCH (MANAGED edit, member role, conversation update/r | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MSG-003 | P2 | BACKEND | Relay query allowlists drop documented parameters (`scope` on message delete, `reason` on member removal, `threadRootId` | `CLOSED` | 4c257004 (merged 51c5903a) |

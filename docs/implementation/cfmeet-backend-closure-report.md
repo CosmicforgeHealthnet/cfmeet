@@ -9,7 +9,7 @@ Production (`main`) untouched; open release PR #39 (`staging` → `main`) left o
 **BACKEND_ENGINEERING_PARTIAL — BLOCKERS_REMAIN.** All 22 journeys are certified (19 PASS, 1 PASS
 with an owner gate, 2 EXTERNAL_BLOCKED with truthful reporting; none NOT_COVERED, PARTIAL or
 failed), no P0/P1 finding has implementable backend work left, and the full CI matrix is green.
-Six implementable backend findings remain open, all P2/P3 (§6). They block no journey and no frontend
+Five implementable backend findings remain open, all P2/P3 (§6). They block no journey and no frontend
 contract, so the backend contract is frozen and handed over; they keep the strict "every
 implementable finding closed" verdict from being claimed. Repository cleanup is also incomplete: the
 38 temporary branches are verified safe to delete, but this session cannot delete remote refs (§5).
@@ -26,6 +26,7 @@ implementable finding closed" verdict from being claimed. Repository cleanup is 
 | J-18 | real-schema backup / restore drill over all 11 databases, new CI job | `42b415fd` |
 | J-12 harness | Calling binding gets its own service account | `84b981b1` |
 | Frontend contract | generated, CI-checked endpoint reference (618 operations) + handover guide | `3e944b79`, `cea2088d` |
+| INV-002 | every contract operation is exercised by a test: route-level tests (401 / 403 / OPERATOR_REQUIRED, validation 400, missing / foreign 404, refused state 409 / 422, success with effect) for the 40 internal / operator operations left under the frozen baseline; the baseline is now empty, so an untested operation fails `scripts/contracts/operation_test_coverage.py` in CI (0 of 1,151 untested) | `services/platform-access/tests/operator_reads.rs`, `services/communications/tests/operator_routes.rs`, `services/calling/tests/webhook_migration.rs`, `services/developer-platform/tests/operator_commands.rs`, `services/developer-platform/tests/webhook_migration_routes.rs`, `services/numbering/tests/operator_http.rs` (22 tests); 3900b3db, 18f14dd0, f71fb728, de76d5ab, cca0d321, 86955834 |
 | Docs | audit closure register, certification report, runbook additions, ADR 0053 update, API inventory note | this branch |
 
 ## 3. Recovered and consolidated (from `blueprint/final-org-events`, 35 commits)
@@ -60,7 +61,6 @@ block-events ingest, legacy API keys (see API inventory §4).
 | Finding | Sev | Remaining work |
 |---|---|---|
 | SEC-012 | P2 | Bind service tokens to the request (`htm` method / `htu` path claims) and add a shared `jti` replay cache on mutating routes. Design: (1) receivers accept and verify the optional claims via a `verify_request(method, path, headers)` API (claims are a closed set, so receivers must ship first); (2) signers emit them behind a flag; (3) receivers require them. Touches every service's verifier and signer (~50 sites) and needs a staged deployment. Mitigations today: private network, TLS, audience + ≤ 300 s lifetime, request/correlation-id binding, replay checks in the Hub and scan gateway. |
-| INV-002 | P2 | automated tests for the 48 internal / operator operations still under the frozen coverage baseline |
 | MSG-009 | P2 | realtime nudge for timeline cards; call cards for members without a profile at launch |
 | PLT-008 | P2 | credential expiry webhook (last-use and `expiringSoon` already served) |
 | DATA-017 | P3 | reconciliation sweepers for Messaging, Developer Platform and Numbering foreign references |
