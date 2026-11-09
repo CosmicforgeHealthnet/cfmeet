@@ -747,6 +747,33 @@ async fn voice_call(cert: &Cert) {
         "rtc certification: quality summary recorded (admitted sessions 2, connected participants 2, reconnects {})",
         summary.metrics.get("session_reconnects").unwrap_or_default()
     );
+    // Section 18 J-11: the same personal call closes in both parties' history — ring,
+    // answer, real media, hold/resume and end above, history here — in one journey.
+    for (principal, direction) in [
+        (cert.a.w.initiator.id().as_uuid(), "OUTBOUND"),
+        (cert.a.w.recipient.id().as_uuid(), "INBOUND"),
+    ] {
+        let r = cert
+            .a
+            .get(&format!("/v1/calls?principalId={principal}"))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let entries: Vec<&Value> = r.json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["callId"] == call.to_string())
+            .collect();
+        assert_eq!(entries.len(), 1, "one history entry per party: {}", r.text);
+        assert_eq!(entries[0]["state"], "ENDED", "{}", r.text);
+        assert_eq!(entries[0]["participation"]["direction"], direction);
+        assert_eq!(
+            entries[0]["participation"]["outcome"], "ANSWERED",
+            "{}",
+            r.text
+        );
+    }
+    println!("rtc certification: J-11 personal call ring -> answer -> media -> hold -> resume -> end -> history: PASS");
     a.quit().await;
     b.quit().await;
 }
