@@ -912,7 +912,17 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert!(!json.contains("e164") && !json.contains('+'));
+        // Inspect keys and values, not raw text: the random hex token id can contain
+        // the letters "e164" by chance.
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        for (key, field) in value.as_object().unwrap() {
+            assert!(
+                !key.contains("e164") && !matches!(key.as_str(), "number" | "phone" | "msisdn"),
+                "{key}"
+            );
+            let text = field.as_str().unwrap_or_default();
+            assert!(!text.contains('+'), "{key}: {text}");
+        }
         assert!(NumberGrantClaims::from_json(&json).is_ok());
     }
 
