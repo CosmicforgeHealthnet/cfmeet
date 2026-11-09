@@ -175,8 +175,14 @@ async fn the_channel_authenticates_before_upgrading_and_delivers_committed_signa
     let view = a.call_view(call.parse().unwrap()).await;
     assert_eq!(view["state"], incoming["callState"]);
     assert!(view["version"].as_i64().unwrap() >= incoming["callVersion"].as_i64().unwrap());
+    // Matched at a token boundary only: a random UUID in the signal can contain "cfc-"
+    // (e.g. "…0cfc-…"), which is not a media resource name or credential.
+    let rendered = incoming.to_string();
     for forbidden in ["cfc-", "cfmid_", "token", "secret", a.secret()] {
-        assert!(!incoming.to_string().contains(forbidden), "{forbidden}");
+        assert!(
+            !contains_token(&rendered, forbidden),
+            "{forbidden} in {rendered}"
+        );
     }
 
     // Closing the channel completes the closing handshake (a clean close, never a
@@ -466,4 +472,21 @@ async fn signals_fan_out_across_instances() {
         )
         .await;
     assert_eq!(r.json["state"], "ANSWERED");
+}
+
+/// `needle` occurs in `haystack` where it starts a token (not preceded by a letter or digit).
+fn contains_token(haystack: &str, needle: &str) -> bool {
+    haystack
+        .match_indices(needle)
+        .any(|(i, _)| i == 0 || !haystack.as_bytes()[i - 1].is_ascii_alphanumeric())
+}
+
+#[test]
+fn contains_token_ignores_matches_inside_identifiers() {
+    assert!(contains_token("{\"room\":\"cfc-0b6f\"}", "cfc-"));
+    assert!(!contains_token(
+        "{\"callId\":\"9ab190e2-1251-4fb4-a4cb-6f794decfc-0\"}",
+        "cfc-"
+    ));
+    assert!(contains_token("cfc-", "cfc-"));
 }
