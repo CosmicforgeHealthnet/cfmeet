@@ -348,6 +348,30 @@ async fn enable_calling(stack: &Stack, org: Uuid, scope: Scope) {
     status(&r, 200, "bind the organization's Calling credential");
 }
 
+/// The Meeting Service consumer's delivery state at Organizations (operator read).
+async fn meeting_delivery(stack: &Stack) -> Value {
+    let r = signed(
+        stack,
+        services::OPERATOR_CONSOLE,
+        ServiceId::organizations(),
+        stack.url(stack::ORGANIZATIONS),
+        Method::GET,
+        "/internal/v1/admin/event-delivery",
+        None,
+        vec![("x-cf-operator".into(), "cfmeet-certification".into())],
+        None,
+    )
+    .await;
+    r.body["destinations"]
+        .as_array()
+        .and_then(|d| {
+            d.iter()
+                .find(|d| d["destination"] == "cfmeet.meeting-service")
+                .cloned()
+        })
+        .unwrap_or(Value::Null)
+}
+
 /// The member's principal in an environment (as the Meeting Service recorded it).
 async fn principal_in(stack: &Stack, user: Uuid, environment: Uuid) -> Option<Uuid> {
     let db = stack.db(stack::MEETING_SERVICE).await.unwrap();
@@ -418,7 +442,7 @@ async fn organization_lifecycle_across_real_services() {
             "MESSAGING_REALTIME_REVALIDATE_SECONDS",
             "5",
         );
-    let stack = Stack::start_with(config, options)
+    let mut stack = Stack::start_with(config, options)
         .await
         .expect("certification stack with organizations starts");
     let meeting_url = stack.url(stack::MEETING_SERVICE).to_string();
@@ -1111,6 +1135,159 @@ async fn organization_lifecycle_across_real_services() {
         "one principal per organization scope"
     );
     println!("ORG_LIFECYCLE STEP J-12 Enterprise Calling per organization scope; cross-organization admin refused");
+    // ---- J-19: outages and recovery across real processes.
+    // (a) The consumer is down while a membership changes: the event waits durably with a
+    // retry class, then is delivered in order once the Meeting Service is back.
+    let members_b = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/organizations/{org_b}/members"),
+        &employee,
+        None,
+    )
+    .await;
+    status(&members_b, 200, "organization B members");
+    let owner_in_b = members_b
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["userId"] == json!(owner.id))
+        .expect("owner's membership in B")
+        .clone();
+    assert!(
+        stack.stop(stack::MEETING_SERVICE).await,
+        "Meeting Service stopped"
+    );
+    let r = signed(
+        &stack,
+        services::MEETING_SERVICE,
+        ServiceId::organizations(),
+        stack.url(stack::ORGANIZATIONS),
+        Method::PATCH,
+        &format!(
+            "/internal/v1/organizations/{org_b}/members/{}",
+            owner_in_b["id"].as_str().unwrap()
+        ),
+        None,
+        vec![("x-cf-acting-user".into(), employee.id.to_string())],
+        Some(json!({ "expectedVersion": owner_in_b["version"], "role": "MEMBER" })),
+    )
+    .await;
+    status(&r, 200, "role change while the consumer is down");
+    let mut waiting = Value::Null;
+    for _ in 0..120 {
+        waiting = meeting_delivery(&stack).await;
+        if waiting["pending"].as_i64().unwrap_or(0) >= 1 && waiting["lastErrorClass"].is_string() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(
+        waiting["lastErrorClass"].is_string(),
+        "delivery failed with a class and stayed pending: {waiting}"
+    );
+    assert_eq!(
+        waiting["dead"], 0,
+        "an outage never dead-letters: {waiting}"
+    );
+    stack
+        .restart(stack::MEETING_SERVICE, &[])
+        .await
+        .expect("Meeting Service back");
+    let mut drained = Value::Null;
+    for _ in 0..240 {
+        drained = meeting_delivery(&stack).await;
+        if drained["pending"] == 0 && drained["inflight"] == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(
+        (drained["pending"].as_i64(), drained["dead"].as_i64()),
+        (Some(0), Some(0)),
+        "backlog drained: {drained}"
+    );
+    let db = stack.db(stack::MEETING_SERVICE).await.unwrap();
+    let changed = db.query_one(Statement::from_string(sea_orm::DbBackend::Postgres, format!(
+        "SELECT count(*) FROM organization_event_inbox WHERE organization_id = '{org_b}' AND event_type = 'membership.role_changed' AND outcome = 'APPLIED'"
+    ))).await.unwrap().unwrap().try_get_by_index::<i64>(0).unwrap();
+    assert_eq!(
+        changed, 1,
+        "the role change was applied once after the outage"
+    );
+    println!("ORG_LIFECYCLE STEP J-19a consumer outage: pending with {}, drained after restart, applied once", waiting["lastErrorClass"]);
+
+    // (b) Platform Access is down while an organization is provisioned: the saga backs off
+    // with a recorded failure class and completes once Platform Access is back.
+    assert!(
+        stack.stop(stack::PLATFORM_ACCESS).await,
+        "Platform Access stopped"
+    );
+    let slug = format!("cert-{}", tag());
+    let r = meeting(
+        &stack,
+        Method::POST,
+        "/api/v2/organizations",
+        &owner,
+        Some(json!({ "name": "Outage Clinic", "slug": slug })),
+    )
+    .await;
+    status(&r, 201, "create while Platform Access is down");
+    let org_c = r.body["id"].as_str().unwrap().to_string();
+    let mut pending = Value::Null;
+    for _ in 0..120 {
+        pending = meeting(
+            &stack,
+            Method::GET,
+            &format!("/api/v2/organizations/{org_c}/provisioning"),
+            &owner,
+            None,
+        )
+        .await
+        .body;
+        if pending["attempts"].as_i64().unwrap_or(0) >= 1 && pending["lastErrorClass"].is_string() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_ne!(
+        pending["provisioningState"], "READY",
+        "never READY without Platform Access: {pending}"
+    );
+    assert!(
+        pending["lastErrorClass"].is_string(),
+        "the failure is recorded: {pending}"
+    );
+    stack
+        .restart(stack::PLATFORM_ACCESS, &[])
+        .await
+        .expect("Platform Access back");
+    let mut ready = Value::Null;
+    for _ in 0..360 {
+        ready = meeting(
+            &stack,
+            Method::GET,
+            &format!("/api/v2/organizations/{org_c}/provisioning"),
+            &owner,
+            None,
+        )
+        .await
+        .body;
+        if ready["provisioningState"] == "READY" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(
+        ready["provisioningState"], "READY",
+        "provisioning recovered after the outage: {ready}"
+    );
+    println!(
+        "ORG_LIFECYCLE STEP J-19b provisioning outage: {} recorded, READY after recovery",
+        pending["lastErrorClass"]
+    );
+
     // ---- J-19: delivery evidence — signed outbox delivery, nothing dead-lettered, the
     // removal applied by the consumer exactly once.
     let r = signed(
@@ -1152,7 +1329,7 @@ async fn organization_lifecycle_across_real_services() {
         "ORG_LIFECYCLE STEP J-19 delivered={} dead=0, removal applied once",
         meeting_dest["delivered"]
     );
-    println!("ORGANIZATION_LIFECYCLE_REAL_E2E: J-04 J-05 J-06 J-07 J-10 J-12 J-14 J-19: PASS");
+    println!("ORGANIZATION_LIFECYCLE_REAL_E2E: J-04 J-05 J-06 J-07 J-10 J-12 J-14 J-19 (incl. outages): PASS");
     let _ = socket.close().await;
     stack.teardown().await;
 }
