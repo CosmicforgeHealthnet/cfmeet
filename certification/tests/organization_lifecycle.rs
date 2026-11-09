@@ -315,6 +315,39 @@ async fn enable_messaging(stack: &Stack, org: Uuid, scope: Scope) -> Uuid {
     sa
 }
 
+/// Operator step: a Calling service account + credential inside the organization's own
+/// scope (enterprise configuration scopes), bound in Organizations.
+async fn enable_calling(stack: &Stack, org: Uuid, scope: Scope) {
+    let operator = stack.operator();
+    let scopes = [
+        "enterprise.config.read",
+        "enterprise.config.write",
+        "calls.read",
+    ];
+    operator
+        .grant_scopes(scope.application, &scopes)
+        .await
+        .expect("grant Calling scopes in the organization scope");
+    let sa = operator
+        .service_account(scope.environment)
+        .await
+        .expect("Calling service account in the organization scope");
+    let (credential, _secret) = operator.credential(sa, &scopes).await.expect("credential");
+    let r = signed(
+        stack,
+        services::OPERATOR_CONSOLE,
+        ServiceId::organizations(),
+        stack.url(stack::ORGANIZATIONS),
+        Method::PUT,
+        &format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/calling"),
+        None,
+        vec![("x-cf-operator".into(), "cfmeet-certification".into())],
+        Some(json!({ "serviceAccountId": sa, "credentialId": credential })),
+    )
+    .await;
+    status(&r, 200, "bind the organization's Calling credential");
+}
+
 /// The member's principal in an environment (as the Meeting Service recorded it).
 async fn principal_in(stack: &Stack, user: Uuid, environment: Uuid) -> Option<Uuid> {
     let db = stack.db(stack::MEETING_SERVICE).await.unwrap();
@@ -351,6 +384,10 @@ async fn as_principal(
         body,
     )
     .await
+}
+
+fn urlencoding(v: String) -> String {
+    v.replace(':', "%3A").replace('+', "%2B")
 }
 
 fn text_message(text: &str) -> Value {
@@ -471,6 +508,90 @@ async fn organization_lifecycle_across_real_services() {
     status(&r, 404, "non-member read");
 
     println!("ORG_LIFECYCLE STEP J-05 invitation accepted, membership {membership}");
+
+    // ---- J-07: organization meeting space + calendar (time zone, schedule, agenda, ICS).
+    let space = meeting(
+        &stack,
+        Method::POST,
+        "/api/v2/meeting-spaces",
+        &owner,
+        Some(
+            json!({ "title": "Morning handover", "accessPolicy": "ORGANIZATION_ONLY",
+                     "organizationId": org, "timezone": "Africa/Lagos" }),
+        ),
+    )
+    .await;
+    status(&space, 201, "organization meeting space");
+    let space_id = space.body["id"].as_str().unwrap().to_string();
+    let start = chrono::Utc::now() + chrono::Duration::days(1);
+    let conf = meeting(&stack, Method::POST, &format!("/api/v2/meeting-spaces/{space_id}/conferences"), &owner,
+        Some(json!({ "scheduledStartAt": start.to_rfc3339(), "scheduledEndAt": (start + chrono::Duration::hours(1)).to_rfc3339() }))).await;
+    assert!(
+        conf.status == 201 || conf.status == 200,
+        "schedule the organization meeting: {}",
+        conf.text
+    );
+    let conference_id = ["/id", "/conference/id", "/conferenceId"]
+        .iter()
+        .find_map(|p| conf.body.pointer(p).and_then(Value::as_str))
+        .expect("conference id")
+        .to_string();
+    let window = format!(
+        "/api/v2/me/conferences?organizationId={org}&from={}&to={}",
+        urlencoding((start - chrono::Duration::hours(2)).to_rfc3339()),
+        urlencoding((start + chrono::Duration::hours(3)).to_rfc3339())
+    );
+    let agenda = meeting(&stack, Method::GET, &window, &employee, None).await;
+    status(&agenda, 200, "member agenda");
+    assert!(
+        agenda.text.contains(&conference_id),
+        "the member sees the organization meeting: {}",
+        agenda.text
+    );
+    let ics = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/conferences/{conference_id}/calendar.ics"),
+        &employee,
+        None,
+    )
+    .await;
+    status(&ics, 200, "member ICS export");
+    assert!(
+        ics.text.contains("BEGIN:VCALENDAR") && ics.text.contains("BEGIN:VEVENT"),
+        "{}",
+        ics.text
+    );
+    let outsider_space = meeting(
+        &stack,
+        Method::GET,
+        &format!("/api/v2/meeting-spaces/{space_id}"),
+        &stranger,
+        None,
+    )
+    .await;
+    assert!(
+        outsider_space.status == 404 || outsider_space.status == 403,
+        "an outsider cannot open it: {}",
+        outsider_space.text
+    );
+    let outsider_agenda = meeting(
+        &stack,
+        Method::GET,
+        &format!(
+            "/api/v2/me/conferences?from={}&to={}",
+            urlencoding((start - chrono::Duration::hours(2)).to_rfc3339()),
+            urlencoding((start + chrono::Duration::hours(3)).to_rfc3339())
+        ),
+        &stranger,
+        None,
+    )
+    .await;
+    assert!(
+        !outsider_agenda.text.contains(&conference_id),
+        "never in an outsider's agenda"
+    );
+    println!("ORG_LIFECYCLE STEP J-07 organization meeting {conference_id}: member agenda + ICS, outsider refused");
     // ---- J-10 (part 1): organization conversation in the organization's own scope.
     let sa = enable_messaging(&stack, org, scope).await;
     let r = org_messaging(
@@ -772,6 +893,23 @@ async fn organization_lifecycle_across_real_services() {
     assert_eq!(texts(&list), ["handover at 7", "acknowledged"]);
 
     println!("ORG_LIFECYCLE STEP J-10b removal: relay refused, PRINCIPAL_INACTIVE, realtime closed, other scope still sends");
+    let after = meeting(
+        &stack,
+        Method::GET,
+        &format!(
+            "/api/v2/me/conferences?from={}&to={}",
+            urlencoding((start - chrono::Duration::hours(2)).to_rfc3339()),
+            urlencoding((start + chrono::Duration::hours(3)).to_rfc3339())
+        ),
+        &employee,
+        None,
+    )
+    .await;
+    assert!(
+        !after.text.contains(&conference_id),
+        "a removed member no longer sees organization meetings: {}",
+        after.text
+    );
     // ---- J-14: organization suspension fails closed; reactivation restores.
     let r = meeting(
         &stack,
@@ -929,6 +1067,50 @@ async fn organization_lifecycle_across_real_services() {
     );
 
     println!("ORG_LIFECYCLE STEP J-06 second organization {org_b}: no conversation crosses, roles OWNER/ADMIN");
+
+    // ---- J-12: organization Enterprise Calling runs in each organization's own scope.
+    enable_calling(&stack, org, scope).await;
+    enable_calling(&stack, org_b, scope_b).await;
+    let calling = |o: Uuid, u: &User| {
+        let (stack, u) = (&stack, u.clone());
+        async move {
+            meeting(
+                stack,
+                Method::GET,
+                &format!("/api/v2/organizations/{o}/calling/v1/enterprise/extensions?limit=5"),
+                &u,
+                None,
+            )
+            .await
+        }
+    };
+    let r = calling(org, &owner).await;
+    status(
+        &r,
+        200,
+        "organization A Enterprise Calling through real Calling",
+    );
+    let r = calling(org_b, &owner).await;
+    status(
+        &r,
+        200,
+        "organization B Enterprise Calling through real Calling",
+    );
+    // The removed employee administers B, not A: A's Enterprise Calling refuses them.
+    let r = calling(org, &employee).await;
+    assert!(
+        r.status == 403 || r.status == 404,
+        "no Enterprise Calling of another organization: {}",
+        r.text
+    );
+    // Each organization's principals live in its own environment.
+    let owner_a = principal_in(&stack, owner.id, scope.environment).await;
+    let owner_b = principal_in(&stack, owner.id, scope_b.environment).await;
+    assert!(
+        owner_a.is_some() && owner_b.is_some() && owner_a != owner_b,
+        "one principal per organization scope"
+    );
+    println!("ORG_LIFECYCLE STEP J-12 Enterprise Calling per organization scope; cross-organization admin refused");
     // ---- J-19: delivery evidence — signed outbox delivery, nothing dead-lettered, the
     // removal applied by the consumer exactly once.
     let r = signed(
@@ -970,7 +1152,7 @@ async fn organization_lifecycle_across_real_services() {
         "ORG_LIFECYCLE STEP J-19 delivered={} dead=0, removal applied once",
         meeting_dest["delivered"]
     );
-    println!("ORGANIZATION_LIFECYCLE_REAL_E2E: J-04 J-05 J-06 J-10 J-14 J-19: PASS");
+    println!("ORGANIZATION_LIFECYCLE_REAL_E2E: J-04 J-05 J-06 J-07 J-10 J-12 J-14 J-19: PASS");
     let _ = socket.close().await;
     stack.teardown().await;
 }
