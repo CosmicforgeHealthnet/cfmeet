@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "numbering"
 path = "src/main.rs"
 
+# DATA-017: report-only reconciliation of the foreign references Numbering holds.
+[[bin]]
+name = "numbering-reconcile-references"
+path = "src/bin/numbering-reconcile-references.rs"
+
 [dependencies]
 numbering-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).

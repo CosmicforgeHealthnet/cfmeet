@@ -26,6 +26,11 @@ path = "src/bin/messaging-admin.rs"
 name = "messaging-kt-witness"
 path = "src/bin/messaging-kt-witness.rs"
 
+# DATA-017: report-only reconciliation of the foreign references Messaging holds.
+[[bin]]
+name = "messaging-reconcile-references"
+path = "src/bin/messaging-reconcile-references.rs"
+
 [dependencies]
 cf-communications-policy = { path = "../../packages/communications-policy" }
 messaging-migration = { path = "migration" }

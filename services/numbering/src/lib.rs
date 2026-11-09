@@ -29,5 +29,6 @@ pub mod infra;
 pub mod metrics;
 pub mod numbers;
 pub mod providers;
+pub mod reference_reconciliation;
 pub mod state;
 pub mod stewardship;
