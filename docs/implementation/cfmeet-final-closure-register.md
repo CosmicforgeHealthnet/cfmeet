@@ -61,3 +61,12 @@ Confirmed open gaps (checked in code, not only in reports):
 |---|---|---|
 | Production Organizations authority migration | `ORGANIZATIONS_AUTHORITY_MODE` beyond `legacy` in production | not approved |
 | Production deployment | any `main` promotion / deploy workflow | not approved |
+
+## 5. Consolidation closure checkpoint (2026-11-09)
+
+- Branch audit: 40 remote heads; 38 fully contained in `staging` (36 ancestors, 4 `s18-sip-race*` patch-identical to `e9950455`), `blueprint/final-org-events` the only unique work (35 commits, fast-forward). See `cfmeet-branch-consolidation-report.md`.
+- Integration branch for the closure: `claude/cfmeet-consolidation-closure-vk2pe3` (temporary; fast-forwarded into `staging`, then deleted).
+- Fixed: J-07 disclosure (`a48b0413`), J-12 harness (`84b981b1`), SEC-004 (`1d8bf9c2`), ORG-011/MTG-016 (`89efdc91`). Added: J-08 (`3b8b7f42`), J-11 (`d7959fd7`), J-18 real-schema drill (`42b415fd`).
+- Part VI certification green on `84b981b1` (run 42579359634): `ORGANIZATION_LIFECYCLE_REAL_E2E … PASS`, `ORGANIZATION_CUTOVER_REAL_E2E … PASS`.
+- Final documents: closure report (A), certification report (D), audit closure register (E), frontend handover + endpoint reference (C/B), runbook update (F), branch report (G).
+- W1–W7 above: all merged; their "pending" CI notes are superseded by the runs in the certification report.

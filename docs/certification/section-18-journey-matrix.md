@@ -1,5 +1,14 @@
 # Section 18: journey certification matrix (J-01 to J-22)
 
+> **Superseded verdicts (final consolidation closure, 2026-11-09).** The current verdict of every
+> journey is in [`cfmeet-final-certification-report.md`](cfmeet-final-certification-report.md):
+> PASS 19, PASS (engineering) + owner gate 1 (J-18), EXTERNAL_BLOCKED 2 (J-03, J-22); NOT_COVERED 0,
+> PARTIAL 0. Gaps 1–8, 10, 12 and 13 of the table below are closed there (J-04/05/06/07/10/12/14/17/19
+> across real Organizations / Meeting / Platform Access / Messaging / Calling processes, J-08 guest
+> journey, J-11 single personal call with real media and history, J-18 real-schema drill). The
+> sections below are kept as the historical record of the 2026-11-08 run.
+
+
 Baseline: `staging` = `ccb7caa9` (Section 17 web account, mobile, Developer Portal, web calling and web meetings merged; Unified Messaging browser journey and Enterprise SIP connect race fixed). Every run below is on that exact SHA (push matrix, plus dispatched Communications Hub, backup drill and Phase 2 certification). The first edition of this matrix used `8d7b99a3`; every citation was re-read in the new logs: each named test appears as `test <name> ... ok`, no cited run printed `SKIPPED` except where stated. The SEC-020 isolation tests listed at the end ran on `blueprint/s18-certification` and on the merged tree `blueprint/s18-integration`.
 
 Verdict rules used:
