@@ -10,7 +10,7 @@ name: Backup and restore drill
 # secrets, no SSH, no schedule.
 on:
   push:
-    branches: [main, staging, "blueprint/**"]
+    branches: [main, staging]
     paths:
       - "infra/deployment/backup/**"
       - ".github/workflows/backup-restore-drill.yml"

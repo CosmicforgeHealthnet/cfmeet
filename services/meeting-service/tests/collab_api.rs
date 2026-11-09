@@ -789,3 +789,146 @@ async fn realtime_audiences() {
     send(&app, cid, g[2].auth(), json!({ "body": "welcome back" })).await;
     collect(&mut wa, |f| f["event"]["payload"]["body"] == "welcome back").await;
 }
+
+/// Section 18 J-08 — one guest journey in the owning service, end to end: an invited guest
+/// resolves the invitation, sees pre-join, is refused without the invitation and without
+/// consent, consents, waits as one logical participant, is admitted by the host, receives
+/// the media credential only after admission, and the consent and admission are recorded.
+#[tokio::test]
+async fn j08_invited_guest_prejoin_consent_wait_admit_journey() {
+    let app = app!();
+    let host = app.user("host").await;
+    let (sid, cid) = app
+        .live_conference(
+            &host,
+            json!({
+                "title": "Guest consult", "accessPolicy": "INVITE_ONLY", "waitingRoomPolicy": "UNAUTHENTICATED_ONLY",
+                "collaborationPolicy": { "requiredConsents": ["RECORDING"], "consentVersion": "2026-11" }
+            }),
+        )
+        .await;
+    let (s, inv) = app
+        .post(
+            &format!("/api/v2/meeting-spaces/{sid}/invitations"),
+            Auth::Bearer(&host.token),
+            json!({ "conferenceId": cid }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{inv}");
+    let invitation = inv["token"].as_str().unwrap().to_string();
+
+    // 1. The signed-out guest resolves the invitation (no use consumed).
+    let (s, r) = app
+        .post(
+            &format!("/api/v2/invitations/{invitation}/resolve"),
+            Auth::None,
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{r}");
+    assert_eq!(r["conferenceId"], cid.to_string());
+    assert_eq!(r["meetingSpace"]["view"], "SUMMARY");
+
+    // 2. Pre-join: invitation and consent are announced, nothing is granted yet.
+    let (s, pre) = app
+        .get(&format!("/api/v2/conferences/{cid}/pre-join"), Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{pre}");
+    assert_eq!(pre["access"]["invitationRequired"], true, "{pre}");
+    assert_eq!(pre["access"]["alreadyAuthorized"], false);
+    assert_eq!(pre["consents"]["required"], json!(["RECORDING"]));
+    assert_eq!(pre["consents"]["version"], "2026-11");
+
+    // 3. Without the invitation: refused. With it but without consent: refused, no participant.
+    let consent = json!([{ "type": "RECORDING", "version": "2026-11" }]);
+    let (s, e) = app
+        .join(
+            cid,
+            Auth::None,
+            json!({ "displayName": "Guest Bo", "consents": consent }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{e}");
+    let (s, e) = app
+        .join(
+            cid,
+            Auth::None,
+            json!({ "displayName": "Guest Bo", "invitationToken": invitation }),
+        )
+        .await;
+    assert_eq!((s, code(&e)), (StatusCode::FORBIDDEN, "CONSENT_REQUIRED"));
+    let participants =
+        format!("SELECT count(*) FROM conference_participants WHERE conference_id='{cid}'");
+    assert_eq!(
+        app.scalar(&participants).await,
+        0,
+        "no admission without consent"
+    );
+
+    // 4. Consent given: the guest waits, without any media credential.
+    let (s, v) = app
+        .join(
+            cid,
+            Auth::None,
+            json!({ "displayName": "Guest Bo", "invitationToken": invitation, "consents": consent }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["participant"]["admissionState"], "WAITING", "{v}");
+    assert_eq!(v["participant"]["identityType"], "INVITED_EXTERNAL");
+    assert_eq!(v["rtcStatus"], "NOT_ISSUED_WAITING");
+    assert!(v["rtc"].is_null());
+    let guest = v["participantToken"].as_str().unwrap().to_string();
+    let pid = uuid(&v["participant"]["id"]);
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM meeting_consents WHERE conference_id='{cid}' AND decision='GRANTED' AND consent_version='2026-11'")).await,
+        1,
+        "consent recorded"
+    );
+
+    // 5. The host sees exactly this guest waiting and admits them.
+    let (_, wr) = app
+        .get(
+            &format!("/api/v2/conferences/{cid}/waiting-room"),
+            Auth::Bearer(&host.token),
+        )
+        .await;
+    let waiting: Vec<_> = wr["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| uuid(&p["id"]))
+        .collect();
+    assert_eq!(waiting, vec![pid], "{wr}");
+    let (s, a) = app
+        .post(
+            &format!("/api/v2/conferences/{cid}/waiting-room/admit"),
+            Auth::Bearer(&host.token),
+            json!({ "participantIds": [pid] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+
+    // 6. Admitted: the same logical participant receives the media credential; no re-consent.
+    let (s, joined) = app.join(cid, Auth::Participant(&guest), json!({})).await;
+    assert_eq!(s, StatusCode::OK, "{joined}");
+    assert_eq!(uuid(&joined["participant"]["id"]), pid);
+    assert_eq!(joined["participant"]["admissionState"], "ADMITTED");
+    assert_eq!(joined["rtcStatus"], "ISSUED");
+    assert!(joined["participantSession"]["id"].is_string());
+    assert_eq!(
+        app.scalar(&participants).await,
+        1,
+        "one logical participant"
+    );
+
+    // 7. A second signed-out caller cannot reuse a single-conference grant without the token.
+    let (s, _) = app
+        .join(
+            cid,
+            Auth::None,
+            json!({ "displayName": "Intruder", "consents": consent }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}

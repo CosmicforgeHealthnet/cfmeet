@@ -9,7 +9,7 @@ name: Organizations service
 
 on:
   push:
-    branches: [main, staging, "blueprint/**"]
+    branches: [main, staging]
     paths:
       - "services/organizations/**"
       - "packages/service-auth/**"
