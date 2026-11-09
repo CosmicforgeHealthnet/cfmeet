@@ -89,13 +89,19 @@ end-to-end encrypted and without exposing service credentials to clients.
 * **Identity bridge addition.** `POST /api/v2/messaging/session-tokens` issues
   MANAGED-realtime session-device tokens bound to the verified account session (ADR 0049
   amendment A1); signing out of that session revokes them.
-* **Organization conversations (integration point, not built).** Organization-scoped
-  conversations wait for the Section 7 organization scopes: Meeting will resolve the
-  caller's organization role through the Organizations Service and create conversations
-  with `context = { namespace: "organization", reference: <organization id> }` under a
-  context authority, exactly like `meeting` contexts. Until then no conversation carries
-  organization authority and the colleague directory stays the only organization-bounded
-  messaging surface.
+* **Organization conversations (built in the final closure, 2026-11-09; supersedes the
+  earlier "integration point, not built" note).** Organization conversations are not a
+  `context` inside the personal scope: they live in the **organization's own FIRST_PARTY
+  technical scope** (ADR 0056 §4), reached through
+  `/api/v2/organizations/{id}/messaging/relay/{path}` (the same allowlist as the personal
+  relay), `/api/v2/organizations/{id}/messaging/session-tokens` (MANAGED realtime) and
+  `/api/v2/organizations/{id}/messaging/members/resolve` (active colleagues → their
+  organization-scope principals). Membership, organization status and `features.messaging`
+  are decided by the Organizations Service per request; the Messaging binding is per
+  organization scope (`service-bindings/messaging`). Offboarding suspends the member's
+  organization principal (organization events → Meeting `organization_access` worker →
+  Platform Access), which stops reads, sends and realtime while personal Messaging is
+  untouched. Certified across real processes in `organization_lifecycle.rs` (J-10).
 
 ## Consequences
 

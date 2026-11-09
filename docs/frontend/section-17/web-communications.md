@@ -26,8 +26,10 @@ and never count as E2EE devices.
 
 ## Gaps (not invented on the client)
 
-* Conversations carry no organization context (ADR 0053 organization conversations open), so the
-  chat list cannot be partitioned by workspace; only the people pickers are.
+* Conversations carry no organization field. Organization conversations live in the organization's own
+  scope (ADR 0053, final closure): the organization workspace reads them through
+  `/api/v2/organizations/{id}/messaging/relay/...` (web: `ca4072cc`), so the list is partitioned by which
+  relay is called, not by a field.
 * `GET /api/v2/messaging/directory` spans every organization of the caller (no organization filter);
   the web narrows it with `GET /api/v2/organizations/{id}/members`.
 * `principals/names` only names colleagues; a DIRECT chat with a contact takes its name from the Hub

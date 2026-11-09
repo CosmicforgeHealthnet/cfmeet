@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 25 | 14 | 57 |
+| `CLOSED` | 2 | 16 | 25 | 15 | 58 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,7 +28,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 3 | 7 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 2 | 6 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
@@ -40,7 +40,6 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | PLT-008 | P2 | Credential lifecycle lacks last-used tracking and expiry warnings | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
 | SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
 | DATA-017 | P3 | Cross-service references are opaque (no FKs) — need reconciliation coverage | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
-| MSG-015 | P3 | Documentation drift: ADR 0053 scope and the native API map contradict the code | PARTIAL: ADR 0053, native API map and handoff note corrected |
 | MSG-018 | P3 | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversat | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
 
 ## All findings
@@ -127,7 +126,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-012 | P2 | FRONTEND | Meeting chat migration cutover would break mobile in-meeting chat (v1 chat refused after cutover; dormant v2 mobile clie | `FRONTEND_CORRECTED` | 57407e77 mobile in-meeting chat on v2 |
 | MSG-013 | P1 | EXTERNAL_DEPENDENCY | PRIVATE_E2EE is correctly gated off in production pending independent review; key transparency is unwitnessed | `EXTERNAL_BLOCKED` | OPEN |
 | MSG-014 | P2 | FRONTEND | Web E2EE journey fails in CI at multi-device history recovery (known frontend issue #37) | `CLOSED` | c0fcedce |
-| MSG-015 | P3 | SHARED_CONTRACT | Documentation drift: ADR 0053 scope and the native API map contradict the code | `BACKEND_FOLLOW_UP` | PARTIAL: ADR 0053, native API map and handoff note corrected |
+| MSG-015 | P3 | SHARED_CONTRACT | Documentation drift: ADR 0053 scope and the native API map contradict the code | `CLOSED` | ADR 0053 updated for organization conversations in the organization scope (final closure); native API map and handoff note corrected earlier |
 | MSG-016 | P3 | BACKEND | Hub hygiene: `block-events` ingress has no producer; inbox shows conversations the viewer has left | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-017 | P2 | PRODUCT_DECISION | Administration needed to run CF Meet's own environment (policy incl. attachments enablement, moderation queue, legal hol | `OWNER_DECISION` | operator APIs exist (Messaging admin, moderation, legal holds); a first-party admin surface and attachment enablement are owner product decisions |
 | MSG-018 | P3 | SHARED_CONTRACT | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversation-sequen | `BACKEND_FOLLOW_UP` | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
