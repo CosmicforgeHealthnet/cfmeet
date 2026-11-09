@@ -63,3 +63,15 @@ Meeting v2 operations: 188 → 206. Gateway `EXCLUDED` (first-party organization
 ## 4. Deprecated compatibility operations (kept until verified migration)
 
 The 7 deprecated Meeting Service operations are the legacy v1 create paths (`POST /api/v1/meetings`, `POST /api/v1/meetings/instant`, `POST /api/v1/api/meetings`; v2 creation replaces them, PLT-004) and the legacy meeting webhooks (`GET`/`POST /api/v1/webhooks`, `PATCH`/`DELETE /api/v1/webhooks/{id}`; never delivered, replaced by Developer Platform webhooks, PLT-003). The deprecated Communications internal operation is `POST /internal/v1/communications/block-events` (owner block metadata ingest, superseded by the canonical block rules). None is deleted before its verified migration.
+
+## 5. Consolidation closure (2026-11-09) and frontend view
+
+Re-verified on the consolidated branch: every count above is unchanged (1,055 operations, 8 deprecated). The consolidation closure added **no** operation; it changed behaviour and Swagger descriptions only:
+
+| Operation | Change |
+|---|---|
+| `GET /api/v2/meeting-spaces/{id}`, `GET /api/v2/resolve/{identifier}` | `ORGANIZATION_ONLY` spaces disclosed only to owner / members / organization members / invitees; documented `401 AUTHENTICATION_REQUIRED` (signed out) and `404 MEETING_NOT_FOUND` (outsider) |
+| `PATCH /api/v2/meeting-spaces/{id}`, `POST …/archive`, `POST …/owner-transfer` | also allowed to organization OWNER / ADMIN holding `meetings.organization.manage` (authoritative mode) |
+| `POST /api/v1/auth/refresh` (legacy guest tokens) | single use, 24 h guest-session cap, refused after removal / leave / meeting end |
+
+Frontend classification: the operations a CF Meet client may call (gateway classes `PUBLIC_CUSTOMER` and `EXCLUDED`, minus internal / operator / callback / infrastructure paths) are listed one per row, with auth, statuses, error codes and their canonical contract entry, in the generated `docs/frontend/cfmeet-frontend-endpoint-reference.md` (618 operations: Meeting Service 245, Communications Hub 73, Calling 129, Messaging 98, Developer Platform 73).
