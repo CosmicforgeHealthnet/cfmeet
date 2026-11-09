@@ -15992,6 +15992,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Messaging replace (allowlisted path under `v1/`, e.g. a read cursor).",
+        "description": "Replaces an allowlisted Messaging resource (for example a conversation read cursor) in\nthe organization's own Messaging scope, as the caller's principal there. Requires\nactive membership, an active organization and `features.messaging`. The JSON object\nbody (at most 1 MiB) is forwarded. Messaging's status and JSON body are returned.",
         "operationId": "v2_organization_messaging_put",
         "parameters": [
           {
@@ -16096,6 +16097,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Messaging delete (allowlisted path under `v1/`, e.g. remove a member).",
+        "description": "Deletes an allowlisted Messaging resource (for example removes a conversation member\nor a reaction) in the organization's own Messaging scope, as the caller's principal\nthere; Messaging enforces conversation roles. Requires active membership, an active\norganization and `features.messaging`. Messaging's status and JSON body are returned.",
         "operationId": "v2_organization_messaging_delete",
         "parameters": [
           {
@@ -16190,6 +16192,7 @@
           "Organizations (v2)"
         ],
         "summary": "Organization Messaging update (allowlisted path under `v1/`, e.g. edit a message).",
+        "description": "Updates an allowlisted Messaging resource (for example edits a message or changes a\nmember's role) in the organization's own Messaging scope, as the caller's principal\nthere; Messaging enforces conversation roles. Requires active membership, an active\norganization and `features.messaging`. Messaging's status and JSON body are returned.",
         "operationId": "v2_organization_messaging_patch",
         "parameters": [
           {

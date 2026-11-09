@@ -164,6 +164,11 @@ pub async fn messaging_post(
 }
 
 /// Organization Messaging replace (allowlisted path under `v1/`, e.g. a read cursor).
+///
+/// Replaces an allowlisted Messaging resource (for example a conversation read cursor) in
+/// the organization's own Messaging scope, as the caller's principal there. Requires
+/// active membership, an active organization and `features.messaging`. The JSON object
+/// body (at most 1 MiB) is forwarded. Messaging's status and JSON body are returned.
 #[utoipa::path(
     put, path = "/api/v2/organizations/{id}/messaging/relay/{path}", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_put",
     params(("id" = String, Path, description = "Organization id"), ("path" = String, Path, description = "An allowlisted Messaging customer path under v1/")),
@@ -183,6 +188,11 @@ pub async fn messaging_put(
 }
 
 /// Organization Messaging update (allowlisted path under `v1/`, e.g. edit a message).
+///
+/// Updates an allowlisted Messaging resource (for example edits a message or changes a
+/// member's role) in the organization's own Messaging scope, as the caller's principal
+/// there; Messaging enforces conversation roles. Requires active membership, an active
+/// organization and `features.messaging`. Messaging's status and JSON body are returned.
 #[utoipa::path(
     patch, path = "/api/v2/organizations/{id}/messaging/relay/{path}", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_patch",
     params(("id" = String, Path, description = "Organization id"), ("path" = String, Path, description = "An allowlisted Messaging customer path under v1/")),
@@ -202,6 +212,11 @@ pub async fn messaging_patch(
 }
 
 /// Organization Messaging delete (allowlisted path under `v1/`, e.g. remove a member).
+///
+/// Deletes an allowlisted Messaging resource (for example removes a conversation member
+/// or a reaction) in the organization's own Messaging scope, as the caller's principal
+/// there; Messaging enforces conversation roles. Requires active membership, an active
+/// organization and `features.messaging`. Messaging's status and JSON body are returned.
 #[utoipa::path(
     delete, path = "/api/v2/organizations/{id}/messaging/relay/{path}", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_delete",
     params(("id" = String, Path, description = "Organization id"), ("path" = String, Path, description = "An allowlisted Messaging customer path under v1/")),
