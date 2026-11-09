@@ -210,15 +210,20 @@ struct GatewayForward {
 /// Verifies the service token of a forwarded request (the caller has checked that no
 /// `Authorization` header is present). Every failure is a bounded reason; the token is
 /// never logged.
-fn gateway_forward(
+async fn gateway_forward(
     state: &AppState,
+    method: &axum::http::Method,
+    path: &str,
     headers: &HeaderMap,
     local: &RequestContext,
 ) -> Result<GatewayForward, AuthFailureReason> {
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
     let caller = state
         .service_auth
         .verifier()
-        .verify_headers(headers)
+        .verify_request(method, path, headers)
+        .await
         .map_err(|error| {
             let d = &error.diagnostics;
             tracing::info!(
@@ -333,7 +338,10 @@ pub async fn require_platform_credential(
         if headers.contains_key(header::AUTHORIZATION) {
             return reject(AuthFailureReason::ServiceCredentialPresented, None);
         }
-        let forward = match gateway_forward(&state, headers, &request_context) {
+        let method = request.method().clone();
+        let path = crate::internal_auth::middleware::received_path(&request);
+        let forward = match gateway_forward(&state, &method, &path, headers, &request_context).await
+        {
             Ok(forward) => forward,
             Err(reason) => return reject(reason, None),
         };

@@ -5,8 +5,9 @@
 //!
 //! * selects the target from the token audience — the base URL comes from this service's
 //!   configuration for that service identity, never from business code;
-//! * signs a fresh short-lived token bound to the hop's request id, the operation's
-//!   correlation id and the optional delegated context;
+//! * signs a fresh short-lived token (fresh `jti`) for every call, bound to the hop's
+//!   request id, the operation's correlation id, the optional delegated context and —
+//!   when the signer emits request binding (SEC-012) — the call's method and path;
 //! * restricts paths to the `/internal/v1/` namespace;
 //! * requires HTTPS outside `local` / `test` runtime environments;
 //! * never follows redirects (a token is never forwarded to another host), bypasses
@@ -437,9 +438,11 @@ impl InternalServiceClient {
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query.iter().copied());
         }
+        // Bound (when the signer emits request binding) to the method and the path exactly
+        // as sent: the joined URL's path, which the receiver routes on.
         let signed = self
             .signer
-            .sign(request)
+            .sign_request(request, &method, url.path())
             .map_err(InternalCallError::Signing)?;
 
         // Forwarded headers first: the service-authentication headers always win.

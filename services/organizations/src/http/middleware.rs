@@ -155,7 +155,19 @@ pub async fn require_internal_service(
     next: Next,
 ) -> Response {
     let route = route_pattern(&request);
-    let ctx = match state.verifier.verify_headers(request.headers()) {
+    // SEC-012: bound to this request (method + received path, before nest stripping);
+    // single-use on mutating methods in memory, in addition to the durable nonce below.
+    let method = request.method().clone();
+    let path = request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned());
+    let verified = state
+        .verifier
+        .verify_request(&method, &path, request.headers())
+        .await;
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(error) => {
             let d = &error.diagnostics;

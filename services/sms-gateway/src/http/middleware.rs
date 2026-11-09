@@ -124,7 +124,8 @@ enum Presented {
     /// Forwarded by the API Gateway: the signed delegated context of a verified service
     /// token granted `sms-request.forward`, naming the credential the API Gateway
     /// authenticated (re-verified live by Platform Access).
-    Forwarded(DelegatedPlatformContext),
+    /// The verified service token rides along for the single-use step (SEC-012).
+    Forwarded(DelegatedPlatformContext, Box<InternalServiceContext>),
 }
 
 fn refuse_forwarded(
@@ -151,7 +152,14 @@ fn identify(state: &AppState, request: &Request) -> Option<(Presented, RequestCo
     if map.contains_key(header::AUTHORIZATION) {
         return refuse_forwarded("customer_credential_present", request);
     }
-    let ctx = match state.service_auth.verifier().verify_headers(map) {
+    // SEC-012: bound to this request (method + received path); the single-use step
+    // (`admit_once`) runs in `require_customer` before the request is admitted.
+    let verified = state.service_auth.verifier().verify_request_binding(
+        request.method(),
+        &received_path(request),
+        map,
+    );
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(error) => {
             let d = &error.diagnostics;
@@ -181,7 +189,7 @@ fn identify(state: &AppState, request: &Request) -> Option<(Presented, RequestCo
         correlation_id: ctx.correlation_id().clone(),
         causation_id: Some(CausationId::of_request(ctx.request_id())),
     };
-    Some((Presented::Forwarded(delegated), context))
+    Some((Presented::Forwarded(delegated, Box::new(ctx)), context))
 }
 
 /// A forwarded credential's chain must be exactly the one the delegated context names.
@@ -247,7 +255,8 @@ pub async fn require_customer(
         .await;
         return with_request_id(response, &context);
     };
-    let forwarded = matches!(presented, Presented::Forwarded(_));
+    let forwarded = matches!(presented, Presented::Forwarded(..));
+    let method = request.method().clone();
     let span = tracing::info_span!("customer_request", request_id = %context.request_id,
         correlation_id = %context.correlation_id, forwarded, method = %request.method(),
         route = route_pattern(&request));
@@ -259,11 +268,26 @@ pub async fn require_customer(
                 Presented::Credential(credential) => {
                     state.authority.authenticate(&credential).await
                 }
-                Presented::Forwarded(delegated) => state
-                    .authority
-                    .authenticate_delegated(&delegated, &correlation_id)
-                    .await
-                    .map(|outcome| named_by(outcome, &delegated)),
+                Presented::Forwarded(delegated, token) => {
+                    // SEC-012: a token on a mutating request is single-use.
+                    if let Err(error) = state
+                        .service_auth
+                        .verifier()
+                        .admit_once(&method, &token)
+                        .await
+                    {
+                        tracing::warn!(
+                            reason = error.failure.as_str(),
+                            "gateway service authentication rejected"
+                        );
+                        return ApiError::Code(ErrorCode::AuthenticationFailed).into_response();
+                    }
+                    state
+                        .authority
+                        .authenticate_delegated(&delegated, &correlation_id)
+                        .await
+                        .map(|outcome| named_by(outcome, &delegated))
+                }
             };
             admit(outcome, request, next).await
         }
@@ -310,16 +334,30 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
     }
 }
 
+/// The request-target path as received (before any `Router::nest` prefix stripping),
+/// which is what a signer binds in `htu`.
+pub(crate) fn received_path(request: &Request) -> String {
+    request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned())
+}
+
 pub async fn require_internal_service(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods.
+    let (method, path) = (request.method().clone(), received_path(&request));
+    let verified = state
         .service_auth
         .verifier()
-        .verify_headers(request.headers())
-    {
+        .verify_request(&method, &path, request.headers())
+        .await;
+    match verified {
         Ok(ctx) => {
             // Same operation (signed correlation id), caused by the upstream hop.
             let context = RequestContext {

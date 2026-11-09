@@ -45,7 +45,7 @@ cf-scan-gateway-contract = { path = "../../packages/scan-gateway-contract" }
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net", "io-util"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json", "postgres-array"] }
-axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query", "matched-path", "ws"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "original-uri", "query", "matched-path", "ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # Self-hosted realtime broker / ephemeral presence (pub/sub and TTL sets only; never the
 # message store).

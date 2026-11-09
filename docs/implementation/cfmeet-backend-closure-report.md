@@ -9,7 +9,7 @@ Production (`main`) untouched; open release PR #39 (`staging` → `main`) left o
 **BACKEND_ENGINEERING_PARTIAL — BLOCKERS_REMAIN.** All 22 journeys are certified (19 PASS, 1 PASS
 with an owner gate, 2 EXTERNAL_BLOCKED with truthful reporting; none NOT_COVERED, PARTIAL or
 failed), no P0/P1 finding has implementable backend work left, and the full CI matrix is green.
-Six implementable backend findings remain open, all P2/P3 (§6). They block no journey and no frontend
+Five implementable backend findings remain open, all P2/P3 (§6; SEC-012 closed, §2). They block no journey and no frontend
 contract, so the backend contract is frozen and handed over; they keep the strict "every
 implementable finding closed" verdict from being claimed. Repository cleanup is also incomplete: the
 38 temporary branches are verified safe to delete, but this session cannot delete remote refs (§5).
@@ -20,6 +20,7 @@ implementable finding closed" verdict from being claimed. Repository cleanup is 
 |---|---|---|
 | Security (J-07) | `ORGANIZATION_ONLY` meeting spaces are no longer disclosed by identifier lookup (space read, resolve, Hub meeting card) to outsiders (404) or signed-out callers (401); members, invitees and token holders keep access | `a48b0413`; `org04`; real-process J-07 |
 | SEC-004 | legacy guest refresh: live participation required, single use, 24 h cap | `1d8bf9c2` |
+| SEC-012 (closed) | service tokens bound to the request: optional `bnd` / `htm` / `htu` claims with a documented canonical-path rule (`packages/service-auth/src/binding.rs`; contract `token-claims/v1.schema.json`); `ServiceTokenVerifier::verify_request(method, path, headers)` with versioned modes `off` / `accept` (default) / `require` (`SERVICE_AUTH_REQUEST_BINDING_MODE`) and distinct failures (`request_method_mismatch`, `request_path_mismatch`, `request_binding_missing`); jti replay guard on POST/PUT/PATCH/DELETE (`replay.rs`: bounded in-memory LRU/TTL behind the `ReplayGuard` trait, shared through Redis in Messaging); signers emit behind `SERVICE_AUTH_REQUEST_BINDING=emit` (default `off`; `InternalServiceClient` binds every call, API Gateway / Meeting Service / Messaging scanner bind their direct calls); every receiver (12 services, 20 sites) verifies through `verify_request`. Rollout steps 2–3 are operator steps (`docs/operations/service-token-request-binding.md`) | `packages/service-auth/tests/request_binding.rs`, `binding::tests`, `replay::tests`, `contract_conformance`; `security-scan-gateway/tests/gateway.rs::a_request_bound_token_only_works_for_its_method_and_path`; api-gateway suite with `SERVICE_AUTH_REQUEST_BINDING=emit SERVICE_AUTH_REQUEST_BINDING_MODE=require`; `messaging config::replay_guard::tests` (real Redis) |
 | ORG-011 / MTG-016 | organization OWNER / ADMIN (`meetings.organization.manage`) configure, reassign, archive organization meetings, with FULL view | `89efdc91` |
 | J-08 | one invited-guest journey end to end | `3b8b7f42` |
 | J-11 | real-media personal call closes in both histories | `d7959fd7` |
@@ -59,7 +60,6 @@ block-events ingest, legacy API keys (see API inventory §4).
 
 | Finding | Sev | Remaining work |
 |---|---|---|
-| SEC-012 | P2 | Bind service tokens to the request (`htm` method / `htu` path claims) and add a shared `jti` replay cache on mutating routes. Design: (1) receivers accept and verify the optional claims via a `verify_request(method, path, headers)` API (claims are a closed set, so receivers must ship first); (2) signers emit them behind a flag; (3) receivers require them. Touches every service's verifier and signer (~50 sites) and needs a staged deployment. Mitigations today: private network, TLS, audience + ≤ 300 s lifetime, request/correlation-id binding, replay checks in the Hub and scan gateway. |
 | INV-002 | P2 | automated tests for the 48 internal / operator operations still under the frozen coverage baseline |
 | MSG-009 | P2 | realtime nudge for timeline cards; call cards for members without a profile at launch |
 | PLT-008 | P2 | credential expiry webhook (last-use and `expiringSoon` already served) |

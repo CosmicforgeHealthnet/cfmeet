@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 25 | 15 | 58 |
+| `CLOSED` | 2 | 16 | 26 | 15 | 59 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,7 +28,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 2 | 6 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 3 | 2 | 5 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
@@ -38,7 +38,6 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | INV-002 | P2 | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain ( |
 | MSG-009 | P2 | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no  | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
 | PLT-008 | P2 | Credential lifecycle lacks last-used tracking and expiry warnings | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
-| SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
 | DATA-017 | P3 | Cross-service references are opaque (no FKs) — need reconciliation coverage | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
 | MSG-018 | P3 | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversat | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
 
@@ -186,7 +185,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | SEC-009 | P1 | BACKEND | Legacy kick does not evict media; legacy LiveKit tokens are 6 h with client-side `room_admin` for hosts | `CLOSED` | fb490003 |
 | SEC-010 | P0 | INFRASTRUCTURE | No backup coverage for meeting-service, communications and developer-platform databases; no scheduled backups in repo | `OWNER_DECISION` | tooling + CI drill over every real migrated schema (42b415fd, J-18); off-host target and age key custody are owner inputs |
 | SEC-011 | P1 | INFRASTRUCTURE | Production migrations run without a pre-migration snapshot; rollback is container-only | `OWNER_DECISION` | PARTIAL: pre-migration snapshot helper done; insertion into release workflows pending release review |
-| SEC-012 | P2 | SHARED_CONTRACT | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | `BACKEND_FOLLOW_UP` | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
+| SEC-012 | P2 | SHARED_CONTRACT | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | `CLOSED` | optional `bnd`/`htm`/`htu` claims with a canonical-path rule (`packages/service-auth/src/binding.rs`), `ServiceTokenVerifier::verify_request` with `off`/`accept`/`require` modes and a jti replay guard on POST/PUT/PATCH/DELETE (`verifier.rs`, `replay.rs`: bounded in-memory LRU/TTL, `ReplayGuard` trait; Redis-shared in Messaging `services/messaging/src/config/replay_guard.rs`); signers emit behind `SERVICE_AUTH_REQUEST_BINDING=emit` (client.rs binds every call automatically; API Gateway, Meeting Service, Messaging scanner bound); all 12 receiving services' 20 verification sites routed through `verify_request`. Tests: `packages/service-auth/tests/request_binding.rs` (11), `binding::tests` (7), `replay::tests` (4), `contract_conformance` (bound claims + fixtures); `security-scan-gateway/tests/gateway.rs::a_request_bound_token_only_works_for_its_method_and_path`; api-gateway suite green with `SERVICE_AUTH_REQUEST_BINDING=emit SERVICE_AUTH_REQUEST_BINDING_MODE=require`; `messaging config::replay_guard` (2, one against a real Redis). Rollout steps 2–3 (signers emit, receivers require) are operator steps: `docs/operations/service-token-request-binding.md` |
 | SEC-013 | P1 | BACKEND | No security audit trail for account, admin and API-key events in meeting-service | `CLOSED` | 08298305; CI: meeting-service 42308337872, comms-hub 42306789245, part-vi cert 42306794069, backup drill 42307503831 |
 | SEC-014 | P2 | BACKEND | Meetings v2 creates lack Idempotency-Key; legacy v1 writes have check-then-act races | `CLOSED` | 3620317a; CI: meeting-service 42353311875, certification 42356374877 |
 | SEC-015 | P2 | BACKEND | Migration binaries ship the full sea-orm CLI (down/fresh/reset/refresh) in production images | `CLOSED` | fb490003 |

@@ -121,6 +121,26 @@ fn signed_tokens_conform_to_the_header_and_claims_contracts() {
             "token claims",
         );
     }
+    // SEC-012: tokens with a request binding (bnd / htm / htu) conform too.
+    let emitting = fleet
+        .calling
+        .with_request_binding(cf_service_auth::RequestBindingEmission::Emit);
+    for (method, path) in [
+        (http::Method::POST, "/internal/v1/privacy-relay/authorize"),
+        (http::Method::GET, "/internal/v1/a%7eb/%2fc/"),
+    ] {
+        let signed = emitting
+            .sign_request(
+                &OutboundServiceRequest::new_operation(ServiceId::privacy_relay()),
+                &method,
+                path,
+            )
+            .unwrap();
+        let token = token_of(&signed);
+        let claims = decode_segment(token.split('.').nth(1).unwrap());
+        assert_eq!(claims["bnd"], 1);
+        assert_conforms(&claims_v, &claims, "bound token claims");
+    }
 }
 
 #[test]

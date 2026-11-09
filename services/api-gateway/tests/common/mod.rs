@@ -173,7 +173,12 @@ async fn upstream_handler(
         Some((verifier, permission))
             if parts.headers.contains_key("x-cf-service-authorization") =>
         {
-            match verifier.verify_headers(&parts.headers) {
+            // SEC-012: the fake upstream verifies like a real receiver (request binding
+            // per SERVICE_AUTH_REQUEST_BINDING_MODE, single use on mutating methods).
+            match verifier
+                .verify_request(&parts.method, parts.uri.path(), &parts.headers)
+                .await
+            {
                 Ok(ctx) => {
                     if ctx.require_permission(*permission).is_err() {
                         return StatusCode::FORBIDDEN.into_response();
