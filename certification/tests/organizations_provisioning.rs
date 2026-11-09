@@ -36,12 +36,23 @@ const BINARIES: &[&str] = &[
     "organizations-migration",
 ];
 
+/// A free local port no other service of this test process was given (ports are
+/// released before the services bind them, so parallel tests could be offered the same
+/// one); the same guard as `stack::free_port`.
 fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static GIVEN: std::sync::Mutex<std::collections::BTreeSet<u16>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let mut given = GIVEN.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        if given.insert(port) {
+            return port;
+        }
+    }
 }
 
 struct MiniStack {
