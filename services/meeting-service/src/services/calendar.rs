@@ -581,6 +581,26 @@ struct CalendarAccess {
     full: bool,
 }
 
+/// The agenda's organization relation (`r_org`), for one space: a verified member of the
+/// space's organization sees ORGANIZATION_ONLY / PUBLIC / PUBLIC_PASSCODE / AUTHENTICATED
+/// meetings that are not healthcare or high-security.
+pub fn organization_visible(space: &meeting_spaces::Model, verified: &[Uuid]) -> bool {
+    use crate::domain::{AccessPolicy, MeetingType};
+    space.organization_id.is_some_and(|o| verified.contains(&o))
+        && matches!(
+            space.access_policy,
+            AccessPolicy::OrganizationOnly
+                | AccessPolicy::Public
+                | AccessPolicy::PublicPasscode
+                | AccessPolicy::Authenticated
+        )
+        && !matches!(
+            space.security_profile,
+            SecurityProfile::Healthcare | SecurityProfile::HighSecurity
+        )
+        && space.meeting_type != MeetingType::Healthcare
+}
+
 impl CalendarService {
     pub fn new(core: Core) -> Self {
         Self { core }
@@ -865,6 +885,12 @@ impl CalendarService {
             return Ok(Some(CalendarAccess {
                 full: space_allows(role, SpacePermission::ViewMembers, &pctx),
             }));
+        }
+        // The agenda's organization relation (same rule): an organization meeting is
+        // visible to a server-verified member of its organization unless it is a
+        // healthcare / high-security meeting; such a member may export what it sees.
+        if organization_visible(space, &ctx.verified_organizations) {
+            return Ok(Some(CalendarAccess { full: false }));
         }
         let conference_id = conference.map(|c| c.id);
         if let Some(email) = actor

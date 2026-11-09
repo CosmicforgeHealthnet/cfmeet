@@ -448,6 +448,25 @@ async fn cal03_organization_filter_member_vs_outsider() {
     let msg = |d: &Value| d["error"]["message"].clone();
     assert_eq!(msg(&d1), msg(&d2));
     assert_eq!(msg(&d1), msg(&d3));
+
+    // Final closure (J-07): what the member sees in the organization agenda it may also
+    // export (summary only, as for an invitee) — the organization-only meeting, never the
+    // invite-only or the healthcare one; an outsider exports nothing.
+    let export = |c: &Value| {
+        format!(
+            "/api/v2/conferences/{}/calendar.ics",
+            c["id"].as_str().unwrap()
+        )
+    };
+    let (s, _, body, v) = ics(&app, &export(&c_all), Some(&insider.token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(body.contains("BEGIN:VEVENT"), "{body}");
+    for conference in [&c_secret, &c_clinic] {
+        let (s, _, _, v) = ics(&app, &export(conference), Some(&insider.token)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    }
+    let (s, _, _, _) = ics(&app, &export(&c_all), Some(&outsider.token)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
 /// Cursor pagination is stable: no duplicates, no gaps, new earlier rows never shift

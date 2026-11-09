@@ -3477,6 +3477,46 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
     }
     assert_eq!(calls[0].query.as_deref(), Some("limit=5"));
     assert_eq!(calls[1].body["title"], "Ward 7");
+    // Replace, update and delete operations of the allowlist reach Messaging in the same
+    // organization scope (read cursor, conversation title, member removal).
+    let conversation = Uuid::new_v4();
+    let (s, v) = w
+        .messaging(
+            Method::PUT,
+            &w.member,
+            &format!("v1/conversations/{conversation}/read-cursor"),
+            Some(json!({ "sequence": 1 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .messaging(
+            Method::PATCH,
+            &w.member,
+            &format!("v1/conversations/{conversation}"),
+            Some(json!({ "title": "Ward 7 nights" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = w
+        .messaging(
+            Method::DELETE,
+            &w.member,
+            &format!("v1/conversations/{conversation}/members/{}", Uuid::new_v4()),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let last = w.messaging_records();
+    assert_eq!(
+        last.iter()
+            .rev()
+            .take(3)
+            .map(|r| r.method.as_str())
+            .collect::<Vec<_>>(),
+        ["DELETE", "PATCH", "PUT"]
+    );
+    assert!(last.iter().all(|r| r.environment == w.triple.2));
     // The organization scope environment is recorded for offboarding.
     assert_eq!(
         w.app
@@ -3794,6 +3834,119 @@ async fn org006_teams_and_policies_are_relayed_for_the_verified_actor_with_safe_
         )
         .await;
     assert_eq!(s, StatusCode::OK);
+    // The rest of the Section 6 surface is relayed for the owner (success paths).
+    let tm = Uuid::new_v4();
+    let base = format!("/internal/v1/organizations/{org}/teams");
+    for (method, path, status, doc) in [
+        (
+            "GET",
+            base.clone(),
+            200,
+            json!({ "items": [], "nextCursor": null }),
+        ),
+        (
+            "GET",
+            format!("{base}/{team}"),
+            200,
+            json!({ "id": team, "name": "Ward 7", "version": 2 }),
+        ),
+        (
+            "PATCH",
+            format!("{base}/{team}"),
+            200,
+            json!({ "id": team, "name": "Ward 7 nights", "version": 3 }),
+        ),
+        (
+            "POST",
+            format!("{base}/{team}/members"),
+            201,
+            json!({ "id": tm, "teamId": team, "userId": member.id, "role": "MEMBER", "version": 1 }),
+        ),
+        (
+            "PATCH",
+            format!("{base}/{team}/members/{tm}"),
+            200,
+            json!({ "id": tm, "teamId": team, "userId": member.id, "role": "LEAD", "version": 2 }),
+        ),
+        (
+            // The Meeting DELETE maps to Organizations' explicit removal action.
+            "POST",
+            format!("{base}/{team}/members/{tm}/remove"),
+            200,
+            json!({ "id": tm, "removed": true }),
+        ),
+        (
+            "PATCH",
+            format!("/internal/v1/organizations/{org}/policies"),
+            200,
+            json!({ "organizationId": org, "revision": 4 }),
+        ),
+    ] {
+        fake.script(method, &path, status, doc);
+    }
+    let public = |p: &str| p.replace("/internal/v1/organizations/", "/api/v2/organizations/");
+    let (s, v) = app.get(&public(&base), auth).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app.get(&public(&format!("{base}/{team}")), auth).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app
+        .patch(
+            &public(&format!("{base}/{team}")),
+            auth,
+            json!({ "name": "Ward 7 nights", "expectedVersion": 2 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app
+        .post(
+            &public(&format!("{base}/{team}/members")),
+            auth,
+            json!({ "userId": member.id, "role": "MEMBER" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(
+        fake.last("POST", &format!("{base}/{team}/members")).body["userId"],
+        json!(member.id)
+    );
+    let (s, v) = app
+        .patch(
+            &public(&format!("{base}/{team}/members/{tm}")),
+            auth,
+            json!({ "role": "LEAD", "expectedVersion": 1 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app
+        .call(
+            Method::DELETE,
+            &public(&format!("{base}/{team}/members/{tm}")),
+            auth,
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = app
+        .patch(
+            &format!("/api/v2/organizations/{org}/policies"),
+            auth,
+            json!({ "expectedRevision": 3, "policy": { "features": { "messaging": true } } }),
+        )
+        .await;
+    assert_eq!(
+        (s, v["revision"].as_i64()),
+        (StatusCode::OK, Some(4)),
+        "{v}"
+    );
+    assert_eq!(
+        fake.last(
+            "PATCH",
+            &format!("/internal/v1/organizations/{org}/policies")
+        )
+        .acting_user,
+        Some(owner.id.to_string())
+    );
+
     // Unauthenticated callers reach nothing.
     let before = fake.relayed();
     let (s, _) = app
