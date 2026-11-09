@@ -9,7 +9,7 @@ Production (`main`) untouched; open release PR #39 (`staging` → `main`) left o
 **BACKEND_ENGINEERING_PARTIAL — BLOCKERS_REMAIN.** All 22 journeys are certified (19 PASS, 1 PASS
 with an owner gate, 2 EXTERNAL_BLOCKED with truthful reporting; none NOT_COVERED, PARTIAL or
 failed), no P0/P1 finding has implementable backend work left, and the full CI matrix is green.
-Five implementable backend findings remain open, all P2/P3 (§6). They block no journey and no frontend
+One implementable backend finding remains open (SEC-012, P2, §6); INV-002, PLT-008, DATA-017, MSG-009 and MSG-018 were closed after the report (§6). It blocks no journey and no frontend
 contract, so the backend contract is frozen and handed over; they keep the strict "every
 implementable finding closed" verdict from being claimed. Repository cleanup is also incomplete: the
 38 temporary branches are verified safe to delete, but this session cannot delete remote refs (§5).
@@ -61,8 +61,8 @@ block-events ingest, legacy API keys (see API inventory §4).
 | Finding | Sev | Remaining work |
 |---|---|---|
 | SEC-012 | P2 | Bind service tokens to the request (`htm` method / `htu` path claims) and add a shared `jti` replay cache on mutating routes. Design: (1) receivers accept and verify the optional claims via a `verify_request(method, path, headers)` API (claims are a closed set, so receivers must ship first); (2) signers emit them behind a flag; (3) receivers require them. Touches every service's verifier and signer (~50 sites) and needs a staged deployment. Mitigations today: private network, TLS, audience + ≤ 300 s lifetime, request/correlation-id binding, replay checks in the Hub and scan gateway. |
-| MSG-009 | P2 | realtime nudge for timeline cards; call cards for members without a profile at launch |
-| MSG-018 | P3 | server-side receipt-event coalescing (client half done) |
+
+Closed after this report (commit `23f42c92`): **MSG-009** — Hub call cards for call parties without a profile at launch (materialized once on first timeline / activity read) and a deduplicated, version-monotonic realtime nudge (`communications.timeline.changed` → Messaging `timeline.changed`, members only, live and replay); tests `services/communications/tests/unified.rs::call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once`, `services/messaging/tests/realtime_receipts_timeline.rs::hub_timeline_nudges_reach_members_once_per_version`. **MSG-018** — server-side receipt-event coalescing (one leading and one trailing receipt per member and window, monotonic, privacy re-checked; `receipts.query` for reconnect); tests `realtime_receipts_timeline.rs::receipt_events_are_coalesced_per_member_and_window_and_snapshots_read_current_cursors`, `load.rs::read_receipt_burst_is_coalesced` (30 readers × 40 reads: 1,200 reads → 60 receipt events). Records: `docs/operations/messaging-section-13.md`, `docs/operations/communications-hub-section-14.md`.
 
 Closed since this report was first written:
 

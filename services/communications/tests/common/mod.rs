@@ -473,6 +473,11 @@ impl Harness {
         assert!(!communications_migration::ready(&db).await.unwrap());
         communications_migration::up_all(&db).await.unwrap();
         communications_migration::up_all(&db).await.unwrap();
+        // The previous (Section 14) image checks foundation + unified + device-session
+        // exactly; the MSG-009 history is separate, so it still starts (rollback safety).
+        assert!(communications_migration::device_session_ready(&db)
+            .await
+            .unwrap());
         assert!(communications_migration::foundation_ready(&db)
             .await
             .unwrap());

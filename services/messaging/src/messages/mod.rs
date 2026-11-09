@@ -21,6 +21,7 @@ pub mod e2ee;
 pub mod http;
 pub mod keys;
 pub mod managed;
+pub mod receipts;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
@@ -1004,7 +1005,7 @@ pub async fn set_read_cursor(
     let st = state.clone();
     let ctx = ctx.clone();
     let acting = acting.clone();
-    let request_ctx = request_context();
+    let window = state.realtime.settings.receipt_window.as_secs_f64();
     state
         .db
         .transaction::<_, Value, Error>(move |txn| {
@@ -1037,6 +1038,7 @@ pub async fn set_read_cursor(
                     acting.principal_id,
                     current,
                     effective.privacy.delivery_receipts,
+                    window,
                     now,
                 )
                 .await?;
@@ -1065,18 +1067,16 @@ pub async fn set_read_cursor(
                     )
                     .await?
                         == 0;
+                // MSG-018: coalesced per reader (one event per window, highest cursor).
                 if shares && current == request.sequence {
-                    outbox::enqueue_conversation(
+                    receipts::record(
                         txn,
+                        window,
+                        receipts::ReceiptKind::Read,
+                        scope_of(&ctx),
                         conversation.id,
-                        NewEvent {
-                            event_type: "messaging.read-cursor.updated",
-                            aggregate_type: "CONVERSATION",
-                            aggregate_id: conversation.id,
-                            scope: scope_of(&ctx),
-                            payload: json!({ "principal_id": acting.principal_id, "read_sequence": current }),
-                        },
-                        &request_ctx,
+                        acting.principal_id,
+                        current,
                         now,
                     )
                     .await?;
@@ -1090,8 +1090,10 @@ pub async fn set_read_cursor(
 
 /// Advances a member's delivery cursor (§52: DELIVERED once a session acknowledged the
 /// message or the member synchronized past it) and, when the policy shares delivery
-/// receipts, records `messaging.delivery-cursor.updated` in the same transaction.
+/// receipts, records `messaging.delivery-cursor.updated` in the same transaction —
+/// coalesced per member inside `window_secs` (MSG-018, [`receipts`]).
 /// Returns the new delivered sequence when it moved.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     txn: &C,
     scope: crate::events::outbox::EventScope,
@@ -1099,6 +1101,7 @@ pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     principal_id: Uuid,
     sequence: i64,
     share: bool,
+    window_secs: f64,
     now: DateTime<Utc>,
 ) -> Result<Option<i64>> {
     if sequence <= 0 {
@@ -1116,17 +1119,15 @@ pub(crate) async fn advance_delivery<C: ConnectionTrait>(
     .await?
     .map(|r| r.delivered_sequence);
     if let (Some(delivered), true) = (moved, share) {
-        outbox::enqueue_conversation(
+        // MSG-018: coalesced per member (one event per window, highest cursor).
+        receipts::record(
             txn,
+            window_secs,
+            receipts::ReceiptKind::Delivered,
+            scope,
             conversation_id,
-            NewEvent {
-                event_type: "messaging.delivery-cursor.updated",
-                aggregate_type: "CONVERSATION",
-                aggregate_id: conversation_id,
-                scope,
-                payload: json!({ "principal_id": principal_id, "delivered_sequence": delivered }),
-            },
-            &request_context(),
+            principal_id,
+            delivered,
             now,
         )
         .await?;

@@ -154,9 +154,18 @@ impl Rt {
             },
             "test",
         ));
-        let mut tasks = vec![tokio::spawn(
-            publisher.run_with_wakeup(Duration::from_millis(50), realtime.outbox_wakeup.clone()),
-        )];
+        let mut tasks = vec![
+            tokio::spawn(
+                publisher
+                    .run_with_wakeup(Duration::from_millis(50), realtime.outbox_wakeup.clone()),
+            ),
+            // MSG-018: coalesced receipts are published when their window ends (on the
+            // harness's manual clock).
+            tokio::spawn(messaging::messages::receipts::run(
+                h.state.clone(),
+                Duration::from_millis(50),
+            )),
+        ];
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = h.router();

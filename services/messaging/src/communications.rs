@@ -341,6 +341,10 @@ async fn event(
             return Err(Error::validation("Event identity conflict"));
         }
     }
+    let mut announced = None;
+    if n == 1 && e.kind == TIMELINE_CHANGED {
+        announced = timeline_changed(&txn, &s, d, &e).await?;
+    }
     if let (Some(principal), Some(cutoff)) = (
         e.data["principalId"]
             .as_str()
@@ -353,5 +357,104 @@ async fn event(
         txn.execute(Statement::from_sql_and_values(DbBackend::Postgres,"UPDATE messaging_push_registrations SET enabled=FALSE,disabled_reason='ACCOUNT_SESSION_REVOKED',updated_at=now() WHERE tenant_id=$1 AND application_id=$2 AND environment_id=$3 AND principal_id=$4 AND updated_at<=to_timestamp($5::double precision)",[d.tenant_id.into(),d.application_id.into(),d.environment_id.into(),principal.into(),(cutoff as f64).into()])).await.map_err(Error::from)?;
     }
     txn.commit().await.map_err(Error::from)?;
+    if announced == Some(true) {
+        s.realtime.outbox_wakeup.notify_one();
+    }
     Ok(Json(json!({"applied":n==1,"duplicate":n==0})))
+}
+
+/// MSG-009: the Hub's realtime nudge for a conversation's call / meeting timeline.
+pub const TIMELINE_CHANGED: &str = "communications.timeline.changed";
+
+/// Why the Hub timeline changed (references only; never card content).
+const TIMELINE_REASONS: &[&str] = &[
+    "CALL_STARTED",
+    "CALL_UPDATED",
+    "MEETING_SHARED",
+    "CARDS_MATERIALIZED",
+];
+
+/// MSG-009: announces a Communications Hub timeline change of one conversation to its
+/// members as the durable conversation event `messaging.timeline.changed` (ids, version
+/// and reason only; clients refetch the Hub timeline). Members only: the event joins the
+/// conversation's own stream, so the realtime gateway delivers it to ACTIVE members'
+/// subscriptions within their history window, and the REST replay serves it to members
+/// who were offline. Idempotent and version-monotonic: an event id is applied once (the
+/// inbox) and a timeline version at or below the last announced one publishes nothing,
+/// so redelivered or reordered Hub events never duplicate or regress the stream.
+/// Returns `Some(true)` when an event was recorded, `Some(false)` when nothing new was
+/// announced, `None` when the conversation is not in the delegated scope.
+async fn timeline_changed<C: ConnectionTrait>(
+    txn: &C,
+    s: &AppState,
+    d: crate::identity::OwnerScope,
+    e: &Event,
+) -> Result<Option<bool>> {
+    let conversation = e.data["conversationId"]
+        .as_str()
+        .and_then(|x| Uuid::parse_str(x).ok());
+    let version = e.data["timelineVersion"].as_i64();
+    let reason = e.data["reason"].as_str();
+    let (Some(conversation), Some(version), Some(reason)) = (conversation, version, reason) else {
+        return Err(Error::validation("Invalid timeline event"));
+    };
+    if conversation != e.aggregate_id
+        || version != e.version
+        || !TIMELINE_REASONS.contains(&reason)
+        || e.data.as_object().is_some_and(|o| o.len() != 3)
+    {
+        return Err(Error::validation("Invalid timeline event"));
+    }
+    // The conversation must belong to the verified delegated scope; anything else is
+    // acknowledged without effect (never an existence oracle, never retried forever).
+    let known = crate::db::scalar_i64(
+        txn,
+        "SELECT count(*) FROM messaging_conversations WHERE id = $1 AND tenant_id = $2 AND application_id = $3 AND environment_id = $4",
+        vec![conversation.into(), d.tenant_id.into(), d.application_id.into(), d.environment_id.into()],
+    )
+    .await?;
+    if known == 0 {
+        return Ok(None);
+    }
+    let now = s.now();
+    let advanced = txn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO messaging_conversation_timeline_versions (conversation_id, timeline_version, updated_at) VALUES ($1, $2, $3) \
+             ON CONFLICT (conversation_id) DO UPDATE SET timeline_version = EXCLUDED.timeline_version, updated_at = EXCLUDED.updated_at \
+             WHERE messaging_conversation_timeline_versions.timeline_version < EXCLUDED.timeline_version",
+            [conversation.into(), version.into(), now.into()],
+        ))
+        .await
+        .map_err(Error::from)?
+        .rows_affected()
+        == 1;
+    if !advanced {
+        crate::metrics::inc("messaging_timeline_nudges_total", &[("outcome", "stale")]);
+        return Ok(Some(false));
+    }
+    crate::events::outbox::enqueue_conversation(
+        txn,
+        conversation,
+        crate::events::outbox::NewEvent {
+            event_type: "messaging.timeline.changed",
+            aggregate_type: "CONVERSATION",
+            aggregate_id: conversation,
+            scope: crate::events::outbox::EventScope {
+                tenant_id: d.tenant_id,
+                application_id: d.application_id,
+                environment_id: d.environment_id,
+            },
+            payload: json!({ "timeline_version": version, "reason": reason }),
+        },
+        &crate::conversations::service::request_context(),
+        now,
+    )
+    .await
+    .map_err(Error::from)?;
+    crate::metrics::inc(
+        "messaging_timeline_nudges_total",
+        &[("outcome", "announced")],
+    );
+    Ok(Some(true))
 }

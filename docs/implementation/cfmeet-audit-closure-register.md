@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 27 | 16 | 61 |
+| `CLOSED` | 2 | 16 | 28 | 17 | 63 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,16 +28,14 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 2 | 1 | 3 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 1 | 0 | 1 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
 
 | Finding | Sev | Title | Remaining |
 |---|---|---|---|
-| MSG-009 | P2 | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no  | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
 | SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
-| MSG-018 | P3 | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversat | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
 
 ## All findings
 
@@ -118,7 +116,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-006 | P1 | FRONTEND | The Communications Hub (~70 public endpoints) and the unified Chats/Calls journeys have no frontend consumer; mobile has | `FRONTEND_REMAINING` | PARTIAL: backend complete; journey -> endpoint handoff (communications-unified-handoff.md §11); web/mobile clients are Section 17 |
 | MSG-007 | P2 | BACKEND | No server-side inbox model: conversations have no title/avatar, last message/activity or unread, and are ordered by crea | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MSG-008 | P2 | FRONTEND | Web MANAGED client: append-only sync, no tombstone/edit refresh, fragile attachments and a non-durable offline queue | `FRONTEND_CORRECTED` | f47e09d6 managed store, tombstones, durable outbox, ack-cursor resume |
-| MSG-009 | P2 | BACKEND | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no card for m | `BACKEND_FOLLOW_UP` | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
+| MSG-009 | P2 | BACKEND | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no card for m | `CLOSED` | 23f42c92: owed call cards for parties without a profile (Hub calls.rs materialize_call_cards) + deduplicated, version-monotonic communications.timeline.changed -> Messaging messaging.timeline.changed (members only, live + replay); tests: Hub unified.rs call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once, messaging realtime_receipts_timeline.rs hub_timeline_nudges_reach_members_once_per_version; chat lines stay client-composed (E2EE rule) |
 | MSG-010 | P2 | BACKEND | Hub ↔ owner integration is not tested end-to-end in CI; Hub tests use simulated owners | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-012 | P2 | FRONTEND | Meeting chat migration cutover would break mobile in-meeting chat (v1 chat refused after cutover; dormant v2 mobile clie | `FRONTEND_CORRECTED` | 57407e77 mobile in-meeting chat on v2 |
 | MSG-013 | P1 | EXTERNAL_DEPENDENCY | PRIVATE_E2EE is correctly gated off in production pending independent review; key transparency is unwitnessed | `EXTERNAL_BLOCKED` | OPEN |
@@ -126,7 +124,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-015 | P3 | SHARED_CONTRACT | Documentation drift: ADR 0053 scope and the native API map contradict the code | `CLOSED` | ADR 0053 updated for organization conversations in the organization scope (final closure); native API map and handoff note corrected earlier |
 | MSG-016 | P3 | BACKEND | Hub hygiene: `block-events` ingress has no producer; inbox shows conversations the viewer has left | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-017 | P2 | PRODUCT_DECISION | Administration needed to run CF Meet's own environment (policy incl. attachments enablement, moderation queue, legal hol | `OWNER_DECISION` | operator APIs exist (Messaging admin, moderation, legal holds); a first-party admin surface and attachment enablement are owner product decisions |
-| MSG-018 | P3 | SHARED_CONTRACT | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversation-sequen | `BACKEND_FOLLOW_UP` | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
+| MSG-018 | P3 | SHARED_CONTRACT | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversation-sequen | `CLOSED` | 23f42c92: server receipt-event coalescing (messaging/src/messages/receipts.rs; leading + trailing receipt per member and window, monotonic, privacy re-checked) + receipts.query/receipts.snapshot for reconnect; client half f47e09d6; tests: realtime_receipts_timeline.rs receipt_events_are_coalesced_per_member_and_window_and_snapshots_read_current_cursors, load.rs read_receipt_burst_is_coalesced (1,200 reads -> 60 receipt events) |
 | MSG-019 | P3 | BACKEND | Send idempotency edge cases: rate limits charged before dedupe; replay with a different attachment set returns the origi | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MTG-001 | P0 | FRONTEND | Mobile meeting creation, scheduling, listing, editing and instant meeting are broken (wrong v1 contract, and retired by  | `FRONTEND_CORRECTED` | 57407e77 / 25001ae4 mobile Meeting Service v2 client |
 | MTG-002 | P1 | FRONTEND | Mobile live room drives a v2 conference through legacy v1 participant/waiting/chat/media/end endpoints | `FRONTEND_CORRECTED` | 25001ae4 mobile v2 live room |

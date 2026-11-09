@@ -376,6 +376,14 @@ async fn main() -> anyhow::Result<()> {
             realtime.outbox_wakeup.clone(),
         ),
     );
+    // MSG-018: publishes coalesced read / delivery receipts when their window ends.
+    tokio::spawn(messaging::messages::receipts::run(
+        state.clone(),
+        config
+            .realtime
+            .publisher_interval
+            .max(std::time::Duration::from_millis(50)),
+    ));
     tokio::spawn(messaging::realtime::push::run(
         state.clone(),
         config.workers.interval,

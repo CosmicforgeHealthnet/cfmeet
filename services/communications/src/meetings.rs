@@ -57,6 +57,10 @@ impl State {
                         vec![viewer.id.into(),c.id.into(),format!("meeting:{id}").into(),space.into(),data.into()]).await?;
                     self.store.change(&txn, viewer.id, "MEETING_LINK", Some(c.id), None).await?;
                 }
+                // MSG-009: members are told in realtime; members without a profile get the
+                // card when they open the timeline (`materialize_meeting_cards`).
+                self.timeline_nudge(&txn, p.scope(), c.id, &format!("meeting:{id}"), "MEETING_SHARED")
+                    .await?;
                 l
             }
             // Replay of the same request, or this meeting is already linked here.
