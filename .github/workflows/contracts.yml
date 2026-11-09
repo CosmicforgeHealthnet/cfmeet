@@ -22,6 +22,7 @@ on:
       - "sdks/**"
       - "apps/web/src/**"
       - "docs/architecture/first-party-direct-ingress-decision.md"
+      - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
   pull_request:
     paths:
@@ -34,6 +35,7 @@ on:
       - "sdks/**"
       - "apps/web/src/**"
       - "docs/architecture/first-party-direct-ingress-decision.md"
+      - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
   workflow_dispatch:
 
@@ -114,6 +116,11 @@ jobs:
       - name: generated SDK types are current with the public contracts (FE-015)
         working-directory: .
         run: python3 sdks/generate.py --check
+
+      # Final closure: the frontend endpoint reference is generated from the contracts.
+      - name: frontend endpoint reference is current with the contracts
+        working-directory: .
+        run: python3 scripts/contracts/frontend_reference.py --check
 
       # FE-018: the first-party direct-ingress decision record lists exactly the
       # operations public-routes.json EXCLUDES from the gateway (generated block).
