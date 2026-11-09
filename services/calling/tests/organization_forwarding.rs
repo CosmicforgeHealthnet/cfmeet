@@ -122,7 +122,7 @@ async fn send(
 }
 
 async fn whoami(h: &Harness, headers: &[(String, String)]) -> TestResponse {
-    send(h, Method::POST, "/test/context", headers, Some(json!({}))).await
+    send(h, Method::GET, "/test/context", headers, None).await
 }
 
 fn assert_rejected(response: &TestResponse) {
