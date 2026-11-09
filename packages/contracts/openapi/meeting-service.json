@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "paths": {
     "/": {
@@ -13945,7 +13945,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
                 }
               }
             }
@@ -14022,7 +14022,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OrganizationInvitation"
                 }
               }
             }
@@ -14168,7 +14168,7 @@
           "Organizations (v2)"
         ],
         "summary": "Get a business organization.",
-        "description": "Returns the organization with its profile, member count and the caller's own membership\n(`viewer`: role, status and capabilities). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "description": "Returns the organization with its profile, member count and the caller's own membership\n(`viewer`: role, status and capabilities), plus `createdByDisplayName` (the creator's display\nname from the account authority, when known). Organizations the caller does not belong to\nanswer ORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
         "operationId": "v2_get_business_organization",
         "parameters": [
           {
@@ -14471,11 +14471,11 @@
         ],
         "responses": {
           "200": {
-            "description": "items: audit events",
+            "description": "Audit events, newest first",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OrganizationAuditEventPage"
                 }
               }
             }
@@ -15057,11 +15057,11 @@
         ],
         "responses": {
           "200": {
-            "description": "items: invitations",
+            "description": "Invitations",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OrganizationInvitationList"
                 }
               }
             }
@@ -15307,7 +15307,7 @@
           "Organizations (v2)"
         ],
         "summary": "List members (platform admins, organization OWNER/ADMIN).",
-        "description": "Returns every membership of the organization, whatever its status, oldest first. Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list) and each item also carries\n`organizationRole` and `version`.",
+        "description": "Returns the organization's memberships, oldest first, each with the member's display identity\n(`displayName` and `username` from the account authority; never an email address). Allowed for\nplatform administrators and for active OWNER or ADMIN members of an active organization. Once\nthe Organizations Service is authoritative, the list comes from it (removed memberships are\nomitted; members holding `organization.members.read` may list, following the organization's\nmember-directory policy) and each item also carries `organizationRole` and `version`.\n\nPaging (ORG-006): without `limit` or `cursor` every membership is returned, as before. With\n`limit` (1–200) and/or `cursor`, one page is returned (50 items when only `cursor` is given)\nand, while more remain, the `X-Next-Cursor` response header holds the opaque cursor of the\nnext page. The body stays a JSON array in both cases.",
         "operationId": "v2_list_organization_members",
         "parameters": [
           {
@@ -15319,11 +15319,40 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size 1–200; omit both `limit` and `cursor` for the whole list",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `X-Next-Cursor` header (opaque)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Members",
+            "headers": {
+              "X-Next-Cursor": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Paged requests only: the cursor of the next page; absent on the last page"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -15331,6 +15360,16 @@
                   "items": {
                     "$ref": "#/components/schemas/OrganizationMemberResponse"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (limit or cursor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -16283,11 +16322,11 @@
         },
         "responses": {
           "200": {
-            "description": "Transfer result",
+            "description": "The organization after the transfer",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/BusinessOrganization"
                 }
               }
             }
@@ -16340,6 +16379,192 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/policies": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Get the organization policy.",
+        "description": "Returns the organization's policy document (member directory visibility, guests, meeting\nhosting, enabled features, retention hint, delegated administration) with its `revision` (0\nwhile the defaults apply). Requires an active membership (`organization.read`). Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_get_organization_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Change the organization policy (compare-and-swap).",
+        "description": "Merges the partial `policy` document into the current one (unknown keys and out-of-range\nvalues are VALIDATION_ERROR) and stores it as `revision + 1`. `expectedRevision` must be the\ncurrent `revision`, otherwise VERSION_CONFLICT. A policy only removes capabilities and never\ntouches OWNER administration. Requires `organization.policies.manage` (OWNER; ADMINs unless\nthe policy reserves it to OWNERs); `delegatedAdministration` is OWNER-only. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_organization_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/provisioning": {
       "get": {
         "tags": [
@@ -16366,7 +16591,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OrganizationProvisioning"
                 }
               }
             }
@@ -16551,6 +16776,1073 @@
           },
           "409": {
             "description": "VERSION_CONFLICT / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List an organization's teams.",
+        "description": "Returns the organization's teams in id order (`cursor` = the previous page's `nextCursor`;\n`limit` 1–200, default 50), optionally filtered by `status` (ACTIVE or ARCHIVED). Requires an\nactive membership allowed to read the member directory (`organization.members.read` under the\norganization policy). Organizations the caller does not belong to answer\nORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_list_organization_teams",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "ACTIVE or ARCHIVED",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Teams",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create a team.",
+        "description": "Creates an ACTIVE team (`name` 1–120 characters, unique among the organization's ACTIVE teams;\noptional `description` and `parentTeamId`, nesting bounded). Requires the\n`organization.teams.manage` capability (OWNER, ADMIN; MANAGERs only when the organization\npolicy lets them create teams, and they become the new team's TEAM_MANAGER). Send an\n`Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_create_organization_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationTeamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeam"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND (parent) / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "TEAM_NAME_TAKEN / TEAM_ARCHIVED (parent) / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED / IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams/{teamId}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Get a team.",
+        "description": "Returns one team of the organization with its ACTIVE member count. A team of another\norganization answers TEAM_NOT_FOUND. Requires the same access as the team list. Returns\nFEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_get_organization_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeam"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Update a team.",
+        "description": "Changes the team's `name`, `description` (`null` clears it) or `parentTeamId` (`null`\ndetaches it). `expectedVersion` must be the team's current `version`, otherwise\nVERSION_CONFLICT. Requires `organization.teams.manage` (OWNER, ADMIN, or a MANAGER who is\nTEAM_MANAGER of this team). Returns FEATURE_DISABLED until the Organizations Service is\nauthoritative.",
+        "operationId": "v2_update_organization_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationTeamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeam"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / TEAM_NAME_TAKEN / TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams/{teamId}/archive": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Archive a team.",
+        "description": "Archives the team (idempotent) and ends every ACTIVE team membership; refused while the team\nhas ACTIVE child teams. Optional `expectedVersion`. Requires `organization.teams.manage` as an\nOWNER or ADMIN. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_archive_organization_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveOrganizationTeamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Archived team",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeam"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (active child teams)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams/{teamId}/members": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "List a team's members.",
+        "description": "Returns the team's ACTIVE memberships in id order (`cursor` = the previous page's\n`nextCursor`; `limit` 1–200, default 50), each with the member's display identity\n(`displayName`, `username`; never an email address). Requires the same access as the team\nlist. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_list_organization_team_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–200 (default 50)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamMemberPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Add a member to a team.",
+        "description": "Adds an ACTIVE organization member (exactly one of `membershipId` and `userId`) with `role`\nTEAM_MANAGER (organization MANAGERs, ADMINs and OWNERs only) or TEAM_MEMBER. OWNERs and ADMINs\nholding `organization.teams.manage` add either role; a MANAGER who is TEAM_MANAGER of the team\nadds TEAM_MEMBERs only. Re-adding an ACTIVE member answers 200 with the existing membership.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_add_organization_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddOrganizationTeamMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Already a member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamMember"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Added team member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": {
+      "delete": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Remove a member from a team.",
+        "description": "Ends one team membership (idempotent: removing a removed membership answers it again).\nOWNERs and ADMINs remove anyone, a TEAM_MANAGER removes TEAM_MEMBERs, and everyone can leave a\nteam themselves. The organization membership is unchanged. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_remove_organization_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "description": "Team membership id (the `id` of a team member list item)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ended team membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamMember"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Change a team member's role.",
+        "description": "Sets `role` (TEAM_MANAGER or TEAM_MEMBER) of one team membership (the path's member segment is\nthe team membership `id`). `expectedVersion` must be its current `version`. OWNERs and ADMINs\nassign either role; a TEAM_MANAGER can only step down; nobody raises their own team role.\nReturns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_update_organization_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "memberId",
+            "in": "path",
+            "description": "Team membership id (the `id` of a team member list item)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationTeamMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated team member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationTeamMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT / TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
             "content": {
               "application/json": {
                 "schema": {
@@ -16855,6 +18147,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "AddOrganizationTeamMemberRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/teams/{teamId}/members` — exactly one of\n`membershipId` and `userId`.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "An ACTIVE organization membership.",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "TEAM_MANAGER (organization MANAGERs, ADMINs and OWNERs only) or TEAM_MEMBER."
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A user with an ACTIVE organization membership.",
+            "nullable": true
+          }
+        }
       },
       "AdminLogListResponse": {
         "type": "object",
@@ -17505,6 +18822,18 @@
           "used_count": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "ArchiveOrganizationTeamRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/teams/{teamId}/archive`.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Optional team `version` the archive is based on.",
+            "nullable": true
           }
         }
       },
@@ -18238,6 +19567,11 @@
           "createdBy": {
             "type": "string",
             "format": "uuid",
+            "nullable": true
+          },
+          "createdByDisplayName": {
+            "type": "string",
+            "description": "`GET /api/v2/organizations/{id}` only: the display name of `createdBy` from the\naccount authority (`null` when there is no creator or the account no longer\nexists). Never an email address.",
             "nullable": true
           },
           "creationSource": {
@@ -19664,6 +20998,30 @@
         },
         "additionalProperties": false
       },
+      "CreateOrganizationTeamRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/organizations/{id}/teams`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "description": "1–120 characters."
+          },
+          "parentTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "An ACTIVE team of the same organization (nesting is bounded).",
+            "nullable": true
+          }
+        }
+      },
       "CreatePollRequest": {
         "type": "object",
         "required": [
@@ -20096,6 +21454,9 @@
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
           "ORGANIZATION_POLICY_RESTRICTED",
+          "TEAM_NOT_FOUND",
+          "TEAM_ARCHIVED",
+          "TEAM_NAME_TAKEN",
           "ORGANIZATION_CALLING_DISABLED",
           "USERNAME_TAKEN",
           "REAUTHENTICATION_REQUIRED",
@@ -21825,6 +23186,111 @@
           "UNKNOWN"
         ]
       },
+      "OrganizationAuditActor": {
+        "type": "object",
+        "description": "Who performed an audited organization change.",
+        "required": [
+          "kind",
+          "serviceId"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "USER, OPERATOR or SYSTEM."
+          },
+          "serviceId": {
+            "type": "string",
+            "description": "The service the change came through (for example `cfmeet.meeting-service`)."
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationAuditEvent": {
+        "type": "object",
+        "description": "One organization audit event (append-only).",
+        "required": [
+          "id",
+          "seq",
+          "action",
+          "actor",
+          "targetType",
+          "summary",
+          "occurredAt"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Dotted action name, for example `membership.role_changed` or `policy.updated`."
+          },
+          "actor": {
+            "$ref": "#/components/schemas/OrganizationAuditActor"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Monotonic sequence number (pass the oldest one seen as `before`)."
+          },
+          "summary": {
+            "type": "object",
+            "description": "Value-free change summary (ids, versions, changed field names)."
+          },
+          "targetId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "targetType": {
+            "type": "string",
+            "description": "The kind of resource changed (organization, membership, invitation, team, policy...)."
+          }
+        }
+      },
+      "OrganizationAuditEventPage": {
+        "type": "object",
+        "description": "A page of organization audit events, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationAuditEvent"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as `before` for the next (older) page; null on the last page.",
+            "nullable": true
+          }
+        }
+      },
       "OrganizationInvitation": {
         "type": "object",
         "description": "An organization invitation. The raw `token` is returned once, at creation only.",
@@ -21887,6 +23353,22 @@
             "type": "string",
             "description": "One-time invitation token (creation response only; never in URLs or logs).",
             "nullable": true
+          }
+        }
+      },
+      "OrganizationInvitationList": {
+        "type": "object",
+        "description": "`GET /api/v2/organizations/{id}/invitations`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationInvitation"
+            },
+            "description": "Invitations (masked invitee email; never a token)."
           }
         }
       },
@@ -21957,6 +23439,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "displayName": {
+            "type": "string",
+            "description": "ORG-006: the member's display name (the account's chosen display name, otherwise\nits username), from the account authority. `null` when the account no longer\nexists. The email address is never included: the organization policy has no\nemail-visibility setting, so only the display identity is shown.",
+            "nullable": true
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -21983,6 +23470,11 @@
           "userId": {
             "type": "string",
             "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "description": "ORG-006: the member's username (public handle). `null` when the account no\nlonger exists.",
+            "nullable": true
           },
           "version": {
             "type": "integer",
@@ -22017,6 +23509,181 @@
             "type": "string",
             "format": "uuid",
             "description": "The membership that becomes OWNER."
+          }
+        }
+      },
+      "OrganizationPolicy": {
+        "type": "object",
+        "description": "`GET /api/v2/organizations/{id}/policies`.",
+        "required": [
+          "schemaVersion",
+          "organizationId",
+          "revision",
+          "policy",
+          "legacyMeetingProfilePolicy"
+        ],
+        "properties": {
+          "legacyMeetingProfilePolicy": {
+            "type": "object",
+            "description": "The Meeting Service profile policy, verbatim (still enforced by the Meeting\nService)."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/OrganizationPolicyDocument"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as `expectedRevision` to change the policy (0: never changed, defaults)."
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Always 1."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationPolicyDelegatedAdministration": {
+        "type": "object",
+        "description": "Delegated administration (OWNER-only section).",
+        "required": [
+          "managersMayInvite",
+          "managersMayCreateTeams",
+          "adminsMayManagePolicies"
+        ],
+        "properties": {
+          "adminsMayManagePolicies": {
+            "type": "boolean",
+            "description": "ADMINs may change policies (default true)."
+          },
+          "managersMayCreateTeams": {
+            "type": "boolean",
+            "description": "MANAGERs may create teams (default false)."
+          },
+          "managersMayInvite": {
+            "type": "boolean",
+            "description": "MANAGERs may invite MEMBERs and GUESTs (default true)."
+          }
+        }
+      },
+      "OrganizationPolicyDocument": {
+        "type": "object",
+        "description": "The organization policy document (schema version 1). Defaults equal the role matrix; a\npolicy only removes capabilities and never touches OWNER administration.",
+        "required": [
+          "memberDirectory",
+          "guests",
+          "meetings",
+          "features",
+          "retention",
+          "delegatedAdministration"
+        ],
+        "properties": {
+          "delegatedAdministration": {
+            "$ref": "#/components/schemas/OrganizationPolicyDelegatedAdministration"
+          },
+          "features": {
+            "$ref": "#/components/schemas/OrganizationPolicyFeatures"
+          },
+          "guests": {
+            "$ref": "#/components/schemas/OrganizationPolicyGuests"
+          },
+          "meetings": {
+            "$ref": "#/components/schemas/OrganizationPolicyMeetings"
+          },
+          "memberDirectory": {
+            "$ref": "#/components/schemas/OrganizationPolicyMemberDirectory"
+          },
+          "retention": {
+            "$ref": "#/components/schemas/OrganizationPolicyRetention"
+          }
+        }
+      },
+      "OrganizationPolicyFeatures": {
+        "type": "object",
+        "description": "Features enabled for the organization (a disabled feature removes its capabilities\nfor every role).",
+        "required": [
+          "meetings",
+          "messaging",
+          "calling"
+        ],
+        "properties": {
+          "calling": {
+            "type": "boolean"
+          },
+          "meetings": {
+            "type": "boolean"
+          },
+          "messaging": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OrganizationPolicyGuests": {
+        "type": "object",
+        "description": "External guests.",
+        "required": [
+          "invitationsAllowed"
+        ],
+        "properties": {
+          "invitationsAllowed": {
+            "type": "boolean",
+            "description": "GUEST invitations may be created or accepted (default true)."
+          }
+        }
+      },
+      "OrganizationPolicyMeetings": {
+        "type": "object",
+        "description": "Organization meetings.",
+        "required": [
+          "hostCreation"
+        ],
+        "properties": {
+          "hostCreation": {
+            "type": "string",
+            "description": "MEMBERS (default), MANAGERS or ADMINS: the minimum role that may host."
+          }
+        }
+      },
+      "OrganizationPolicyMemberDirectory": {
+        "type": "object",
+        "description": "Who may list the organization's members.",
+        "required": [
+          "visibility",
+          "searchable"
+        ],
+        "properties": {
+          "searchable": {
+            "type": "boolean",
+            "description": "Colleague discovery hint (default true)."
+          },
+          "visibility": {
+            "type": "string",
+            "description": "MEMBERS (default), MANAGERS or ADMINS: the minimum role that may list members."
+          }
+        }
+      },
+      "OrganizationPolicyRetention": {
+        "type": "object",
+        "description": "Retention hint.",
+        "properties": {
+          "hintDays": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1–3650 days, or `null` for no hint.",
+            "nullable": true
           }
         }
       },
@@ -22074,6 +23741,71 @@
           }
         }
       },
+      "OrganizationProvisioning": {
+        "type": "object",
+        "description": "`GET /api/v2/organizations/{id}/provisioning`.",
+        "required": [
+          "organizationId",
+          "provisioningState",
+          "attempts",
+          "updatedAt",
+          "provisioningEnabled",
+          "scopes"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastErrorClass": {
+            "type": "string",
+            "description": "The failure class of the last failed attempt.",
+            "nullable": true
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provisioningEnabled": {
+            "type": "boolean",
+            "description": "Whether technical provisioning runs in this deployment (while false organizations\nstay PENDING)."
+          },
+          "provisioningState": {
+            "type": "string",
+            "description": "NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationScopeMapping"
+            }
+          },
+          "step": {
+            "type": "string",
+            "description": "The current step (at most 64 characters).",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workflowId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "workflowState": {
+            "type": "string",
+            "description": "PENDING, IN_PROGRESS, READY, FAILED or CANCELLED.",
+            "nullable": true
+          }
+        }
+      },
       "OrganizationResponse": {
         "type": "object",
         "required": [
@@ -22111,12 +23843,272 @@
           "MEMBER"
         ]
       },
+      "OrganizationScopeMapping": {
+        "type": "object",
+        "description": "The organization's technical scope mapping (ids and verification state only).",
+        "required": [
+          "id",
+          "capability",
+          "mappingState",
+          "mappingVersion",
+          "syncAttempts"
+        ],
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "capability": {
+            "type": "string",
+            "description": "`primary`."
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lastSyncErrorClass": {
+            "type": "string",
+            "nullable": true
+          },
+          "mappingState": {
+            "type": "string",
+            "description": "PENDING, VERIFYING, READY, FAILED, SUSPENDED or RETIRED."
+          },
+          "mappingVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "syncAttempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "tenantStatusApplied": {
+            "type": "string",
+            "description": "ACTIVE or SUSPENDED.",
+            "nullable": true
+          },
+          "tenantStatusDesired": {
+            "type": "string",
+            "description": "ACTIVE or SUSPENDED.",
+            "nullable": true
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
       "OrganizationStatus": {
         "type": "string",
         "enum": [
           "ACTIVE",
           "SUSPENDED"
         ]
+      },
+      "OrganizationTeam": {
+        "type": "object",
+        "description": "A team of a first-party organization.",
+        "required": [
+          "id",
+          "organizationId",
+          "name",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "version",
+          "memberCount"
+        ],
+        "properties": {
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Up to 500 characters.",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "ACTIVE team members."
+          },
+          "name": {
+            "type": "string",
+            "description": "1–120 characters, unique among the organization's ACTIVE teams."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE or ARCHIVED."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as `expectedVersion` to change or archive the team."
+          }
+        }
+      },
+      "OrganizationTeamMember": {
+        "type": "object",
+        "description": "One team membership. `displayName` / `username` are added by this relay from the\naccount authority (never an email address).",
+        "required": [
+          "id",
+          "organizationId",
+          "teamId",
+          "membershipId",
+          "userId",
+          "role",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "addedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "The member's display name; `null` when the account no longer exists.",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The team membership id (the `{memberId}` path segment)."
+          },
+          "membershipId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The organization membership."
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "removedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "description": "TEAM_MANAGER or TEAM_MEMBER."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE or REMOVED."
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "description": "The member's username; `null` when the account no longer exists.",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as `expectedVersion` to change the team role."
+          }
+        }
+      },
+      "OrganizationTeamMemberPage": {
+        "type": "object",
+        "description": "A page of ACTIVE team members (id order).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationTeamMember"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last page.",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationTeamPage": {
+        "type": "object",
+        "description": "A page of teams (id order).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationTeam"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last page.",
+            "nullable": true
+          }
+        }
       },
       "OrganizationViewer": {
         "type": "object",
@@ -25710,6 +27702,25 @@
         },
         "additionalProperties": false
       },
+      "UpdateOrganizationPolicyRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}/policies` (compare-and-swap).",
+        "required": [
+          "expectedRevision",
+          "policy"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The policy `revision` the change is based on; a stale one is VERSION_CONFLICT."
+          },
+          "policy": {
+            "type": "object",
+            "description": "A partial policy document merged into the current one (unknown keys refused)."
+          }
+        }
+      },
       "UpdateOrganizationRequest": {
         "type": "object",
         "required": [
@@ -25721,6 +27732,54 @@
           }
         },
         "additionalProperties": false
+      },
+      "UpdateOrganizationTeamMemberRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}`.",
+        "required": [
+          "expectedVersion",
+          "role"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The team membership `version` the change is based on."
+          },
+          "role": {
+            "type": "string",
+            "description": "TEAM_MANAGER or TEAM_MEMBER."
+          }
+        }
+      },
+      "UpdateOrganizationTeamRequest": {
+        "type": "object",
+        "description": "`PATCH /api/v2/organizations/{id}/teams/{teamId}`.",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "`null` clears the description.",
+            "nullable": true
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The team `version` the change is based on."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "parentTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "`null` detaches the team from its parent; absent leaves it unchanged.",
+            "nullable": true
+          }
+        }
       },
       "UpdateVideoRequest": {
         "type": "object",

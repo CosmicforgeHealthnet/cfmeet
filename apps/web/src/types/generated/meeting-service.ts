@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.4.0";
+export const CONTRACT_VERSION = "1.5.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -84,6 +84,19 @@ export interface AddMemberRequest {
   email?: string | null;
   role: Role;
   /** Registered CF Meet user. Exactly one of `userId` / `email`. */
+  userId?: string | null;
+}
+
+/**
+ * `POST /api/v2/organizations/{id}/teams/{teamId}/members` — exactly one of
+ * `membershipId` and `userId`.
+ */
+export interface AddOrganizationTeamMemberRequest {
+  /** An ACTIVE organization membership. */
+  membershipId?: string | null;
+  /** TEAM_MANAGER (organization MANAGERs, ADMINs and OWNERs only) or TEAM_MEMBER. */
+  role: string;
+  /** A user with an ACTIVE organization membership. */
   userId?: string | null;
 }
 
@@ -305,6 +318,12 @@ export interface ApiKeyResponse {
   used_count: number;
 }
 
+/** `POST /api/v2/organizations/{id}/teams/{teamId}/archive`. */
+export interface ArchiveOrganizationTeamRequest {
+  /** Optional team `version` the archive is based on. */
+  expectedVersion?: number | null;
+}
+
 
 export interface ArtifactAccess {
   artifactId: string;
@@ -524,6 +543,12 @@ export interface BusinessOrganization {
   /** When the organization was created on CF Meet (never an incorporation date). */
   createdAt: string;
   createdBy?: string | null;
+  /**
+   * `GET /api/v2/organizations/{id}` only: the display name of `createdBy` from the
+   * account authority (`null` when there is no creator or the account no longer
+   * exists). Never an email address.
+   */
+  createdByDisplayName?: string | null;
   /** SELF_SERVICE, PLATFORM_ADMIN or IMPORTED. */
   creationSource: string;
   id: string;
@@ -945,6 +970,16 @@ export interface CreateOrganizationRequest {
   slug: string;
 }
 
+/** `POST /api/v2/organizations/{id}/teams`. */
+export interface CreateOrganizationTeamRequest {
+  /** Up to 500 characters. */
+  description?: string | null;
+  /** 1–120 characters. */
+  name: string;
+  /** An ACTIVE team of the same organization (nesting is bounded). */
+  parentTeamId?: string | null;
+}
+
 
 export interface CreatePollRequest {
   anonymous?: boolean;
@@ -1075,7 +1110,7 @@ export interface ErrorBody {
 }
 
 /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ORGANIZATION_POLICY_RESTRICTED" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DATABASE_ERROR" | "INTERNAL_ERROR";
 
 /** OpenAPI description of the public error envelope. */
 export interface ErrorEnvelope {
@@ -1653,6 +1688,41 @@ export interface MyOrganizationResponse {
 
 export type NetworkType = "WIFI" | "CELLULAR" | "ETHERNET" | "UNKNOWN";
 
+/** Who performed an audited organization change. */
+export interface OrganizationAuditActor {
+  /** USER, OPERATOR or SYSTEM. */
+  kind: string;
+  /** The service the change came through (for example `cfmeet.meeting-service`). */
+  serviceId: string;
+  userId?: string | null;
+}
+
+/** One organization audit event (append-only). */
+export interface OrganizationAuditEvent {
+  /** Dotted action name, for example `membership.role_changed` or `policy.updated`. */
+  action: string;
+  actor: OrganizationAuditActor;
+  correlationId?: string | null;
+  id: string;
+  occurredAt: string;
+  organizationId?: string | null;
+  requestId?: string | null;
+  /** Monotonic sequence number (pass the oldest one seen as `before`). */
+  seq: number;
+  /** Value-free change summary (ids, versions, changed field names). */
+  summary: Record<string, unknown>;
+  targetId?: string | null;
+  /** The kind of resource changed (organization, membership, invitation, team, policy...). */
+  targetType: string;
+}
+
+/** A page of organization audit events, newest first. */
+export interface OrganizationAuditEventPage {
+  items: Array<OrganizationAuditEvent>;
+  /** Pass as `before` for the next (older) page; null on the last page. */
+  nextCursor?: number | null;
+}
+
 /** An organization invitation. The raw `token` is returned once, at creation only. */
 export interface OrganizationInvitation {
   createdAt: string;
@@ -1669,6 +1739,12 @@ export interface OrganizationInvitation {
   status: string;
   /** One-time invitation token (creation response only; never in URLs or logs). */
   token?: string | null;
+}
+
+/** `GET /api/v2/organizations/{id}/invitations`. */
+export interface OrganizationInvitationList {
+  /** Invitations (masked invitee email; never a token). */
+  items: Array<OrganizationInvitation>;
 }
 
 /** `POST /api/v2/organization-invitations/accept` and `/decline`. */
@@ -1701,6 +1777,13 @@ export interface OrganizationLifecycleRequest {
 
 export interface OrganizationMemberResponse {
   createdAt: string;
+  /**
+   * ORG-006: the member's display name (the account's chosen display name, otherwise
+   * its username), from the account authority. `null` when the account no longer
+   * exists. The email address is never included: the organization policy has no
+   * email-visibility setting, so only the display identity is shown.
+   */
+  displayName?: string | null;
   id: string;
   organizationId: string;
   /**
@@ -1712,6 +1795,11 @@ export interface OrganizationMemberResponse {
   status: OrganizationMemberStatus;
   updatedAt: string;
   userId: string;
+  /**
+   * ORG-006: the member's username (public handle). `null` when the account no
+   * longer exists.
+   */
+  username?: string | null;
   /**
    * Once the Organizations Service is authoritative: the membership version, used as
    * `expectedVersion` by `PATCH /api/v2/organizations/{id}/members/{userId}`.
@@ -1728,6 +1816,82 @@ export interface OrganizationOwnershipTransferRequest {
   expectedVersion: number;
   /** The membership that becomes OWNER. */
   toMembershipId: string;
+}
+
+/** `GET /api/v2/organizations/{id}/policies`. */
+export interface OrganizationPolicy {
+  /**
+   * The Meeting Service profile policy, verbatim (still enforced by the Meeting
+   * Service).
+   */
+  legacyMeetingProfilePolicy: Record<string, unknown>;
+  organizationId: string;
+  policy: OrganizationPolicyDocument;
+  /** Pass as `expectedRevision` to change the policy (0: never changed, defaults). */
+  revision: number;
+  /** Always 1. */
+  schemaVersion: number;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+}
+
+/** Delegated administration (OWNER-only section). */
+export interface OrganizationPolicyDelegatedAdministration {
+  /** ADMINs may change policies (default true). */
+  adminsMayManagePolicies: boolean;
+  /** MANAGERs may create teams (default false). */
+  managersMayCreateTeams: boolean;
+  /** MANAGERs may invite MEMBERs and GUESTs (default true). */
+  managersMayInvite: boolean;
+}
+
+/**
+ * The organization policy document (schema version 1). Defaults equal the role matrix; a
+ * policy only removes capabilities and never touches OWNER administration.
+ */
+export interface OrganizationPolicyDocument {
+  delegatedAdministration: OrganizationPolicyDelegatedAdministration;
+  features: OrganizationPolicyFeatures;
+  guests: OrganizationPolicyGuests;
+  meetings: OrganizationPolicyMeetings;
+  memberDirectory: OrganizationPolicyMemberDirectory;
+  retention: OrganizationPolicyRetention;
+}
+
+/**
+ * Features enabled for the organization (a disabled feature removes its capabilities
+ * for every role).
+ */
+export interface OrganizationPolicyFeatures {
+  calling: boolean;
+  meetings: boolean;
+  messaging: boolean;
+}
+
+/** External guests. */
+export interface OrganizationPolicyGuests {
+  /** GUEST invitations may be created or accepted (default true). */
+  invitationsAllowed: boolean;
+}
+
+/** Organization meetings. */
+export interface OrganizationPolicyMeetings {
+  /** MEMBERS (default), MANAGERS or ADMINS: the minimum role that may host. */
+  hostCreation: string;
+}
+
+/** Who may list the organization's members. */
+export interface OrganizationPolicyMemberDirectory {
+  /** Colleague discovery hint (default true). */
+  searchable: boolean;
+  /** MEMBERS (default), MANAGERS or ADMINS: the minimum role that may list members. */
+  visibility: string;
+}
+
+/** Retention hint. */
+export interface OrganizationPolicyRetention {
+  /** 1–3650 days, or `null` for no hint. */
+  hintDays?: number | null;
 }
 
 /** Organization profile. On update, an omitted field is unchanged and `null` clears it. */
@@ -1751,6 +1915,29 @@ export interface OrganizationProfile {
   publicContactEmail?: string | null;
 }
 
+/** `GET /api/v2/organizations/{id}/provisioning`. */
+export interface OrganizationProvisioning {
+  attempts: number;
+  /** The failure class of the last failed attempt. */
+  lastErrorClass?: string | null;
+  nextAttemptAt?: string | null;
+  organizationId: string;
+  /**
+   * Whether technical provisioning runs in this deployment (while false organizations
+   * stay PENDING).
+   */
+  provisioningEnabled: boolean;
+  /** NOT_REQUIRED, PENDING, IN_PROGRESS, READY or FAILED. */
+  provisioningState: string;
+  scopes: Array<OrganizationScopeMapping>;
+  /** The current step (at most 64 characters). */
+  step?: string | null;
+  updatedAt: string;
+  workflowId?: string | null;
+  /** PENDING, IN_PROGRESS, READY, FAILED or CANCELLED. */
+  workflowState?: string | null;
+}
+
 
 export interface OrganizationResponse {
   createdAt: string;
@@ -1763,8 +1950,91 @@ export interface OrganizationResponse {
 
 export type OrganizationRole = "OWNER" | "ADMIN" | "MEMBER";
 
+/** The organization's technical scope mapping (ids and verification state only). */
+export interface OrganizationScopeMapping {
+  applicationId?: string | null;
+  /** `primary`. */
+  capability: string;
+  environmentId?: string | null;
+  id: string;
+  lastSyncErrorClass?: string | null;
+  /** PENDING, VERIFYING, READY, FAILED, SUSPENDED or RETIRED. */
+  mappingState: string;
+  mappingVersion: number;
+  syncAttempts: number;
+  tenantId?: string | null;
+  /** ACTIVE or SUSPENDED. */
+  tenantStatusApplied?: string | null;
+  /** ACTIVE or SUSPENDED. */
+  tenantStatusDesired?: string | null;
+  verifiedAt?: string | null;
+}
+
 
 export type OrganizationStatus = "ACTIVE" | "SUSPENDED";
+
+/** A team of a first-party organization. */
+export interface OrganizationTeam {
+  archivedAt?: string | null;
+  createdAt: string;
+  createdBy?: string | null;
+  /** Up to 500 characters. */
+  description?: string | null;
+  id: string;
+  /** ACTIVE team members. */
+  memberCount: number;
+  /** 1–120 characters, unique among the organization's ACTIVE teams. */
+  name: string;
+  organizationId: string;
+  parentTeamId?: string | null;
+  /** ACTIVE or ARCHIVED. */
+  status: string;
+  updatedAt: string;
+  /** Pass as `expectedVersion` to change or archive the team. */
+  version: number;
+}
+
+/**
+ * One team membership. `displayName` / `username` are added by this relay from the
+ * account authority (never an email address).
+ */
+export interface OrganizationTeamMember {
+  addedBy?: string | null;
+  createdAt: string;
+  /** The member's display name; `null` when the account no longer exists. */
+  displayName?: string | null;
+  /** The team membership id (the `{memberId}` path segment). */
+  id: string;
+  /** The organization membership. */
+  membershipId: string;
+  organizationId: string;
+  removedAt?: string | null;
+  /** TEAM_MANAGER or TEAM_MEMBER. */
+  role: string;
+  /** ACTIVE or REMOVED. */
+  status: string;
+  teamId: string;
+  updatedAt: string;
+  userId: string;
+  /** The member's username; `null` when the account no longer exists. */
+  username?: string | null;
+  /** Pass as `expectedVersion` to change the team role. */
+  version: number;
+}
+
+/** A page of ACTIVE team members (id order). */
+export interface OrganizationTeamMemberPage {
+  items: Array<OrganizationTeamMember>;
+  /** Pass as `cursor` for the next page; null on the last page. */
+  nextCursor?: string | null;
+}
+
+/** A page of teams (id order). */
+export interface OrganizationTeamPage {
+  items: Array<OrganizationTeam>;
+  /** Pass as `cursor` for the next page; null on the last page. */
+  nextCursor?: string | null;
+}
 
 /** The caller's own membership, as seen on an organization. */
 export interface OrganizationViewer {
@@ -2940,9 +3210,36 @@ export interface UpdateMemberRequest {
   version: number;
 }
 
+/** `PATCH /api/v2/organizations/{id}/policies` (compare-and-swap). */
+export interface UpdateOrganizationPolicyRequest {
+  /** The policy `revision` the change is based on; a stale one is VERSION_CONFLICT. */
+  expectedRevision: number;
+  /** A partial policy document merged into the current one (unknown keys refused). */
+  policy: Record<string, unknown>;
+}
+
 
 export interface UpdateOrganizationRequest {
   status: OrganizationStatus;
+}
+
+/** `PATCH /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}`. */
+export interface UpdateOrganizationTeamMemberRequest {
+  /** The team membership `version` the change is based on. */
+  expectedVersion: number;
+  /** TEAM_MANAGER or TEAM_MEMBER. */
+  role: string;
+}
+
+/** `PATCH /api/v2/organizations/{id}/teams/{teamId}`. */
+export interface UpdateOrganizationTeamRequest {
+  /** `null` clears the description. */
+  description?: string | null;
+  /** The team `version` the change is based on. */
+  expectedVersion: number;
+  name?: string | null;
+  /** `null` detaches the team from its parent; absent leaves it unchanged. */
+  parentTeamId?: string | null;
 }
 
 /** Request to update video state */
@@ -3213,6 +3510,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
+  "DELETE /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_remove_organization_team_member",
   "GET /": "get_app_info",
   "GET /api/v1/admin/logs": "list_logs",
   "GET /api/v1/admin/meetings": "admin_list_meetings",
@@ -3284,7 +3582,11 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
+  "GET /api/v2/organizations/{id}/policies": "v2_get_organization_policy",
   "GET /api/v2/organizations/{id}/provisioning": "v2_get_organization_provisioning",
+  "GET /api/v2/organizations/{id}/teams": "v2_list_organization_teams",
+  "GET /api/v2/organizations/{id}/teams/{teamId}": "v2_get_organization_team",
+  "GET /api/v2/organizations/{id}/teams/{teamId}/members": "v2_list_organization_team_members",
   "GET /api/v2/resolve/{identifier}": "v2_resolve_identifier",
   "GET /health": "health_check",
   "PATCH /api/v1/admin/users/{id}": "update_user",
@@ -3306,6 +3608,9 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_patch",
   "PATCH /api/v2/organizations/{id}/members/{userId}": "v2_update_organization_membership",
   "PATCH /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_patch",
+  "PATCH /api/v2/organizations/{id}/policies": "v2_update_organization_policy",
+  "PATCH /api/v2/organizations/{id}/teams/{teamId}": "v2_update_organization_team",
+  "PATCH /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_update_organization_team_member",
   "POST /api/v1/api-keys": "create_api_key",
   "POST /api/v1/api/meetings": "api_create_meeting",
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
@@ -3432,6 +3737,9 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",
   "POST /api/v2/organizations/{id}/reactivate": "v2_reactivate_business_organization",
   "POST /api/v2/organizations/{id}/suspend": "v2_suspend_business_organization",
+  "POST /api/v2/organizations/{id}/teams": "v2_create_organization_team",
+  "POST /api/v2/organizations/{id}/teams/{teamId}/archive": "v2_archive_organization_team",
+  "POST /api/v2/organizations/{id}/teams/{teamId}/members": "v2_add_organization_team_member",
   "PUT /api/v1/meetings/{id}": "update_meeting",
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
   "PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_set_recurrence_exception",

@@ -145,6 +145,24 @@ fn every_v2_route_is_documented() {
             "post",
             "/api/v2/organizations/{id}/messaging/session-tokens",
         ),
+        // Section 17 (ORG-006): Section 6 teams and policies through the Organizations relay
+        ("get", "/api/v2/organizations/{id}/teams"),
+        ("post", "/api/v2/organizations/{id}/teams"),
+        ("get", "/api/v2/organizations/{id}/teams/{teamId}"),
+        ("patch", "/api/v2/organizations/{id}/teams/{teamId}"),
+        ("post", "/api/v2/organizations/{id}/teams/{teamId}/archive"),
+        ("get", "/api/v2/organizations/{id}/teams/{teamId}/members"),
+        ("post", "/api/v2/organizations/{id}/teams/{teamId}/members"),
+        (
+            "patch",
+            "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}",
+        ),
+        (
+            "delete",
+            "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}",
+        ),
+        ("get", "/api/v2/organizations/{id}/policies"),
+        ("patch", "/api/v2/organizations/{id}/policies"),
         // Blueprint Section 4 — first-party organizations (Organizations Service relay)
         ("post", "/api/v2/organizations"),
         ("get", "/api/v2/organizations/{id}"),

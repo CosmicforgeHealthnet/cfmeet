@@ -25,6 +25,7 @@ use crate::{
     models::{organization_memberships, organizations},
     services::{
         actor::{ActorContext, RegisteredActor},
+        display_identity,
         meeting_core::{permission_denied, validation},
         organizations_authority::{
             legacy_role, relayed_error, unavailable, ActingUser, AuthorityError, AuthorityMember,
@@ -55,6 +56,8 @@ fn member(m: &organization_memberships::Model) -> OrganizationMemberResponse {
         updated_at: m.updated_at,
         organization_role: None,
         version: None,
+        display_name: None,
+        username: None,
     }
 }
 
@@ -221,6 +224,8 @@ fn legacy_member(m: &AuthorityMember) -> ApiResult<OrganizationMemberResponse> {
         updated_at: m.updated_at,
         organization_role: Some(m.role.clone()),
         version: m.version,
+        display_name: None,
+        username: None,
     })
 }
 
@@ -370,18 +375,73 @@ pub async fn update_organization(
     Ok(Json(org(&o)))
 }
 
+/// ORG-006 member-list paging: `limit` (1–200, default 50 when only `cursor` is given) and
+/// `cursor` (the previous page's `X-Next-Cursor`). `None` when neither is given: the whole
+/// list, exactly as before paging existed. Other query parameters are ignored, as before.
+fn member_page(raw: Option<&str>) -> ApiResult<Option<(Option<(i64, Uuid)>, usize)>> {
+    let Some(raw) = raw.filter(|r| !r.is_empty()) else {
+        return Ok(None);
+    };
+    let (mut cursor, mut limit) = (None, None);
+    for (k, v) in url::form_urlencoded::parse(raw.as_bytes()) {
+        match k.as_ref() {
+            "cursor" => {
+                cursor = Some(
+                    v.split_once('.')
+                        .and_then(|(t, id)| {
+                            Some((t.parse::<i64>().ok()?, Uuid::parse_str(id).ok()?))
+                        })
+                        .ok_or_else(|| {
+                            validation("cursor must be a previous page's X-Next-Cursor")
+                        })?,
+                )
+            }
+            "limit" => {
+                limit = Some(
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|l| (1..=200).contains(l))
+                        .ok_or_else(|| validation("limit must be between 1 and 200"))?,
+                )
+            }
+            _ => {}
+        }
+    }
+    if cursor.is_none() && limit.is_none() {
+        return Ok(None);
+    }
+    Ok(Some((cursor, limit.unwrap_or(50))))
+}
+
+/// The opaque member-list position of `m` (oldest-first order: creation time, then id).
+fn member_cursor(m: &OrganizationMemberResponse) -> (i64, Uuid) {
+    (m.created_at.timestamp_micros(), m.id)
+}
+
 /// List members (platform admins, organization OWNER/ADMIN).
 ///
-/// Returns every membership of the organization, whatever its status, oldest first. Allowed for
+/// Returns the organization's memberships, oldest first, each with the member's display identity
+/// (`displayName` and `username` from the account authority; never an email address). Allowed for
 /// platform administrators and for active OWNER or ADMIN members of an active organization. Once
 /// the Organizations Service is authoritative, the list comes from it (removed memberships are
-/// omitted; members holding `organization.members.read` may list) and each item also carries
-/// `organizationRole` and `version`.
+/// omitted; members holding `organization.members.read` may list, following the organization's
+/// member-directory policy) and each item also carries `organizationRole` and `version`.
+///
+/// Paging (ORG-006): without `limit` or `cursor` every membership is returned, as before. With
+/// `limit` (1–200) and/or `cursor`, one page is returned (50 items when only `cursor` is given)
+/// and, while more remain, the `X-Next-Cursor` response header holds the opaque cursor of the
+/// next page. The body stays a JSON array in both cases.
 #[utoipa::path(
     get, path = "/api/v2/organizations/{id}/members", tag = "Organizations (v2)", operation_id = "v2_list_organization_members",
-    params(("id" = Uuid, Path, description = "Organization id")),
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("limit" = Option<i64>, Query, description = "Page size 1–200; omit both `limit` and `cursor` for the whole list"),
+        ("cursor" = Option<String>, Query, description = "The previous page's `X-Next-Cursor` header (opaque)"),
+    ),
     responses(
-        (status = 200, description = "Members", body = [OrganizationMemberResponse]),
+        (status = 200, description = "Members", body = [OrganizationMemberResponse],
+            headers(("X-Next-Cursor" = String, description = "Paged requests only: the cursor of the next page; absent on the last page"))),
+        (status = 400, description = "VALIDATION_ERROR (limit or cursor)", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "MEETING_NOT_FOUND / ORGANIZATION_NOT_FOUND (authoritative mode)", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
@@ -392,8 +452,10 @@ pub async fn list_organization_members(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
-) -> ApiResult<Json<Vec<OrganizationMemberResponse>>> {
-    if let Some(authority) = authoritative(&state) {
+    RawQuery(query): RawQuery,
+) -> ApiResult<Response> {
+    let page = member_page(query.as_deref())?;
+    let mut list = if let Some(authority) = authoritative(&state) {
         let user = actor.require_registered()?;
         let acting = ActingUser::of(user);
         // Platform administrators read the authoritative list as a service read; everyone
@@ -403,15 +465,39 @@ pub async fn list_organization_members(
             .members(id, as_actor)
             .await
             .map_err(authority_error)?;
-        let mut list = members
+        members
             .iter()
             .map(legacy_member)
-            .collect::<ApiResult<Vec<_>>>()?;
-        list.sort_by_key(|m| (m.created_at, m.id));
-        return Ok(Json(list));
+            .collect::<ApiResult<Vec<_>>>()?
+    } else {
+        let list = state.meeting.organizations.list_members(&actor, id).await?;
+        list.iter().map(member).collect()
+    };
+    list.sort_by_key(member_cursor);
+    let mut next = None;
+    if let Some((cursor, limit)) = page {
+        let start = cursor.map_or(0, |c| list.partition_point(|m| member_cursor(m) <= c));
+        let end = start.saturating_add(limit).min(list.len());
+        if end < list.len() {
+            next = list.get(end - 1).map(|m| {
+                let (t, id) = member_cursor(m);
+                format!("{t}.{id}")
+            });
+        }
+        list = list.drain(start..end).collect();
     }
-    let list = state.meeting.organizations.list_members(&actor, id).await?;
-    Ok(Json(list.iter().map(member).collect()))
+    let known = display_identity::lookup(&state.db, list.iter().map(|m| m.user_id)).await;
+    for m in &mut list {
+        if let Some(identity) = known.get(&m.user_id) {
+            m.display_name = Some(identity.display_name.clone());
+            m.username = Some(identity.username.clone());
+        }
+    }
+    let mut response = Json(list).into_response();
+    if let Some(v) = next.and_then(|c| HeaderValue::from_str(&c).ok()) {
+        response.headers_mut().insert("x-next-cursor", v);
+    }
+    Ok(response)
 }
 
 /// Add or change a membership (platform admins, organization OWNER/ADMIN within limits).
@@ -593,8 +679,9 @@ pub async fn create_business_organization(
 /// Get a business organization.
 ///
 /// Returns the organization with its profile, member count and the caller's own membership
-/// (`viewer`: role, status and capabilities). Organizations the caller does not belong to answer
-/// ORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the
+/// (`viewer`: role, status and capabilities), plus `createdByDisplayName` (the creator's display
+/// name from the account authority, when known). Organizations the caller does not belong to
+/// answer ORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the
 /// Organizations Service is authoritative.
 #[utoipa::path(
     get, path = "/api/v2/organizations/{id}", tag = "Organizations (v2)", operation_id = "v2_get_business_organization",
@@ -614,7 +701,7 @@ pub async fn get_business_organization(
     headers: HeaderMap,
     V2Path(id): V2Path<Uuid>,
 ) -> ApiResult<Response> {
-    relay(
+    let mut reply = relay_reply(
         &state,
         &actor,
         Relay {
@@ -626,7 +713,9 @@ pub async fn get_business_organization(
             allowed_query: &[],
         },
     )
-    .await
+    .await?;
+    display_identity::enrich_creator(&state.db, &mut reply.body).await;
+    Ok(relayed_success(reply))
 }
 
 /// Update a business organization's name, slug or profile.
@@ -764,7 +853,7 @@ pub async fn leave_organization(
     params(("id" = Uuid, Path, description = "Organization id")),
     request_body = OrganizationOwnershipTransferRequest,
     responses(
-        (status = 200, description = "Transfer result", body = Object),
+        (status = 200, description = "The organization after the transfer", body = BusinessOrganization),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 409, description = "VERSION_CONFLICT", body = ErrorEnvelope),
@@ -923,7 +1012,7 @@ pub async fn create_organization_invitation(
         ("status" = Option<String>, Query, description = "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED"),
     ),
     responses(
-        (status = 200, description = "items: invitations", body = Object),
+        (status = 200, description = "Invitations", body = OrganizationInvitationList),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
@@ -1002,7 +1091,7 @@ pub async fn revoke_organization_invitation(
     post, path = "/api/v2/organization-invitations/accept", tag = "Organizations (v2)", operation_id = "v2_accept_organization_invitation",
     request_body = OrganizationInvitationTokenRequest,
     responses(
-        (status = 200, description = "Membership created by the invitation", body = Object),
+        (status = 200, description = "Membership created by the invitation", body = BusinessOrganizationMembership),
         (status = 403, description = "PERMISSION_DENIED (verified email does not match)", body = ErrorEnvelope),
         (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 410, description = "INVITATION_INVALID / INVITE_EXPIRED", body = ErrorEnvelope),
@@ -1039,7 +1128,7 @@ pub async fn accept_organization_invitation(
     post, path = "/api/v2/organization-invitations/decline", tag = "Organizations (v2)", operation_id = "v2_decline_organization_invitation",
     request_body = OrganizationInvitationTokenRequest,
     responses(
-        (status = 200, description = "Declined invitation", body = Object),
+        (status = 200, description = "Declined invitation", body = OrganizationInvitation),
         (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 410, description = "INVITATION_INVALID / INVITE_EXPIRED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
@@ -1190,7 +1279,7 @@ pub async fn archive_business_organization(
         ("limit" = Option<i64>, Query, description = "1–200 (default 50)"),
     ),
     responses(
-        (status = 200, description = "items: audit events", body = Object),
+        (status = 200, description = "Audit events, newest first", body = OrganizationAuditEventPage),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
@@ -1228,7 +1317,7 @@ pub async fn list_organization_audit_events(
     get, path = "/api/v2/organizations/{id}/provisioning", tag = "Organizations (v2)", operation_id = "v2_get_organization_provisioning",
     params(("id" = Uuid, Path, description = "Organization id")),
     responses(
-        (status = 200, description = "Provisioning state", body = Object),
+        (status = 200, description = "Provisioning state", body = OrganizationProvisioning),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
     ),
@@ -1296,6 +1385,510 @@ pub async fn admin_list_organizations(
             body: None,
             raw_query: query.as_deref(),
             allowed_query: &["cursor", "limit", "status"],
+        },
+    )
+    .await
+}
+
+// ---------------------------------------------------------------------------------------
+// Teams and policies (Blueprint Section 6 catalogue, Section 17 web administration;
+// authoritative mode only)
+// ---------------------------------------------------------------------------------------
+
+/// A relayed team-member answer with each member's display identity added.
+async fn relay_team_members(
+    state: &AppState,
+    actor: &ActorContext,
+    r: Relay<'_>,
+) -> ApiResult<Response> {
+    let mut reply = relay_reply(state, actor, r).await?;
+    display_identity::enrich_members(&state.db, &mut reply.body).await;
+    Ok(relayed_success(reply))
+}
+
+/// List an organization's teams.
+///
+/// Returns the organization's teams in id order (`cursor` = the previous page's `nextCursor`;
+/// `limit` 1–200, default 50), optionally filtered by `status` (ACTIVE or ARCHIVED). Requires an
+/// active membership allowed to read the member directory (`organization.members.read` under the
+/// organization policy). Organizations the caller does not belong to answer
+/// ORGANIZATION_NOT_FOUND, exactly like unknown ones. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/teams", tag = "Organizations (v2)", operation_id = "v2_list_organization_teams",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("status" = Option<String>, Query, description = "ACTIVE or ARCHIVED"),
+        ("cursor" = Option<Uuid>, Query, description = "The previous page's nextCursor"),
+        ("limit" = Option<i64>, Query, description = "1–200 (default 50)"),
+    ),
+    responses(
+        (status = 200, description = "Teams", body = OrganizationTeamPage),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_organization_teams(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+    RawQuery(query): RawQuery,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/teams"),
+            headers: &headers,
+            body: None,
+            raw_query: query.as_deref(),
+            allowed_query: &["status", "cursor", "limit"],
+        },
+    )
+    .await
+}
+
+/// Create a team.
+///
+/// Creates an ACTIVE team (`name` 1–120 characters, unique among the organization's ACTIVE teams;
+/// optional `description` and `parentTeamId`, nesting bounded). Requires the
+/// `organization.teams.manage` capability (OWNER, ADMIN; MANAGERs only when the organization
+/// policy lets them create teams, and they become the new team's TEAM_MANAGER). Send an
+/// `Idempotency-Key` header to make retries safe. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/teams", tag = "Organizations (v2)", operation_id = "v2_create_organization_team",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = CreateOrganizationTeamRequest,
+    responses(
+        (status = 201, description = "Created team", body = OrganizationTeam),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND (parent) / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "TEAM_NAME_TAKEN / TEAM_ARCHIVED (parent) / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED / IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_organization_team(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organizations/{id}/teams"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Get a team.
+///
+/// Returns one team of the organization with its ACTIVE member count. A team of another
+/// organization answers TEAM_NOT_FOUND. Requires the same access as the team list. Returns
+/// FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/teams/{teamId}", tag = "Organizations (v2)", operation_id = "v2_get_organization_team",
+    params(("id" = Uuid, Path, description = "Organization id"), ("teamId" = Uuid, Path, description = "Team id")),
+    responses(
+        (status = 200, description = "Team", body = OrganizationTeam),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_organization_team(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id)): V2Path<(Uuid, Uuid)>,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}"),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Update a team.
+///
+/// Changes the team's `name`, `description` (`null` clears it) or `parentTeamId` (`null`
+/// detaches it). `expectedVersion` must be the team's current `version`, otherwise
+/// VERSION_CONFLICT. Requires `organization.teams.manage` (OWNER, ADMIN, or a MANAGER who is
+/// TEAM_MANAGER of this team). Returns FEATURE_DISABLED until the Organizations Service is
+/// authoritative.
+#[utoipa::path(
+    patch, path = "/api/v2/organizations/{id}/teams/{teamId}", tag = "Organizations (v2)", operation_id = "v2_update_organization_team",
+    params(("id" = Uuid, Path, description = "Organization id"), ("teamId" = Uuid, Path, description = "Team id")),
+    request_body = UpdateOrganizationTeamRequest,
+    responses(
+        (status = 200, description = "Updated team", body = OrganizationTeam),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "VERSION_CONFLICT / TEAM_NAME_TAKEN / TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_organization_team(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id)): V2Path<(Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::PATCH,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Archive a team.
+///
+/// Archives the team (idempotent) and ends every ACTIVE team membership; refused while the team
+/// has ACTIVE child teams. Optional `expectedVersion`. Requires `organization.teams.manage` as an
+/// OWNER or ADMIN. Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/teams/{teamId}/archive", tag = "Organizations (v2)", operation_id = "v2_archive_organization_team",
+    params(("id" = Uuid, Path, description = "Organization id"), ("teamId" = Uuid, Path, description = "Team id")),
+    request_body = ArchiveOrganizationTeamRequest,
+    responses(
+        (status = 200, description = "Archived team", body = OrganizationTeam),
+        (status = 400, description = "VALIDATION_ERROR (active child teams)", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "VERSION_CONFLICT / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn archive_organization_team(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id)): V2Path<(Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}/archive"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// List a team's members.
+///
+/// Returns the team's ACTIVE memberships in id order (`cursor` = the previous page's
+/// `nextCursor`; `limit` 1–200, default 50), each with the member's display identity
+/// (`displayName`, `username`; never an email address). Requires the same access as the team
+/// list. Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/teams/{teamId}/members", tag = "Organizations (v2)", operation_id = "v2_list_organization_team_members",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("teamId" = Uuid, Path, description = "Team id"),
+        ("cursor" = Option<Uuid>, Query, description = "The previous page's nextCursor"),
+        ("limit" = Option<i64>, Query, description = "1–200 (default 50)"),
+    ),
+    responses(
+        (status = 200, description = "Team members", body = OrganizationTeamMemberPage),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_organization_team_members(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id)): V2Path<(Uuid, Uuid)>,
+    RawQuery(query): RawQuery,
+) -> ApiResult<Response> {
+    relay_team_members(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}/members"),
+            headers: &headers,
+            body: None,
+            raw_query: query.as_deref(),
+            allowed_query: &["cursor", "limit"],
+        },
+    )
+    .await
+}
+
+/// Add a member to a team.
+///
+/// Adds an ACTIVE organization member (exactly one of `membershipId` and `userId`) with `role`
+/// TEAM_MANAGER (organization MANAGERs, ADMINs and OWNERs only) or TEAM_MEMBER. OWNERs and ADMINs
+/// holding `organization.teams.manage` add either role; a MANAGER who is TEAM_MANAGER of the team
+/// adds TEAM_MEMBERs only. Re-adding an ACTIVE member answers 200 with the existing membership.
+/// Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/teams/{teamId}/members", tag = "Organizations (v2)", operation_id = "v2_add_organization_team_member",
+    params(("id" = Uuid, Path, description = "Organization id"), ("teamId" = Uuid, Path, description = "Team id")),
+    request_body = AddOrganizationTeamMemberRequest,
+    responses(
+        (status = 200, description = "Already a member", body = OrganizationTeamMember),
+        (status = 201, description = "Added team member", body = OrganizationTeamMember),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn add_organization_team_member(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id)): V2Path<(Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay_team_members(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}/members"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Change a team member's role.
+///
+/// Sets `role` (TEAM_MANAGER or TEAM_MEMBER) of one team membership (the path's member segment is
+/// the team membership `id`). `expectedVersion` must be its current `version`. OWNERs and ADMINs
+/// assign either role; a TEAM_MANAGER can only step down; nobody raises their own team role.
+/// Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    patch, path = "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}", tag = "Organizations (v2)", operation_id = "v2_update_organization_team_member",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("teamId" = Uuid, Path, description = "Team id"),
+        ("memberId" = Uuid, Path, description = "Team membership id (the `id` of a team member list item)"),
+    ),
+    request_body = UpdateOrganizationTeamMemberRequest,
+    responses(
+        (status = 200, description = "Updated team member", body = OrganizationTeamMember),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "VERSION_CONFLICT / TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_organization_team_member(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id, member_id)): V2Path<(Uuid, Uuid, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay_team_members(
+        &state,
+        &actor,
+        Relay {
+            method: Method::PATCH,
+            path: format!("/internal/v1/organizations/{id}/teams/{team_id}/members/{member_id}"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Remove a member from a team.
+///
+/// Ends one team membership (idempotent: removing a removed membership answers it again).
+/// OWNERs and ADMINs remove anyone, a TEAM_MANAGER removes TEAM_MEMBERs, and everyone can leave a
+/// team themselves. The organization membership is unchanged. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    delete, path = "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}", tag = "Organizations (v2)", operation_id = "v2_remove_organization_team_member",
+    params(
+        ("id" = Uuid, Path, description = "Organization id"),
+        ("teamId" = Uuid, Path, description = "Team id"),
+        ("memberId" = Uuid, Path, description = "Team membership id (the `id` of a team member list item)"),
+    ),
+    responses(
+        (status = 200, description = "The ended team membership", body = OrganizationTeamMember),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn remove_organization_team_member(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path((id, team_id, member_id)): V2Path<(Uuid, Uuid, Uuid)>,
+) -> ApiResult<Response> {
+    relay_team_members(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!(
+                "/internal/v1/organizations/{id}/teams/{team_id}/members/{member_id}/remove"
+            ),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Get the organization policy.
+///
+/// Returns the organization's policy document (member directory visibility, guests, meeting
+/// hosting, enabled features, retention hint, delegated administration) with its `revision` (0
+/// while the defaults apply). Requires an active membership (`organization.read`). Returns
+/// FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/policies", tag = "Organizations (v2)", operation_id = "v2_get_organization_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "Organization policy", body = OrganizationPolicy),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_organization_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/policies"),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Change the organization policy (compare-and-swap).
+///
+/// Merges the partial `policy` document into the current one (unknown keys and out-of-range
+/// values are VALIDATION_ERROR) and stores it as `revision + 1`. `expectedRevision` must be the
+/// current `revision`, otherwise VERSION_CONFLICT. A policy only removes capabilities and never
+/// touches OWNER administration. Requires `organization.policies.manage` (OWNER; ADMINs unless
+/// the policy reserves it to OWNERs); `delegatedAdministration` is OWNER-only. Returns
+/// FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    patch, path = "/api/v2/organizations/{id}/policies", tag = "Organizations (v2)", operation_id = "v2_update_organization_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = UpdateOrganizationPolicyRequest,
+    responses(
+        (status = 200, description = "Updated organization policy", body = OrganizationPolicy),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / ORGANIZATION_POLICY_RESTRICTED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "VERSION_CONFLICT / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_organization_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::PATCH,
+            path: format!("/internal/v1/organizations/{id}/policies"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
         },
     )
     .await

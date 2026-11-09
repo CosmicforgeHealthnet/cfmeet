@@ -10,9 +10,9 @@
     "license": {
       "name": ""
     },
-    "version": "1.4.0",
+    "version": "1.5.0",
     "x-cfmeet-source-contract": "cfmeet.meeting-service.http-api",
-    "x-cfmeet-source-version": "1.4.0"
+    "x-cfmeet-source-version": "1.5.0"
   },
   "servers": [
     {
@@ -13018,6 +13018,9 @@
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
           "ORGANIZATION_POLICY_RESTRICTED",
+          "TEAM_NOT_FOUND",
+          "TEAM_ARCHIVED",
+          "TEAM_NAME_TAKEN",
           "ORGANIZATION_CALLING_DISABLED",
           "USERNAME_TAKEN",
           "REAUTHENTICATION_REQUIRED",

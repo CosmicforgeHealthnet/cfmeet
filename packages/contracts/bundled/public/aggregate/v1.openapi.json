@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.4.0"
+      "description": "cfmeet.meeting-service.http-api 1.5.0"
     },
     {
       "name": "calling",
@@ -69741,6 +69741,9 @@
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
           "ORGANIZATION_POLICY_RESTRICTED",
+          "TEAM_NOT_FOUND",
+          "TEAM_ARCHIVED",
+          "TEAM_NAME_TAKEN",
           "ORGANIZATION_CALLING_DISABLED",
           "USERNAME_TAKEN",
           "REAUTHENTICATION_REQUIRED",

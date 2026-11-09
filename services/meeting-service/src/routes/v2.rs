@@ -595,6 +595,36 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/organizations/:id/provisioning",
             get(organizations::get_organization_provisioning),
         )
+        // Blueprint Section 17: Section 6 teams and policies (Organizations relay)
+        .route(
+            "/organizations/:id/teams",
+            get(organizations::list_organization_teams)
+                .post(organizations::create_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id",
+            get(organizations::get_organization_team)
+                .patch(organizations::update_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/archive",
+            post(organizations::archive_organization_team),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members",
+            get(organizations::list_organization_team_members)
+                .post(organizations::add_organization_team_member),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/members/:member_id",
+            patch(organizations::update_organization_team_member)
+                .delete(organizations::remove_organization_team_member),
+        )
+        .route(
+            "/organizations/:id/policies",
+            get(organizations::get_organization_policy)
+                .patch(organizations::update_organization_policy),
+        )
         .route(
             "/organization-invitations/accept",
             post(organizations::accept_organization_invitation),

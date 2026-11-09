@@ -141,6 +141,13 @@ pub enum ErrorCode {
     /// decision `GET /api/v2/me/workspaces/{id}/capabilities` reports as
     /// `POLICY_RESTRICTED`.
     OrganizationPolicyRestricted,
+    /// Blueprint Section 6: the team does not exist in this organization (or the team
+    /// membership does not exist in this team).
+    TeamNotFound,
+    /// Blueprint Section 6: the team is archived.
+    TeamArchived,
+    /// Blueprint Section 6: an ACTIVE team of the organization already has this name.
+    TeamNameTaken,
     /// Per-organization Enterprise Calling is not enabled in this deployment
     /// (`ORGANIZATION_CALLING_SCOPE=shared`) or not bound for this organization yet.
     OrganizationCallingDisabled,
@@ -258,6 +265,9 @@ impl ErrorCode {
             ErrorCode::ProvisioningPending => "PROVISIONING_PENDING",
             ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
             ErrorCode::OrganizationPolicyRestricted => "ORGANIZATION_POLICY_RESTRICTED",
+            ErrorCode::TeamNotFound => "TEAM_NOT_FOUND",
+            ErrorCode::TeamArchived => "TEAM_ARCHIVED",
+            ErrorCode::TeamNameTaken => "TEAM_NAME_TAKEN",
             ErrorCode::OrganizationCallingDisabled => "ORGANIZATION_CALLING_DISABLED",
             ErrorCode::UsernameTaken => "USERNAME_TAKEN",
             ErrorCode::ReauthenticationRequired => "REAUTHENTICATION_REQUIRED",
@@ -354,7 +364,7 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::ChatMigrationRefused => StatusCode::CONFLICT,
             ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::OrganizationNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::OrganizationNotFound | ErrorCode::TeamNotFound => StatusCode::NOT_FOUND,
             ErrorCode::MembershipRequired => StatusCode::FORBIDDEN,
             ErrorCode::OrganizationSuspended
             | ErrorCode::OrganizationArchived
@@ -365,6 +375,8 @@ impl ErrorCode {
             | ErrorCode::ProvisioningPending
             | ErrorCode::InvitationRequired
             | ErrorCode::OrganizationCallingDisabled
+            | ErrorCode::TeamArchived
+            | ErrorCode::TeamNameTaken
             | ErrorCode::UsernameTaken => StatusCode::CONFLICT,
             ErrorCode::OrganizationPolicyRestricted
             | ErrorCode::ReauthenticationRequired
@@ -650,6 +662,9 @@ mod tests {
             ErrorCode::ChatMigrationRefused,
             ErrorCode::OrganizationPolicyRestricted,
             ErrorCode::OrganizationCallingDisabled,
+            ErrorCode::TeamNotFound,
+            ErrorCode::TeamArchived,
+            ErrorCode::TeamNameTaken,
         ];
         for c in all {
             let s = c.as_str();

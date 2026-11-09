@@ -3617,3 +3617,164 @@ async fn closure_organization_messaging_fails_closed() {
     );
     assert!(w.messaging_records().is_empty());
 }
+
+// ---------------------------------------------------------------------------------------
+// Section 17 (ORG-006): teams, team members and policies through the Organizations relay
+// ---------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn org006_teams_and_policies_are_relayed_for_the_verified_actor_with_safe_display_names() {
+    if !require_test_redis() {
+        return;
+    }
+    let (signer, fake) = organizations().await;
+    let app = some!(
+        app_with(Some(authority(
+            &signer,
+            &fake.url(),
+            AuthorityMode::Authoritative
+        )))
+        .await
+    );
+    let owner = app.user("org006-owner").await;
+    let member = app.user("org006-member").await;
+    let org = fake.add_org("org006", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let team = Uuid::new_v4();
+    let auth = Auth::Bearer(&owner.token);
+
+    // Create a team: relayed with the verified acting user, body unchanged, 201 relayed.
+    fake.script(
+        "POST",
+        &format!("/internal/v1/organizations/{org}/teams"),
+        201,
+        json!({ "id": team, "organizationId": org, "name": "Ward 7", "version": 1 }),
+    );
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/organizations/{org}/teams"),
+            auth,
+            json!({ "name": "Ward 7" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["id"], json!(team));
+    let sent = fake.last("POST", &format!("/internal/v1/organizations/{org}/teams"));
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+    assert_eq!(sent.body["name"], "Ward 7");
+
+    // Team members: enriched with the presentation name and username of each account,
+    // never an e-mail address or any other account attribute.
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/members"),
+        200,
+        json!({ "items": [
+            { "id": Uuid::new_v4(), "teamId": team, "userId": member.id, "role": "MEMBER", "version": 1 },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": Uuid::new_v4(), "role": "MEMBER", "version": 1 }
+        ], "nextCursor": null }),
+    );
+    let (s, v) = app
+        .get(
+            &format!("/api/v2/organizations/{org}/teams/{team}/members"),
+            auth,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().unwrap();
+    assert!(items[0]["displayName"].is_string(), "{v}");
+    assert!(items[0]["username"]
+        .as_str()
+        .unwrap()
+        .starts_with("org006-member"));
+    assert_eq!(
+        items[1]["displayName"],
+        Value::Null,
+        "unknown accounts get no name"
+    );
+    assert!(
+        !v.to_string().contains(&member.email),
+        "no e-mail is ever exposed"
+    );
+
+    // Policies: read and compare-and-swap update relayed; Organizations' refusal relayed.
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/policies"),
+        200,
+        json!({ "organizationId": org, "revision": 3, "features": { "messaging": true } }),
+    );
+    let (s, v) = app
+        .get(&format!("/api/v2/organizations/{org}/policies"), auth)
+        .await;
+    assert_eq!(
+        (s, v["revision"].as_i64()),
+        (StatusCode::OK, Some(3)),
+        "{v}"
+    );
+    fake.script(
+        "PATCH",
+        &format!("/internal/v1/organizations/{org}/policies"),
+        403,
+        json!({ "error": { "code": "PERMISSION_DENIED", "message": "Only owners and admins change policies." } }),
+    );
+    let (s, v) = app
+        .patch(
+            &format!("/api/v2/organizations/{org}/policies"),
+            Auth::Bearer(&member.token),
+            json!({ "expectedRevision": 3, "policy": { "features": { "messaging": false } } }),
+        )
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("PERMISSION_DENIED")),
+        "{v}"
+    );
+    let sent = fake.last(
+        "PATCH",
+        &format!("/internal/v1/organizations/{org}/policies"),
+    );
+    assert_eq!(
+        sent.acting_user,
+        Some(member.id.to_string()),
+        "the member's own request, never elevated"
+    );
+
+    // Archive a team (action) and remove a team member (DELETE) are relayed too.
+    fake.script(
+        "POST",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/archive"),
+        200,
+        json!({ "id": team, "archived": true, "version": 2 }),
+    );
+    let (s, _) = app
+        .post(
+            &format!("/api/v2/organizations/{org}/teams/{team}/archive"),
+            auth,
+            json!({ "expectedVersion": 1 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    // Unauthenticated callers reach nothing.
+    let before = fake.relayed();
+    let (s, _) = app
+        .get(&format!("/api/v2/organizations/{org}/teams"), Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(fake.relayed(), before);
+}
+
+#[tokio::test]
+async fn org006_teams_and_policies_need_the_organizations_service() {
+    let app = some!(app_with(None).await);
+    let owner = app.user("org006-legacy").await;
+    for path in ["teams", "policies"] {
+        let (s, v) = app
+            .get(
+                &format!("/api/v2/organizations/{}/{path}", Uuid::new_v4()),
+                Auth::Bearer(&owner.token),
+            )
+            .await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+        assert_eq!(v["error"]["code"], "FEATURE_DISABLED");
+    }
+}
