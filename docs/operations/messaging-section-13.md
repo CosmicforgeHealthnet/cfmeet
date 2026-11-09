@@ -61,5 +61,19 @@ Meeting has no migration in this section.
 * Production enablement: the production release scripts
   (`infra/calling/production/messaging_runtime.py`) do not set
   `MESSAGING_SESSION_DEVICES_ENABLED`; adding it is a release-time operator change.
-* Receipt-event coalescing (MSG-018 server half) and the PRIVATE_E2EE retry path's rate
-  limit ordering (E2EE is blocked in production) are left as they were.
+* The PRIVATE_E2EE retry path's rate limit ordering (E2EE is blocked in production) is
+  left as it was. Receipt-event coalescing (MSG-018 server half) was closed later: see
+  "Audit closure MSG-018 / MSG-009" below.
+
+## Audit closure MSG-018 / MSG-009 (after Section 13)
+
+| Finding | Change | Where |
+|---|---|---|
+| MSG-018 (server half) | Read / delivery receipts are coalesced per conversation, member and kind (`messaging_receipt_emissions`): the first advance of a window is published at once, later advances inside the window only raise a durable pending cursor, and one `read.cursor.updated` / `delivery.cursor.updated` with the HIGHEST cursor is published when the window ends (`MESSAGING_RECEIPT_COALESCE_WINDOW_MS`, default 1500, 0–10000; 0 = every advance). Receipt traffic no longer takes the conversation's event-sequence lock per read / ack. Published cursors only grow (database trigger); repeated cursors publish nothing; privacy is re-checked when a deferred receipt is published. Reconnect: realtime client frame `receipts.query` → `receipts.snapshot` (current cursors, same privacy filter); the REST replay keeps the last published receipt of every window. | Messaging `messages/receipts.rs`, `messages/mod.rs` (`set_read_cursor`, `advance_delivery`), `realtime/connection.rs`, migration `m20261203_000031_receipt_coalescing_timeline`; test `tests/realtime_receipts_timeline.rs` |
+| MSG-009 (Messaging half) | `POST /internal/v1/communications/events` accepts `communications.timeline.changed {conversationId, timelineVersion, reason}` from the Hub and records the durable conversation event `messaging.timeline.changed` (client type `timeline.changed`, data `timelineVersion`, `reason`) once per higher timeline version (`messaging_conversation_timeline_versions`): members get it live on their subscriptions and from the replay (late members inside their history window); a redelivered, repeated or older nudge publishes nothing; another scope's conversation is acknowledged without effect. | Messaging `communications.rs` (`timeline_changed`); Hub half in [communications-hub-section-14.md](communications-hub-section-14.md) |
+
+Contracts: `cfmeet.messaging.realtime-protocol` 1.3.0, `cfmeet.messaging.event` 1.12.0,
+`cfmeet.messaging.communications-internal` 1.3.0 (+bundled). Migration: additive (two
+tables); its down drops only them. Rollback: the previous image ignores both tables;
+deferred receipts not yet published when rolling back stay unpublished (the canonical
+cursors are unaffected and `receipts.query` / REST reads still return them).
