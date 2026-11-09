@@ -260,4 +260,21 @@ class MeetingServiceMigrationRole(unittest.TestCase):
             self.assertEqual(env,'KEEP=original\nDATABASE_URL='+MIGRATOR_URL+'\n')
 
 
+class VerifyAcceptsTheCoordinatedRelease(unittest.TestCase):
+    def test_own_record_then_coordinated_release_then_refusal(self):
+        import coordinated_release as coordinated
+        with tempfile.TemporaryDirectory() as d:
+            work=Path(d)
+            (work/'production-evidence.json').write_text(json.dumps({'sha':'a'*40,'images':{'calling':'sha256:old'}}))
+            manifest={coordinated.image_of(s):{'imageId':'sha256:'+s} for s in release.PORTS}
+            with patch.object(release,'WORK',work):
+                self.assertEqual(release.accepted_images('a'*40),{'calling':'sha256:old'})
+                with patch.object(coordinated,'last_release',return_value={'sha':'b'*40}), \
+                        patch.object(coordinated,'registry',return_value=manifest):
+                    self.assertEqual(release.accepted_images('b'*40),{s:'sha256:'+s for s in release.PORTS})
+                with patch.object(coordinated,'last_release',return_value=None):
+                    with self.assertRaisesRegex(AssertionError,'not the recorded release'):
+                        release.accepted_images('c'*40)
+
+
 if __name__=='__main__':unittest.main()
