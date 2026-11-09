@@ -26,6 +26,62 @@ Nothing in this guide is a secret; no credential value appears anywhere in the f
 
 ---
 
+## 0. Production status (live, verified 2026-11-09)
+
+This section records what is **actually running** in production, verified on the server and through
+the public host. Where it disagrees with older wording elsewhere in this guide, this section wins.
+
+**Release.** Every CF Meet backend service runs the images built from `main` `bde67a8b` (all 13
+services: Platform Access, Organizations, Communications Hub, Messaging, Calling, Meeting Service,
+Developer Platform + worker, API Gateway, Numbering, Privacy Relay, SMS Gateway, Telephony; plus the
+security scan gateway). The coordinated release verified each running container's image id and
+source revision, applied every migration, and passed its post-release checks (public Swagger, CORS
+from `https://cfmeet.com`, internal routes not public, provider features off).
+
+**Hosts and Swagger** (the only hosts a client uses; no internal credential is ever needed):
+
+| What | URL |
+|---|---|
+| Production API | `https://api.cfmeet.com` |
+| Swagger UI (all public contracts) | `https://api.cfmeet.com/swagger-ui/` |
+| Swagger index | `https://api.cfmeet.com/api-docs/swagger-config.json` |
+| Meetings / accounts / organizations relay | `/api-docs/openapi.json` (1.5.0, 188 paths) |
+| Communications Hub | `/api-docs/communications.json` (1.3.0) |
+| Calling | `/api-docs/calling.json` (1.16.0) |
+| Messaging | `/api-docs/messaging.json` (1.16.0) |
+| Developer Platform | `/api-docs/developer-platform.json` (1.6.0) |
+| API Gateway | `/api-docs/api-gateway.json` (1.1.0) |
+| Messaging realtime (WebSocket) | `wss://api.cfmeet.com/v1/realtime` (ticket from `POST /v1/realtime/tickets`) |
+| Media (LiveKit) | `wss://livekit.cfmeet.com` (token issued by the API, never by the client) |
+
+**Feature availability in production:**
+
+| Capability | State | Evidence / reason |
+|---|---|---|
+| Accounts, sessions, profile, session revocation | **Active** | live acceptance (login, `/api/v2/communications/me`, logout → 401) |
+| Meetings, calendar, guests, waiting room, LiveKit media, recordings | **Active** | Meeting Service health + regression on every step |
+| Conference realtime, webinar mode, quality telemetry | **Active** | `activate-first-party-features` |
+| Meeting notification email | **Active** | SMTP credentials present; enabled by `activate-first-party-features` |
+| Healthcare profile | Off | compliance decision for the owner |
+| Communications Hub: CF Meet ID, QR, contacts, requests, blocking, privacy, timeline | **Active** | live Messaging acceptance 15/15 (contacts, requests, blocking) |
+| Timeline realtime (`timeline.changed` on the Messaging stream) | **Active** | released (MSG-009); subscribe to the conversation stream |
+| App-to-app Calling (voice/video), call history, transfers | **Active** | Calling regression, both LiveKit keys PASS |
+| Call recording with consent | **Active** | `test-recording` passed in production |
+| Voicemail | **Active** | `test-voicemail` passed in production |
+| Enterprise Calling (shared developer scope) | **Active** | `test-enterprise` passed in production |
+| Per-organization Enterprise Calling | Off | needs the Organizations authority cutover (below) |
+| MANAGED Messaging + session-device realtime, read receipts (coalesced) | **Active** | `activate-first-party-features`; receipts released (MSG-018) |
+| PRIVATE_E2EE personal messaging | Off | independent cryptographic assessment + owner sign-off required |
+| Organizations service: provisioning, signed event delivery | **Active** | `activate-provisioning`, `activate-org-events`; dead-letter count 0 |
+| Organizations **authority** (routes answer from the Organizations service) | Off (`legacy`) | import step needs the owner's verified **off-site backup**; production holds 0 legacy organizations |
+| Developer Platform + public API Gateway | **Active** | gateway answers `401` unauthenticated on `/v1/environments/*`, `/v1/scopes`, CORS OK |
+| Credential expiry webhooks (`credential.expiring_soon`, `credential.expired`) | **Active** | released (PLT-008) |
+| Push (APNs / FCM / Web Push) | Off | no provider credentials |
+| SMS / phone OTP (Africa's Talking), SMS delivery callbacks | Off | no provider credentials or onboarding |
+| PSTN calling, real numbers, carrier interconnect | Off | no carrier agreement |
+
+---
+
 ## 1. System map for client developers
 
 | Product area | Owner service (authority) | How a first-party client reaches it | Contract (version) |
@@ -376,7 +432,7 @@ certification report for the journey evidence). Known backend limitations a clie
 (documented, not defects): conversations carry no organization field (partition by which relay you
 called); `GET /api/v2/messaging/directory` spans all of the caller's organizations (filter with the
 organization members list); `principals/names` only names colleagues (DIRECT chats take the name from
-the Hub conversation context); no batch reaction read; the Hub has no realtime channel (poll); contact
+the Hub conversation context); no batch reaction read; Hub timeline changes arrive as `timeline.changed` events on the conversation's Messaging stream (other Hub data: poll); contact
 requests carry only the CF Meet ID; no "this and following" recurrence split (edit the series or one
 occurrence).
 
