@@ -62,4 +62,4 @@ Meeting v2 operations: 188 → 206. Gateway `EXCLUDED` (first-party organization
 
 ## 4. Deprecated compatibility operations (kept until verified migration)
 
-The 7 deprecated Meeting Service operations are the legacy meeting webhooks and v1 create paths (PLT-003 / PLT-004, migration to the Developer Platform documented); the deprecated Communications internal operation is the pre-1.4 preference read. None is deleted before its verified migration.
+The 7 deprecated Meeting Service operations are the legacy v1 create paths (`POST /api/v1/meetings`, `POST /api/v1/meetings/instant`, `POST /api/v1/api/meetings`; v2 creation replaces them, PLT-004) and the legacy meeting webhooks (`GET`/`POST /api/v1/webhooks`, `PATCH`/`DELETE /api/v1/webhooks/{id}`; never delivered, replaced by Developer Platform webhooks, PLT-003). The deprecated Communications internal operation is `POST /internal/v1/communications/block-events` (owner block metadata ingest, superseded by the canonical block rules). None is deleted before its verified migration.
