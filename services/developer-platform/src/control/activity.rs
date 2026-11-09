@@ -101,6 +101,31 @@ pub async fn record_operator<C: ConnectionTrait>(
     .await
 }
 
+/// Records a SUCCEEDED event of a Developer Platform background job (actor kind
+/// `SERVICE`, actor `system:<job>`), e.g. the PLT-008 credential lifecycle notices.
+pub async fn record_system<C: ConnectionTrait>(
+    db: &C,
+    job: &str,
+    request_id: &str,
+    correlation_id: &str,
+    event: Event<'_>,
+) -> Result<(), ApiError> {
+    insert(
+        db,
+        event.tenant_id,
+        "SERVICE",
+        &format!("system:{job}"),
+        event.action,
+        event.target_type,
+        &event.target_id,
+        "SUCCEEDED",
+        request_id,
+        correlation_id,
+        event.summary,
+    )
+    .await
+}
+
 fn action_name(action: Action) -> &'static str {
     match action {
         Action::OrganizationRead => "organization.read",

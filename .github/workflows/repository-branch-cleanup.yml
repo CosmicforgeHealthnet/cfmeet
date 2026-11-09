@@ -1,0 +1,42 @@
+name: Repository branch cleanup
+
+# Deletes the temporary branches consolidated into `staging`, pinned to the tips recorded in
+# docs/implementation/cfmeet-branch-consolidation-report.md. Dispatch-only, from `main`.
+# Dry run by default; set `apply: true` to delete. Never touches `main` or `staging`:
+# the script refuses them, and a branch that moved or carries unique work is reported, not deleted.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Delete (true) or only report (false)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run the pinned deletion script
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            bash scripts/repository/delete-consolidated-branches.sh --apply
+          else
+            bash scripts/repository/delete-consolidated-branches.sh
+          fi
+      - name: Report remaining branches
+        run: |
+          git ls-remote --heads origin | tee remaining.txt
+          echo "Remote branch count: $(wc -l < remaining.txt)" | tee -a "$GITHUB_STEP_SUMMARY"

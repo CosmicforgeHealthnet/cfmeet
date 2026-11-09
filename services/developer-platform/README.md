@@ -30,6 +30,26 @@ implemented.
   `/v1/environments/{environmentId}/webhooks*`. Behind `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED`
   (default off) and `DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE` (default `shadow`: nothing is
   sent). Signing secrets are stored sealed only (`DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY*`).
+* **Credential lifecycle webhooks (Blueprint Section 15, PLT-008):** the worker sweeps the
+  environments subscribed to `credential.expiring_soon` / `credential.expired` (at most once
+  per `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS`, default 3600, across
+  instances), reads their credentials from Platform Access (read-only delegation) and emits
+  one notice per crossed lead time (`DEVELOPER_PLATFORM_CREDENTIAL_EXPIRY_WARNING_DAYS`,
+  default `14,7,1`; only the smallest crossed one) and one `credential.expired` (within
+  `DEVELOPER_PLATFORM_CREDENTIAL_EXPIRED_LOOKBACK_DAYS`, default 7) through the central
+  webhook outbox (signed, retried, dead-lettered). Deduplication is persisted in
+  `devplat_credential_lifecycle_notices` (credential, event type, threshold, expiry) and by
+  a deterministic source event id; each notice writes one `SERVICE` activity event
+  (`system:credential-lifecycle`). Revoked / superseded / rotated credentials get none.
+  `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED=false` turns it off.
+* **Reference reconciliation (DATA-017, report only):**
+  `developer-platform-reconcile-references` (also in the image; `cargo run --bin …`) prints
+  a JSON report of every foreign reference (Platform Access tenants / applications /
+  environments / credentials, Meeting Service accounts) with local invariant breaks and,
+  with service authentication configured, organizations / projects / environments
+  `MISSING` or `MISMATCHED` at Platform Access; exit 1 when anything needs attention. The
+  worker logs the same report every `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS`
+  (default 86400, 0 = off). Nothing is repaired or deleted.
 * **Service accounts (Section 50):** `/v1/environments/{environmentId}/service-accounts*`
   (list / create / get / suspend / resume) are delegated to Platform Access
   (`/internal/v1/delegation/environments/{id}/service-accounts*`, the only store): OWNER /

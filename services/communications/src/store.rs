@@ -255,6 +255,29 @@ impl Store {
         }
         Ok(())
     }
+    /// A durable event for Messaging alone (MSG-009 timeline nudges: Calling has no use
+    /// for them). Same outbox, delivery, retry and dead-letter path as [`Self::scoped_event`].
+    pub async fn messaging_event<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        scope: Scope,
+        event_type: &str,
+        aggregate_id: Uuid,
+        version: i64,
+        payload: Json,
+    ) -> Result<()> {
+        let mut v = vec![Uuid::new_v4().into()];
+        v.extend(scoped(scope));
+        v.extend([
+            "MESSAGING".into(),
+            aggregate_id.into(),
+            version.into(),
+            event_type.into(),
+            payload.into(),
+        ]);
+        execute(db,"INSERT INTO communication_outbox(event_id,tenant_id,application_id,environment_id,destination,aggregate_id,aggregate_version,event_type,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",v).await?;
+        Ok(())
+    }
     pub async fn idempotency(
         &self,
         db: &DatabaseTransaction,

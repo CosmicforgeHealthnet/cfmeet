@@ -78,7 +78,7 @@ async fn forward(
 }
 
 async fn whoami(h: &Harness, headers: &[(String, String)]) -> TestResponse {
-    forward(h, Method::POST, "/test/context", headers, Some(json!({}))).await
+    forward(h, Method::GET, "/test/context", headers, None).await
 }
 
 fn assert_rejected(response: &TestResponse, headers: &[(String, String)]) {
@@ -350,4 +350,25 @@ async fn a_safety_only_chain_reaches_only_safety_routes() {
     .await;
     assert_ne!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
     assert_ne!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.text);
+}
+
+#[tokio::test]
+async fn a_replayed_forwarded_mutation_is_refused() {
+    // SEC-012: a forwarded token admits one mutating request; a second use of the very
+    // same signed headers is the normalized 401. Reads are not replay-checked.
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.consumer("acme", TenantClassification::External).await;
+    let issued = h.issue(c.sa(EnvironmentKind::Production), &[]).await;
+    let (headers, _) = signed(
+        &h.peers.api_gateway,
+        Some(delegated(&c, Some(credential_id(&issued)))),
+    );
+    let first = forward(&h, Method::POST, "/test/context", &headers, Some(json!({}))).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text);
+    let replay = forward(&h, Method::POST, "/test/context", &headers, Some(json!({}))).await;
+    assert_rejected(&replay, &headers);
+    assert_eq!(whoami(&h, &headers).await.status, StatusCode::OK);
+    assert_eq!(whoami(&h, &headers).await.status, StatusCode::OK);
 }

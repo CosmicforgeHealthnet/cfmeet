@@ -20,7 +20,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 25 | 15 | 58 |
+| `CLOSED` | 2 | 16 | 29 | 17 | 64 |
 | `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
@@ -28,19 +28,14 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
 | `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
-| `BACKEND_FOLLOW_UP` | 0 | 0 | 4 | 2 | 6 |
+| `BACKEND_FOLLOW_UP` | 0 | 0 | 0 | 0 | 0 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
 
 ## Open backend follow-ups (exact list)
 
 | Finding | Sev | Title | Remaining |
 |---|---|---|---|
-| INV-002 | P2 | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain ( |
-| MSG-009 | P2 | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no  | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
-| PLT-008 | P2 | Credential lifecycle lacks last-used tracking and expiry warnings | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
-| SEC-012 | P2 | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
-| DATA-017 | P3 | Cross-service references are opaque (no FKs) — need reconciliation coverage | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
-| MSG-018 | P3 | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversat | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
+| — | — | none: all six remaining findings (SEC-012, INV-002, MSG-009, PLT-008, DATA-017, MSG-018) are closed | — |
 
 ## All findings
 
@@ -99,7 +94,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | DATA-012 | P3 | BACKEND | Inconsistent type for the same concept (`credentials_not_before`) | `CLOSED` | fb490003 |
 | DATA-014 | P3 | BACKEND | Migration numbering/dating anomalies | `CLOSED` | 781a5624 |
 | DATA-016 | P2 | BACKEND | Missing business/identity fields on `users` | `OWNER_DECISION` | PARTIAL: profile fields and email_verified_at done; deleted_at DEFERRED_BY_OWNER (D-6) |
-| DATA-017 | P3 | BACKEND | Cross-service references are opaque (no FKs) — need reconciliation coverage | `BACKEND_FOLLOW_UP` | PARTIAL: report-only reconcile_references for every foreign id held by meeting-service; messaging/developer-platform/numbering sweepers remain |
+| DATA-017 | P3 | BACKEND | Cross-service references are opaque (no FKs) — need reconciliation coverage | `CLOSED` | 9bb7f35e (developer-platform: src/reference_reconciliation.rs, bin developer-platform-reconcile-references, worker job, remote checks at Platform Access) + 5eae90cf (messaging + numbering: src/reference_reconciliation.rs, bins *-reconcile-references); tests tests/reference_reconciliation.rs in each service (missing/invalid refs reported, nothing deleted); report only |
 | FE-001 | P1 | FRONTEND | Web (and mobile) pre-join reads a PreJoinResponse shape the backend does not return; consent-required joins cannot succe | `FRONTEND_REMAINING` | PARTIAL: web pre-join consumes access.*/consents.* and sends consents; mobile in s17-mobile |
 | FE-005 | P1 | FRONTEND | Mobile guest join never keeps the participant credential and re-POSTs join every 3 s while waiting | `FRONTEND_CORRECTED` | 25001ae4 mobile guest join keeps the participant credential |
 | FE-006 | P1 | FRONTEND | Mobile build config hard-codes a private LAN IP over cleartext HTTP, overriding env | `FRONTEND_CORRECTED` | 57407e77 env-driven HTTPS base URL (FE-002..006) |
@@ -112,7 +107,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | FE-019 | P3 | FRONTEND | Mobile error decoding ignores the v2 error envelope and mislabels every 401 | `FRONTEND_CORRECTED` | 57407e77 mobile v2 error envelope |
 | FE-021 | P2 | PRODUCT_DECISION | Mobile covers only auth plus a broken legacy meeting flow; no spaces, conferences, messaging, calling or organizations | `FRONTEND_CORRECTED` | 57407e77 mobile spaces, conferences, organizations, chats |
 | INV-001 | P3 | SHARED_CONTRACT | No CI gate proves gateway manifest upstream paths exist in the upstream routers (all 572 resolve today, by static extrac | `CLOSED` | 782c3c86 |
-| INV-002 | P2 | BACKEND | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service auth/API- | `BACKEND_FOLLOW_UP` | PARTIAL: coverage gate with frozen baseline (scripts/contracts/operation_test_coverage.py); meeting-service legacy routes and all 96 messaging mirror routes tested; 48 internal/operator operations in 9 contracts remain (untested 146 -> 48 of 1,128) |
+| INV-002 | P2 | BACKEND | 200 of 1,066 registered operations have no automated test that references their path (incl. 13 meeting-service auth/API- | `CLOSED` | baseline emptied (scripts/contracts/operation_test_coverage.py BASELINE = {}; 0 of 1,151 untested; unit test pins it); the 40 operations still untested at closure time (48 at Section 16, 8 since covered) now have route-level authz / validation / failure / success tests: platform-access tests/operator_reads.rs (3 ops, 3 tests), communications tests/operator_routes.rs (2 ops, 4 tests), calling tests/webhook_migration.rs (1 op, 1 test), developer-platform tests/operator_commands.rs (5 ops, 5 tests) and tests/webhook_migration_routes.rs (9 ops, 4 tests), numbering tests/operator_http.rs (20 ops, 5 tests); 3900b3db, 18f14dd0, f71fb728, de76d5ab, cca0d321, 86955834 |
 | MSG-001 | P1 | SHARED_CONTRACT | REST event replay uses `afterEventSequence` but Messaging only accepts `after`; web realtime recovery never advances and | `CLOSED` | 4c257004 (merged 51c5903a); CI: meeting-service 42368524444, messaging 42368522195 |
 | MSG-002 | P1 | BACKEND | Meeting relay mounts GET/POST/PUT/DELETE only: every allowlisted PATCH (MANAGED edit, member role, conversation update/r | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MSG-003 | P2 | BACKEND | Relay query allowlists drop documented parameters (`scope` on message delete, `reason` on member removal, `threadRootId` | `CLOSED` | 4c257004 (merged 51c5903a) |
@@ -121,7 +116,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-006 | P1 | FRONTEND | The Communications Hub (~70 public endpoints) and the unified Chats/Calls journeys have no frontend consumer; mobile has | `FRONTEND_REMAINING` | PARTIAL: backend complete; journey -> endpoint handoff (communications-unified-handoff.md §11); web/mobile clients are Section 17 |
 | MSG-007 | P2 | BACKEND | No server-side inbox model: conversations have no title/avatar, last message/activity or unread, and are ordered by crea | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MSG-008 | P2 | FRONTEND | Web MANAGED client: append-only sync, no tombstone/edit refresh, fragile attachments and a non-durable offline queue | `FRONTEND_CORRECTED` | f47e09d6 managed store, tombstones, durable outbox, ack-cursor resume |
-| MSG-009 | P2 | BACKEND | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no card for m | `BACKEND_FOLLOW_UP` | PARTIAL: late-member meeting cards done; chat lines client-composed (E2EE rule); no realtime nudge; no call cards for members without a profile at launch |
+| MSG-009 | P2 | BACKEND | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no card for m | `CLOSED` | 23f42c92: owed call cards for parties without a profile (Hub calls.rs materialize_call_cards) + deduplicated, version-monotonic communications.timeline.changed -> Messaging messaging.timeline.changed (members only, live + replay); tests: Hub unified.rs call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once, messaging realtime_receipts_timeline.rs hub_timeline_nudges_reach_members_once_per_version; chat lines stay client-composed (E2EE rule) |
 | MSG-010 | P2 | BACKEND | Hub ↔ owner integration is not tested end-to-end in CI; Hub tests use simulated owners | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-012 | P2 | FRONTEND | Meeting chat migration cutover would break mobile in-meeting chat (v1 chat refused after cutover; dormant v2 mobile clie | `FRONTEND_CORRECTED` | 57407e77 mobile in-meeting chat on v2 |
 | MSG-013 | P1 | EXTERNAL_DEPENDENCY | PRIVATE_E2EE is correctly gated off in production pending independent review; key transparency is unwitnessed | `EXTERNAL_BLOCKED` | OPEN |
@@ -129,7 +124,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-015 | P3 | SHARED_CONTRACT | Documentation drift: ADR 0053 scope and the native API map contradict the code | `CLOSED` | ADR 0053 updated for organization conversations in the organization scope (final closure); native API map and handoff note corrected earlier |
 | MSG-016 | P3 | BACKEND | Hub hygiene: `block-events` ingress has no producer; inbox shows conversations the viewer has left | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-017 | P2 | PRODUCT_DECISION | Administration needed to run CF Meet's own environment (policy incl. attachments enablement, moderation queue, legal hol | `OWNER_DECISION` | operator APIs exist (Messaging admin, moderation, legal holds); a first-party admin surface and attachment enablement are owner product decisions |
-| MSG-018 | P3 | SHARED_CONTRACT | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversation-sequen | `BACKEND_FOLLOW_UP` | client half done (f47e09d6); server receipt-event coalescing remains (efficiency, P3) |
+| MSG-018 | P3 | SHARED_CONTRACT | Realtime efficiency: the web ignores the server's per-device ack cursor, and every read/ack writes a conversation-sequen | `CLOSED` | 23f42c92: server receipt-event coalescing (messaging/src/messages/receipts.rs; leading + trailing receipt per member and window, monotonic, privacy re-checked) + receipts.query/receipts.snapshot for reconnect; client half f47e09d6; tests: realtime_receipts_timeline.rs receipt_events_are_coalesced_per_member_and_window_and_snapshots_read_current_cursors, load.rs read_receipt_burst_is_coalesced (1,200 reads -> 60 receipt events) |
 | MSG-019 | P3 | BACKEND | Send idempotency edge cases: rate limits charged before dedupe; replay with a different attachment set returns the origi | `CLOSED` | 4c257004 (merged 51c5903a) |
 | MTG-001 | P0 | FRONTEND | Mobile meeting creation, scheduling, listing, editing and instant meeting are broken (wrong v1 contract, and retired by  | `FRONTEND_CORRECTED` | 57407e77 / 25001ae4 mobile Meeting Service v2 client |
 | MTG-002 | P1 | FRONTEND | Mobile live room drives a v2 conference through legacy v1 participant/waiting/chat/media/end endpoints | `FRONTEND_CORRECTED` | 25001ae4 mobile v2 live room |
@@ -175,7 +170,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | PLT-005 | P1 | INFRASTRUCTURE | API Gateway and Developer Platform are not deployed; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | `EXTERNAL_BLOCKED` | EXTERNAL: activation checklist done; needs internal-TLS decision and deployment approval |
 | PLT-006 | P2 | SHARED_CONTRACT | Three Swagger renderers publish contradictory "public" surfaces; calling's Swagger UI is unhardened | `CLOSED` | 3a90d077 (merged 8920d20c) |
 | PLT-007 | P2 | SHARED_CONTRACT | Contract quality gates and the private catalogue skip the Developer Platform, Gateway and Communications contracts | `CLOSED` | 90c2397e, f07b1b39 |
-| PLT-008 | P2 | BACKEND | Credential lifecycle lacks last-used tracking and expiry warnings | `BACKEND_FOLLOW_UP` | PARTIAL: last-use and expiringSoon in credential reads; expiry webhook not built |
+| PLT-008 | P2 | BACKEND | Credential lifecycle lacks last-used tracking and expiry warnings | `CLOSED` | c53b6084 (last use, expiringSoon); 9bb7f35e: credential.expiring_soon / credential.expired worker sweep (services/developer-platform/src/control/credential_lifecycle.rs, worker.rs; migration m20261203_000014; catalog + webhook schema); tests services/developer-platform/tests/credential_lifecycle.rs (thresholds, dedupe, crash recovery, outage + delivery retry, scope authz, schedule) |
 | PLT-009 | P2 | BACKEND | Operator/admin plane is fragmented, partly unaudited, has no UI, and audit trails are write-only | `CLOSED` | c53b6084 (merged ffd4c4c5) |
 | PLT-011 | P3 | SHARED_CONTRACT | Gateway scope pre-check absent for 153 credential routes | `CLOSED` | c53b6084 (merged ffd4c4c5); CI: api-gateway 42382697686 |
 | PLT-012 | P3 | INFRASTRUCTURE | Gateway rate limiting covers only platform-credential traffic; stale config comment | `CLOSED` | c53b6084 (merged ffd4c4c5) |
@@ -186,7 +181,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | SEC-009 | P1 | BACKEND | Legacy kick does not evict media; legacy LiveKit tokens are 6 h with client-side `room_admin` for hosts | `CLOSED` | fb490003 |
 | SEC-010 | P0 | INFRASTRUCTURE | No backup coverage for meeting-service, communications and developer-platform databases; no scheduled backups in repo | `OWNER_DECISION` | tooling + CI drill over every real migrated schema (42b415fd, J-18); off-host target and age key custody are owner inputs |
 | SEC-011 | P1 | INFRASTRUCTURE | Production migrations run without a pre-migration snapshot; rollback is container-only | `OWNER_DECISION` | PARTIAL: pre-migration snapshot helper done; insertion into release workflows pending release review |
-| SEC-012 | P2 | SHARED_CONTRACT | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | `BACKEND_FOLLOW_UP` | P2 defence-in-depth: request (method/path) binding claims + shared jti cache need a staged cross-service rollout (receivers first, then signers); design in the closure report |
+| SEC-012 | P2 | SHARED_CONTRACT | Internal service tokens are not bound to method/path/body and replay is only blocked by 2 receivers | `CLOSED` | optional `bnd`/`htm`/`htu` claims with a canonical-path rule (`packages/service-auth/src/binding.rs`), `ServiceTokenVerifier::verify_request` with `off`/`accept`/`require` modes and a jti replay guard on POST/PUT/PATCH/DELETE (`verifier.rs`, `replay.rs`: bounded in-memory LRU/TTL, `ReplayGuard` trait; Redis-shared in Messaging `services/messaging/src/config/replay_guard.rs`); signers emit behind `SERVICE_AUTH_REQUEST_BINDING=emit` (client.rs binds every call automatically; API Gateway, Meeting Service, Messaging scanner bound); all 12 receiving services' 20 verification sites routed through `verify_request`. Tests: `packages/service-auth/tests/request_binding.rs` (11), `binding::tests` (7), `replay::tests` (4), `contract_conformance` (bound claims + fixtures); `security-scan-gateway/tests/gateway.rs::a_request_bound_token_only_works_for_its_method_and_path`; api-gateway suite green with `SERVICE_AUTH_REQUEST_BINDING=emit SERVICE_AUTH_REQUEST_BINDING_MODE=require`; `messaging config::replay_guard` (2, one against a real Redis). Rollout steps 2–3 (signers emit, receivers require) are operator steps: `docs/operations/service-token-request-binding.md` |
 | SEC-013 | P1 | BACKEND | No security audit trail for account, admin and API-key events in meeting-service | `CLOSED` | 08298305; CI: meeting-service 42308337872, comms-hub 42306789245, part-vi cert 42306794069, backup drill 42307503831 |
 | SEC-014 | P2 | BACKEND | Meetings v2 creates lack Idempotency-Key; legacy v1 writes have check-then-act races | `CLOSED` | 3620317a; CI: meeting-service 42353311875, certification 42356374877 |
 | SEC-015 | P2 | BACKEND | Migration binaries ship the full sea-orm CLI (down/fresh/reset/refresh) in production images | `CLOSED` | fb490003 |

@@ -987,3 +987,90 @@ async fn attachment_pipeline_real_storage_and_scanner() {
         }),
     );
 }
+
+/// Audit MSG-018: 30 readers of one group each advance their read cursor message by
+/// message (a reader catching up). Before coalescing every read wrote one
+/// conversation-sequenced event (taking the conversation's event-sequence lock); now each
+/// reader publishes at most a leading and a trailing receipt per window. Asserts the
+/// canonical cursors are exact and the receipt count is bounded by readers × 2; reports
+/// read latency and the event reduction.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore]
+async fn read_receipt_burst_is_coalesced() {
+    let Some(h) =
+        Harness::build(|s| s.conversations.environment_messages_per_minute = 1_000_000).await
+    else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 31).await;
+    h.set_policy(&c, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } },
+        "abuse": { "messagesPerMinute": 100000 } })).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let mut seqs = Vec::new();
+    for i in 0..40 {
+        let r = h.send_managed(&c, &conv, people[0], &format!("m{i}")).await;
+        seqs.push(r.json["sequence"].as_i64().unwrap());
+    }
+    let last = *seqs.last().unwrap();
+    let started = Instant::now();
+    let readers = people[1..].iter().map(|p| {
+        let (h, c, cid, seqs) = (&h, &c, &cid, &seqs);
+        async move {
+            let mut lat = Vec::new();
+            for s in seqs {
+                let t = Instant::now();
+                let r = h
+                    .put(
+                        c,
+                        Some(*p),
+                        &format!("/v1/conversations/{cid}/read-cursor"),
+                        json!({ "sequence": s }),
+                    )
+                    .await;
+                assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+                lat.push(t.elapsed());
+            }
+            lat
+        }
+    });
+    let lat: Vec<Duration> = futures_util::future::join_all(readers)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+    let elapsed = started.elapsed();
+    // Close every window (manual clock) and publish the trailing receipts.
+    h.clock.advance(chrono::Duration::seconds(10));
+    let trailing = messaging::messages::receipts::flush_due(&h.state, 10_000)
+        .await
+        .unwrap();
+    let reads = lat.len() as i64;
+    let readers = (people.len() - 1) as i64;
+    let events = h
+        .scalar(&format!("SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}' AND event_type = 'messaging.read-cursor.updated'"))
+        .await;
+    assert!(
+        events <= readers * 2,
+        "{events} receipt events for {readers} readers"
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_read_cursors WHERE conversation_id = '{cid}' AND read_sequence = {last}")).await,
+        readers,
+        "every canonical cursor is exact"
+    );
+    assert_eq!(
+        h.scalar(&format!("SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}' AND event_type = 'messaging.read-cursor.updated' AND (payload->>'read_sequence')::bigint = {last}")).await,
+        readers,
+        "each reader's last published receipt carries its highest cursor"
+    );
+    report(
+        "read_receipt_burst_is_coalesced",
+        json!({
+            "readers": readers, "reads": reads, "seconds": elapsed.as_secs_f64(),
+            "reads_per_second": reads as f64 / elapsed.as_secs_f64(), "latency": percentiles(lat),
+            "receipt_events": events, "trailing_events_read_and_delivery": trailing,
+            "events_without_coalescing": reads,
+        }),
+    );
+}

@@ -543,12 +543,23 @@ async fn forward_rest(
     };
     let auth = presented(&parts.headers).ok().flatten();
     let mut headers = forwarded_headers(parts, route, mode, auth.as_ref());
+    // SEC-012: a service token is bound (when emission is on) to the method and the path
+    // exactly as the upstream receives them: the parsed upstream URL's path.
+    // (An unparsable URL fails below exactly as before; binding then refuses to sign.)
+    let upstream_path = reqwest::Url::parse(&url)
+        .map(|u| u.path().to_owned())
+        .unwrap_or_default();
+    let upstream_path = upstream_path.as_str();
     match &forward {
         Forward::Credential(customer) => {
             let hop =
                 OutboundServiceRequest::continuing(route.upstream.clone(), &context.correlation_id)
                     .with_delegated_context(customer.delegated());
-            match state.service_auth.signer().sign(&hop) {
+            match state
+                .service_auth
+                .signer()
+                .sign_request(&hop, &parts.method, upstream_path)
+            {
                 Ok(signed) => signed.apply_to(&mut headers),
                 Err(_) => return ApiError::Code(ErrorCode::InternalError).into_response(),
             }
@@ -557,7 +568,10 @@ async fn forward_rest(
             let hop =
                 OutboundServiceRequest::continuing(route.upstream.clone(), &context.correlation_id);
             match (
-                state.service_auth.signer().sign(&hop),
+                state
+                    .service_auth
+                    .signer()
+                    .sign_request(&hop, &parts.method, upstream_path),
                 HeaderValue::from_str(token),
             ) {
                 (Ok(signed), Ok(session)) => {

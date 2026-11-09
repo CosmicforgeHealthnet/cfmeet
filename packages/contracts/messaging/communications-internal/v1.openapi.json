@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -1416,7 +1416,7 @@
           },
           "data": {
             "type": "object",
-            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media."
+            "description": "Metadata-only domain event, never message content, credentials, invitation tokens or media. 1.3.0 (MSG-009): type communications.timeline.changed carries exactly {conversationId, timelineVersion, reason} with aggregateId = conversationId and version = timelineVersion (reason CALL_STARTED, CALL_UPDATED or MEETING_SHARED); Messaging records messaging.timeline.changed in the conversation's stream once per higher version (a conversation outside the delegated scope is acknowledged without effect; a malformed one is refused with 400)."
           }
         },
         "required": [

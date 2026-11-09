@@ -2223,3 +2223,209 @@ async fn another_tenant_scope_reaches_no_profile_and_applies_nothing() {
     );
     h.close().await;
 }
+
+/// Timeline nudges of one conversation: (version, reason) in version order, MESSAGING only.
+async fn nudges(h: &Harness, conv: Uuid) -> Vec<(i64, String)> {
+    let v: Value = one(&h.state.store.db,
+        "SELECT COALESCE(jsonb_agg(jsonb_build_array(aggregate_version,payload->>'reason',destination,payload->'timelineVersion') ORDER BY aggregate_version),'[]') doc \
+         FROM communication_outbox WHERE event_type='communications.timeline.changed' AND aggregate_id=$1",
+        vec![conv.into()]).await.unwrap().unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            assert_eq!(n[2], "MESSAGING", "timeline nudges go to Messaging only");
+            assert_eq!(n[3], n[0], "payload version = event version");
+            (n[0].as_i64().unwrap(), n[1].as_str().unwrap().to_owned())
+        })
+        .collect()
+}
+
+/// Audit MSG-009: (1) a conversation call reaches every call party, including members who
+/// had no Hub profile when it was launched — the owed card is written once, the first
+/// time they read their timeline or activity, and never for anyone else; (2) every
+/// distinct timeline change (call started, each Calling state version, meeting shared) is
+/// announced to Messaging exactly once with a monotonic per-conversation version, however
+/// many viewers observe it or however often a request is replayed; (3) the nudges are
+/// delivered through the durable owner outbox.
+#[tokio::test]
+async fn call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let (late, later) = (h.account(), h.account());
+    let outsider = user(&h).await;
+    let conv = Uuid::new_v4();
+    h.world.write().unwrap().conversations.insert(
+        conv,
+        MockConversation {
+            context: "GROUP".into(),
+            members: vec![
+                a.profile.principal_id,
+                b.profile.principal_id,
+                late.principal_id,
+                later.principal_id,
+            ],
+            last_sequence: 9,
+            messages: BTreeMap::new(),
+        },
+    );
+    let sa = h.delegated(&a.account);
+    let request = Uuid::new_v4();
+    let launch = json!({"kind":"VOICE","clientRequestId":request,"endpointId":endpoint(&h, &a)});
+    let call = h
+        .state
+        .call_conversation(&sa, &a.profile, conv, launch.clone())
+        .await
+        .unwrap();
+    let call_id = Uuid::parse_str(call["callId"].as_str().unwrap()).unwrap();
+    assert_eq!(nudges(&h, conv).await, vec![(1, "CALL_STARTED".into())]);
+    // A replayed launch creates no card, owed card or nudge.
+    let replay = h
+        .state
+        .call_conversation(&sa, &a.profile, conv, launch)
+        .await
+        .unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(nudges(&h, conv).await.len(), 1);
+    let pending = |principal: Uuid| {
+        let db = h.state.store.db.clone();
+        async move {
+            let v: Value = one(&db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_pending_call_cards WHERE principal_id=$1",
+                vec![principal.into()]).await.unwrap().unwrap();
+            v["n"].as_i64().unwrap()
+        }
+    };
+    assert_eq!(
+        (
+            pending(late.principal_id).await,
+            pending(later.principal_id).await
+        ),
+        (1, 1)
+    );
+
+    // The late party activates and opens the conversation: its card is there, once.
+    let late_profile = h.profile(&late).await;
+    let sl = h.delegated(&late);
+    for _ in 0..2 {
+        let t = h
+            .state
+            .timeline(&sl, &late_profile, conv, &q(&[]))
+            .await
+            .unwrap();
+        let data = t["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1, "{t}");
+        assert_eq!(data[0]["kind"], "CALL");
+        assert_eq!(data[0]["sourceId"], json!(call_id));
+        assert_eq!(data[0]["anchorSequence"], 9);
+        assert_eq!(data[0]["call"]["initiatedByViewer"], false);
+    }
+    assert_eq!(pending(late.principal_id).await, 0);
+    // The other late party gets it from Activity too (no timeline read needed).
+    let later_profile = h.profile(&later).await;
+    let activity = h
+        .state
+        .activity(&h.delegated(&later), &later_profile, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(activity["data"].as_array().unwrap().len(), 1, "{activity}");
+    assert_eq!(activity["data"][0]["sourceId"], json!(call_id));
+    assert_eq!(pending(later.principal_id).await, 0);
+    // Owed cards are matched by principal only: nobody else gains one, and a non-member
+    // still cannot read the conversation's timeline.
+    assert_eq!(
+        h.state
+            .materialize_call_cards(&outsider.profile)
+            .await
+            .unwrap(),
+        0
+    );
+    not_found(
+        h.state
+            .timeline(
+                &h.delegated(&outsider.account),
+                &outsider.profile,
+                conv,
+                &q(&[]),
+            )
+            .await,
+    );
+
+    // Calling state versions: each one is nudged once, whichever and however many
+    // viewers observe it (the sweep reads all four parties' cards).
+    h.state.reconcile_call_cards(20).await.unwrap();
+    assert_eq!(
+        nudges(&h, conv).await,
+        vec![(1, "CALL_STARTED".into()), (2, "CALL_UPDATED".into())],
+        "the first Calling observation (version 1) is announced once"
+    );
+    h.world
+        .write()
+        .unwrap()
+        .calls
+        .insert(call_id, ("NO_ANSWER".into(), true, 3, "MISSED".into()));
+    // B reads first: B's card changes, the other parties' cards become due at once
+    // (outcomes are per party) and the conversation is nudged for version 3.
+    let sb = h.delegated(&b.account);
+    execute(&h.state.store.db, "UPDATE communication_timeline_entries SET refreshed_at=now()-interval '10 seconds' WHERE source_id=$1 AND viewer_profile_id=$2",
+        vec![call_id.into(), b.profile.id.into()]).await.unwrap();
+    let tb = h
+        .state
+        .timeline(&sb, &b.profile, conv, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(tb["data"][0]["call"]["outcome"], "MISSED");
+    let due: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_timeline_entries WHERE source_id=$1 AND viewer_profile_id<>$2 AND refreshed_at='epoch'",
+        vec![call_id.into(), b.profile.id.into()]).await.unwrap().unwrap();
+    assert_eq!(
+        due["n"], 3,
+        "the other parties re-read Calling at their next read"
+    );
+    h.state.reconcile_call_cards(20).await.unwrap();
+    h.state.reconcile_call_cards(20).await.unwrap();
+    let ta = h
+        .state
+        .timeline(&sa, &a.profile, conv, &q(&[]))
+        .await
+        .unwrap();
+    assert_eq!(ta["data"][0]["call"]["terminal"], true);
+    assert_eq!(
+        nudges(&h, conv).await,
+        vec![
+            (1, "CALL_STARTED".into()),
+            (2, "CALL_UPDATED".into()),
+            (3, "CALL_UPDATED".into())
+        ]
+    );
+
+    // A meeting shared into the conversation: one nudge; a replayed request none.
+    let share = json!({"clientRequestId":Uuid::new_v4()});
+    h.state
+        .instant_meeting(&sa, &a.profile, conv, share.clone())
+        .await
+        .unwrap();
+    h.state
+        .instant_meeting(&sa, &a.profile, conv, share)
+        .await
+        .unwrap();
+    let all = nudges(&h, conv).await;
+    assert_eq!(all.len(), 4, "{all:?}");
+    assert_eq!(all[3], (4, "MEETING_SHARED".into()));
+    // Another conversation keeps its own version line.
+    let other = conversation(&h, "DIRECT", &[&a, &b], 1);
+    h.state
+        .call_conversation(
+            &sa,
+            &a.profile,
+            other,
+            json!({"kind":"VIDEO","clientRequestId":Uuid::new_v4(),"endpointId":endpoint(&h, &a)}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(nudges(&h, other).await, vec![(1, "CALL_STARTED".into())]);
+    // Delivered through the durable owner outbox (Messaging's events route).
+    h.state.deliver_due().await.unwrap();
+    let undelivered: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.timeline.changed' AND state<>'DELIVERED'",
+        vec![]).await.unwrap().unwrap();
+    assert_eq!(undelivered["n"], 0);
+    h.close().await;
+}

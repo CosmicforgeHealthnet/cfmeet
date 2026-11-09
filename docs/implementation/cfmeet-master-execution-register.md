@@ -152,7 +152,7 @@ Release steps to enable (owner-gated): PA migration 000005, Organizations migrat
 
 - ORG-014: developer-organization provisioning keeps a provisioning row; a failed Platform Access step is compensated and the worker reconciles leftovers through PA `GET /internal/v1/delegation/tenant-slugs/{slug}`.
 - ORG-013: PA tenant rename endpoint; Developer Platform syncs display names (sync flag recorded per organization).
-- PLT-008 (partial): `platform_credential_usage` records last authentication; credential reads return `lastAuthenticatedAt` and `expiringSoon`. The expiry webhook is not built.
+- PLT-008: `platform_credential_usage` records last authentication; credential reads return `lastAuthenticatedAt` and `expiringSoon`; the Developer Platform worker emits `credential.expiring_soon` / `credential.expired` webhooks (9bb7f35e).
 - PLT-009: PA `GET /internal/v1/admin/audit`, Developer Platform operator organization and activity reads, `devplat_operator_audit`; [operator/admin consolidation map](../operations/operator-admin-consolidation-map.md).
 - PLT-011: 147 `x-cfmeet-required-scope` annotations (messaging contract 1.16.0, numbering 1.13.0, SMS gateway 1.3.0); [gateway scope pre-check](../api/gateway-scope-precheck.md). Messaging session-device operations are EXCLUDED from the gateway.
 - PLT-012: optional per-token limit `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` (default 0, off); stale config comment fixed.
@@ -181,7 +181,7 @@ Release notes: both migrations are additive. The PA down migration refuses once 
 - PLT-006: ENGINEERING_COMPLETE. Meeting-service peer Swagger documents are the generated public bundles (test: equal to the gateway `PUBLIC_CUSTOMER` set); Calling Swagger UI off by default (`CALLING_DOCS_ENABLED`), token-gated, SRI + CSP, no persisted authorization; no-op tag patch removed.
 - MTG-020 (TS): ENGINEERING_COMPLETE. Eight `V2OptionalJson` operations `requestBody.required: false`; SDKs regenerated.
 - DATA-011: PARTIAL. Target readiness rule for every meeting-service history (base included); consolidation documented for a maintenance window.
-- INV-002: PARTIAL. `operation_test_coverage.py` gate with frozen baseline (untested 146 → 48 of 1,128); new tests `legacy_auth_keys_webhooks.rs`, `legacy_create_mode.rs`, messaging `delegated_mirror.rs`.
+- INV-002: CLOSED. `operation_test_coverage.py` gate with frozen baseline (untested 146 → 48 of 1,128); new tests `legacy_auth_keys_webhooks.rs`, `legacy_create_mode.rs`, messaging `delegated_mirror.rs`. Closure: the remaining internal / operator operations got route-level tests (platform-access `operator_reads.rs`, communications `operator_routes.rs`, calling `webhook_migration.rs`, developer-platform `operator_commands.rs` + `webhook_migration_routes.rs`, numbering `operator_http.rs`) and the baseline is empty (0 of 1,151 untested).
 - FE-015: FRONTEND_HANDOFF (SDK freshness also in contracts.yml; report-only web parity scan). FE-018: NOT_APPLICABLE_WITH_EVIDENCE ([decision record](../architecture/first-party-direct-ingress-decision.md), list generated and checked). CAL-013: FRONTEND_HANDOFF ([handoff](../api/privacy-relay-contacts-upstream-handoff.md); routing already correct; deployment is the owner's).
 
 Contracts: meeting-service http-api and public-api 1.2.0 → 1.3.0 (bundles, SDKs and `sdk-discovery.json` regenerated). Meeting v2 operations unchanged (188). Migrations: none. Release: meeting-service image only; rollback by image.

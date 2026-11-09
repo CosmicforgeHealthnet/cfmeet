@@ -2,6 +2,8 @@
 
 Status: **prepared, not executed.** Nothing in this runbook has been run against production. Every step marked *owner* needs explicit authorization; every feature introduced by the closure programme ships **off**. Production is promoted only from a `staging` commit whose full CI matrix is green (see the final closure register).
 
+**Automation:** [coordinated-production-release.md](coordinated-production-release.md) — the dispatch-only workflow that performs §0 P3, §1 and the §4 steps (each a separate operation) and is the single production path for every backend service.
+
 Related, authoritative for their own scope (this runbook orders them, it does not replace them):
 
 - [organizations-cutover-runbook.md](organizations-cutover-runbook.md) — the Organizations authority migration (legacy → shadow → authoritative) and its no-split-brain rollback rule.

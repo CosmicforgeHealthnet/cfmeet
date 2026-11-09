@@ -71,6 +71,8 @@ export const WEBHOOK_EVENT_TYPES: string[] = [
   "credential.created",
   "credential.rotated",
   "credential.revoked",
+  "credential.expiring_soon",
+  "credential.expired",
   "production_access.requested",
   "production_access.approved",
   "production_access.rejected",

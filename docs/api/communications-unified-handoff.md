@@ -243,5 +243,9 @@ enter them) and for MANAGED ones it would bypass the sender's own client. The Hu
 timeline cards are the server record, visible to every current member (1.2.0 adds cards
 for late-activated members). A client that also wants a chat line sends it itself as a
 normal message (MANAGED: through the relay; PRIVATE_E2EE: encrypted by the device), with
-the `meetingCode` as text. Cards are refreshed by polling (`stale`); a realtime nudge for
-`TIMELINE` changes is not built (no Hub realtime channel exists).
+the `meetingCode` as text. Realtime (audit MSG-009 closure): when a conversation's cards
+change (call started, call state changed, meeting shared) every member's Messaging
+subscription receives a durable `timeline.changed` event (`data.timelineVersion`,
+`data.reason`; also in the REST replay) — refetch `GET /conversations/{id}/timeline` then.
+Call parties who had no Hub profile when a call was launched get its card on their first
+timeline / activity read. Cards still report `stale` when Calling could not be reached.

@@ -34,6 +34,26 @@
     "delegated_context": {
       "description": "Optional safe customer/application/actor context asserted by the issuing service.",
       "$ref": "https://schemas.cfmeet.com/platform/service-auth/delegated-platform-context/v1.schema.json"
+    },
+    "bnd": {
+      "description": "Request binding version (SEC-012). Present together with htm and htu, or not at all.",
+      "const": 1
+    },
+    "htm": {
+      "description": "Bound HTTP request method (upper case).",
+      "type": "string",
+      "pattern": "^[A-Z]{1,16}$"
+    },
+    "htu": {
+      "description": "Bound request path in canonical form: path only (no scheme, host, query or fragment), starting with '/', escapes of unreserved characters decoded and other escapes in upper-case hex, no dot or empty segments, trailing slash significant, at most 1024 bytes. The pattern checks the character set; the full rule is canonical_request_path in packages/service-auth/src/binding.rs.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^/([A-Za-z0-9\\-._~!$&'()*+,;=:@/]|%[0-9A-F]{2})*$"
     }
+  },
+  "dependentRequired": {
+    "bnd": ["htm", "htu"],
+    "htm": ["bnd", "htu"],
+    "htu": ["bnd", "htm"]
   }
 }

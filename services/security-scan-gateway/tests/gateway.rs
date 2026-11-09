@@ -595,6 +595,50 @@ async fn a_token_is_single_use() {
     assert_eq!(f.engine.scans.load(Ordering::SeqCst), 1);
 }
 
+/// SEC-012: once signers emit request binding, a token bound to another method or path
+/// is refused before any byte is scanned; a token bound to this request is accepted.
+#[tokio::test]
+async fn a_request_bound_token_only_works_for_its_method_and_path() {
+    let mut f = gateway(Options::default()).await;
+    let placeholder = ServiceTokenSigner::new(
+        ServiceId::messaging(),
+        ENV,
+        ServiceSigningKey::generate(KeyId::parse("placeholder-1").unwrap()),
+        TokenTtl::default(),
+        Arc::new(SystemClock),
+    );
+    let signer = std::mem::replace(&mut f.messaging.signer, placeholder)
+        .with_request_binding(cf_service_auth::RequestBindingEmission::Emit);
+    let bound = |method: http::Method, path: &str| {
+        signer
+            .sign_request(
+                &OutboundServiceRequest::new_operation(ServiceId::security_scan()),
+                &method,
+                path,
+            )
+            .unwrap()
+            .headers()
+    };
+    for headers in [
+        bound(http::Method::POST, "/v1/scan/elsewhere"),
+        bound(http::Method::PUT, SCAN_PATH),
+        bound(http::Method::POST, &format!("{SCAN_PATH}/")),
+    ] {
+        let (status, body) = post(&f, headers, &sha(b"a"), b"a".to_vec()).await;
+        assert_eq!(
+            (status, body["error"]["code"].as_str()),
+            (401, Some("UNAUTHENTICATED"))
+        );
+    }
+    assert_eq!(f.engine.scans.load(Ordering::SeqCst), 0);
+    assert!(f.app.metrics.render().contains("request_path_mismatch"));
+    let ok = bound(http::Method::POST, SCAN_PATH);
+    assert_eq!(post(&f, ok.clone(), &sha(b"a"), b"a".to_vec()).await.0, 200);
+    // ...and single-use.
+    assert_eq!(post(&f, ok, &sha(b"a"), b"a".to_vec()).await.0, 401);
+    assert_eq!(f.engine.scans.load(Ordering::SeqCst), 1);
+}
+
 #[tokio::test]
 async fn customer_credentials_are_never_accepted_alongside_a_service_token() {
     let f = gateway(Options::default()).await;

@@ -154,6 +154,10 @@ catalog! {
     "credential.created" => Some(scopes::CREDENTIALS_MANAGE),
     "credential.rotated" => Some(scopes::CREDENTIALS_MANAGE),
     "credential.revoked" => Some(scopes::CREDENTIALS_MANAGE),
+    // Section 15 (PLT-008): emitted by the Developer Platform worker's credential
+    // lifecycle sweep (`control::credential_lifecycle`), never by a customer request.
+    "credential.expiring_soon" => Some(scopes::CREDENTIALS_MANAGE),
+    "credential.expired" => Some(scopes::CREDENTIALS_MANAGE),
     "production_access.requested" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
     "production_access.approved" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
     "production_access.rejected" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
@@ -547,6 +551,10 @@ const DEVELOPER_PLATFORM_KEYS: &[(&str, &str, bool)] = &[
     ("request_id", "requestId", false),
     ("environment_id", "environmentId", false),
     ("status", "status", false),
+    // PLT-008 credential lifecycle notices: the lead time that was crossed and the
+    // credential's expiry as integer Unix seconds (no timestamp string crosses).
+    ("threshold_days", "thresholdDays", true),
+    ("expires_at_epoch_seconds", "expiresAtEpochSeconds", true),
 ];
 
 /// Projects the Developer Platform's own facts (`developer-platform.<aggregate>.<fact>`).
@@ -557,6 +565,8 @@ pub fn project_developer_platform(envelope: &Value) -> Option<PublicEvent> {
         "developer-platform.credential.created" => "credential.created",
         "developer-platform.credential.rotated" => "credential.rotated",
         "developer-platform.credential.revoked" => "credential.revoked",
+        "developer-platform.credential.expiring-soon" => "credential.expiring_soon",
+        "developer-platform.credential.expired" => "credential.expired",
         "developer-platform.production-access.requested" => "production_access.requested",
         "developer-platform.production-access.approved" => "production_access.approved",
         "developer-platform.production-access.rejected" => "production_access.rejected",

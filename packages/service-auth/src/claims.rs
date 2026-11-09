@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    binding::{MethodClaim, PathClaim, RequestBinding, REQUEST_BINDING_VERSION},
     delegated::DelegatedPlatformContext,
     identity::{RuntimeEnvironment, ServiceId},
     ids::{CorrelationId, KeyId, RequestId, TokenId},
@@ -30,8 +31,11 @@ pub const MAX_TOKEN_LEN: usize = 4096;
 
 /// Claims of a service token. Produced only by the signer; the claim set is closed
 /// (unknown claims are rejected), so a token can never carry self-declared permissions.
+///
+/// The optional request binding group (`bnd`, `htm`, `htu`; [`crate::binding`]) is
+/// all-or-nothing: a partial group or an unknown `bnd` is malformed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawClaims")]
 pub struct ServiceTokenClaims {
     pub(crate) ver: u8,
     pub(crate) iss: ServiceId,
@@ -45,6 +49,65 @@ pub struct ServiceTokenClaims {
     pub(crate) correlation_id: CorrelationId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) delegated_context: Option<DelegatedPlatformContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) bnd: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) htm: Option<MethodClaim>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) htu: Option<PathClaim>,
+}
+
+/// Wire shape (closed claim set); [`ServiceTokenClaims`] adds the binding group rule.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawClaims {
+    ver: u8,
+    iss: ServiceId,
+    aud: ServiceId,
+    runtime_environment: RuntimeEnvironment,
+    iat: i64,
+    nbf: i64,
+    exp: i64,
+    jti: TokenId,
+    request_id: RequestId,
+    correlation_id: CorrelationId,
+    #[serde(default)]
+    delegated_context: Option<DelegatedPlatformContext>,
+    #[serde(default)]
+    bnd: Option<u8>,
+    #[serde(default)]
+    htm: Option<MethodClaim>,
+    #[serde(default)]
+    htu: Option<PathClaim>,
+}
+
+impl TryFrom<RawClaims> for ServiceTokenClaims {
+    type Error = &'static str;
+
+    fn try_from(r: RawClaims) -> Result<Self, Self::Error> {
+        match (r.bnd, &r.htm, &r.htu) {
+            (None, None, None) => {}
+            (Some(REQUEST_BINDING_VERSION), Some(_), Some(_)) => {}
+            (Some(_), Some(_), Some(_)) => return Err("unsupported request binding version"),
+            _ => return Err("bnd, htm and htu must be present together"),
+        }
+        Ok(Self {
+            ver: r.ver,
+            iss: r.iss,
+            aud: r.aud,
+            runtime_environment: r.runtime_environment,
+            iat: r.iat,
+            nbf: r.nbf,
+            exp: r.exp,
+            jti: r.jti,
+            request_id: r.request_id,
+            correlation_id: r.correlation_id,
+            delegated_context: r.delegated_context,
+            bnd: r.bnd,
+            htm: r.htm,
+            htu: r.htu,
+        })
+    }
 }
 
 impl ServiceTokenClaims {
@@ -88,6 +151,17 @@ impl ServiceTokenClaims {
 
     pub fn delegated_context(&self) -> Option<&DelegatedPlatformContext> {
         self.delegated_context.as_ref()
+    }
+
+    /// The request binding (`bnd` / `htm` / `htu`), when the token carries one.
+    pub fn request_binding(&self) -> Option<RequestBinding> {
+        match (&self.htm, &self.htu) {
+            (Some(method), Some(path)) => Some(RequestBinding {
+                method: method.clone(),
+                path: path.clone(),
+            }),
+            _ => None,
+        }
     }
 }
 

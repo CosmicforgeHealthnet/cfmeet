@@ -75,9 +75,11 @@ impl Probe {
             (Some(h), _) => (h.clone(), String::new()),
             (None, Some(s)) => {
                 let signed = s
-                    .sign(&OutboundServiceRequest::new_operation(
-                        ServiceId::security_scan(),
-                    ))
+                    .sign_request(
+                        &OutboundServiceRequest::new_operation(ServiceId::security_scan()),
+                        &http::Method::POST,
+                        SCAN_PATH,
+                    )
                     .expect("signed");
                 (signed.headers(), signed.request_id().as_str().to_string())
             }

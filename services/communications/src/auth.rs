@@ -18,7 +18,21 @@ pub async fn middleware(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let ctx = match s.config.verifier.verify_headers(request.headers()) {
+    // SEC-012: bound to this request (method + received path); single-use on mutating
+    // methods in memory, in addition to the durable nonce below (which covers every
+    // method across Hub instances).
+    let method = request.method().clone();
+    let path = request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned());
+    let verified = s
+        .config
+        .verifier
+        .verify_request(&method, &path, request.headers())
+        .await;
+    let ctx = match verified {
         Ok(c) => c,
         Err(_) => return Error::Authentication.into_response(),
     };

@@ -34,8 +34,17 @@ review #13); no change here enables or weakens it.
 
 ## Not in this section
 
-* Realtime nudge for Hub timeline/feed changes (no Hub realtime channel); clients poll (`stale`).
-* Call cards for members without a Hub profile at launch time (Calling decides call parties; `GET /calls/history` still lists the call).
+* Realtime nudge for Hub timeline changes and call cards for members without a Hub profile at launch time — both closed later by the MSG-009 audit closure below.
 * Auto-linking Messaging devices / Calling endpoints into the Hub registry at registration (client step in the handoff).
 * Removal of the deprecated `block-events` route and the dead Meeting `audio_video_devices` table (later contract / legacy-retirement steps).
 * Web and mobile clients (Section 17).
+
+## Audit closure MSG-009 (after Section 14)
+
+| Change | Where |
+|---|---|
+| **Call cards for parties without a profile at launch.** A conversation call's members are all call parties (Calling rings them all); a member without a Hub profile now gets an owed card (`communication_pending_call_cards`, references and safe state only). It is written once — moved into the timeline in one statement — the first time that principal reads its timeline or activity with a profile, due for an immediate refresh from Calling under its own delegation, and announced on its change feed. Matched by principal only; every read that shows a card still checks membership. Pruned after 30 days (call history keeps the call). | Hub `calls.rs` (`launch`, `materialize_call_cards`), `events.rs` (`maintain`) |
+| **Realtime nudge.** Every distinct timeline change — a call started (`CALL_STARTED`), each Calling state version first observed by any viewer (`CALL_UPDATED`), a meeting shared (`MEETING_SHARED`) — is deduplicated (`communication_timeline_nudges`), bumps the conversation's monotonic version (`communication_timeline_versions`) once and queues `communications.timeline.changed` for Messaging ONLY, in the same transaction, through the durable owner outbox. Messaging publishes `timeline.changed` to the conversation's members (live and replay; see [messaging-section-13.md](messaging-section-13.md)). Replayed launches / shares and repeated sweeps nudge nothing. When a call's state moves for one viewer, the other parties' cards of that call are made due at once (outcomes are per party), so every party converges on its next read or the next sweep. | Hub `calls.rs` (`timeline_nudge`, `refresh_call_cards`), `meetings.rs` (`record_meeting`), `store.rs` (`messaging_event`) |
+| Tests | `services/communications/tests/unified.rs` `call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once`; Messaging `tests/realtime_receipts_timeline.rs` `hub_timeline_nudges_reach_members_once_per_version` |
+
+Database: a FOURTH separate history `communications_timeline_realtime_seaql_migrations`, migration `m20261109_000001_timeline_realtime` (three additive tables), applied by `communications-migration up`. The previous image checks foundation + unified + device-session exactly (`device_session_ready`), so it still starts after this migration; the backup catalog lists the new optional history. Contract: `cfmeet.messaging.communications-internal` 1.3.0 documents the event. Calls launched outside the Hub still have no card (Calling has no producer); chat lines stay client-composed (handoff §11).

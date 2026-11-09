@@ -1,8 +1,12 @@
 name: Deploy Backend
 
-# Meeting Service only: automatically release successful, validated main changes.
-# Staging and PRs run tests without deployment. Manual production releases remain available.
-# Other backend services and production API routing/cutovers are never deployed by this workflow.
+# Meeting Service tests on every relevant push / PR. Production releases of ALL backend
+# services, the Meeting Service included, go through cfmeet-coordinated-release.yml (one SHA,
+# green CI, backups, dependency order, rollback). A main push therefore no longer deploys:
+# two release paths for the same container could race or roll each other back.
+# The manual dispatch below remains as an emergency Meeting-only path; it shares the
+# deploy-backend-production concurrency group with the coordinated release, and the next
+# coordinated release brings the Meeting Service back to its verified release image.
 # Never deploy PR commits or overwrite the live service before smoke checks and rollback setup.
 # Requires GitHub Secrets:
 #   - VPS_HOST: VPS IP or hostname (e.g., 173.249.30.55)
@@ -38,14 +42,9 @@ on:
         options:
           - production
 
-# Only the CI-gate needs Actions API read; no workflow-write access.
 permissions:
   contents: read
-  actions: read
 
-concurrency:
-  group: deploy-backend-production
-  cancel-in-progress: false  # Don't cancel in-progress deployments
 
 env:
   DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH || '/opt/cfmeet-production' }}
@@ -98,76 +97,16 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
 
-  release-ci:
-    name: Verify green main CI before production
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - name: Require same-commit main CI success
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const sha = context.sha;
-            const required = [
-              'Meeting service',
-              'Service boundaries',
-              'Dependency and image security'
-            ];
-            const deadline = Date.now() + 70 * 60 * 1000;
-            let stable = 0;
-            while (Date.now() < deadline) {
-              // Fail closed if a newer main commit superseded this deployment.
-              const { data: main } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
-              if (main.commit.sha !== sha) {
-                core.setFailed('Main advanced; refusing to release superseded commit ' + sha);
-                return;
-              }
-
-              const all = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
-                owner, repo, head_sha: sha, event: 'push', per_page: 100
-              });
-              const runs = all.filter(r => r.head_sha === sha &&
-                r.event === 'push' && r.head_branch === 'main' &&
-                r.name !== 'Deploy Backend');
-              const names = new Set(runs.map(r => r.name));
-              const missing = required.filter(n => !names.has(n));
-              const bad = runs.filter(r => r.status === 'completed' &&
-                !['success', 'skipped', 'neutral'].includes(r.conclusion));
-              const pending = runs.filter(r => r.status !== 'completed');
-
-              if (bad.length) {
-                core.setFailed('Main CI failed: ' + bad.map(r => r.name + ': ' + r.conclusion).join(', '));
-                return;
-              }
-              if (!missing.length && !pending.length) {
-                // Observe a second clean inventory to avoid an early release while
-                // other main-push workflows are still being registered.
-                stable += 1;
-                if (stable >= 2) {
-                  core.info('All ' + runs.length + ' main-push workflows green for ' + sha);
-                  return;
-                }
-              } else {
-                stable = 0;
-                core.info('Waiting for main CI: missing [' + missing.join(', ') +
-                  '], unfinished [' + pending.map(r => r.name).join(', ') + ']');
-              }
-              await new Promise(resolve => setTimeout(resolve, 30000));
-            }
-            core.setFailed('Timed out waiting for green main CI for ' + sha);
-
   deploy:
-    if: >-
-      ${{ always() && github.ref == 'refs/heads/main' &&
-          needs.test.result == 'success' &&
-          ((github.event_name == 'push' && needs['release-ci'].result == 'success') ||
-           github.event_name == 'workflow_dispatch') }}
-    name: Deploy to VPS
-    needs: [test, release-ci]
+    # Manual dispatch only (emergency path); pushes are released by the coordinated release.
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && needs.test.result == 'success' }}
+    name: Deploy to VPS (manual)
+    needs: [test]
+    # The production lock shared with cfmeet-coordinated-release.yml and the mutating
+    # cfmeet-calling-production.yml operations; tests do not hold it.
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment: production
     steps:

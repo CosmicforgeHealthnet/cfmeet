@@ -211,6 +211,13 @@ class RealRepository(unittest.TestCase):
         failures, _ = cov.gate(report, cov.BASELINE)
         self.assertEqual(failures, [])
 
+    def test_every_operation_is_tested_and_the_baseline_is_empty(self):
+        # INV-002 closed: no contract may carry untested operations, so nothing is frozen.
+        self.assertEqual(cov.BASELINE, {})
+        report, _ = cov.analyse(cov.ROOT)
+        untested = {k: v["untested"] for k, v in report.items() if v["untested"]}
+        self.assertEqual(untested, {})
+
     def test_removing_a_test_reference_raises_a_count_above_the_baseline(self):
         # Single mutation of the real corpus: drop every test reference to one tested
         # meeting-service path and the gate must fail.

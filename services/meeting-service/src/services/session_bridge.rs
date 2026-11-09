@@ -115,7 +115,18 @@ struct VerifyBody {
 }
 
 async fn verify(State(s): State<BridgeState>, request: Request) -> Response {
-    let ctx = match s.verifier.verify_headers(request.headers()) {
+    // SEC-012: bound to this request (method + received path); single-use (POST).
+    let method = request.method().clone();
+    let path = request
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_owned())
+        .unwrap_or_else(|| request.uri().path().to_owned());
+    let verified = s
+        .verifier
+        .verify_request(&method, &path, request.headers())
+        .await;
+    let ctx = match verified {
         Ok(ctx) => ctx,
         Err(e) => {
             tracing::warn!(

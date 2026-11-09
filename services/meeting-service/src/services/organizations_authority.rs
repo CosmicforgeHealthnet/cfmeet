@@ -387,9 +387,11 @@ impl OrganizationsClient {
         }
         let signed = self
             .signer
-            .sign(&OutboundServiceRequest::new_operation(
-                self.audience.clone(),
-            ))
+            .sign_request(
+                &OutboundServiceRequest::new_operation(self.audience.clone()),
+                &call.method,
+                url.path(),
+            )
             .map_err(|_| Unavailable("signing failed"))?;
         // A fresh header map: nothing from the inbound request is forwarded except what is
         // added here explicitly.

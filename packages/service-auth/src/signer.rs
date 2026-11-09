@@ -13,6 +13,9 @@ use jsonwebtoken::{Algorithm, Header};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::{
+    binding::{
+        RequestBinding, RequestBindingEmission, RequestBindingError, REQUEST_BINDING_VERSION,
+    },
     claims::{
         ServiceTokenClaims, CLAIMS_VERSION, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS, MIN_TTL_SECONDS,
         TOKEN_TYPE,
@@ -34,6 +37,8 @@ pub enum SignError {
     InvalidTtl,
     #[error("token signing failed")]
     Signing,
+    #[error("{0}")]
+    UnbindableRequest(RequestBindingError),
 }
 
 /// Validated token lifetime (10–300 s, default 120 s).
@@ -196,6 +201,7 @@ pub struct ServiceTokenSigner {
     key: ServiceSigningKey,
     ttl: TokenTtl,
     clock: SharedClock,
+    binding: RequestBindingEmission,
 }
 
 impl fmt::Debug for ServiceTokenSigner {
@@ -205,11 +211,15 @@ impl fmt::Debug for ServiceTokenSigner {
             .field("runtime_environment", &self.runtime_environment)
             .field("key", &self.key)
             .field("ttl", &self.ttl)
+            .field("binding", &self.binding)
             .finish()
     }
 }
 
 impl ServiceTokenSigner {
+    /// A signer for `issuer`. Request binding emission comes from
+    /// `SERVICE_AUTH_REQUEST_BINDING` (`off` by default, or `emit`); an invalid value is a
+    /// startup configuration error (panics naming the variable).
     pub fn new(
         issuer: ServiceId,
         runtime_environment: RuntimeEnvironment,
@@ -217,13 +227,25 @@ impl ServiceTokenSigner {
         ttl: TokenTtl,
         clock: SharedClock,
     ) -> Self {
+        let binding = RequestBindingEmission::from_env().unwrap_or_else(|e| panic!("{e}"));
         Self {
             issuer,
             runtime_environment,
             key,
             ttl,
             clock,
+            binding,
         }
+    }
+
+    /// Explicit request binding emission (overrides the environment).
+    pub fn with_request_binding(mut self, binding: RequestBindingEmission) -> Self {
+        self.binding = binding;
+        self
+    }
+
+    pub fn request_binding(&self) -> RequestBindingEmission {
+        self.binding
     }
 
     pub fn issuer(&self) -> &ServiceId {
@@ -248,15 +270,52 @@ impl ServiceTokenSigner {
         self.ttl
     }
 
+    /// Signs an UNBOUND token (no `htm` / `htu`). Prefer [`Self::sign_request`] for HTTP
+    /// calls: once receivers require request binding, unbound tokens are refused.
     pub fn sign(
         &self,
         request: &OutboundServiceRequest,
+    ) -> Result<SignedServiceRequest, SignError> {
+        self.sign_with(request, None)
+    }
+
+    /// Signs a token for one HTTP request: `method` on `path` (the request-target path
+    /// exactly as it is sent, without query). When emission is on
+    /// ([`RequestBindingEmission::Emit`]) the token carries `bnd` / `htm` / `htu`
+    /// (canonical path, [`crate::binding::canonical_request_path`]); when it is off the
+    /// token is identical to [`Self::sign`] and `method` / `path` are not inspected.
+    pub fn sign_request(
+        &self,
+        request: &OutboundServiceRequest,
+        method: &http::Method,
+        path: &str,
+    ) -> Result<SignedServiceRequest, SignError> {
+        let binding = match self.binding {
+            RequestBindingEmission::Off => None,
+            RequestBindingEmission::Emit => {
+                Some(RequestBinding::new(method, path).map_err(SignError::UnbindableRequest)?)
+            }
+        };
+        self.sign_with(request, binding)
+    }
+
+    fn sign_with(
+        &self,
+        request: &OutboundServiceRequest,
+        binding: Option<RequestBinding>,
     ) -> Result<SignedServiceRequest, SignError> {
         if request.audience == self.issuer {
             return Err(SignError::SelfAudience(self.issuer.clone()));
         }
         let now = self.clock.now_unix();
+        let (bnd, htm, htu) = match binding {
+            Some(b) => (Some(REQUEST_BINDING_VERSION), Some(b.method), Some(b.path)),
+            None => (None, None, None),
+        };
         let claims = ServiceTokenClaims {
+            bnd,
+            htm,
+            htu,
             ver: CLAIMS_VERSION,
             iss: self.issuer.clone(),
             aud: request.audience.clone(),
