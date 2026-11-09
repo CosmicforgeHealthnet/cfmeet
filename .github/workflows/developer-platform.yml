@@ -164,7 +164,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          test "$(docker run --rm --entrypoint /bin/ls cfmeet-developer-platform:ci /app | tr '\n' ' ')" = "developer-platform developer-platform-migration developer-platform-worker "
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-developer-platform:ci /app | tr '\n' ' ')" = "developer-platform developer-platform-migration developer-platform-reconcile-references developer-platform-worker "
           if docker run --rm --entrypoint /bin/sh cfmeet-developer-platform:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
             echo "::error::private key material in the image"; exit 1
           fi
