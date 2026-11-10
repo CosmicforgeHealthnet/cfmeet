@@ -16,6 +16,9 @@ Operations
                                order: migrations (migrator role) -> swap -> health -> image check.
   verify                       images == release SHA, health, migration histories, safe
                                provider defaults, public smoke, Organizations delivery counts.
+                               Strict: only a SHA with a completed coordinated release.
+  certify                      read-only live-production certification of the deployed
+                               topology, whatever revisions it runs (live_certification.py).
   rollback                     restores the containers of the latest journal entry (a release
                                or one activation). Migrations are never rolled back.
   activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS).
@@ -689,14 +692,25 @@ def cfmeet_containers(names):
     return [n for n in names if (n.startswith('cfmeet-') and not n.startswith('cfmeet-staging-')) or n == 'lk-server']
 
 
+def image_revision(image_id):
+    try:
+        meta = json.loads(p.run('docker', 'image', 'inspect', image_id))[0]
+    except (RuntimeError, OSError, ValueError, IndexError):
+        return None
+    return ((meta.get('Config') or {}).get('Labels') or {}).get('org.opencontainers.image.revision')
+
+
 def summarize(c):
     labels = c['Config'].get('Labels') or {}
     env = p.env_of(c)
     h = c['HostConfig']
+    # `revision` is the image's own label (authoritative). A container cloned by a release
+    # keeps the label of the image it was first created from: reported separately.
     return dict(name=c['Name'].lstrip('/'), state=c['State']['Status'],
                 health=(c['State'].get('Health') or {}).get('Status', 'not_configured'),
                 image=c['Config']['Image'], imageId=c['Image'],
-                revision=labels.get('org.opencontainers.image.revision'), memoryMiB=(h.get('Memory') or 0) // 1048576,
+                revision=image_revision(c['Image']), containerLabelRevision=labels.get('org.opencontainers.image.revision'),
+                releaseSha=labels.get('com.cfmeet.release.sha'), memoryMiB=(h.get('Memory') or 0) // 1048576,
                 restart=(h.get('RestartPolicy') or {}).get('Name'), networks=sorted(c['NetworkSettings']['Networks']),
                 ports=h.get('PortBindings') or {}, environmentNames=sorted(env), flags=safe_flags(env))
 
@@ -1025,7 +1039,13 @@ def deploy(name, image_id, sha, run_id, entry):
         if not c['State']['Running']:
             raise RuntimeError('Existing service container is not running; refusing to replace it: ' + container)
         cfg = release.clone(c, container, image_id, {}, False)
-        cfg.setdefault('Labels', {})['com.cfmeet.release.sha'] = sha
+        labels = cfg.setdefault('Labels', {}) or {}
+        cfg['Labels'] = labels
+        # The cloned container labels would shadow the new image's OCI labels (Docker keeps
+        # explicit container labels): drop them so the container reports the release image.
+        for key in [k for k in labels if k.startswith('org.opencontainers.image.')]:
+            del labels[key]
+        labels['com.cfmeet.release.sha'] = sha
         component = swap(name, cfg, run_id, entry)
     else:
         if s['existing']:
@@ -1158,7 +1178,10 @@ def event_delivery():
 def verify(sha, run_id):
     entry = last_release(sha)
     if not entry:
-        raise RuntimeError('No completed coordinated release of this SHA is recorded')
+        latest = last_release()
+        raise RuntimeError('No completed coordinated release of this SHA is recorded (latest completed release: %s). '
+                           'verify certifies a coordinated release only; use certify for the live deployment'
+                           % (latest['sha'] if latest else 'none'))
     manifest = registry(sha)
     checks = {}
     for name in ORDER:
@@ -1613,7 +1636,7 @@ ACTIVATIONS = {
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
 }
-OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback') + tuple(ACTIVATIONS)
+OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS)
 
 
 def run(operation, sha, run_id, confirm=''):
@@ -1621,6 +1644,13 @@ def run(operation, sha, run_id, confirm=''):
         raise RuntimeError('Unknown coordinated release operation')
     if not SHA_RE.fullmatch(sha) or not RUN_RE.fullmatch(run_id):
         raise RuntimeError('Invalid SHA or run id')
+    if operation == 'certify':
+        # Read-only: no journal entry, no work directories, no confirmation accepted.
+        if confirm:
+            raise RuntimeError('certify takes no confirmation')
+        import live_certification
+        live_certification.certify(sha, run_id)
+        return
     for folder in (WORK, WORK / 'run', WORK / 'env', WORK / 'trust'):
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     if operation == 'inspect':
