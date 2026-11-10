@@ -2,7 +2,36 @@
 
 Date: 2026-11-09. Baseline: CF Meet Consolidated Platform Architecture & End-to-End Implementation
 Blueprint v1.0 (18 sections, 149 audit findings, 22 journeys). Integration branch: `staging`.
-Production (`main`) untouched; open release PR #39 (`staging` → `main`) left open, not merged.
+Production: `main` `4904ee33` (merged through PR #39 and PR #43) is deployed to the production VPS by
+the coordinated release; see §0.
+
+## 0. Production release and activation (2026-11-09 / 10)
+
+| Item | Result | Evidence (GitHub Actions run) |
+|---|---|---|
+| Six remaining findings | SEC-012, INV-002, MSG-009, MSG-018, PLT-008, DATA-017 closed | PR #40 (full CI matrix green; 111 checks) |
+| `staging` → `main` | PR #39 merged → `bde67a8b`; PR #43 → `4904ee33` | merge commits on `main` |
+| Pre-release backups | 10 databases dumped, checksummed; Meeting + Platform Access restore-tested | coordinated `backup` 42700953862, again inside `release` |
+| Coordinated release | all 13 services run the release images (image id + revision label verified); migrations applied on 11 databases; 30/30 post-release checks | `release` 42707740486 (`bde67a8b`), 42723081476 (`4904ee33`) |
+| New services deployed | Organizations, Developer Platform (+ worker), API Gateway, Numbering, Privacy Relay, SMS Gateway, Telephony | same |
+| Organizations provisioning | on | `activate-provisioning` 42709421203 |
+| Organization event delivery | on (dead letters 0) | `activate-org-events` 42710192324 |
+| Organizations export | 0 organizations, 0 memberships in production | `org-cutover-export` 42711430322 |
+| Developer Platform | on; public routing of the Developer Platform families on `api.cfmeet.com` | 42712263986, 42713082843 |
+| First-party features | conference realtime, webinar mode, quality telemetry, notification email (SMTP present), Messaging session devices | `activate-first-party-features` 42730700547 |
+| Live acceptance | Messaging 15/15; Enterprise Calling, recording, voicemail PASS; regression PASS after every step | calling-production 42716127525, 42717080104, 42718224193, 42719418460 |
+| Public surface (external probe) | `/health` 200; 9 Swagger documents + Swagger UI 200; authenticated routes 401; `/internal/*` 404; CORS for `https://cfmeet.com` | this report |
+
+Not activated, with the precise reason:
+
+| Capability | Blocker | Action owner |
+|---|---|---|
+| Organizations **authority** cutover (import → shadow → authoritative) and everything that requires it (per-organization Enterprise Calling and organization Messaging bindings) | the import step requires `confirm=offsite-backup-verified`; no off-site backup target exists (backups are on the VPS only) | owner: choose an off-host target, run and verify one restore, then dispatch `org-cutover-import`; the authoritative switch additionally needs the §6.2 legacy-write block (`quiesced`) |
+| PRIVATE_E2EE messaging | independent cryptographic assessment and owner sign-off | owner / external reviewer |
+| Push (APNs, FCM, Web Push) | no provider credentials | owner |
+| SMS / phone OTP (Africa's Talking), SMS callbacks, PSTN, carrier interconnect | no provider credentials, onboarding or carrier agreement | owner (excluded by mandate) |
+| Healthcare meeting profile | compliance decision | owner |
+| Remote branch deletion (39 verified-obsolete branches) | this session's Git proxy refuses ref deletion (HTTP 403) | owner: dispatch `repository-branch-cleanup.yml` from `main` with `apply: true` |
 
 ## 1. Verdict
 
