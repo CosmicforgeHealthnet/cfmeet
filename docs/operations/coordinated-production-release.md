@@ -169,8 +169,10 @@ healthy, authentic and current?" without weakening `verify`.
 
 It changes nothing: no container lifecycle or configuration change, no file written on the
 host (credentials reach `psql` only through the docker CLI's environment), read-only SQL
-sessions, no image pull (`--pull never`; ephemeral `--rm --read-only` probe containers only),
-no journal entry, no confirmation accepted. It takes the same production lock as every
+sessions, no image pull (`--pull never`; ephemeral `--rm --read-only` psql containers only;
+HTTP probes run the host's `curl` inside each service's network namespace via `nsenter -n`,
+with names pinned to Docker's own addresses so TLS is verified), no journal entry, no
+confirmation accepted. It takes the same production lock as every
 production operation, so it never runs during a release.
 
 Per service (all 13 containers, `live_certification.py` on the VPS and
