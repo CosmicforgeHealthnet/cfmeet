@@ -7,6 +7,9 @@ name: CF Meet coordinated production release
 # dispatched SHA must be the main head whose push CI is green. Images are built (or reused)
 # for that SHA, their revision label is verified, and they are transferred to the VPS over
 # SSH; infra/calling/production/coordinated_release.py then performs the operation there.
+# `certify` is the read-only live-production certification: it changes nothing on the VPS,
+# certifies whatever revisions are deployed (verify stays strictly same-SHA), probes the
+# public API from the runner and writes the verdict (certification_report.py).
 # Runbook: docs/operations/coordinated-production-release.md.
 on:
   workflow_dispatch:
@@ -16,7 +19,7 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
@@ -48,13 +51,15 @@ jobs:
           [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Production operations run from main only"; exit 1; }
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::release_sha must be a full lowercase SHA"; exit 1; }
           # inspect is read-only and rollback restores the recorded previous containers;
-          # every other operation acts on exactly the main head it was dispatched on.
+          # every other operation acts on exactly the main head it was dispatched on
+          # (certify uses it as the reference for revision lineage and source comparison).
           if [[ "$OPERATION" != inspect && "$OPERATION" != rollback && "$RELEASE_SHA" != "$GITHUB_SHA" ]]; then
             echo "::error::release_sha ($RELEASE_SHA) must equal the main head ($GITHUB_SHA)"; exit 1
           fi
 
       - name: Require green main CI for this SHA
-        if: inputs.operation != 'inspect' && inputs.operation != 'rollback'
+        # Read-only operations (inspect, certify) and rollback do not wait for CI.
+        if: inputs.operation != 'inspect' && inputs.operation != 'rollback' && inputs.operation != 'certify'
         uses: actions/github-script@v7
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
@@ -149,6 +154,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # certify compares running revisions with the main head: full history.
+          fetch-depth: ${{ inputs.operation == 'certify' && '0' || '1' }}
 
       - name: Offline release tests (resource gate, grants, order, rollback, secrecy)
         run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
@@ -231,9 +238,35 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "cd '$remote' && python3 -u coordinated_release.py '$OPERATION' '$RELEASE_SHA' '$run_id' '$CONFIRM'" | tee coordinated-release.log
 
+      - name: Public API and gateway certification (read-only, unauthenticated)
+        id: public
+        if: always() && inputs.operation == 'certify'
+        continue-on-error: true
+        run: python3 infra/calling/production/public_certification.py . certification-public.json
+
+      - name: Certification verdict
+        if: always() && inputs.operation == 'certify'
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          touch coordinated-release.log
+          cd infra/calling/production
+          status=0
+          python3 certification_report.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "$GITHUB_WORKSPACE/coordinated-release.log" \
+            "$GITHUB_WORKSPACE/certification-public.json" "$GITHUB_WORKSPACE/certification.md" \
+            "$GITHUB_WORKSPACE/certification.json" "$RUN_URL" || status=$?
+          cat "$GITHUB_WORKSPACE/certification.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coordinated-release-${{ inputs.operation }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: coordinated-release.log
+          path: |
+            coordinated-release.log
+            certification-public.json
+            certification.md
+            certification.json
           if-no-files-found: ignore

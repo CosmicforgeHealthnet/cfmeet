@@ -52,11 +52,12 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 
 | Operation | Changes production | What it does |
 |---|---|---|
-| `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, revision label, limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |
+| `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, image revision label (`revision`; the container's own, possibly stale, label is `containerLabelRevision`), limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |
 | `backup` | files only | `pg_dump -Fc` of every `cfmeet_*` database in `cfmeet-core-db` and of the Meeting database; sha256; `pg_restore --list` must list every migration history; isolated restore test (network-less throwaway PostgreSQL, histories compared row for row) of Meeting, Platform Access and Organizations (once it exists). Manifest: `/opt/cfmeet-core/backups/<run>/manifest.json`. Disk gate: 2 × database size + 5 GiB free. |
 | `provision` | yes (idempotent, additive) | For the new services: database + `<svc>_migrator` / `<svc>` roles (the `cfmeet-core-db.yml` SQL), Ed25519 service keys (`/opt/cfmeet-core/secrets/<svc>-service-auth.pem`), SMS Gateway content/fingerprint keys, empty receiver trust bundles, private TLS routes 8450–8455 (`nginx -t`, reload, restore on failure). |
 | `release` | yes | See below. |
 | `verify` | no | Every container runs the manifest image of the SHA with revision label = SHA and is healthy; migration histories present; provider-dependent features off; public smoke (`/api-docs/swagger-config.json`, CORS preflight from `https://cfmeet.com`, `/internal/*` not public); Organizations outbox counts by state (`DEAD` must be 0); the existing production regression. |
+| `certify` | no | Read-only live-production certification of the deployed topology, whatever revisions it runs (see below). `verify` is unchanged and stays strictly same-SHA. |
 | `rollback` | yes | Restores the containers of the **latest** journal entry (a release or one activation), newest component first; new services are stopped and renamed `…-rolled-back-…`. Migrations and databases are kept (every migration is additive and the previous images start on the migrated schema). Refuses `org-cutover-authoritative`. Repeat to unwind further. |
 | `activate-provisioning` | yes | Grant `platform-identity.provision-first-party` (Platform Access ← Organizations); `ORGANIZATIONS_PROVISIONING_ENABLED=true`. |
 | `activate-org-events` | yes | Pre: Meeting has `organization_integration_migrations`, private route 8448. Grant `meeting-organization-events.apply` (Meeting ← Organizations) and `ORGANIZATION_EVENTS_ENABLED=true` on Meeting, then `ORGANIZATIONS_EVENT_DESTINATIONS=cfmeet.meeting-service` + `CF_MEETING_SERVICE_BASE_URL` on Organizations. Post: no `DEAD` events. |
@@ -132,7 +133,8 @@ run() { gh workflow run cfmeet-coordinated-release.yml --ref main -f operation="
 run inspect                       # read-only; check the resource-gate preview and flags
 run backup                        # optional dry run of the backup and restore tests
 run release                       # gates → backup → provision → ordered release → verify
-run verify                        # any time later
+run verify                        # any time later (only a SHA with a completed release)
+run certify                       # read-only live certification of what is actually deployed
 
 # Activation steps: one owner approval each, in this order, re-running verify between steps.
 run activate-provisioning
@@ -155,6 +157,51 @@ gh run watch                      # each run uploads its log as an artifact
 Activation and verify runs act on the dispatched main head, which must be the released SHA:
 if `main` moved, release the new head first. `rollback` (and `inspect`) may be dispatched
 with any SHA; rollback always restores the latest recorded entry.
+
+## Live-production certification (`certify`)
+
+`verify` certifies one coordinated release: every container must run the image of exactly
+the dispatched SHA, and the journal must record a completed release of it. After a release,
+`main` usually advances (docs, tooling), and other operations can redeploy single services,
+so `verify` on the latest head correctly refuses: *No completed coordinated release of this
+SHA is recorded*. `certify` answers the different question "is what is deployed right now
+healthy, authentic and current?" without weakening `verify`.
+
+It changes nothing: no container lifecycle or configuration change, no file written on the
+host (credentials reach `psql` only through the docker CLI's environment), read-only SQL
+sessions, no image pull (`--pull never`; ephemeral `--rm --read-only` probe containers only),
+no journal entry, no confirmation accepted. It takes the same production lock as every
+production operation, so it never runs during a release.
+
+Per service (all 13 containers, `live_certification.py` on the VPS and
+`certification_report.py` on the runner):
+
+| Check | Passes when |
+|---|---|
+| container | running, not restarting, not OOM-killed; restart count unchanged during the run |
+| image | the image's own `org.opencontainers.image.revision` is a SHA, the image is the local `ghcr.io/cosmicforgehealthnet/cfmeet-<svc>:<revision>` tag, source label is this repository |
+| revision on main | that revision is an ancestor of the dispatched main head |
+| source equals main | none of the image's build inputs (Dockerfile `COPY` sources) changed since that revision |
+| readiness | `/ready` or `/health` answers 200 from inside the service's network namespace |
+| database | `psql` with the service's own `DATABASE_URL`, from its own namespace, read-only session; database matches the catalogue |
+| migrations | history tables present and every migration defined at the running revision applied |
+| authentication | a credential-free GET is rejected by the auth layer (401; the gateway answers 404 while public routing is off) |
+| service auth | signing key mounted; trust bundle is the production bundle of this receiver; every grant of a completed activation is present with the issuer's current public key |
+| service-to-service | every configured `CF_*_BASE_URL` upstream answers its readiness route from the caller's namespace (private TLS verified) |
+
+Platform: provider-dependent features at safe defaults, external integrations reported as
+enabled/disabled, Organizations outbox without `DEAD` events, the VPS public smoke. From the
+runner (`public_certification.py`, unauthenticated GET/OPTIONS only): `/health`, Swagger and
+every OpenAPI document, CORS preflight, TLS certificate ≥ 14 days, every public GET route of
+`infra/api-gateway/route-manifest.json` (401/403 or unrouted; activated gateway families must
+route; any 5xx or unauthenticated 2xx fails), and every internal/operator/provider-callback GET
+route of the source contracts must not answer on the public host.
+
+Verdict: `CERTIFIED_READ_ONLY` only when every applicable check passes; otherwise
+`NOT_CERTIFIED` (a check failed) or `INCOMPLETE` (collection did not finish). The run fails
+unless certified and uploads `certification.md` / `certification.json`. Authenticated
+end-to-end journeys are outside its scope (they write sessions and data) and are always listed
+as an outstanding requirement for full production readiness.
 
 ## Records on the VPS
 
