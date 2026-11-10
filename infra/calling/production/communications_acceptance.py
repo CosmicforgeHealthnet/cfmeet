@@ -214,7 +214,7 @@ class Journey:
         assert set(providers.values())<={'CONFIGURED','NOT_CONFIGURED'} and delivery['physicalDeviceAcceptance']=='NOT_RUN'
         self.report['pushProviders']=providers
         self.hub(a,'/me/storage-summary')
-        assert self.hub(a,'/me/recovery-state')['phoneRecovery']['status']=='DEFERRED'
+        assert self.hub(a,'/me/recovery-state')['phoneRecovery']['status']=='PROVIDER_BLOCKED'
         feed=self.hub(a,'/sync?after=0&limit=500')
         positions=[e['position'] for e in feed['data']]
         assert positions==sorted(positions) and len(set(positions))==len(positions)
@@ -352,8 +352,13 @@ class Journey:
         self.done('authenticated_ingress_private_policy_and_public_swagger')
         a,b=self.accounts()
         capabilities=self.hub(a,'/me/capabilities')
-        assert capabilities['phoneVerification']['status']=='DEFERRED'
-        if not capabilities['messaging']['securityReady']:assert capabilities['messaging']['available'] is False
+        # Contract 1.3.0: the canonical provider-gated label (DEFERRED was retired).
+        assert capabilities['phoneVerification']=={'status':'PROVIDER_BLOCKED','required':False},capabilities['phoneVerification']
+        messaging=capabilities['messaging']
+        # Section 14: `available` follows MANAGED messaging; private E2EE is reported separately
+        # and is never available without device security readiness.
+        if not messaging['securityReady']:assert messaging.get('privateE2ee',messaging)['available'] is False
+        if 'managed' in messaging:assert messaging['available']==(messaging['managed']['reason']=='AVAILABLE')
         self.done('capabilities_report_actual_messaging_security_readiness')
         if self.c['stage']:
             policy=self.request('messaging','/v1/messaging/policy',token=self.c['scope']['token'])
