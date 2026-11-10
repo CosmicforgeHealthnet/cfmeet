@@ -16,16 +16,18 @@ SHA = 'a' * 40
 OLD = 'b' * 40
 REPO_URL = 'https://github.com/CosmicforgeHealthnet/cfmeet'
 # Docker sub-commands certification may issue. Everything else mutates the host.
-READ_ONLY_DOCKER = {('docker', 'inspect'), ('docker', 'image'), ('docker', 'ps'), ('docker', 'run'), ('docker', 'exec')}
+READ_ONLY_DOCKER = {('docker', 'inspect'), ('docker', 'image'), ('docker', 'ps'), ('docker', 'run'), ('docker', 'exec'),
+                    ('nsenter', '-t')}
 
 
-def container(name, image='sha256:img', env=None, labels=None, mounts=(), restarts=0):
+def container(name, image='sha256:img', env=None, labels=None, mounts=(), restarts=0, aliases=(), ip='10.0.0.9'):
     return {'Name': '/' + name, 'Id': name + '-id', 'Image': image, 'RestartCount': restarts,
-            'State': {'Running': True, 'Status': 'running', 'OOMKilled': False, 'StartedAt': '2026-11-10T00:00:00Z'},
+            'State': {'Running': True, 'Status': 'running', 'OOMKilled': False, 'StartedAt': '2026-11-10T00:00:00Z',
+                      'Pid': 4242},
             'Config': {'Env': ['%s=%s' % kv for kv in (env or {}).items()], 'Labels': labels or {}, 'Image': image},
             'HostConfig': {'RestartPolicy': {'Name': 'unless-stopped'}, 'Memory': 0, 'ReadonlyRootfs': True},
             'Mounts': [{'Source': s, 'Destination': d} for s, d in mounts],
-            'NetworkSettings': {'Networks': {p.NET: {}}}}
+            'NetworkSettings': {'Networks': {p.NET: {'Aliases': list(aliases), 'IPAddress': ip}}}}
 
 
 class FakeHost:
@@ -58,6 +60,8 @@ class FakeHost:
                 env['DATABASE_URL'] = 'postgres://%s:hunter2@cfmeet-core-db:5432/%s' % (s['role'] or 'meeting', s['db'] or 'cfmeet')
             self.containers[s['container']] = container(s['container'], 'sha256:' + cr.image_of(name), env,
                                                         {'org.opencontainers.image.revision': OLD}, mounts)
+        # The private TLS proxy answers for api.cfmeet.com on the private network.
+        self.containers['cfmeet-core-tls'] = container('cfmeet-core-tls', aliases=['api.cfmeet.com'], ip='10.0.0.2')
 
     def image_meta(self, image):
         return [{'Id': image, 'Created': '2026-11-09T00:00:00Z', 'RepoDigests': [],
@@ -89,6 +93,17 @@ class FakeHost:
                 image = ref[len(cr.IMAGE_REPO):].split(':')[0]
                 return 0, 'sha256:' + image
             return 0, 'sha256:probe'
+        if args[0] == 'nsenter':
+            assert args[:5] == ['nsenter', '-t', '4242', '-n', '--'] and args[5] == 'curl', args
+            url = args[-1]
+            if 'api.cfmeet.com' in url:
+                assert any(a.startswith('api.cfmeet.com:') and a.endswith(':10.0.0.2') for a in args), args
+            for fragment, answer in self.http.items():
+                if fragment in url:
+                    return 0, answer
+            if '/internal/' in url or url.endswith(('/api/v1/users/me', '/v1/calls', '/sms-bridge/disclosure')):
+                return 0, '{"error":{"code":"INTERNAL_AUTHENTICATION_FAILED"}}\n401'
+            return 0, '{"status":"ok"}\n200'
         assert args[:2] == ['docker', 'run'] and '--rm' in args and 'never' in args and '--read-only' in args
         if lc.PG in args:
             assert env and env['PGOPTIONS'] == '-c default_transaction_read_only=on'
@@ -102,15 +117,11 @@ class FakeHost:
                 return 2, ''
             db = env['DATABASE_URL'].rsplit('/', 1)[1]
             return 0, '%s|role|on|160004' % db
-        url = args[-1]
-        for fragment, answer in self.http.items():
-            if fragment in url:
-                return 0, answer
-        if '/internal/' in url or url.endswith(('/api/v1/users/me', '/v1/calls', '/sms-bridge/disclosure')):
-            return 0, '{"error":{"code":"INTERNAL_AUTHENTICATION_FAILED"}}\n401'
-        return 0, '{"status":"ok"}\n200'
+        raise AssertionError('unexpected docker run %s' % args)
 
     def inspect(self, name):
+        if name not in self.containers:
+            raise RuntimeError('subprocess failed: docker')
         return self.containers[name]
 
 
@@ -123,6 +134,7 @@ def host(**kwargs):
         with patch.object(cr, 'WORK', work), patch.object(cr, 'JOURNAL', work / 'journal.json'), \
                 patch.object(p, 'run', side_effect=fake.run), patch.object(p, 'inspect', side_effect=fake.inspect), \
                 patch.object(lc, 'docker', side_effect=fake.docker), patch.object(lc.time, 'sleep'), \
+                patch.object(lc.shutil, 'which', return_value='/usr/bin/tool'), \
                 patch.object(p, 'identity'), patch.object(cr, 'public_smoke', return_value={'public_swagger': 'PASS'}), \
                 patch.object(cr, 'mem_available_mib', return_value=5000), \
                 patch.object(cr, 'disk_free_bytes', return_value=100 * 2**30), contextlib.redirect_stdout(out):
@@ -142,6 +154,9 @@ class ReadOnlyByConstruction(unittest.TestCase):
             self.assertIn(tuple(call[:2]), READ_ONLY_DOCKER, call)
             if call[:2] in (('docker', 'image'),):
                 self.assertEqual(call[2], 'inspect')
+            if call[0] == 'nsenter':
+                self.assertEqual(call[3:6], ('-n', '--', 'curl'))  # network namespace only
+                continue
             if call[:2] == ('docker', 'run'):
                 for flag in ('--rm', '--read-only', 'no-new-privileges'):
                     self.assertIn(flag, call)
@@ -211,6 +226,9 @@ class PerServiceChecks(unittest.TestCase):
     def test_upstream_owner_resolves_private_tls_and_container_routes(self):
         from urllib.parse import urlsplit
         self.assertEqual(lc.upstream_owner(urlsplit('https://api.cfmeet.com:8443')), 'platform-access')
+        with host() as (fake, work, out):
+            self.assertEqual(lc.address_of('api.cfmeet.com', 'cfmeet-calling'), '10.0.0.2')
+            self.assertIsNone(lc.address_of('elsewhere.example', 'cfmeet-calling'))
         self.assertEqual(lc.upstream_owner(urlsplit('https://api.cfmeet.com:8448')), 'meeting-service')
         self.assertEqual(lc.upstream_owner(urlsplit('http://cfmeet-developer-platform:8098')), 'developer-platform')
         self.assertIsNone(lc.upstream_owner(urlsplit('https://example.com:8443')))
