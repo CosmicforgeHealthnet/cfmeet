@@ -19,7 +19,7 @@ the coordinated release; see §0.
 | Organizations export | 0 organizations, 0 memberships in production | `org-cutover-export` 42711430322 |
 | Developer Platform | on; public routing of the Developer Platform families on `api.cfmeet.com` | 42712263986, 42713082843 |
 | First-party features | conference realtime, webinar mode, quality telemetry, notification email (SMTP present), Messaging session devices | `activate-first-party-features` 42730700547 |
-| Live acceptance | Messaging 15/15; Enterprise Calling, recording, voicemail PASS; regression PASS after every step | calling-production 42716127525, 42717080104, 42718224193, 42719418460 |
+| Live acceptance | Communications 20/20 (incl. Hub-launched voice and video calls with bidirectional media, QR, blocking, timeline cards, call history); Messaging 15/15; Enterprise Calling, recording, voicemail PASS; regression PASS after every step | calling-production 42740615988, 42716127525, 42717080104, 42718224193, 42719418460 |
 | Public surface (external probe) | `/health` 200; 9 Swagger documents + Swagger UI 200; authenticated routes 401; `/internal/*` 404; CORS for `https://cfmeet.com` | this report |
 
 Not activated, with the precise reason:
@@ -32,6 +32,12 @@ Not activated, with the precise reason:
 | SMS / phone OTP (Africa's Talking), SMS callbacks, PSTN, carrier interconnect | no provider credentials, onboarding or carrier agreement | owner (excluded by mandate) |
 | Healthcare meeting profile | compliance decision | owner |
 | Remote branch deletion (39 verified-obsolete branches) | this session's Git proxy refuses ref deletion (HTTP 403) | owner: dispatch `repository-branch-cleanup.yml` from `main` with `apply: true` |
+
+**Production verdict (2026-11-10): BACKEND_PRODUCTION_ACTIVE — FRONTEND_INTEGRATION_READY for personal
+workspaces, Meetings, Calling, MANAGED Messaging, Communications Hub and the Developer Platform.**
+The Organizations *authority* (and the per-organization Enterprise Calling / Messaging bindings that
+depend on it) is **not** active: it is blocked on the owner's off-site backup (table above). The
+original verdict below is kept as the engineering record.
 
 ## 1. Verdict
 
