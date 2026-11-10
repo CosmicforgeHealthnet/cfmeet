@@ -8,14 +8,17 @@ revision's ancestry, its source against the main head, and its expected migratio
 (certification_report.py). `verify` keeps its strict same-SHA contract unchanged.
 
 Read-only by construction:
-  - no container is stopped, started, renamed, created (except the ephemeral, --rm,
-    --pull never, read-only probe containers below), removed or reconfigured;
+  - no container is stopped, started, renamed, created (except ephemeral --rm,
+    --pull never, read-only psql containers), removed or reconfigured;
+  - HTTP probes run the host's own curl inside the service's network namespace
+    (nsenter -n): no container is created for them. Names are resolved from Docker's
+    own records (curl --resolve), so TLS is verified against the real hostname;
   - no file on the host is written: database URLs reach psql through the environment of
     the docker CLI process (`docker run -e NAME`), never a file or the command line;
   - every SQL session is read-only (default_transaction_read_only=on);
   - HTTP probes are credential-free GETs that the services reject in their auth layer
     before any handler runs, or health/readiness reads;
-  - nothing is pulled: a missing probe image is reported, not fetched.
+  - nothing is pulled: a missing psql image is reported, not fetched.
 
 Output: one JSON object per line (`certifyService`, `certifyPlatform`, `certifyCollected`).
 Secrets are never printed; error messages are reduced to their type.
@@ -23,6 +26,7 @@ Secrets are never printed; error messages are reduced to their type.
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -32,8 +36,9 @@ import production as p
 import coordinated_release as cr
 import communications_release as release
 
-PROBE = cr.PROBE_IMAGE
 PG = cr.PG_CLIENT
+# Containers whose name or network alias a service may use to reach a dependency.
+RESOLVABLE = ('cfmeet-core-tls', 'cfmeet-core-db')
 SAFE_RUN = ('--rm', '--pull', 'never', '--read-only', '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '128m')
 READ_ONLY_SQL = 'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;\n'
@@ -121,11 +126,38 @@ def has_image(ref):
 
 # --- HTTP from inside a service's own network namespace -------------------------------------
 
+def address_of(hostname, container):
+    """IPv4 address Docker's DNS gives `hostname` inside `container` (a container name or
+    network alias on a network the two share), or None."""
+    networks = p.inspect(container)['NetworkSettings']['Networks']
+    candidates = [s['container'] for s in cr.SERVICES.values()] + list(RESOLVABLE)
+    for candidate in candidates:
+        try:
+            other = p.inspect(candidate)
+        except RuntimeError:
+            continue
+        for net, endpoint in (other['NetworkSettings']['Networks'] or {}).items():
+            names = {candidate} | set(endpoint.get('Aliases') or []) | set(endpoint.get('DNSNames') or [])
+            if net in networks and hostname in names and endpoint.get('IPAddress'):
+                return endpoint['IPAddress']
+    return None
+
+
 def http_probe(container, url, timeout=8):
-    """(status, body excerpt). Status 0: no HTTP answer (connection or TLS failure)."""
-    code, out = docker(['docker', 'run', *SAFE_RUN, '--network', 'container:' + container, PROBE,
-                        '-sS', '--max-time', str(timeout), '-o', '/dev/stdout', '-w', '\n%{http_code}', url],
-                       timeout=timeout + 30)
+    """(status, body excerpt). Status 0: no HTTP answer (connection, TLS or name failure)."""
+    target = urlsplit(url)
+    pid = p.inspect(container)['State'].get('Pid')
+    if not pid:
+        return 0, 'container has no process'
+    args = ['nsenter', '-t', str(pid), '-n', '--', 'curl', '-sS', '--noproxy', '*', '--proto', '=http,https',
+            '--max-time', str(timeout), '-o', '/dev/stdout', '-w', '\n%{http_code}']
+    if target.hostname not in ('127.0.0.1', 'localhost'):
+        address = address_of(target.hostname, container)
+        if not address:
+            return 0, 'name not resolvable on the service networks'
+        port = target.port or (443 if target.scheme == 'https' else 80)
+        args += ['--resolve', '%s:%d:%s' % (target.hostname, port, address)]
+    code, out = docker(args + [url], timeout=timeout + 30)
     body, _, status = out.rpartition('\n')
     status = int(status) if status.isdigit() else 0
     return status, cr.scrub(body)[:300]
@@ -415,9 +447,12 @@ def platform(envs, latest, journal):
 
 def certify(sha, run_id):
     emit('certifyStarted', dict(referenceSha=sha, runId=run_id, at=cr.now(), services=list(cr.ORDER)))
-    missing = [ref for ref in (PROBE, PG) if not has_image(ref)]
+    missing = [ref for ref in (PG,) if not has_image(ref)]
     if missing:
         raise RuntimeError('Probe images are not present on the host (certify never pulls): ' + ', '.join(missing))
+    tools = [tool for tool in ('nsenter', 'curl') if not shutil.which(tool)]
+    if tools:
+        raise RuntimeError('Host tools missing: ' + ', '.join(tools))
     names = cr.container_names()
     envs = cr.running_envs()
     journal, done_ops, latest, registry = journal_state()
