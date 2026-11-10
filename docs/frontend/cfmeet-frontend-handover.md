@@ -31,10 +31,11 @@ Nothing in this guide is a secret; no credential value appears anywhere in the f
 This section records what is **actually running** in production, verified on the server and through
 the public host. Where it disagrees with older wording elsewhere in this guide, this section wins.
 
-**Release.** Every CF Meet backend service runs the images built from `main` `bde67a8b` (all 13
+**Release.** Every CF Meet backend service runs the images built from `main` `4904ee33` (first
+released as `bde67a8b`; `4904ee33` adds release tooling only, the service code is identical). All 13
 services: Platform Access, Organizations, Communications Hub, Messaging, Calling, Meeting Service,
-Developer Platform + worker, API Gateway, Numbering, Privacy Relay, SMS Gateway, Telephony; plus the
-security scan gateway). The coordinated release verified each running container's image id and
+Developer Platform + worker, API Gateway, Numbering, Privacy Relay, SMS Gateway, Telephony, plus the
+security scan gateway. The coordinated release verified each running container's image id and
 source revision, applied every migration, and passed its post-release checks (public Swagger, CORS
 from `https://cfmeet.com`, internal routes not public, provider features off).
 
