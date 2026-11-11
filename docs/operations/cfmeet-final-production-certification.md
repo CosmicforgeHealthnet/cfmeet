@@ -14,6 +14,16 @@ It did not re-run the authenticated end-to-end journeys: sign-in, meetings, mess
 and communications create sessions, audit rows and messages. Those journeys are an applicable
 requirement that this certification could not evidence. See [Outstanding requirements](#outstanding-requirements).
 
+## Closure re-certification (2026-11-11)
+
+Run [43070726146](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43070726146) confirms the state certified on 2026-11-10 with **0 failures**:
+- All 13 containers still run `4904ee33`, with restart count 0 since the release.
+- Every completed activation's flags are unchanged, and every activated grant is still present with the issuer's current key.
+- The Meeting Service is still in `legacy` organization mode.
+- The public surface is unchanged: 236 public routes and 25 internal routes probed, TLS 40 days.
+
+No activation, release, or configuration change was made between the two runs. The final backend closure, including the organization cutover status, is in [CFMEET_BACKEND_FINAL_CLOSURE.md](CFMEET_BACKEND_FINAL_CLOSURE.md).
+
 ## Evidence
 
 | Run | Operation | Ref | Result |
@@ -22,6 +32,7 @@ requirement that this certification could not evidence. See [Outstanding require
 | [42884861657](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42884861657) | `inspect` | `982d72cd` | Passed; showed apparently mixed revisions (see audit) |
 | [42898830797](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42898830797) | `certify` (first) | `d2bc8ff5` | `INCOMPLETE`: probe image `curlimages/curl:8.12.1` absent on the host; certify refuses to pull. Public half passed. |
 | [42909534672](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/42909534672) | `certify` | `d2deb862` | **`CERTIFIED_READ_ONLY`**, 0 failures |
+| [43070726146](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43070726146) | `certify` (closure re-certification, 2026-11-11) | `d2deb862` | **`CERTIFIED_READ_ONLY`**, 0 failures |
 
 Artifact of the final run: `coordinated-release-certify-42909534672-1` contains:
 - `coordinated-release.log` (raw VPS output)
@@ -186,7 +197,7 @@ host's `curl` in each service's network namespace (#50 / #51).
    current, owner-approved run of the acceptance suites with dedicated acceptance accounts. The
    most recent recorded evidence is in the backend closure report (Communications 20/20 live
    acceptance). That evidence predates this certification and was not re-validated here.
-2. **Owner note: enterprise calling flag versus coordinated activation.** Calling runs with
+2. **Owner note: enterprise calling flag versus coordinated activation** (status at closure: pending, blocked by the Organizations cutover gates; see [CFMEET_BACKEND_FINAL_CLOSURE.md](CFMEET_BACKEND_FINAL_CLOSURE.md#organization-cutover-status)). Calling runs with
    `ENTERPRISE_CALLING_ENABLED=true`, recording and voicemail on. These were set by the earlier
    Calling production path. The coordinated `activate-enterprise-calling` step has not run (it
    follows the Organizations authoritative cutover). As a result, Calling's trust bundle does not
