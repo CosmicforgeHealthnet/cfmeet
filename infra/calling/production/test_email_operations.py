@@ -65,7 +65,7 @@ class ResendActivation(unittest.TestCase):
             self.assertFalse(webhook)
             self.assertNotIn('re_test', json.dumps(overrides))
             self.assertEqual((Path(folder) / mail.SECRET_KEY_FILE).stat().st_mode & 0o777, 0o400)
-            (Path(folder) / mail.SECRET_WEBHOOK_FILE).write_text('whsec_c2VjcmV0c2VjcmV0c2VjcmV0\n')
+            (Path(folder) / mail.SECRET_WEBHOOK_FILE).write_text('whsec_fixture-not-a-secret-000000000000\n')
             overrides, mounts, webhook = mail.resend_changes(cr)
             self.assertTrue(webhook)
             self.assertEqual(overrides['RESEND_WEBHOOK_SECRET_FILE'], mail.WEBHOOK_TARGET)

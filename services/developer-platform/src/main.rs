@@ -102,6 +102,15 @@ async fn main() -> anyhow::Result<()> {
     }
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
+    if config.production_access_withheld {
+        tracing::warn!(
+            "production-access submissions stay disabled: no named reviewer \
+             (DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS)"
+        );
+    }
+    if config.auto_approval_refused {
+        tracing::warn!("automatic production approval is not permitted and was ignored");
+    }
     tracing::info!(address = %config.bind_address, "developer platform listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(developer_platform::shutdown_signal())

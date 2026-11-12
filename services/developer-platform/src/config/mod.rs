@@ -82,6 +82,11 @@ pub struct DeveloperPlatformConfig {
     /// any operator holding `developer-platform.administer` (previous behaviour). Customer
     /// submissions (`…_PRODUCTION_ACCESS_WORKFLOW_ENABLED`) require at least one reviewer.
     pub production_reviewers: Vec<String>,
+    /// `…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=true` was requested but no reviewer is named:
+    /// the workflow was kept off (reported at startup).
+    pub production_access_withheld: bool,
+    /// `…_PRODUCTION_AUTO_APPROVAL=true` was requested and ignored (reported at startup).
+    pub auto_approval_refused: bool,
     pub database_url: SecretString,
     pub database_max_connections: u32,
     pub bind_address: SocketAddr,
@@ -250,7 +255,7 @@ impl DeveloperPlatformConfig {
             1,
             200,
         )? as u32;
-        let flags = FeatureFlags {
+        let mut flags = FeatureFlags {
             gateway_api: flag(&get, "DEVELOPER_PLATFORM_GATEWAY_API_ENABLED")?,
             production_auto_approval: flag(&get, "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL")?,
             production_access_workflow: flag(
@@ -273,19 +278,18 @@ impl DeveloperPlatformConfig {
                 "must be comma-separated operator names",
             ));
         }
-        if flags.production_access_workflow && production_reviewers.is_empty() {
-            return Err(ConfigError::invalid(
-                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
-                "customer production-access submissions need at least one named reviewer",
-            ));
+        // Customer submissions are only accepted while someone can decide them: without a
+        // named reviewer the workflow stays off (submit / cancel / activate answer 503
+        // `CAPABILITY_UNAVAILABLE`) and everything else starts normally.
+        let production_access_withheld =
+            flags.production_access_workflow && production_reviewers.is_empty();
+        if production_access_withheld {
+            flags.production_access_workflow = false;
         }
-        if flags.production_auto_approval {
-            // Owner decision (final completion): manual approval only.
-            return Err(ConfigError::invalid(
-                "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL",
-                "automatic production approval is not permitted; reviewers decide manually",
-            ));
-        }
+        // Owner decision (final completion): manual approval only. A request for automatic
+        // approval is ignored (never a startup failure of the whole service).
+        let auto_approval_refused = flags.production_auto_approval;
+        flags.production_auto_approval = false;
         let worker_interval = Duration::from_millis(bounded(
             &get,
             "DEVELOPER_PLATFORM_WORKER_INTERVAL_MS",
@@ -340,6 +344,8 @@ impl DeveloperPlatformConfig {
         )? as u64;
         Ok(Self {
             production_reviewers,
+            production_access_withheld,
+            auto_approval_refused,
             database_url,
             database_max_connections,
             bind_address,
@@ -396,11 +402,14 @@ mod tests {
             v.extend_from_slice(extra);
             DeveloperPlatformConfig::from_lookup(lookup(&v))
         };
-        assert!(with(&[(
+        // Without a named reviewer the service starts and submissions stay off.
+        let withheld = with(&[(
             "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
-            "true"
+            "true",
         )])
-        .is_err());
+        .expect("starts without reviewers");
+        assert!(!withheld.flags.production_access_workflow);
+        assert!(withheld.production_access_withheld);
         let cfg = with(&[
             (
                 "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
@@ -413,8 +422,13 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cfg.production_reviewers, ["github-alice", "github-bob"]);
+        assert!(cfg.flags.production_access_workflow);
+        assert!(!cfg.production_access_withheld);
         assert!(with(&[("DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS", "bad name")]).is_err());
-        assert!(with(&[("DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL", "true")]).is_err());
+        // Automatic approval is never effective (manual review only), and never a crash.
+        let auto = with(&[("DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL", "true")]).unwrap();
+        assert!(!auto.flags.production_auto_approval);
+        assert!(auto.auto_approval_refused);
         assert!(with(&[]).unwrap().production_reviewers.is_empty());
     }
 

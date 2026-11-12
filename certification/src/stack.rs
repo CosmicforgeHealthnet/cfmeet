@@ -681,6 +681,12 @@ impl Stack {
                 "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
                 "true".into(),
             ),
+            // Submissions need a named reviewer: the certification operator (an explicit
+            // test reviewer; self-approval stays refused by membership).
+            kv(
+                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
+                crate::provision::OPERATOR_NAME.into(),
+            ),
             kv("DEVELOPER_PLATFORM_WORKER_INTERVAL_MS", "500".into()),
             kv("CF_PLATFORM_ACCESS_BASE_URL", url(self, PLATFORM_ACCESS)),
             kv("CF_MEETING_SERVICE_BASE_URL", url(self, MEETING_SERVICE)),

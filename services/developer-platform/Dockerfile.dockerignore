@@ -16,3 +16,6 @@
 **/*.log
 services/developer-platform/Dockerfile
 services/developer-platform/Dockerfile.dockerignore
+
+# Local Redis snapshots never enter an image context
+**/*.rdb
