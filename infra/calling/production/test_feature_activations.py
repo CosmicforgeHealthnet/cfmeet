@@ -42,6 +42,15 @@ class SafeDefaults(unittest.TestCase):
             self.assertEqual(len(cr.safe_default_violations(envs)), 7)
 
 
+    def test_push_adapter_credentials_are_refused_until_push_is_approved(self):
+        with isolated_work():
+            envs = {'messaging': {'MESSAGING_PUSH_PROVIDER': 'none', 'MESSAGING_PUSH_WEB_VAPID_KEY_FILE': '/k',
+                                  'MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE': '/f', 'MESSAGING_PUSH_APNS_TOPIC': ''}}
+            self.assertEqual(cr.safe_default_violations(envs),
+                             ['messaging MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE',
+                              'messaging MESSAGING_PUSH_WEB_VAPID_KEY_FILE'])
+
+
 class GatewayFamilies(unittest.TestCase):
     def test_every_family_is_a_routed_public_customer_rest_family_of_calling_messaging_or_developer_platform(self):
         upstreams = {'cfmeet.calling', 'cfmeet.messaging', 'cfmeet.developer-platform'}

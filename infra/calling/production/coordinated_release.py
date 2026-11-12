@@ -1101,6 +1101,9 @@ SAFE_DEFAULTS = {
 }
 
 
+PUSH_ADAPTER_PREFIXES = ('MESSAGING_PUSH_APNS_', 'MESSAGING_PUSH_FCM_', 'MESSAGING_PUSH_WEB_')
+
+
 def safe_defaults():
     """SAFE_DEFAULTS, widened only by a completed activation that owns the setting: customer
     webhook delivery may be `active` once activate-developer-webhooks is recorded. Production
@@ -1123,6 +1126,11 @@ def safe_default_violations(envs):
         for var, allowed in rules.items():
             if env.get(var) not in allowed:
                 violations.append('%s %s' % (name, var))
+    # The push adapters switch on from their credential variables whatever
+    # MESSAGING_PUSH_PROVIDER says (services/messaging/src/config/mod.rs): none may be present.
+    messaging = envs.get('messaging') or {}
+    for var in sorted(v for v in messaging if v.startswith(PUSH_ADAPTER_PREFIXES) and messaging[v]):
+        violations.append('messaging ' + var)
     meeting = envs.get('meeting-service')
     if meeting and meeting.get('NOTIFICATIONS_EMAIL_ENABLED') == 'true' and not all(mail_presence(meeting).values()):
         violations.append('meeting-service NOTIFICATIONS_EMAIL_ENABLED without mail credentials')
