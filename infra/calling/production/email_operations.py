@@ -176,6 +176,17 @@ END;
 """
 
 
+ORGANIZATIONS_SQL = """
+SELECT json_build_object(
+  'organizations', (SELECT count(*) FROM organizations),
+  'memberships', (SELECT count(*) FROM organization_memberships),
+  'invitations', (SELECT count(*) FROM organization_invitations),
+  'outboxByState', (SELECT coalesce(json_object_agg(state, n), '{}') FROM
+      (SELECT state, count(*) n FROM organization_outbox GROUP BY state) o),
+  'importRuns', (SELECT count(*) FROM organization_import_runs));
+"""
+
+
 def sql_array(values):
     return "ARRAY[%s]::text[]" % ','.join("'%s'" % v for v in values if re.fullmatch(r'[a-z0-9-]{3,40}', v))
 
@@ -194,6 +205,17 @@ def diagnose(cr, sha, run_id):
     emit('emailLedger', json.loads(cr.meeting_psql(LEDGER_SQL) or 'null'))
     emit('conferenceLifecycle', json.loads(cr.meeting_psql(LIFECYCLE_SQL % sql_array(REPORTED_MEETING_CODES))))
     emit('meetingHistories', cr.history_state(cr.meeting_psql))
+    # Organizations activation (Section 5): is the legacy dataset still empty? Counts only.
+    try:
+        emit('organizationsLegacyInventory', json.loads(cr.meeting_psql(cr.INVENTORY_SQL)))
+    except (RuntimeError, ValueError, AttributeError):
+        emit('organizationsLegacyInventory', 'unavailable')
+    try:
+        rows = cr.release.db_sql('cfmeet_organizations', ORGANIZATIONS_SQL)
+        emit('organizationsServiceInventory', json.loads(rows or 'null'))
+    except (RuntimeError, ValueError):
+        emit('organizationsServiceInventory', 'unavailable')
+    emit('organizationsAuthorityMode', env.get('ORGANIZATIONS_AUTHORITY_MODE') or 'legacy')
 
 
 # --- Resend activation and acceptance --------------------------------------------------------
