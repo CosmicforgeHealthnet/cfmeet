@@ -115,7 +115,7 @@ class Journey:
         self.check('console %s: organization created through the gateway (DEVELOPER_SESSION)' % label,
                    org.get('myRole') == 'OWNER' and org.get('state') == 'ACTIVE')
         _, project = console.call('POST', '/v1/organizations/%s/projects' % org['id'],
-                                  {'displayName': 'acceptance-%s' % label}, expected=(201,), idempotent=True)
+                                  {'displayName': 'acceptance-%s' % label.lower()}, expected=(201,), idempotent=True)
         self.cleanup.insert(0, ('POST', '/v1/projects/%s/archive' % project['id'], console))
         _, env = console.call('POST', '/v1/projects/%s/environments' % project['id'],
                               {'kind': 'SANDBOX', 'displayName': 'acceptance'}, expected=(201,), idempotent=True)
@@ -127,7 +127,7 @@ class Journey:
         for scope in SCOPES:
             console.call('POST', '/v1/projects/%s/scopes' % project['id'], {'scope': scope})
         _, service_account = console.call('POST', '/v1/environments/%s/service-accounts' % env['id'],
-                                          {'name': 'acceptance-%s' % label}, expected=(201,), idempotent=True)
+                                          {'name': 'acceptance-%s' % label.lower()}, expected=(201,), idempotent=True)
         tenant = dict(console=console, org=org, project=project, env=env)
         if before_credential:
             tenant['hook'] = before_credential(tenant)
