@@ -22,6 +22,10 @@ pub fn app(state: State) -> Router {
     let internal = Router::new()
         .route("/internal/v1/communications/dispatch", post(dispatch))
         .route(
+            "/internal/v1/communications/organization-invitations/resolve",
+            post(resolve_organization_invitee),
+        )
+        .route(
             "/internal/v1/communications/policy/check",
             post(policy_check),
         )
@@ -98,6 +102,50 @@ struct ResolvePrincipal {
     cf_meet_id: String,
     #[serde(default)]
     purpose: Option<cf_communications_policy::Action>,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveOrganizationInvitee {
+    account: VerifiedAccount,
+    cf_meet_id: String,
+}
+/// Organization invitation by CF Meet ID (Meeting Service only): translates a CF Meet ID
+/// into the owning account for an invitation the Meeting Service creates on the
+/// inviter's behalf. Exactly the consumer-discovery rules apply to the inviter
+/// (discoverable public id, visible profile, no block in either direction, active
+/// account, the discovery attempt budget); anything else is the same `404 NOT_FOUND` as
+/// an unknown id, so the route never confirms more than discovery would. The account
+/// reference is never relayed to clients: the Meeting Service uses it to address the
+/// invitation and answers the inviter with a masked identity only.
+async fn resolve_organization_invitee(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ResolveOrganizationInvitee>,
+) -> Result<Json<Value>> {
+    if ctx.authenticated_service() != &cf_service_auth::ServiceId::meeting_service() {
+        return Err(Error::Forbidden);
+    }
+    s.metrics.requests.fetch_add(1, Ordering::Relaxed);
+    let scope = auth::delegated(&ctx)?;
+    let actor = s.ensure_profile(&scope, &input.account).await?;
+    s.limit_attempt(&actor, "discovery.resolve", 120).await?;
+    let target = s
+        .store
+        .by_public_id(&s.store.db, actor.scope(), input.cf_meet_id.trim())
+        .await?;
+    if let Err(e) = s.visible_profile(&scope, &actor, &target, false).await {
+        s.metrics.denied.fetch_add(1, Ordering::Relaxed);
+        return Err(match e {
+            e @ (Error::Unavailable | Error::Database(_)) => e,
+            _ => Error::NotFound,
+        });
+    }
+    let mut r = json!({"schemaVersion":1,"accountReference":target.account_reference,
+        "displayName":target.display_name});
+    if actor.id == target.id {
+        r["self"] = json!(true);
+    }
+    Ok(Json(r))
 }
 /// A private translation for authoritative owners; consumer discovery never exposes it.
 async fn resolve_principal(

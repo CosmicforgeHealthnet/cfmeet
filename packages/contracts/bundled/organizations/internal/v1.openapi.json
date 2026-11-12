@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging."
   },
   "tags": [
@@ -5206,6 +5206,13 @@
               "MEMBER",
               "GUEST"
             ]
+          },
+          "inviteeHint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^@]+$",
+            "description": "Optional display hint stored instead of the masked email (inviteeEmailHint) for an invitation addressed by another identifier; the Meeting Service sends `CF Meet ID <id>` so the invitee's email is never disclosed to the inviter, even masked. 1.4.0."
           }
         },
         "required": [

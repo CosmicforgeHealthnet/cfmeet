@@ -336,6 +336,7 @@ async fn offline_devices_replay_missed_events_in_canonical_order_from_their_ack(
             event_sequence: evs[2]["eventSequence"].as_i64().unwrap(),
             event_type: "messaging.message.created".into(),
             subject_principal_id: None,
+            recipients: vec![],
         })
         .await
         .unwrap();
@@ -497,6 +498,7 @@ async fn a_slow_consumer_is_disconnected_resumably_without_unbounded_buffering()
                 event_sequence: 1_000_000 + i,
                 event_type: "messaging.message.created".into(),
                 subject_principal_id: None,
+                recipients: vec![],
             })
             .await
             .unwrap();
@@ -1507,4 +1509,127 @@ async fn session_devices_never_cross_tenants() {
     // The owner's own renewal still works (the refusal above was scope, not validation).
     let r = session_device(h, &a, alice, &binding, json!({ "sessionDeviceId": device })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+}
+
+/// A MANAGED session-device connection of `principal`.
+async fn session_connection(rt: &Rt, c: &Customer, principal: Uuid, seed: u8) -> Ws {
+    let r = session_device(&rt.h, c, principal, &session_ref(seed), json!({})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let ticket = rt.ticket_with(r.json["token"].as_str().unwrap()).await;
+    rt.open(ticket.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("connected")
+}
+
+/// Organization Messaging realtime without polling: an inbox-enabled MANAGED session device
+/// learns about activity in conversations it is not subscribed to, about new conversations
+/// it was added to and about its own removal — identifiers only, never content — while a
+/// subscribed conversation keeps its durable events (no duplicate inbox signal) and a
+/// non-member hears nothing.
+#[tokio::test]
+async fn inbox_signals_cover_unsubscribed_and_new_conversations_without_content() {
+    let Some(rt) = Rt::with_state(test_settings(), |s| s.devices.enabled = false).await else {
+        return;
+    };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (owner, alice) = (people[0], people[1]);
+    let carol = h.principal(&c);
+    let cid = cid(&conv);
+
+    let mut ws = session_connection(&rt, &c, alice, 0x51).await;
+    let mut other = session_connection(&rt, &c, carol, 0x52).await;
+    for (w, rid) in [(&mut ws, "i1"), (&mut other, "i2")] {
+        w.send(json!({ "type": "inbox.subscribe", "requestId": rid }))
+            .await;
+        assert_eq!(w.next_of("inbox.subscribed").await["requestId"], rid);
+    }
+
+    // Activity in an unsubscribed conversation: an identifier-only signal.
+    h.send_managed(&c, &conv, owner, "secret preview text")
+        .await;
+    let f = ws.next_of("inbox.event").await;
+    assert_eq!(f["conversationId"], json!(cid.to_string()));
+    assert_eq!(f["eventType"], "message.created");
+    assert!(f["eventSequence"].as_i64().unwrap() > 0);
+    assert!(!f.to_string().contains("secret preview text"), "{f}");
+
+    // The inbox summary is then read by REST (preview + unread for the member).
+    let list = h.get(&c, Some(alice), "/v1/conversations").await;
+    let item = list.json["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["conversationId"] == json!(cid.to_string()))
+        .cloned()
+        .unwrap();
+    assert_eq!(item["inbox"]["unreadCount"], 1, "{item}");
+    assert_eq!(
+        item["inbox"]["lastMessage"]["previewText"],
+        "secret preview text"
+    );
+    assert_eq!(
+        item["inbox"]["lastMessage"]["senderPrincipalId"],
+        json!(owner.to_string())
+    );
+
+    // A new conversation the member is added to.
+    let r = h
+        .create_conversation(
+            &c,
+            owner,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let second = r.json["conversationId"].as_str().unwrap().to_string();
+    let a = h
+        .post(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{second}/members"),
+            json!({ "principalId": alice }),
+        )
+        .await;
+    assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+    loop {
+        let f = ws.next_of("inbox.event").await;
+        if f["conversationId"] == json!(second) {
+            assert!(
+                f["eventType"].as_str().unwrap().starts_with("member."),
+                "{f}"
+            );
+            break;
+        }
+    }
+
+    // A subscribed conversation delivers durable events and no inbox duplicate.
+    assert_eq!(ws.subscribe(&conv, None).await["type"], "subscribed");
+    h.send_managed(&c, &conv, owner, "now subscribed").await;
+    let e = ws.events(1).await;
+    assert_eq!(e[0]["data"]["message"]["managed"]["text"], "now subscribed");
+    ws.quiet("inbox.event", Duration::from_millis(400)).await;
+
+    // Removal from a conversation reaches the removed member's inbox.
+    let r = h
+        .send(
+            axum::http::Method::DELETE,
+            Some(&c.token),
+            Some(owner),
+            &format!("/v1/conversations/{second}/members/{alice}"),
+            None,
+            &[],
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    loop {
+        let f = ws.next_of("inbox.event").await;
+        if f["conversationId"] == json!(second) && f["eventType"] == "member.removed" {
+            break;
+        }
+    }
+
+    // A principal outside every conversation hears nothing.
+    other.quiet("inbox.event", Duration::from_millis(400)).await;
 }

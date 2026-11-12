@@ -599,14 +599,14 @@
     },
     {
       "id": "cfmeet.messaging.realtime-protocol",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "json-schema",
       "path": "messaging/realtime/v1.schema.json",
       "owner": "messaging",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messaging realtime WebSocket protocol v1 (Part V Part E): client frames (subscribe, unsubscribe, ack, typing, presence.set, presence.query, auth.refresh, ping) and server frames (welcome, subscribed, event, sync.required, subscription.revoked, typing, presence, presence.snapshot, device.event, server.draining, error …), close codes and compatibility rules. Durable events reference the ConversationEvent of cfmeet.messaging.common; no plaintext of PRIVATE_E2EE conversations ever appears. 1.1.0 Part V backend closure: server frame read-cursor.synced (§55: the principal's own sessions follow its read position whatever the read-receipt policy); durable delivery.cursor.updated events (§52 DELIVERED). 1.3.0 (audit MSG-018 / MSG-009): client frame receipts.query and server frame receipts.snapshot (the current read / delivery cursors after a reconnect; receipt events are coalesced per member and window); durable timeline.changed events (Communications Hub call / meeting timeline changed: refetch it)."
+      "description": "Messaging realtime WebSocket protocol v1 (Part V Part E): client frames (subscribe, unsubscribe, ack, typing, presence.set, presence.query, auth.refresh, ping) and server frames (welcome, subscribed, event, sync.required, subscription.revoked, typing, presence, presence.snapshot, device.event, server.draining, error …), close codes and compatibility rules. Durable events reference the ConversationEvent of cfmeet.messaging.common; no plaintext of PRIVATE_E2EE conversations ever appears. 1.1.0 Part V backend closure: server frame read-cursor.synced (§55: the principal's own sessions follow its read position whatever the read-receipt policy); durable delivery.cursor.updated events (§52 DELIVERED). 1.3.0 (audit MSG-018 / MSG-009): client frame receipts.query and server frame receipts.snapshot (the current read / delivery cursors after a reconnect; receipt events are coalesced per member and window); durable timeline.changed events (Communications Hub call / meeting timeline changed: refetch it). 1.4.0 (Session 3, organization Messaging without polling): optional capability `inbox` (welcome.capabilities): client frame inbox.subscribe; server frames inbox.subscribed, inbox.event (identifier-only signal for conversations of the principal the connection is not subscribed to: new conversations, activity, own removal) and inbox.resync; the principal's own read-cursor.synced also reaches its inbox connections."
     },
     {
       "id": "cfmeet.calling.http-api-bundled",
@@ -754,7 +754,7 @@
     },
     {
       "id": "cfmeet.communications.communications-internal-bundled",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "bundled/communications/internal/v1.openapi.json",
       "owner": "communications",
@@ -790,7 +790,7 @@
     },
     {
       "id": "cfmeet.organizations.internal-api-bundled",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "bundled/organizations/internal/v1.openapi.json",
       "owner": "organizations",
@@ -860,14 +860,14 @@
     },
     {
       "id": "cfmeet.organizations.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "organizations/internal/v1.openapi.json",
       "owner": "organizations",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies (compare-and-swap, effective constraints, POLICY_RESTRICTED), the role / capability matrix, team context in resolve / evaluate, verified technical-scope resolution and the operator provisioning retry. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012): operator-only Calling service binding per organization scope (GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling) and serviceBindings on scopes/resolve. 1.3.0 (final closure): organization event delivery status / dead-letter replay (organization.administer) and the Messaging service binding (serviceBindings.messaging)."
+      "description": "Internal signed API of services/organizations (Blueprint v1.0 Sections 3-5, ADR 0056), served at /openapi.json and governed by docs/api/organizations-internal-v1.md: organizations, profiles, memberships (last-owner and no-self-escalation rules), ownership transfer, email invitations with one-time tokens, lifecycle, audit, provisioning state, membership resolution and capability evaluation (organization.read / organization.write; acting user only from organization.act-for-user callers), operator administration (organization.administer) and the Meeting Service migration import / reconciliation (organization.migrate). Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies (compare-and-swap, effective constraints, POLICY_RESTRICTED), the role / capability matrix, team context in resolve / evaluate, verified technical-scope resolution and the operator provisioning retry. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012): operator-only Calling service binding per organization scope (GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling) and serviceBindings on scopes/resolve. 1.3.0 (final closure): organization event delivery status / dead-letter replay (organization.administer) and the Messaging service binding (serviceBindings.messaging). 1.4.0 (Session 3): optional inviteeHint on invitation create (an invitation addressed by CF Meet ID never shows the invitee's email, even masked)."
     },
     {
       "id": "cfmeet.developer-platform.control",
@@ -1057,14 +1057,14 @@
     },
     {
       "id": "cfmeet.communications.communications-internal",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "communications/internal/v1.openapi.json",
       "owner": "communications",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority."
+      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority. 1.5.0 (Session 3): POST /internal/v1/communications/organization-invitations/resolve (Meeting Service only; CF Meet ID → account for organization invitations under the consumer-discovery rules)."
     },
     {
       "id": "cfmeet.calling.communications-internal",

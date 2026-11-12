@@ -1096,3 +1096,84 @@ mod tests {
         assert!(serde_json::from_value::<ResolveMeeting>(resolve).is_err());
     }
 }
+
+/// The Communications Hub's private CF Meet ID translation for organization invitations.
+pub const ORGANIZATION_INVITEE_PATH: &str =
+    "/internal/v1/communications/organization-invitations/resolve";
+
+/// An account an organization invitation may address by CF Meet ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrganizationInvitee {
+    pub user_id: Uuid,
+    /// The CF Meet ID is the inviter's own.
+    pub is_self: bool,
+}
+
+/// Resolves `cf_meet_id` to the owning account for an organization invitation sent by
+/// `user`, under exactly the consumer-discovery rules of the Communications Hub
+/// (discoverable id, visible profile, no block, active account, discovery attempt budget).
+/// `Ok(None)` for every id the inviter may not discover, indistinguishably. The account
+/// reference never leaves the backend.
+pub async fn resolve_organization_invitee(
+    state: &AppState,
+    user: &RegisteredActor,
+    headers: &HeaderMap,
+    cf_meet_id: &str,
+) -> ApiResult<Option<OrganizationInvitee>> {
+    let bridge = state.communications.as_ref().ok_or_else(unavailable)?;
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| ApiError::Unauthorized("Sign in to continue".into()))?;
+    let claims = state.jwt_service.verify_token(token)?;
+    let principal = bridge.principal(state, user.user_id).await?;
+    let avatar_reference = users::Entity::find_by_id(user.user_id)
+        .one(&state.db)
+        .await?
+        .and_then(|u| u.avatar_url);
+    let account = VerifiedAccount {
+        account_reference: format!("cfmeet-user:{}", user.user_id),
+        principal_id: principal,
+        display_name: user.display_name.clone(),
+        avatar_reference,
+        authenticated_at: claims.auth_time,
+        account_session_ref: None,
+    };
+    let scope = bridge
+        .scope
+        .clone()
+        .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+    let outbound = OutboundServiceRequest::new_operation(ServiceId::communications())
+        .with_delegated_context(scope);
+    let r = bridge
+        .client
+        .exchange_json(
+            &outbound,
+            Method::POST,
+            ORGANIZATION_INVITEE_PATH,
+            Some(&json!({ "account": account, "cfMeetId": cf_meet_id })),
+        )
+        .await
+        .map_err(|_| unavailable())?;
+    match r.status() {
+        200 => {
+            let v: Value = r.json().map_err(|_| unavailable())?;
+            let user_id = v["accountReference"]
+                .as_str()
+                .and_then(|s| s.strip_prefix("cfmeet-user:"))
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .ok_or_else(unavailable)?;
+            Ok(Some(OrganizationInvitee {
+                user_id,
+                is_self: v["self"] == json!(true),
+            }))
+        }
+        404 => Ok(None),
+        429 => Err(ApiError::domain(
+            ErrorCode::RateLimited,
+            "Too many lookups; try again later",
+        )),
+        _ => Err(unavailable()),
+    }
+}
