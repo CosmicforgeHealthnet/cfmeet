@@ -89,12 +89,16 @@ pub fn wrap_html(title: &str, content: &str) -> String {
 
 /// A paragraph of already-escaped HTML.
 pub fn paragraph(html: &str) -> String {
-    format!(r#"<p style="margin:0 0 16px;color:#334155;font-size:16px;line-height:1.6;">{html}</p>"#)
+    format!(
+        r#"<p style="margin:0 0 16px;color:#334155;font-size:16px;line-height:1.6;">{html}</p>"#
+    )
 }
 
 /// A small print paragraph of already-escaped HTML.
 pub fn note(html: &str) -> String {
-    format!(r#"<p style="margin:24px 0 0;color:{MUTED};font-size:13px;line-height:1.5;">{html}</p>"#)
+    format!(
+        r#"<p style="margin:24px 0 0;color:{MUTED};font-size:13px;line-height:1.5;">{html}</p>"#
+    )
 }
 
 /// Primary call to action. `text` and `url` must be escaped.

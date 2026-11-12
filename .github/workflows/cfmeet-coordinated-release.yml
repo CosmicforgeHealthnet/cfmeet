@@ -19,13 +19,23 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, developer-acceptance, diagnose, email-acceptance]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, developer-acceptance, diagnose, email-acceptance, developer-access-review]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
         required: true
       confirm:
-        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated)'
+        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp'
+        type: string
+        required: false
+        default: ''
+      request_id:
+        description: 'developer-access-review only: the production-access request id (UUID)'
+        type: string
+        required: false
+        default: ''
+      reason_code:
+        description: 'developer-access-review reject only: safe reason code (e.g. NOT_ELIGIBLE)'
         type: string
         required: false
         default: ''
@@ -156,7 +166,8 @@ jobs:
           persist-credentials: false
           # certify compares running revisions with the main head: full history.
           # Activations prove their images equal the deployed release (activation_base.py).
-          fetch-depth: ${{ (inputs.operation == 'certify' || startsWith(inputs.operation, 'activate-') || startsWith(inputs.operation, 'org-cutover-')) && '0' || '1' }}
+          # A release replaces only the images whose build inputs changed (release_scope.py).
+          fetch-depth: ${{ (inputs.operation == 'certify' || inputs.operation == 'release' || startsWith(inputs.operation, 'activate-') || startsWith(inputs.operation, 'org-cutover-')) && '0' || '1' }}
 
       - name: Offline release tests (resource gate, grants, order, rollback, secrecy)
         run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
@@ -218,6 +229,31 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > '/opt/cfmeet-core/coordinated/registry-$IMAGE_SHA.json'" < "$manifest"
           { echo '### Release images'; echo '```json'; cat "$manifest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Release scope (replace only images whose build inputs changed)
+        # Services whose image build inputs did not change since the latest completed release
+        # keep their running container; the VPS re-checks that each runs exactly the image
+        # recorded for that release before keeping it.
+        if: inputs.operation == 'release'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          base=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" python3 - <<'PY'
+          import json, os
+          path = '/opt/cfmeet-core/coordinated/journal.json'
+          journal = json.load(open(path)) if os.path.exists(path) else []
+          done = [e['sha'] for e in journal if e['operation'] == 'release' and e['status'] == 'done']
+          print(done[-1] if done else '')
+          PY
+          )
+          [[ -z "$base" || "$base" =~ ^[a-f0-9]{40}$ ]]
+          cd infra/calling/production
+          python3 release_scope.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "${base:--}" release-scope.json
+          { echo '### Release scope'; echo '```json'; python3 -c 'import json; d=json.load(open("release-scope.json")); print(json.dumps({k: d[k] for k in ("base", "changed", "unchanged", "reason")}, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Activation base (images of the dispatched head equal the deployed release)
         # Activations change flags, trust bundles and routing, never images. When the head has
         # no completed release of its own, prove that no build input of any of the 13 images
@@ -274,6 +310,36 @@ jobs:
           if [[ -n "$ACCEPTANCE_RECIPIENT" ]]; then
             [[ "$ACCEPTANCE_RECIPIENT" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "::error::CFMEET_EMAIL_ACCEPTANCE_RECIPIENT is not an address"; exit 1; }
             ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > /opt/cfmeet-core/coordinated/email-acceptance-recipient" <<< "$ACCEPTANCE_RECIPIENT"
+          fi
+
+      - name: Production-access reviewers and the review command (named reviewers only)
+        # Reviewers are the owner's explicit list (variable CFMEET_PRODUCTION_ACCESS_REVIEWERS:
+        # github-<login>=<CF Meet user id>, comma separated). The operator of a review is the
+        # GitHub account that dispatched it; the VPS refuses anyone not on the list.
+        if: inputs.operation == 'activate-production-access-review' || inputs.operation == 'developer-access-review'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          OPERATION: ${{ inputs.operation }}
+          REVIEWERS: ${{ vars.CFMEET_PRODUCTION_ACCESS_REVIEWERS }}
+          ACTOR: ${{ github.actor }}
+          COMMAND: ${{ inputs.confirm }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          REASON_CODE: ${{ inputs.reason_code }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          [[ -n "$REVIEWERS" ]] || { echo "::error::Set the CFMEET_PRODUCTION_ACCESS_REVIEWERS variable (github-<login>=<CF Meet user id>, ...)"; exit 1; }
+          [[ "$REVIEWERS" =~ ^[A-Za-z0-9=,\ -]{1,2000}$ ]] || { echo "::error::CFMEET_PRODUCTION_ACCESS_REVIEWERS has unexpected characters"; exit 1; }
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > /opt/cfmeet-core/coordinated/production-reviewers" <<< "$REVIEWERS"
+          if [[ "$OPERATION" == developer-access-review ]]; then
+            [[ "$COMMAND" =~ ^(list|get|review|approve|reject)$ ]] || { echo "::error::confirm must be list, get, review, approve or reject"; exit 1; }
+            [[ -z "$REQUEST_ID" || "$REQUEST_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "::error::request_id must be a lowercase UUID"; exit 1; }
+            [[ -z "$REASON_CODE" || "$REASON_CODE" =~ ^[A-Z][A-Z0-9_]{1,63}$ ]] || { echo "::error::reason_code must be UPPER_SNAKE_CASE"; exit 1; }
+            operator="github-${ACTOR,,}"
+            [[ "$operator" =~ ^github-[a-z0-9-]{1,39}$ ]]
+            printf '{"command":"%s","operator":"%s","requestId":"%s","reasonCode":"%s"}\n' "$COMMAND" "$operator" "$REQUEST_ID" "$REASON_CODE" \
+              | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > /opt/cfmeet-core/coordinated/developer-access-review.json"
           fi
 
       - name: Run the operation on the VPS

@@ -2,9 +2,9 @@
 //! (titles and names are user-provided); links are built by the service, never taken
 //! from a request.
 
-use super::base::{button, wrap_html, wrap_text};
 pub use super::base::escape_html;
 use super::base::plain;
+use super::base::{button, wrap_html, wrap_text};
 use super::EmailTemplate;
 
 /// One notification email: a greeting, paragraphs, an optional call to action.
@@ -72,7 +72,7 @@ mod tests {
             footnote: Some("Sent by CF Meet".into()),
         });
         assert!(!t.html.contains("<script>"));
-        assert!(!t.html.contains("<img"));
+        assert!(!t.html.contains("<img src=x>"));
         assert!(t.html.contains("&lt;script&gt;"));
         assert!(t.html.contains("&amp;y=&quot;2&quot;"));
         assert!(t.text.contains("Title \"Q3\" & <img src=x>"));

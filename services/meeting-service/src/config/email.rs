@@ -136,9 +136,16 @@ impl EmailConfig {
     /// error (the caller decides whether that stops startup).
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> ApiResult<Self> {
         let d = Self::default();
-        let var = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let var = |k: &str| {
+            get(k)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
         let smtp_host = var("SMTP_HOST").unwrap_or_default();
-        let provider = match var("EMAIL_PROVIDER").map(|v| v.to_ascii_lowercase()).as_deref() {
+        let provider = match var("EMAIL_PROVIDER")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+        {
             Some("resend") => EmailProviderKind::Resend,
             Some("smtp") => EmailProviderKind::Smtp,
             Some("none") | Some("off") | Some("disabled") => EmailProviderKind::None,
@@ -162,7 +169,10 @@ impl EmailConfig {
                 "EMAIL_FROM_ADDRESS is not a valid address".into(),
             ));
         }
-        if from_name.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '"')) {
+        if from_name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '<' | '>' | '"'))
+        {
             return Err(ApiError::InternalError(
                 "EMAIL_FROM_NAME contains forbidden characters".into(),
             ));
@@ -208,7 +218,8 @@ impl EmailConfig {
             EmailProviderKind::Resend => {
                 let key = read_secret(&get, "RESEND_API_KEY")?.ok_or_else(|| {
                     ApiError::InternalError(
-                        "EMAIL_PROVIDER=resend needs RESEND_API_KEY_FILE (or RESEND_API_KEY)".into(),
+                        "EMAIL_PROVIDER=resend needs RESEND_API_KEY_FILE (or RESEND_API_KEY)"
+                            .into(),
                     )
                 })?;
                 if !key.starts_with("re_") || key.len() < 12 || key.chars().any(char::is_whitespace)

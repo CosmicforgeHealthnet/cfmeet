@@ -291,7 +291,12 @@ impl EmptyConferenceSweeper {
                         .flatten();
                     let Some(recorded) = recorded else { continue };
                     if now - recorded >= self.timeout {
-                        match self.meeting.conferences.end_if_still_empty(c.id, recorded).await {
+                        match self
+                            .meeting
+                            .conferences
+                            .end_if_still_empty(c.id, recorded)
+                            .await
+                        {
                             Ok(true) => {
                                 report.ended += 1;
                                 inc(&OM.conferences_empty_ended);
@@ -363,9 +368,19 @@ mod tests {
         let old = now - Duration::minutes(30);
         assert_eq!(presence(Some(Ok(1)), &[], now), Presence::Occupied);
         // A stale PENDING/CONNECTED row does not keep an empty provider room alive…
-        assert_eq!(presence(Some(Ok(0)), &[("CONNECTED", old), ("PENDING", old)], now), Presence::Empty);
+        assert_eq!(
+            presence(Some(Ok(0)), &[("CONNECTED", old), ("PENDING", old)], now),
+            Presence::Empty
+        );
         // …but someone connecting right now does.
-        assert_eq!(presence(Some(Ok(0)), &[("PENDING", now - Duration::seconds(30))], now), Presence::Occupied);
+        assert_eq!(
+            presence(
+                Some(Ok(0)),
+                &[("PENDING", now - Duration::seconds(30))],
+                now
+            ),
+            Presence::Occupied
+        );
         assert_eq!(presence(Some(Err(())), &[], now), Presence::Unknown);
     }
 
@@ -373,6 +388,9 @@ mod tests {
     fn without_provider_control_sessions_decide() {
         let now = Utc::now();
         assert_eq!(presence(None, &[], now), Presence::Empty);
-        assert_eq!(presence(None, &[("CONNECTED", now - Duration::hours(1))], now), Presence::Occupied);
+        assert_eq!(
+            presence(None, &[("CONNECTED", now - Duration::hours(1))], now),
+            Presence::Occupied
+        );
     }
 }

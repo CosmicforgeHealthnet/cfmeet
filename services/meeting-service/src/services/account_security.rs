@@ -261,7 +261,9 @@ impl AuthPolicy {
         match self.email_verification_enforce_from {
             None => true,
             Some(from) if account_created_at >= from => true,
-            Some(_) => self.email_verification_grace_until.is_some_and(|g| now >= g),
+            Some(_) => self
+                .email_verification_grace_until
+                .is_some_and(|g| now >= g),
         }
     }
 
@@ -994,8 +996,12 @@ mod gradual_verification_tests {
             "EMAIL_VERIFICATION_ENFORCE_FROM" => Some("2026-11-13T00:00:00Z".into()),
             _ => None,
         });
-        assert!(p.login_requires_verified_email(from + Duration::hours(1), from + Duration::hours(2)));
-        assert!(!p.login_requires_verified_email(from - Duration::days(30), from + Duration::days(400)));
+        assert!(
+            p.login_requires_verified_email(from + Duration::hours(1), from + Duration::hours(2))
+        );
+        assert!(
+            !p.login_requires_verified_email(from - Duration::days(30), from + Duration::days(400))
+        );
         let with_grace = AuthPolicy::from_lookup(|k| match k {
             "EMAIL_VERIFICATION_ENFORCEMENT" => Some("login".into()),
             "EMAIL_VERIFICATION_ENFORCE_FROM" => Some("2026-11-13T00:00:00Z".into()),
@@ -1006,7 +1012,9 @@ mod gradual_verification_tests {
         assert!(!with_grace.login_requires_verified_email(old, from + Duration::days(10)));
         assert!(with_grace.login_requires_verified_email(old, from + Duration::days(90)));
         // Without a cutoff, `login` keeps its original meaning (every pending account).
-        let all = AuthPolicy::from_lookup(|k| (k == "EMAIL_VERIFICATION_ENFORCEMENT").then(|| "login".into()));
+        let all = AuthPolicy::from_lookup(|k| {
+            (k == "EMAIL_VERIFICATION_ENFORCEMENT").then(|| "login".into())
+        });
         assert!(all.login_requires_verified_email(old, from));
         assert!(!AuthPolicy::default().login_requires_verified_email(from, from));
     }

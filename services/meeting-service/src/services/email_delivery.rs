@@ -78,7 +78,9 @@ const BACKOFF_BASE_SECS: i64 = 5;
 const BACKOFF_CAP_SECS: i64 = 15 * 60;
 
 pub fn recipient_hash(address: &str) -> String {
-    hex::encode(Sha256::digest(address.trim().to_ascii_lowercase().as_bytes()))
+    hex::encode(Sha256::digest(
+        address.trim().to_ascii_lowercase().as_bytes(),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +124,9 @@ fn clean_header(value: &str, max: usize) -> String {
 pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult<Enqueued> {
     let to = email.to.trim().to_string();
     if !valid_address(&to) {
-        return Err(ApiError::BadRequest("Invalid recipient email address".into()));
+        return Err(ApiError::BadRequest(
+            "Invalid recipient email address".into(),
+        ));
     }
     let subject = clean_header(&email.subject, 200);
     if subject.is_empty() {
@@ -197,15 +201,17 @@ pub struct DeliveryStatus {
 }
 
 pub async fn status<C: ConnectionTrait>(conn: &C, id: Uuid) -> ApiResult<Option<DeliveryStatus>> {
-    Ok(DeliveryStatus::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        "SELECT id, category, status, provider, attempts, last_error_class, last_error_status,
+    Ok(
+        DeliveryStatus::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id, category, status, provider, attempts, last_error_class, last_error_status,
                 created_at, accepted_at, delivered_at
            FROM email_deliveries WHERE id = $1",
-        [id.into()],
-    ))
-    .one(conn)
-    .await?)
+            [id.into()],
+        ))
+        .one(conn)
+        .await?,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +526,9 @@ impl EmailProvider for RecordingProvider {
 }
 
 /// The configured provider (`None`: messages stay QUEUED).
-pub fn provider_from_config(config: &EmailConfig) -> Result<Option<Arc<dyn EmailProvider>>, String> {
+pub fn provider_from_config(
+    config: &EmailConfig,
+) -> Result<Option<Arc<dyn EmailProvider>>, String> {
     Ok(match config.provider {
         EmailProviderKind::Resend => Some(Arc::new(ResendProvider::new(
             &config.resend_api_url,
@@ -671,7 +679,12 @@ impl EmailWorker {
         Ok(())
     }
 
-    async fn reschedule(&self, id: Uuid, at: DateTime<Utc>, error: &ProviderError) -> ApiResult<()> {
+    async fn reschedule(
+        &self,
+        id: Uuid,
+        at: DateTime<Utc>,
+        error: &ProviderError,
+    ) -> ApiResult<()> {
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -708,14 +721,21 @@ impl EmailWorker {
                 report.expired += 1;
                 continue;
             }
-            let (Some(to), Some(html), Some(text)) =
-                (job.recipient.as_deref(), job.html_body.as_deref(), job.text_body.as_deref())
-            else {
+            let (Some(to), Some(html), Some(text)) = (
+                job.recipient.as_deref(),
+                job.html_body.as_deref(),
+                job.text_body.as_deref(),
+            ) else {
                 // Content already erased: nothing can be sent again.
-                self.finish(job.id, "FAILED", None, Some(&ProviderError::Permanent {
-                    class: "CONTENT_UNAVAILABLE",
-                    status: None,
-                }))
+                self.finish(
+                    job.id,
+                    "FAILED",
+                    None,
+                    Some(&ProviderError::Permanent {
+                        class: "CONTENT_UNAVAILABLE",
+                        status: None,
+                    }),
+                )
                 .await?;
                 report.failed += 1;
                 continue;
@@ -763,9 +783,18 @@ impl EmailWorker {
                     let next = now + retry_after.unwrap_or_else(|| backoff(job.attempts));
                     let expired = job.expires_at.is_some_and(|x| x <= next);
                     if job.attempts >= self.settings.max_attempts || expired {
-                        self.finish(job.id, if expired { "EXPIRED" } else { "FAILED" }, None, Some(&e))
-                            .await?;
-                        inc(if expired { &OM.email_expired } else { &OM.email_failed });
+                        self.finish(
+                            job.id,
+                            if expired { "EXPIRED" } else { "FAILED" },
+                            None,
+                            Some(&e),
+                        )
+                        .await?;
+                        inc(if expired {
+                            &OM.email_expired
+                        } else {
+                            &OM.email_failed
+                        });
                         tracing::warn!(delivery_id = %job.id, category = %job.category,
                             provider = self.provider.name(), error_class = e.class(),
                             status = ?e.status(), attempts = job.attempts,
@@ -918,9 +947,17 @@ pub fn verify_svix(
     now: DateTime<Utc>,
 ) -> Result<(), WebhookError> {
     let key = base64::engine::general_purpose::STANDARD
-        .decode(secret.trim().strip_prefix("whsec_").ok_or(WebhookError::Unauthorized)?)
+        .decode(
+            secret
+                .trim()
+                .strip_prefix("whsec_")
+                .ok_or(WebhookError::Unauthorized)?,
+        )
         .map_err(|_| WebhookError::Unauthorized)?;
-    let ts: i64 = timestamp.trim().parse().map_err(|_| WebhookError::Unauthorized)?;
+    let ts: i64 = timestamp
+        .trim()
+        .parse()
+        .map_err(|_| WebhookError::Unauthorized)?;
     if (now.timestamp() - ts).abs() > 300 || id.is_empty() || id.len() > 128 {
         return Err(WebhookError::Unauthorized);
     }
@@ -931,7 +968,8 @@ pub fn verify_svix(
         let Ok(sig) = base64::engine::general_purpose::STANDARD.decode(sig) else {
             continue;
         };
-        let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|_| WebhookError::Unauthorized)?;
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(&key).map_err(|_| WebhookError::Unauthorized)?;
         mac.update(id.as_bytes());
         mac.update(b".");
         mac.update(timestamp.trim().as_bytes());
@@ -1066,7 +1104,8 @@ mod tests {
 
     #[test]
     fn svix_signatures_are_verified() {
-        let raw = base64::engine::general_purpose::STANDARD.encode(b"0123456789abcdef0123456789abcdef");
+        let raw =
+            base64::engine::general_purpose::STANDARD.encode(b"0123456789abcdef0123456789abcdef");
         let secret = format!("whsec_{raw}");
         let now = Utc::now();
         let ts = now.timestamp().to_string();
@@ -1088,13 +1127,34 @@ mod tests {
     fn resend_errors_are_classified() {
         assert!(matches!(
             ResendProvider::classify(429, Some(3), "rate_limit_exceeded"),
-            ProviderError::Temporary { retry_after_secs: Some(3), .. }
+            ProviderError::Temporary {
+                retry_after_secs: Some(3),
+                ..
+            }
         ));
-        assert!(matches!(ResendProvider::classify(422, None, "validation_error"), ProviderError::Permanent { .. }));
-        assert!(matches!(ResendProvider::classify(403, None, "invalid_from_address"), ProviderError::Temporary { class: "PROVIDER_CONFIGURATION", .. }));
-        assert!(matches!(ResendProvider::classify(503, None, ""), ProviderError::Temporary { .. }));
-        assert!(matches!(ResendProvider::classify(409, None, "concurrent_idempotent_requests"), ProviderError::Temporary { .. }));
-        assert!(matches!(ResendProvider::classify(409, None, "invalid_idempotent_request"), ProviderError::Permanent { .. }));
+        assert!(matches!(
+            ResendProvider::classify(422, None, "validation_error"),
+            ProviderError::Permanent { .. }
+        ));
+        assert!(matches!(
+            ResendProvider::classify(403, None, "invalid_from_address"),
+            ProviderError::Temporary {
+                class: "PROVIDER_CONFIGURATION",
+                ..
+            }
+        ));
+        assert!(matches!(
+            ResendProvider::classify(503, None, ""),
+            ProviderError::Temporary { .. }
+        ));
+        assert!(matches!(
+            ResendProvider::classify(409, None, "concurrent_idempotent_requests"),
+            ProviderError::Temporary { .. }
+        ));
+        assert!(matches!(
+            ResendProvider::classify(409, None, "invalid_idempotent_request"),
+            ProviderError::Permanent { .. }
+        ));
     }
 
     #[test]
@@ -1133,6 +1193,9 @@ mod tests {
 
     #[test]
     fn recipient_hash_is_case_insensitive() {
-        assert_eq!(recipient_hash("Ada@Example.com "), recipient_hash("ada@example.com"));
+        assert_eq!(
+            recipient_hash("Ada@Example.com "),
+            recipient_hash("ada@example.com")
+        );
     }
 }

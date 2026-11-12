@@ -77,7 +77,9 @@ async fn status_of(app: &TestApp, id: Uuid) -> (String, i32, bool) {
 async fn make_due(app: &TestApp) {
     app.db
         .conn
-        .execute_unprepared("UPDATE email_deliveries SET next_attempt_at = now() - interval '1 second'")
+        .execute_unprepared(
+            "UPDATE email_deliveries SET next_attempt_at = now() - interval '1 second'",
+        )
         .await
         .unwrap();
 }
@@ -96,11 +98,17 @@ async fn ledger_is_idempotent_and_the_worker_delivers_once() {
     let r = worker.tick(Utc::now()).await.unwrap();
     assert_eq!((r.claimed, r.accepted), (1, 1));
     assert_eq!(provider.sent().len(), 1);
-    assert_eq!(status_of(&app, first.id).await, ("ACCEPTED".into(), 1, true));
+    assert_eq!(
+        status_of(&app, first.id).await,
+        ("ACCEPTED".into(), 1, true)
+    );
     // Nothing left: a second worker pass (or a second instance) sends nothing.
     let r = worker.tick(Utc::now()).await.unwrap();
     assert_eq!(r.claimed, 0);
-    let s = email_delivery::status(&db, first.id).await.unwrap().unwrap();
+    let s = email_delivery::status(&db, first.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(s.provider.as_deref(), Some("recording"));
     assert!(s.accepted_at.is_some());
 }
@@ -138,7 +146,9 @@ async fn temporary_failures_retry_with_backoff_and_permanent_ones_stop() {
     assert_eq!(status_of(&app, b.id).await, ("FAILED".into(), 1, true));
 
     // Attempts exhausted (max 3) → FAILED, content erased.
-    let c = email_delivery::enqueue(&db, email("exhaust")).await.unwrap();
+    let c = email_delivery::enqueue(&db, email("exhaust"))
+        .await
+        .unwrap();
     let temp = || ProviderError::Temporary {
         class: "PROVIDER_CONFIGURATION",
         status: Some(403),
@@ -152,7 +162,10 @@ async fn temporary_failures_retry_with_backoff_and_permanent_ones_stop() {
     let (status, attempts, erased) = status_of(&app, c.id).await;
     assert_eq!((status.as_str(), attempts, erased), ("FAILED", 3, true));
     let s = email_delivery::status(&db, c.id).await.unwrap().unwrap();
-    assert_eq!(s.last_error_class.as_deref(), Some("PROVIDER_CONFIGURATION"));
+    assert_eq!(
+        s.last_error_class.as_deref(),
+        Some("PROVIDER_CONFIGURATION")
+    );
     assert_eq!(s.last_error_status, Some(403));
 }
 
@@ -226,8 +239,13 @@ async fn provider_webhooks_are_authenticated_deduplicated_and_monotonic() {
         async move {
             let resp = router.oneshot(req).await.unwrap();
             let status = resp.status();
-            let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
-            (status, serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null))
+            let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
         }
     };
     // The worker recorded the RecordingProvider id under provider "recording"; events in
@@ -248,34 +266,72 @@ async fn provider_webhooks_are_authenticated_deduplicated_and_monotonic() {
     let (s, _) = call(post(
         "evt_1",
         delivered.clone(),
-        Some(signed(b"another-secret-of-thirty-two-byte", "evt_1", &delivered)),
+        Some(signed(
+            b"another-secret-of-thirty-two-byte",
+            "evt_1",
+            &delivered,
+        )),
     ))
     .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
-    assert_eq!(app.scalar("SELECT count(*) FROM email_delivery_events").await, 0);
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM email_delivery_events")
+            .await,
+        0
+    );
 
     // Valid → DELIVERED.
-    let (s, v) = call(post("evt_1", delivered.clone(), Some(signed(raw, "evt_1", &delivered)))).await;
+    let (s, v) = call(post(
+        "evt_1",
+        delivered.clone(),
+        Some(signed(raw, "evt_1", &delivered)),
+    ))
+    .await;
     assert_eq!((s, v["duplicate"].clone()), (StatusCode::OK, json!(false)));
     assert_eq!(status_of(&app, d.id).await.0, "DELIVERED");
     // Duplicate delivery of the same event: acknowledged, ignored.
-    let (s, v) = call(post("evt_1", delivered.clone(), Some(signed(raw, "evt_1", &delivered)))).await;
+    let (s, v) = call(post(
+        "evt_1",
+        delivered.clone(),
+        Some(signed(raw, "evt_1", &delivered)),
+    ))
+    .await;
     assert_eq!((s, v["duplicate"].clone()), (StatusCode::OK, json!(true)));
     // A late "delayed" never downgrades DELIVERED; a complaint is recorded.
-    let delayed = json!({"type": "email.delivery_delayed", "data": {"email_id": provider_id}}).to_string();
-    call(post("evt_2", delayed.clone(), Some(signed(raw, "evt_2", &delayed)))).await;
+    let delayed =
+        json!({"type": "email.delivery_delayed", "data": {"email_id": provider_id}}).to_string();
+    call(post(
+        "evt_2",
+        delayed.clone(),
+        Some(signed(raw, "evt_2", &delayed)),
+    ))
+    .await;
     assert_eq!(status_of(&app, d.id).await.0, "DELIVERED");
-    let complained = json!({"type": "email.complained", "data": {"email_id": provider_id}}).to_string();
-    call(post("evt_3", complained.clone(), Some(signed(raw, "evt_3", &complained)))).await;
+    let complained =
+        json!({"type": "email.complained", "data": {"email_id": provider_id}}).to_string();
+    call(post(
+        "evt_3",
+        complained.clone(),
+        Some(signed(raw, "evt_3", &complained)),
+    ))
+    .await;
     assert_eq!(status_of(&app, d.id).await.0, "COMPLAINED");
-    assert_eq!(app.scalar("SELECT count(*) FROM email_delivery_events").await, 3);
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM email_delivery_events")
+            .await,
+        3
+    );
 
     // Without a configured secret the route does not exist.
     let (s, _) = {
         let resp = app
             .router
             .clone()
-            .oneshot(post("evt_4", delivered.clone(), Some(signed(raw, "evt_4", &delivered))))
+            .oneshot(post(
+                "evt_4",
+                delivered.clone(),
+                Some(signed(raw, "evt_4", &delivered)),
+            ))
             .await
             .unwrap();
         (resp.status(), ())
@@ -291,7 +347,10 @@ async fn otp_journey_from_registration_to_session() {
     if !require_test_redis() {
         return;
     }
-    let address = format!("otp-{}@example.com", &Uuid::new_v4().simple().to_string()[..8]);
+    let address = format!(
+        "otp-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
     let (s, v) = app
         .post(
             "/api/v1/auth/register",
@@ -326,28 +385,51 @@ async fn otp_journey_from_registration_to_session() {
     // Wrong code → 400; right code → verified; reused code → 400.
     let wrong = if code == "000000" { "111111" } else { "000000" };
     let (s, _) = app
-        .post("/api/v1/auth/verify-email", Auth::None, json!({"email": address, "token": wrong}))
+        .post(
+            "/api/v1/auth/verify-email",
+            Auth::None,
+            json!({"email": address, "token": wrong}),
+        )
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, v) = app
-        .post("/api/v1/auth/verify-email", Auth::None, json!({"email": address, "token": code}))
+        .post(
+            "/api/v1/auth/verify-email",
+            Auth::None,
+            json!({"email": address, "token": code}),
+        )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let (s, _) = app
-        .post("/api/v1/auth/verify-email", Auth::None, json!({"email": address, "token": code}))
+        .post(
+            "/api/v1/auth/verify-email",
+            Auth::None,
+            json!({"email": address, "token": code}),
+        )
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 
     // Sign in → session tokens.
     let (s, v) = app
-        .post("/api/v1/auth/login", Auth::None, json!({"email": address, "password": "Str0ng!Passw0rd#"}))
+        .post(
+            "/api/v1/auth/login",
+            Auth::None,
+            json!({"email": address, "password": "Str0ng!Passw0rd#"}),
+        )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert!(v["access_token"].as_str().is_some_and(|t| !t.is_empty()), "{v}");
+    assert!(
+        v["access_token"].as_str().is_some_and(|t| !t.is_empty()),
+        "{v}"
+    );
 
     // Password reset: code email in the ledger; the reset sends a security notice.
     let (s, _) = app
-        .post("/api/v1/auth/forgot-password", Auth::None, json!({"email": address}))
+        .post(
+            "/api/v1/auth/forgot-password",
+            Auth::None,
+            json!({"email": address}),
+        )
         .await;
     assert_eq!(s, StatusCode::OK);
     worker.tick(Utc::now()).await.unwrap();
@@ -370,5 +452,60 @@ async fn otp_journey_from_registration_to_session() {
     assert_eq!(
         provider.sent().last().unwrap().2,
         "Your CF Meet password was changed"
+    );
+}
+
+/// The operator console notifies the applicant of a production-access decision through
+/// the unified ledger (fixed template, internal token, idempotent per decision).
+#[tokio::test]
+async fn developer_access_decision_notice_is_queued_once() {
+    let app = app!();
+    std::env::set_var("INTERNAL_API_TOKEN", "test-internal-token-0123456789");
+    let applicant = app.user("applicant").await;
+    let request_id = Uuid::new_v4();
+    let call = |body: Value, token: Option<&'static str>| {
+        let router = app.router.clone();
+        async move {
+            let mut req = Request::post("/internal/operations/email/developer-access-decision")
+                .header("content-type", "application/json");
+            if let Some(t) = token {
+                req = req.header("x-internal-token", t);
+            }
+            let resp = router
+                .oneshot(req.body(Body::from(body.to_string())).unwrap())
+                .await
+                .unwrap();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let body = json!({"userId": applicant.id, "requestId": request_id, "decision": "APPROVED"});
+    let (s, _) = call(body.clone(), None).await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "hidden without the internal token"
+    );
+    let (s, v) = call(body.clone(), Some("test-internal-token-0123456789")).await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{v}");
+    assert_eq!(v["created"], true);
+    let (_, v) = call(body, Some("test-internal-token-0123456789")).await;
+    assert_eq!(v["created"], false, "one notice per decision");
+    let (s, _) = call(
+        json!({"userId": applicant.id, "requestId": request_id, "decision": "REJECTED", "reasonCode": "free text <b>"}),
+        Some("test-internal-token-0123456789"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM email_deliveries WHERE category='DEVELOPER_PLATFORM'")
+            .await,
+        1
     );
 }

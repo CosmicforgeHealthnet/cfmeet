@@ -77,7 +77,8 @@ async fn main() -> anyhow::Result<()> {
         developer_platform::connect(config.database_url(), config.database_max_connections).await?;
     let mut state = AppState::new(db, service_auth.clone())
         .with_platform_access(Arc::new(HttpPlatformAccess::new(service_auth.client())))
-        .with_flags(config.flags);
+        .with_flags(config.flags)
+        .with_production_reviewers(config.production_reviewers.clone());
     if config.webhooks.enabled {
         developer_platform::webhooks::require_signable(&state.db, &config.webhooks)
             .await

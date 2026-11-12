@@ -101,6 +101,10 @@ pub fn create_routes(state: AppState) -> Router {
             "/internal/operations/email/deliveries/:id",
             get(handlers::email::delivery_status),
         )
+        .route(
+            "/internal/operations/email/developer-access-decision",
+            axum::routing::post(handlers::email::developer_access_decision),
+        )
         // Internal provider routes (signature / internal-token protected; Part E).
         .route(
             "/internal/rtc/livekit/webhook",

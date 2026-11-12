@@ -47,6 +47,7 @@ from urllib.parse import urlsplit, quote
 import production as p
 import communications_release as release
 import email_operations as mail_ops
+import developer_access
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -344,6 +345,52 @@ def image_of(name):
     return SERVICES[name]['image'] or name
 
 
+RELEASE_SCOPE = Path(__file__).resolve().parent / 'release-scope.json'
+
+
+def expected_image(name, sha, manifest=None):
+    """(image id, revision) a service must run under the completed release `sha`: the
+    release's own image, or — for a service the release kept because its build inputs did
+    not change — the exact image it kept running (recorded in the journal entry)."""
+    entry = last_release(sha)
+    kept = (entry or {}).get('kept') or {}
+    if name in kept:
+        return kept[name]['imageId'], kept[name]['revision']
+    manifest = manifest or registry(sha)
+    return manifest[image_of(name)]['imageId'], sha
+
+
+def release_scope(sha, path=None):
+    """Images to replace for this release (release_scope.py on the runner). A service is kept
+    only when the runner proved its build inputs unchanged since the previous completed
+    release and the VPS sees it running exactly that release's recorded image."""
+    path = path or RELEASE_SCOPE
+    previous = last_release()
+    if not path.exists() or not previous:
+        return set(IMAGES), {}
+    doc = json.loads(path.read_text())
+    if doc.get('head') != sha or doc.get('base') != previous['sha']:
+        emit('releaseScope', 'scope document does not match this release: full release')
+        return set(IMAGES), {}
+    unchanged = set(doc.get('unchanged') or []) & set(IMAGES)
+    kept = {}
+    for name in ORDER:
+        if image_of(name) not in unchanged or SERVICES[name]['container'] not in container_names():
+            continue
+        try:
+            image_id, revision = expected_image(name, previous['sha'])
+            verify_running(SERVICES[name]['container'], image_id, revision)
+        except (RuntimeError, KeyError):
+            unchanged.discard(image_of(name))
+            continue
+        kept[name] = {'imageId': image_id, 'revision': revision}
+    # A service sharing its image with a replaced one is replaced too.
+    for name in list(kept):
+        if image_of(name) not in unchanged:
+            del kept[name]
+    return set(IMAGES) - unchanged, kept
+
+
 # --- Health --------------------------------------------------------------------------------
 
 def health(name, attempts=45):
@@ -498,6 +545,10 @@ GRANTS = (
     # Developer Console sessions: the Meeting Service verifies its own CF Meet sessions for
     # the Developer Platform (session bridge); it never shares the session secret.
     ('activate-developer-console', 'meeting-service', 'developer-platform', ('user-session.verify',)),
+    # Production-access review: the operator console (no container; key in the secret
+    # store) administers the Developer Platform; manual decisions by named reviewers only.
+    ('activate-production-access-review', 'developer-platform', 'operator-console',
+     ('developer-platform.administer',)),
     # Customer webhooks: every first-party producer publishes to the central ingestion.
     ('activate-developer-webhooks', 'developer-platform', 'meeting-service', ('developer-event.publish',)),
     ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
@@ -558,7 +609,13 @@ def current_bundle(c):
     return target, source, json.loads(Path(source).read_text())
 
 
+# Issuers without a container of their own (operator tooling identities).
+OPERATOR_IDENTITIES = ('operator-console',)
+
+
 def issuer_key(name):
+    if name == 'operator-console':
+        return developer_access.operator_public_key(sys.modules[__name__])
     c = p.inspect(SERVICES[name]['container'])
     e = p.env_of(c)
     if not e.get('CF_SERVICE_AUTH_PRIVATE_KEY_FILE') or not e.get('CF_SERVICE_AUTH_KEY_ID'):
@@ -1162,6 +1219,8 @@ def release_all(sha, run_id):
     p.identity()
     manifest = registry(sha)
     images = {service: verify_image(service, sha, manifest) for service in IMAGES if service != 'security-scan-gateway'}
+    scope, kept = release_scope(sha)
+    emit('releaseScope', {'replaced': sorted(n for n in ORDER if n not in kept), 'kept': sorted(kept)})
     violations = safe_default_violations(running_envs())
     if violations:
         raise RuntimeError('Provider-dependent features are not at their safe defaults: ' + ', '.join(violations))
@@ -1169,8 +1228,13 @@ def release_all(sha, run_id):
     backup(sha, run_id)
     provision(sha, run_id)
     entry = begin('release', sha, run_id)
+    entry['kept'] = kept
+    commit(entry)
     try:
         for name in ORDER:
+            if name in kept:
+                emit('kept', {'service': name, 'revision': kept[name]['revision']})
+                continue
             image_id = images[image_of(name)]
             # Additive migrations, before the image that needs them; never rolled back.
             if SERVICES[name]['container'] not in container_names() or p.inspect(SERVICES[name]['container'])['Image'] != image_id:
@@ -1184,7 +1248,9 @@ def release_all(sha, run_id):
         commit(entry)
         raise
     scan_failed = False
-    if 'cosmicforge-scan-gateway' in container_names():
+    if 'security-scan-gateway' not in scope:
+        entry['scanGateway'] = 'kept (build inputs unchanged)'
+    elif 'cosmicforge-scan-gateway' in container_names():
         # Shared component with its own verified upgrade and self-rollback (scan_gateway.py).
         import scan_gateway
         try:
@@ -1245,7 +1311,7 @@ def verify(sha, run_id):
     for name in ORDER:
         try:
             health(name, attempts=10)
-            verify_running(SERVICES[name]['container'], manifest[image_of(name)]['imageId'], sha)
+            verify_running(SERVICES[name]['container'], *expected_image(name, sha, manifest))
             checks['running ' + name] = 'PASS'
         except Exception:
             checks['running ' + name] = 'FAIL'
@@ -1349,7 +1415,7 @@ def require_release(sha):
     base = activation_base(sha)
     manifest = registry(base)
     for name in ORDER:
-        verify_running(SERVICES[name]['container'], manifest[image_of(name)]['imageId'], base)
+        verify_running(SERVICES[name]['container'], *expected_image(name, base, manifest))
     return base
 
 
@@ -1909,9 +1975,11 @@ ACTIVATIONS = {
     # Final completion: Resend becomes the email provider only after a verified send.
     'activate-resend-email': ((), lambda sha, run_id, confirm: mail_ops.activate_resend_email(
         sys.modules[__name__], sha, run_id, confirm)),
+    'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
+                                          developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
-    + ('developer-acceptance', 'diagnose', 'email-acceptance')
+    + ('developer-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
 # The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
 # (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
 # worker's STRICT endpoint policy refuses as a private address.)
@@ -1939,6 +2007,9 @@ def run(operation, sha, run_id, confirm=''):
         if confirm:
             raise RuntimeError('diagnose takes no confirmation')
         mail_ops.diagnose(sys.modules[__name__], sha, run_id)
+    elif operation == 'developer-access-review':
+        # One audited operator decision (or read) by a named reviewer; no image change.
+        developer_access.review(sys.modules[__name__], sha, run_id, confirm)
     elif operation == 'email-acceptance':
         # Writes one acceptance email (and with confirm=otp one deactivated acceptance account).
         if not done('activate-resend-email'):

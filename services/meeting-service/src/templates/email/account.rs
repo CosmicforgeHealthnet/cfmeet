@@ -2,9 +2,7 @@
 //! password-changed security notice, generic notification). Every interpolated value is
 //! escaped; codes are shown large and nothing beyond the display name is disclosed.
 
-use super::base::{
-    button, code_block, escape_html, note, paragraph, plain, wrap_html, wrap_text,
-};
+use super::base::{button, code_block, escape_html, note, paragraph, plain, wrap_html, wrap_text};
 use super::EmailTemplate;
 
 fn greeting(name: &str) -> (String, String) {

@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::{
     domain::{
         AccessPolicy, ConferenceKind, ConferenceStatus, MediaCapturePolicy, MeetingType,
-        MemberStatus, PrincipalType, RecordOrigin, Role, SecurityProfile, SpaceStatus, TerminationReason,
-        WaitingRoomPolicy,
+        MemberStatus, PrincipalType, RecordOrigin, Role, SecurityProfile, SpaceStatus,
+        TerminationReason, WaitingRoomPolicy,
     },
     dto::v2::{
         AccessConfig, CreateMeetingSpaceRequest, DuplicateMeetingSpaceRequest,

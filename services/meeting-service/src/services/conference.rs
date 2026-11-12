@@ -726,10 +726,7 @@ impl ConferenceService {
         // Part G: stop capture first (queued before the room terminate command); the
         // recording may finish PROCESSING after the conference ended.
         crate::services::artifacts::recording::RecordingService::stop_all_in_txn(
-            txn,
-            &self.core,
-            &updated,
-            actor,
+            txn, &self.core, &updated, actor,
         )
         .await?;
         let mut metadata = json!({ "terminationReason": reason });

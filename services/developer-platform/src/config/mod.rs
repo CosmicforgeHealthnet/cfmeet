@@ -76,6 +76,12 @@ pub struct FeatureFlags {
 }
 
 pub struct DeveloperPlatformConfig {
+    /// Final completion (production-access workflow): the named operators allowed to
+    /// review, approve or reject production-access requests
+    /// (`DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS`, comma separated operator names). Empty:
+    /// any operator holding `developer-platform.administer` (previous behaviour). Customer
+    /// submissions (`…_PRODUCTION_ACCESS_WORKFLOW_ENABLED`) require at least one reviewer.
+    pub production_reviewers: Vec<String>,
     pub database_url: SecretString,
     pub database_max_connections: u32,
     pub bind_address: SocketAddr,
@@ -252,6 +258,34 @@ impl DeveloperPlatformConfig {
                 "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
             )?,
         };
+        let production_reviewers: Vec<String> = get("DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if production_reviewers
+            .iter()
+            .any(|r| !crate::control::operator::valid_operator(r))
+        {
+            return Err(ConfigError::invalid(
+                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
+                "must be comma-separated operator names",
+            ));
+        }
+        if flags.production_access_workflow && production_reviewers.is_empty() {
+            return Err(ConfigError::invalid(
+                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
+                "customer production-access submissions need at least one named reviewer",
+            ));
+        }
+        if flags.production_auto_approval {
+            // Owner decision (final completion): manual approval only.
+            return Err(ConfigError::invalid(
+                "DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL",
+                "automatic production approval is not permitted; reviewers decide manually",
+            ));
+        }
         let worker_interval = Duration::from_millis(bounded(
             &get,
             "DEVELOPER_PLATFORM_WORKER_INTERVAL_MS",
@@ -305,6 +339,7 @@ impl DeveloperPlatformConfig {
             100_000,
         )? as u64;
         Ok(Self {
+            production_reviewers,
             database_url,
             database_max_connections,
             bind_address,
@@ -352,6 +387,35 @@ mod tests {
         );
         assert!(!format!("{cfg:?}").contains("pw-secret-9"));
         assert!(DeveloperPlatformConfig::from_lookup(lookup(&[])).is_err());
+    }
+
+    #[test]
+    fn production_access_needs_named_reviewers_and_never_auto_approves() {
+        let with = |extra: &[(&'static str, &'static str)]| {
+            let mut v: Vec<(&str, &str)> = BASE.to_vec();
+            v.extend_from_slice(extra);
+            DeveloperPlatformConfig::from_lookup(lookup(&v))
+        };
+        assert!(with(&[(
+            "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
+            "true"
+        )])
+        .is_err());
+        let cfg = with(&[
+            (
+                "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
+                "true",
+            ),
+            (
+                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
+                "github-alice, github-bob",
+            ),
+        ])
+        .unwrap();
+        assert_eq!(cfg.production_reviewers, ["github-alice", "github-bob"]);
+        assert!(with(&[("DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS", "bad name")]).is_err());
+        assert!(with(&[("DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL", "true")]).is_err());
+        assert!(with(&[]).unwrap().production_reviewers.is_empty());
     }
 
     #[test]

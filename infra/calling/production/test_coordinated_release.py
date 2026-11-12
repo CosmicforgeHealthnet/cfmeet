@@ -108,7 +108,7 @@ class Grants(unittest.TestCase):
         for operation, receiver, issuer, permissions in cr.GRANTS:
             self.assertIn(operation, cr.ACTIVATIONS)
             self.assertIn(receiver, cr.SERVICES)
-            self.assertIn(issuer, cr.SERVICES)
+            self.assertIn(issuer, tuple(cr.SERVICES) + cr.OPERATOR_IDENTITIES)
             self.assertFalse(any(p_ in ('*', 'admin', 'all', 'root') for p_ in permissions))
 
     def test_merge_never_drops_issuers_keys_or_permissions(self):

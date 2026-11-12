@@ -52,7 +52,9 @@ async fn termination_reason(app: &TestApp, cid: Uuid) -> String {
         .conn
         .query_one(sea_orm::Statement::from_string(
             sea_orm::DbBackend::Postgres,
-            format!("SELECT COALESCE(termination_reason, '') FROM conference_sessions WHERE id='{cid}'"),
+            format!(
+                "SELECT COALESCE(termination_reason, '') FROM conference_sessions WHERE id='{cid}'"
+            ),
         ))
         .await
         .unwrap()
@@ -71,12 +73,18 @@ async fn never_joined_instant_conference_ends_after_ten_minutes() {
     let sweeper = sweeper(&app);
 
     // 9 minutes: still LIVE (the interval started at creation).
-    let r = sweeper.tick(Utc::now() + Duration::minutes(9)).await.unwrap();
+    let r = sweeper
+        .tick(Utc::now() + Duration::minutes(9))
+        .await
+        .unwrap();
     assert_eq!((r.empty, r.ended), (1, 0), "{r:?}");
     assert_eq!(conference_status(&app, cid).await, "LIVE");
 
     // 11 minutes: ended with EMPTY_TIMEOUT.
-    let r = sweeper.tick(Utc::now() + Duration::minutes(11)).await.unwrap();
+    let r = sweeper
+        .tick(Utc::now() + Duration::minutes(11))
+        .await
+        .unwrap();
     assert_eq!(r.ended, 1, "{r:?}");
     assert_eq!(conference_status(&app, cid).await, "ENDED");
     assert_eq!(termination_reason(&app, cid).await, "EMPTY_TIMEOUT");
@@ -85,7 +93,10 @@ async fn never_joined_instant_conference_ends_after_ten_minutes() {
     assert!(!lk(&app).has_room(&room(cid)), "provider room terminated");
 
     // Idempotent: further sweeps change nothing and emit nothing.
-    let r = sweeper.tick(Utc::now() + Duration::minutes(30)).await.unwrap();
+    let r = sweeper
+        .tick(Utc::now() + Duration::minutes(30))
+        .await
+        .unwrap();
     assert_eq!((r.checked, r.ended), (0, 0));
     assert_eq!(events(&app, cid, "conference.ended").await, 1);
 }
@@ -132,9 +143,15 @@ async fn occupied_conference_is_never_ended_and_leaving_starts_a_fresh_interval(
     lk(&app).disconnect(&room(cid), &again.identity);
     let second_leave = Utc::now() + Duration::minutes(10);
     sweeper.tick(second_leave).await.unwrap();
-    let r = sweeper.tick(second_leave + Duration::minutes(5)).await.unwrap();
+    let r = sweeper
+        .tick(second_leave + Duration::minutes(5))
+        .await
+        .unwrap();
     assert_eq!(r.ended, 0, "{r:?}");
-    let r = sweeper.tick(second_leave + Duration::minutes(11)).await.unwrap();
+    let r = sweeper
+        .tick(second_leave + Duration::minutes(11))
+        .await
+        .unwrap();
     assert_eq!(r.ended, 1, "{r:?}");
     assert_eq!(conference_status(&app, cid).await, "ENDED");
     assert_eq!(termination_reason(&app, cid).await, "EMPTY_TIMEOUT");
@@ -192,7 +209,10 @@ async fn scheduled_conferences_are_not_subject_to_the_empty_rule() {
     let app = app!();
     let owner = app.user("host").await;
     let (_, cid) = app
-        .live_conference(&owner, json!({ "title": "Board", "accessPolicy": "PUBLIC" }))
+        .live_conference(
+            &owner,
+            json!({ "title": "Board", "accessPolicy": "PUBLIC" }),
+        )
         .await;
     let r = sweeper(&app)
         .tick(Utc::now() + Duration::minutes(45))
@@ -319,7 +339,9 @@ async fn sweeper_repairs_live_conferences_of_archived_spaces() {
     let (space_id, cid, _) = instant(&app, &owner).await;
     exec(
         &app,
-        &format!("UPDATE meeting_spaces SET status='ARCHIVED', archived_at=now() WHERE id='{space_id}'"),
+        &format!(
+            "UPDATE meeting_spaces SET status='ARCHIVED', archived_at=now() WHERE id='{space_id}'"
+        ),
     )
     .await;
     let r = sweeper(&app).tick(Utc::now()).await.unwrap();
