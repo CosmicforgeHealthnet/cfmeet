@@ -32,7 +32,8 @@ jobs:
           persist-credentials: false
 
       - name: Offline tests of the acceptance tooling
-        run: python3 -m unittest infra/calling/production/test_meeting_acceptance.py -v
+        working-directory: infra/calling/production
+        run: python3 -m unittest test_meeting_acceptance -v
 
       - name: Configure existing production SSH access
         env:
