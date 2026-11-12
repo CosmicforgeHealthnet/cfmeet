@@ -276,7 +276,7 @@ must handle beyond the generic ones in §8.
 | Pre-join | `GET /api/v2/conferences/{id}/pre-join` | `access.*` (authentication / invitation / passcode required, waiting room expected), `consents.required` + `version`, notices (recording, transcription, AI), media permissions, display-name rules |
 | Join / rejoin | `POST /api/v2/conferences/{id}/join` (`displayName`, `invitationToken`, `passcode`, `consents[]`) | `CONSENT_REQUIRED` until every required consent at the current version is sent; `rtcStatus` `NOT_ISSUED_WAITING` while waiting, `ISSUED` with `rtc.credential` + `url` after admission |
 | Waiting room (host) | `GET /api/v2/conferences/{id}/waiting-room`, `POST …/waiting-room/admit` (`participantIds` or `all`), deny | |
-| In meeting | participants, media controls, chat, Q&A, polls, breakouts, recordings, transcription (tags in the reference) | |
+| In meeting | participants, media controls, chat, Q&A, polls, breakouts, recordings, transcription (tags in the reference) | map LiveKit participants by the `participantId` attribute/metadata of the credential, never by display name; moderators can restore dismissed questions (`POST …/questions/{questionId}/restore`, event `qna.question_restored`) — contract: [qna-restore-and-participant-identity.md](qna-restore-and-participant-identity.md) |
 | History / artifacts | conference list per space, artifacts (signed short-lived download grants) | |
 
 ### 6.4 Contacts, CF Meet ID and QR (personal)
