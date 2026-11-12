@@ -17,7 +17,21 @@ Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · B
 | Telephone number provisioning, inventory, porting | Numbering | `NUMBERING_PROVIDERS` unset, porting `false`; `/v1/numbers` unrouted and gateway domain `numbering` disabled | EXCLUDED_BY_OWNER |
 | Privacy Relay, contact vault, relay numbers | Privacy Relay | all `false`; `/v1/privacy-relay` unrouted and gateway domain `privacy-relay` disabled | EXCLUDED_BY_OWNER |
 
-<!-- ACTIVATED -->
+## Production evidence (this activation)
+
+| # | Operation | Run | Result |
+|---|---|---|---|
+| 0 | `inspect` (read-only, before) | [43161073164](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43161073164) | all 13 services on `4904ee33`; journal as in the backend closure |
+| 1 | `activate-developer-console` | [43169453546](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43169453546) | activation base: `main` `4d90b9b6` ≡ release `4904ee33` (56 image build inputs unchanged; running images re-checked on the VPS); grant `user-session.verify` (Meeting ← Developer Platform); `DEVELOPER_SESSION_BRIDGE_ENABLED=true`; regression PASS |
+| 2 | `activate-developer-webhooks` | [43173688215](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43173688215) | preconditions: Calling 0 webhook subscriptions, 0 open deliveries, no migration state; Developer Platform API + worker `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED=true`, `…_DELIVERY_MODE=active`, sealed key ring mounted 0400; worker alone on `cfmeet-webhook-egress`; Calling authority retired; Calling, Messaging, Meeting publish to the central ingestion (grants `developer-event.publish`); regression PASS |
+| 3 | `activate-gateway-families` | [43174233820](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43174233820) | grants `calling-request.forward`, `messaging-request.forward` (← gateway); gateway upstreams Calling + Messaging, central webhooks on, domains `numbering,sms,privacy-relay` disabled; **18/18 post-checks PASS** (8 families refuse anonymous requests 401/403, forged credential refused, CORS `https://cfmeet.com` only, `/v1/numbers`, `/v1/sms`, `/v1/privacy-relay` unrouted, internal paths private, Swagger); regression PASS |
+| 4 | `certify` (read-only, after) | [43176010902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43176010902) | **CERTIFIED_READ_ONLY**: 13/13 services PASS on every check; every grant of every completed activation present with the issuer's current key; provider safe defaults PASS; Organizations outbox clean; public surface: calling 51, communications 37, developer-platform 33, messaging 40, meetings 38 routes refuse anonymous requests or answer a placeholder 404 (never 2xx, never 5xx); numbering 26, privacy-relay 6, sms 4 unrouted (excluded); 10/10 OpenAPI documents; TLS 39 days |
+<!-- ACCEPTANCE_ROWS -->
+
+## Developer Platform and API Gateway
+
+<!-- DEV_ROWS -->
+
 
 ## Messaging
 
