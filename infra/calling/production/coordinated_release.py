@@ -1637,7 +1637,9 @@ def activate_developer_webhooks(sha, run_id, confirm):
     mount = {'mounts': [(key, WEBHOOK_KEY_TARGET)]}
     apply_activation('activate-developer-webhooks', sha, run_id, [
         ('developer-platform', webhooks, mount),
-        ('developer-platform-worker', webhooks, dict(mount, networks=[network])),
+        # Credential lifecycle notices (credential.expiring_soon / expired) every 5 minutes.
+        ('developer-platform-worker', dict(webhooks, DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS='300'),
+         dict(mount, networks=[network])),
         ('calling', {'CALLING_WEBHOOK_AUTHORITY': 'retired', 'CALLING_WEBHOOK_DELIVERY_ENABLED': 'false',
                      'CALLING_PUBLIC_EVENTS_DESTINATION': 'developer-platform', 'CF_DEVELOPER_PLATFORM_BASE_URL': dp}),
         ('messaging', {'MESSAGING_PUBLIC_EVENTS_DESTINATION': 'developer-platform', 'CF_DEVELOPER_PLATFORM_BASE_URL': dp}),
@@ -1865,7 +1867,12 @@ ACTIVATIONS = {
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
 }
-OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS)
+OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
+    + ('developer-acceptance',)
+# The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
+# (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
+# worker's STRICT endpoint policy refuses as a private address.)
+ACCEPTANCE_WEBHOOK_RECEIVER = 'https://httpbin.org/status/204'
 
 
 def run(operation, sha, run_id, confirm=''):
@@ -1894,6 +1901,16 @@ def run(operation, sha, run_id, confirm=''):
         verify(sha, run_id)
     elif operation == 'rollback':
         rollback(sha, run_id)
+    elif operation == 'developer-acceptance':
+        # Writes acceptance data through the public API only; requires the activations it tests.
+        missing = [o for o in ('activate-developer-console', 'activate-developer-webhooks', 'activate-gateway-families')
+                   if not done(o)]
+        if missing:
+            raise RuntimeError('Acceptance needs ' + ', '.join(missing))
+        import developer_acceptance
+        checks = developer_acceptance.run(run_id, ACCEPTANCE_WEBHOOK_RECEIVER)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Developer acceptance failed')
     else:
         requires, step = ACTIVATIONS[operation]
         missing = [r for r in requires if not done(r)]
