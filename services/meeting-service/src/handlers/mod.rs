@@ -2,6 +2,7 @@ pub mod admin;
 pub mod api_keys;
 pub mod auth;
 pub mod chat;
+pub mod email;
 pub mod internal;
 pub mod meetings;
 pub mod participants;

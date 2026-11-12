@@ -919,6 +919,13 @@ pub async fn operator_decide(
     d: Decision,
 ) -> Result<Value, ApiError> {
     let r = load(&state.db, id).await?;
+    // Explicit reviewer roles: only a named reviewer decides production access.
+    if !state.production_reviewers.is_empty()
+        && !state.production_reviewers.iter().any(|n| n == operator)
+    {
+        // POLICY_VIOLATION: deciding production access is reserved to named reviewers.
+        return Err(ApiError(ErrorCode::PolicyViolation));
+    }
     if matches!(command, OperatorCommand::Approve | OperatorCommand::Reject) {
         let Some(user) = operator_user else {
             return Err(ApiError(ErrorCode::OperatorRequired));
