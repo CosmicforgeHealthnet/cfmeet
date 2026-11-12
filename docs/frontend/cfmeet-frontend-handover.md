@@ -412,7 +412,7 @@ per environment):
 | Organization Messaging binding | organization Messaging relay refuses (`PROVISIONING_PENDING` / disabled) |
 | `MESSAGING_SESSION_DEVICES_ENABLED` | MANAGED realtime via session devices off (polling) |
 | `NOTIFICATIONS_EMAIL_ENABLED` | meeting notification emails not sent |
-| `EMAIL_VERIFICATION_ENFORCEMENT` (`off`/`communications`/`login`) | unverified accounts keep access |
+| `EMAIL_VERIFICATION_ENFORCEMENT` (`off`/`communications`/`login`) + `EMAIL_VERIFICATION_ENFORCE_FROM` / `EMAIL_VERIFICATION_GRACE_UNTIL` | unverified accounts keep access (see §12.3 for the gradual policy) |
 | `FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_HEALTHCARE_PROFILE_ENABLED`, `FEATURE_QUALITY_TELEMETRY_ENABLED` | the corresponding v2 meeting features answer `FEATURE_DISABLED` |
 | `NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED` (web) | Developer Portal hidden |
 
@@ -450,3 +450,84 @@ Frontend implementation remaining (from the Section 17 records; backend contract
 | Meetings / calendar / guests / pre-join | done (recurrence UI, time zones, pre-join consents) | v2 live room done; pre-join consents and recurrence UI to finish |
 | Developer Portal | done (flag) | n/a |
 | Physical-device and accessibility acceptance | owner gate | owner gate |
+
+## 12. Final production completion changes (2026-11-12)
+
+Backend changes that the web and mobile clients must handle. No request or response schema
+changed, and every existing endpoint keeps its contract. The generated endpoint reference
+is unchanged for this release; the behaviour below is the authoritative addition.
+
+### 12.1 Transactional email (Resend) and OTP
+
+* All transactional email goes through one durable delivery ledger in the Meeting Service, and from there to Resend (production provider, sender `CF Meet <no-reply@cfmeet.com>`). This covers:
+  * verification codes;
+  * password-reset codes;
+  * password-changed security notices;
+  * meeting and organization invitations;
+  * meeting notices and reminders;
+  * Developer Platform decisions.
+* The API contract is unchanged:
+  * `POST /api/v1/auth/register` → `201`. The verification email is queued, and queueing never blocks registration.
+  * `POST /api/v1/auth/resend-verification` and `POST /api/v1/auth/forgot-password` always answer `200` with the same message, whether or not the account exists. At most 5 codes per address per 15 minutes; beyond that the answer is still `200`, and no email is sent.
+  * `POST /api/v1/auth/verify-email` → `400` for a wrong, expired or already used code, and `429` after repeated wrong codes.
+* Code validity: verification codes last **24 hours** and reset codes **1 hour**. A new code replaces the previous one. Tell users to use the **latest** email.
+* Delivery is asynchronous. It normally takes seconds, and temporary provider errors are retried with backoff. A message whose code expired before it could be sent is not sent. Clients should:
+  * show "We sent a code to …; it can take a minute; check spam";
+  * offer **Resend** after about 30 seconds;
+  * never claim the email was received.
+* After a password change or reset the account receives a "Your CF Meet password was changed" notice. All sessions end, as before.
+
+### 12.2 Instant meetings end when nobody is in them
+
+* `POST /api/v2/instant-meetings` still creates a LIVE conference at once.
+* A LIVE **instant** conference that has nobody in it for **10 continuous minutes** ends automatically:
+  * this counts from creation if nobody ever joins (for example, the host closed the pre-join screen);
+  * it counts from the moment the last participant left otherwise.
+  
+  Anyone joining, or rejoining, resets the 10 minutes. A conference with participants is **never** ended for its age; there is no plan-based duration limit.
+* The end goes through the normal lifecycle: `status` `LIVE` → `ENDING` → `ENDED`, with `terminationReason: "EMPTY_TIMEOUT"`. The conference realtime channel and the event replay deliver `conference.ending` and then `conference.ended`.
+* Home, agenda and meeting lists show the conference as ended without a page refresh: update the card from those events, or re-read `GET /api/v2/conferences/{id}`. Treat `ENDING` as "ending" (not joinable), never as LIVE.
+* Scheduled and recurring conferences keep their own lifecycle: scheduled end plus the auto-end grace from the meeting's schedule policy.
+
+### 12.3 Archiving a meeting ends its LIVE conference
+
+* `POST /api/v2/meeting-spaces/{id}/archive` (an authorized owner, or a platform administrator) now ends every LIVE conference of the space in the same transaction:
+  * `terminationReason` is `HOST_ENDED`, or `ADMIN` for a platform administrator;
+  * the audit cause is `SPACE_ARCHIVED`.
+* Connected participants receive `conference.ending` / `conference.ended` over the conference realtime channel, and the media room is closed by the provider, so clients see the normal "meeting ended" path.
+* An archived space has **zero** LIVE conferences and cannot start a new one: `POST …/conferences` or `…/start` is refused with a `409` state conflict.
+* History is kept: past conferences, attendance, recordings and audit.
+* A repeated archive is idempotent (`200`).
+* Response shape: unchanged (the archived meeting space).
+
+### 12.4 Email verification (gradual policy; not yet enforced)
+
+* The backend can enforce verification for **new** email/password accounts only:
+  * `EMAIL_VERIFICATION_ENFORCEMENT=login` refuses sign-in of unverified accounts created on or after `EMAIL_VERIFICATION_ENFORCE_FROM`;
+  * existing unverified accounts keep signing in until `EMAIL_VERIFICATION_GRACE_UNTIL`, if one is set;
+  * Google accounts count as verified.
+* Enforcement stays **off** in production until the owner approves the transition dates. Clients should already handle everything below:
+  * `403` `EMAIL_VERIFICATION_REQUIRED` on login → route to the verify screen, which has a "Resend code" action;
+  * `GET /api/v2/me/profile` → `emailVerified: false` → show a "verify your email" banner, and never block meetings on it;
+  * the v1 `status` `pending_verification` (`pendingverification` in the legacy format) → the same banner.
+
+### 12.5 Developer Portal: production access
+
+* Production-access requests (`POST /v1/projects/{projectId}/production-access-requests`) are decided **manually** by named CF Meet reviewers. Nothing is approved automatically, and a member of the requesting organization can never decide its own request.
+* While no reviewer is named in production, submissions still answer `503` `CAPABILITY_UNAVAILABLE`. Keep the "request production access" action behind that answer.
+* Once a decision is made, the request moves to `APPROVED` (then the customer activates it) or `REJECTED`, with a safe `decisionReasonCode`. The applicant also receives an email.
+
+### 12.6 Unchanged and still gated
+
+The following are still not available; keep them hidden or labelled as described in §10:
+* push notifications;
+* PRIVATE_E2EE;
+* SMS and phone OTP;
+* PSTN calling and real numbers;
+* Privacy Relay;
+* the healthcare profile;
+* transcription and AI summaries;
+* meeting recording v2;
+* organization management.
+
+The current status of each is in `docs/operations/CFMEET_FINAL_PRODUCTION_COMPLETION.md`.

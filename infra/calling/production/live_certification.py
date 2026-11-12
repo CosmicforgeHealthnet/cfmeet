@@ -374,8 +374,9 @@ def integrations(envs):
                            state='disabled' if value in off else 'enabled'))
     meeting = envs.get('meeting-service') or {}
     mail = cr.mail_presence(meeting) if meeting else {}
-    report.append(dict(service='meeting-service', variable='SMTP_*', integration='Transactional email (SMTP)',
-                       value=None, state='configured' if mail and all(mail.values()) else 'not configured'))
+    provider = 'resend' if mail.get('resendConfigured') else ('smtp' if mail.get('smtpHostConfigured') else 'none')
+    report.append(dict(service='meeting-service', variable='EMAIL_PROVIDER', integration='Transactional email',
+                       value=provider, state='configured' if meeting and cr.mail_available(meeting) else 'not configured'))
     report.append(dict(service='meeting-service', variable='GOOGLE_CLIENT_ID', integration='Google sign-in',
                        value=None, state='configured' if meeting.get('GOOGLE_CLIENT_ID') else 'not configured'))
     return report

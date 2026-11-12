@@ -2,6 +2,7 @@ pub mod account_profile;
 pub mod account_security;
 pub mod auth;
 pub mod email;
+pub mod email_delivery;
 pub mod livekit;
 pub mod otp;
 pub mod rate_limiter;

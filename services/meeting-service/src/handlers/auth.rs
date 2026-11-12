@@ -315,11 +315,11 @@ pub async fn login(
     // ACC-016 (owner decision, off by default): optionally refuse pending accounts at
     // sign-in. Checked only after a correct password, so it reveals nothing to others.
     if state.require_email_verification
-        && state
-            .auth_policy
-            .email_verification_enforcement
-            .covers_login()
         && user.status == users::UserStatus::PendingVerification
+        && state.auth_policy.login_requires_verified_email(
+            user.created_at.and_utc(),
+            chrono::Utc::now(),
+        )
     {
         security::record_event_best_effort(
             &state.db,
@@ -863,11 +863,20 @@ pub async fn reset_password(
     let password_hash = hash_password(&payload.new_password)?;
     let user_id = user.id;
 
+    let (notice_email, notice_name) = (user.email.clone(), user.username.clone());
     let mut user: users::ActiveModel = user.into();
     user.password_hash = Set(Some(password_hash));
     user.updated_at = Set(now_utc());
 
     user.update(&state.db).await?;
+    // Security notice (unified email delivery); never blocks the reset.
+    if let Err(e) = state
+        .email_service
+        .send_password_changed_email(&notice_email, &notice_name, user_id, "reset")
+        .await
+    {
+        tracing::warn!(user_id = %user_id, "password reset notice not queued: {e}");
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_RESET", Outcome::Success)
@@ -998,10 +1007,18 @@ pub async fn change_password(
     // Hash new password and update (the trigger ends every session and token).
     let new_password_hash = hash_password(&payload.new_password)?;
 
+    let (notice_email, notice_name) = (user.email.clone(), user.username.clone());
     let mut user_active: users::ActiveModel = user.into();
     user_active.password_hash = Set(Some(new_password_hash));
     user_active.updated_at = Set(now_utc());
     user_active.update(&state.db).await?;
+    if let Err(e) = state
+        .email_service
+        .send_password_changed_email(&notice_email, &notice_name, user_id, "changed")
+        .await
+    {
+        tracing::warn!(user_id = %user_id, "password change notice not queued: {e}");
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_CHANGED", Outcome::Success).by_user(user_id),

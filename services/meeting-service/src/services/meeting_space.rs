@@ -14,7 +14,7 @@ use crate::{
     domain::{
         AccessPolicy, ConferenceKind, ConferenceStatus, MediaCapturePolicy, MeetingType,
         MemberStatus, PrincipalType, RecordOrigin, Role, SecurityProfile, SpaceStatus,
-        WaitingRoomPolicy,
+        TerminationReason, WaitingRoomPolicy,
     },
     dto::v2::{
         AccessConfig, CreateMeetingSpaceRequest, DuplicateMeetingSpaceRequest,
@@ -1082,6 +1082,12 @@ impl MeetingSpaceService {
     }
 
     /// Soft archive. History, conferences, participants, audit and legacy mapping are kept.
+    ///
+    /// Final completion (Section 4): archiving ends every LIVE conference of the space in
+    /// the same transaction (LIVE → ENDING, `conference.ending`; ENDED and
+    /// `conference.ended` follow once the provider room is terminated, retried durably), so
+    /// an archived space never has a LIVE conference. A repeated archive repeats that step,
+    /// which also repairs spaces archived before this rule.
     pub async fn archive(
         &self,
         ctx: &ActorContext,
@@ -1106,8 +1112,25 @@ impl MeetingSpaceService {
                 ));
             }
         }
+        let audit_actor = AuditActor::from(ctx);
+        let reason = if platform_admin {
+            TerminationReason::Admin
+        } else {
+            TerminationReason::HostEnded
+        };
+        let conferences = crate::services::conference::ConferenceService::new(self.core.clone());
         if space.status == SpaceStatus::Archived {
+            let ended = conferences
+                .end_live_for_archive(&txn, id, &audit_actor, reason)
+                .await?;
             txn.commit().await?;
+            if !ended.is_empty() {
+                crate::services::ops_metrics::add(
+                    &crate::services::ops_metrics::OPS_METRICS.conferences_archive_ended,
+                    ended.len() as u64,
+                );
+                conferences.complete_ending(&ended).await;
+            }
             return Ok(space);
         }
         let now = Utc::now();
@@ -1119,7 +1142,9 @@ impl MeetingSpaceService {
         let updated = am.update(&txn).await?;
         // No new occurrences: end the series and cancel unstarted future occurrences.
         let cancelled = recurrence::stop_series_for_archive(&txn, id, now).await?;
-        let audit_actor = AuditActor::from(ctx);
+        let ended = conferences
+            .end_live_for_archive(&txn, id, &audit_actor, reason)
+            .await?;
         audit(
             &txn,
             &audit_actor,
@@ -1129,7 +1154,10 @@ impl MeetingSpaceService {
                 action: action::SPACE_ARCHIVE,
                 target_type: Some("MEETING_SPACE"),
                 target_ref: Some(id.to_string()),
-                metadata: json!({ "cancelledFutureOccurrences": cancelled }),
+                metadata: json!({
+                    "cancelledFutureOccurrences": cancelled,
+                    "endedConferences": ended,
+                }),
             },
         )
         .await?;
@@ -1141,11 +1169,18 @@ impl MeetingSpaceService {
                 event_type: event::SPACE_ARCHIVED,
                 meeting_space_id: Some(id),
                 conference_id: None,
-                payload: json!({ "meetingSpaceId": id }),
+                payload: json!({ "meetingSpaceId": id, "endedConferenceIds": ended }),
             },
         )
         .await?;
         txn.commit().await?;
+        if !ended.is_empty() {
+            crate::services::ops_metrics::add(
+                &crate::services::ops_metrics::OPS_METRICS.conferences_archive_ended,
+                ended.len() as u64,
+            );
+            conferences.complete_ending(&ended).await;
+        }
         Ok(updated)
     }
 
