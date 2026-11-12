@@ -14,7 +14,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use sea_orm::EntityTrait;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -23,7 +22,7 @@ use crate::{
     domain::{OrganizationMemberStatus, OrganizationStatus},
     dto::v2::*,
     error::{ApiError, ApiResult, ErrorCode},
-    models::{organization_memberships, organizations, users},
+    models::{organization_memberships, organizations},
     services::{
         actor::{ActorContext, RegisteredActor},
         display_identity,
@@ -1148,21 +1147,11 @@ async fn address_invitee(
             {
                 return Err(already_member());
             }
-            let account = users::Entity::find_by_id(invitee.user_id)
-                .one(&state.db)
-                .await?
-                .filter(|u| {
-                    u.role != users::UserRole::Guest
-                        && matches!(
-                            u.status,
-                            users::UserStatus::Active | users::UserStatus::PendingVerification
-                        )
-                })
-                .ok_or_else(invitee_not_found)?;
-            obj.insert(
-                "email".into(),
-                json!(account.email.trim().to_ascii_lowercase()),
-            );
+            let email =
+                crate::services::organization_invitees::invitable_email(&state.db, invitee.user_id)
+                    .await?
+                    .ok_or_else(invitee_not_found)?;
+            obj.insert("email".into(), json!(email));
             obj.insert(
                 "inviteeHint".into(),
                 json!(format!("CF Meet ID {identifier}")),
@@ -1182,15 +1171,11 @@ async fn refuse_member_email(
     organization: Uuid,
     email: &str,
 ) -> ApiResult<()> {
-    use sea_orm::{sea_query::Expr, QueryFilter};
     let (Some(authority), Ok(user)) = (authoritative(state), actor.require_registered()) else {
         return Ok(());
     };
-    let normalized = email.trim().to_ascii_lowercase();
-    let Ok(Some(account)) = users::Entity::find()
-        .filter(Expr::cust_with_values("lower(email) = $1", [normalized]))
-        .one(&state.db)
-        .await
+    let Ok(Some(account)) =
+        crate::services::organization_invitees::account_with_email(&state.db, email).await
     else {
         return Ok(());
     };
@@ -1200,7 +1185,7 @@ async fn refuse_member_email(
     };
     if members
         .iter()
-        .any(|m| m.user_id == account.id && m.status != "REMOVED")
+        .any(|m| m.user_id == account && m.status != "REMOVED")
     {
         return Err(already_member());
     }
