@@ -68,6 +68,9 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 | `activate-enterprise-calling` | yes | Requires authoritative. Grants `platform-principal.ensure` (Platform Access), `calling-request.act-for-organization` (Calling), `messaging-application.delegate` (Messaging), all ← Meeting; `CALLING_ORGANIZATION_FORWARDING_ENABLED=true`; `ORGANIZATION_CALLING_SCOPE=organization` (+ Calling/Messaging URLs if absent) on Meeting. The per-organization service bindings (runbook §4.4) remain operator API steps. |
 | `activate-developer-platform` | yes | Grants (checklist §4): Platform Access ← API Gateway `platform-credential.authenticate`; Platform Access ← Developer Platform `platform-identity.read`, `platform-identity.delegate`; Developer Platform ← API Gateway `developer-request.forward`, `developer-entitlement.read`, `developer-usage.record`. `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED=true`; gateway `API_GATEWAY_PUBLIC_ROUTING_ENABLED=true` + `CF_DEVELOPER_PLATFORM_BASE_URL`. Still not public. |
 | `activate-gateway-routing` | yes (public) | Requires the previous step. A loopback-only relay (`cfmeet-gateway-ingress`, 127.0.0.1:18110 → `cfmeet-api-gateway:8099`, same confinement as the storage relay) and `/etc/nginx/snippets/cfmeet-api-gateway.conf`, included after the Calling routes, routing **only** the Developer Platform families (`/v1/developer-platform`, `/v1/organizations`, `/v1/projects`, `/v1/environments`, `/v1/scopes`, `/v1/invitations`, `/v1/production-access-requests`, `/v1/commercial-plans`). Refuses if any existing location already serves one of them. Meeting, Calling and Messaging keep their direct routes; `/internal`, operator and provider-callback paths never reach the gateway. `nginx -t`, reload, then: gateway answers 401 unauthenticated, CORS for `https://cfmeet.com`, public smoke, regression; any failure removes the include, snippet and relay. `rollback` undoes it the same way. |
+| `activate-developer-console` | yes | Requires `activate-developer-platform`. Grant `user-session.verify` (Meeting ← Developer Platform); Meeting `DEVELOPER_SESSION_BRIDGE_ENABLED=true`; Developer Platform `CF_MEETING_SERVICE_BASE_URL`. Developer Console (DEVELOPER_SESSION) requests stop being refused; the bridge fails closed (revocation store required; guests never authenticate). |
+| `activate-developer-webhooks` | yes | Requires the console step. Refuses unless Calling holds **no** webhook subscriptions or open deliveries and no Calling→DP migration was ever recorded (otherwise: phase-06 webhook migration runbook). Generates the 32-byte sealing key ring (`/opt/cfmeet-core/secrets/developer-platform-webhook-secret.key`, 0400, uid 10001) and mounts it read-only into the Developer Platform API and worker; `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED=true`, `…_DELIVERY_MODE=active`. Attaches **only the worker** to `cfmeet-webhook-egress` (non-internal bridge, inter-container traffic off; `cfmeet-core-private` is `--internal`); the worker's STRICT endpoint policy allows https only and refuses private, loopback, link-local and metadata addresses at connect time. Calling `CALLING_WEBHOOK_AUTHORITY=retired`, `CALLING_WEBHOOK_DELIVERY_ENABLED=false`; Calling, Messaging and Meeting publish to the central ingestion (`…_PUBLIC_EVENTS_DESTINATION=developer-platform`, grants `developer-event.publish`). `SAFE_DEFAULTS` accept `active` only once this step is recorded; auto-approval stays refused. |
+| `activate-gateway-families` | yes (public) | Requires gateway routing and webhooks. Grants `calling-request.forward` (Calling ← gateway) and `messaging-request.forward` (Messaging ← gateway); gateway `CF_CALLING_BASE_URL`, `CF_MESSAGING_BASE_URL`, `API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED=true`, `API_GATEWAY_DISABLED_DOMAINS=numbering,sms,privacy-relay`. Extends the gateway snippet with `/v1/conversations`, `/v1/messaging`, `/v1/abuse-reports`, `/v1/blocks`, `/v1/limits`, `/v1/usage`, `/v1/webhooks`, `/v1/webhook-deliveries` (refuses existing locations). Calling's `/v1/calls`, `/v1/calling`, `/v1/enterprise` and Messaging's `/v1/realtime` keep their direct routes. Post-checks: every family refuses anonymous and forged credentials (401/403), CORS only for `https://cfmeet.com`, `/v1/numbers`, `/v1/sms`, `/v1/privacy-relay` stay unrouted, internal paths private; any failure restores the snippet and the containers. `rollback` removes the families from the edge first. |
 | `activate-first-party-features` | yes | No prerequisites. Meeting: `FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_QUALITY_TELEMETRY_ENABLED` = `true`, and `NOTIFICATIONS_EMAIL_ENABLED=true` **only** when the Meeting Service already carries SMTP host + credentials. Messaging: `MESSAGING_SESSION_DEVICES_ENABLED=true` (MANAGED realtime; refuses if PRIVATE_E2EE devices are on). The healthcare profile is never switched (compliance decision). Reversible with `rollback`. |
 
 Activation order is enforced: provisioning → org events → export → import → shadow →
@@ -154,8 +157,12 @@ run rollback                      # restores the latest release or activation
 gh run watch                      # each run uploads its log as an artifact
 ```
 
-Activation and verify runs act on the dispatched main head, which must be the released SHA:
-if `main` moved, release the new head first. `rollback` (and `inspect`) may be dispatched
+`verify` acts on the dispatched main head, which must be the released SHA. Activations
+act on the deployed release: when the head has no completed release of its own, the workflow
+proves on the runner (`activation_base.py`) that no build input of any of the 13 images
+(Dockerfile `COPY` sources, as `certify` defines them) changed between the latest completed
+release and the head, and the VPS still checks that every container runs exactly that
+release's recorded image. A head that changed any build input must be released first. `rollback` (and `inspect`) may be dispatched
 with any SHA; rollback always restores the latest recorded entry.
 
 ## Live-production certification (`certify`)
@@ -221,9 +228,11 @@ the release they protect is accepted.
 
 ## Not automated (owner decisions)
 
-- Off-host, encrypted backup copy and its restore drill (backup-and-restore.md): the release
-  backup is a same-host 0600 copy; the cutover steps require the owner's explicit
-  `offsite-backup-verified` confirmation.
+- The owner's age key pair for the off-host copy (backup-and-restore.md). Once the public
+  recipient (`vars.CFMEET_BACKUP_AGE_RECIPIENTS`) and the drill identity
+  (`secrets.CFMEET_BACKUP_AGE_IDENTITY`) exist, `cfmeet-offsite-backup.yml` encrypts, stores
+  off-host, restore-drills on a separate runner and records the result on the VPS daily;
+  `org-cutover-import` requires that record **and** the owner's `offsite-backup-verified`.
 - The shadow evidence (§5) and the quiesce block of the legacy organization write routes (§6.2).
 - Per-organization service accounts, credentials and bindings for Enterprise Calling (§4.4).
 - Provider-dependent features (SMS, PSTN, push, email without credentials, PRIVATE_E2EE).

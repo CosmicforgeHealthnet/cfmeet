@@ -1,0 +1,237 @@
+name: CF Meet encrypted off-host backup and restore drill
+
+# Owner gate 1 of the Organizations cutover (organizations-cutover-runbook, ADR 0056 §9) and the
+# disaster-recovery gap of backup-and-restore.md, closed with infrastructure that already exists:
+#
+#   1. backup  (production lock) — on the VPS: the coordinated `backup` (pg_dump -Fc of every
+#      CF Meet database and the Meeting database, sha256, pg_restore --list, same-host restore
+#      tests), then every dump encrypted to the owner's age PUBLIC recipients
+#      (repository variable CFMEET_BACKUP_AGE_RECIPIENTS). Only the *.age files and a
+#      manifest without row data leave the host; they are stored off-host as a GitHub Actions
+#      artifact (separate provider, retention below).
+#   2. drill   (no production access) — on a separate runner: download the off-host copy,
+#      verify every hash, decrypt with the drill identity (repository secret
+#      CFMEET_BACKUP_AGE_IDENTITY), restore each database into a fresh network-less
+#      PostgreSQL of its major version and compare every migration history row count.
+#   3. record  (production lock) — the VPS re-hashes its encrypted files against the hashes the
+#      drill saw off-host and writes <backup>/offsite.json. `org-cutover-import` refuses
+#      without it (and still needs the owner's `offsite-backup-verified` confirmation).
+#
+# The VPS never holds a private key. Runbook: docs/operations/backup-and-restore.md.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'   # daily, 02:17 UTC (off-peak)
+
+permissions:
+  contents: read
+
+env:
+  RETENTION_DAYS: '90'
+
+jobs:
+  backup:
+    name: Backup and encrypt on the VPS (off-host copy)
+    # Scheduled runs wait quietly until the owner has configured the recipients.
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || vars.CFMEET_BACKUP_AGE_RECIPIENTS != '')
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 90
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    outputs:
+      backup_run: ${{ steps.encrypt.outputs.backup_run }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Owner recipients (public keys only)
+        env:
+          RECIPIENTS: ${{ vars.CFMEET_BACKUP_AGE_RECIPIENTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RECIPIENTS" ]]; then
+            echo "::error::Repository variable CFMEET_BACKUP_AGE_RECIPIENTS is not set (owner step: backup-and-restore.md, Off-host copy)"
+            exit 1
+          fi
+          printf '%s\n' "$RECIPIENTS" | tr ', ' '\n\n' | sed '/^$/d' > "$RUNNER_TEMP/recipients.txt"
+          if grep -qiE 'AGE-SECRET-KEY|PRIVATE KEY' "$RUNNER_TEMP/recipients.txt"; then
+            echo "::error::CFMEET_BACKUP_AGE_RECIPIENTS contains private key material; use only age1... public keys"; exit 1
+          fi
+          grep -qvE '^age1[02-9ac-hj-np-z]{58}$' "$RUNNER_TEMP/recipients.txt" && { echo "::error::Invalid recipient"; exit 1; } || true
+          echo "Recipients: $(wc -l < "$RUNNER_TEMP/recipients.txt")"
+
+      - name: Offline tests
+        run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py'
+
+      - name: Install age (shipped to the VPS by checksum)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q && sudo apt-get install -y -q age
+          age --version
+
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Backup and encrypt on the VPS
+        id: encrypt
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40)
+          run_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          remote="/opt/cfmeet-core/offsite-backups/$GITHUB_SHA"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote' /opt/cfmeet-core/bin"
+          tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          sum=$(sha256sum "$(command -v age)" | cut -d' ' -f1)
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "cat > /opt/cfmeet-core/bin/age.new && chmod 0755 /opt/cfmeet-core/bin/age.new && echo '$sum  /opt/cfmeet-core/bin/age.new' | sha256sum -c --quiet && mv /opt/cfmeet-core/bin/age.new /opt/cfmeet-core/bin/age && /opt/cfmeet-core/bin/age --version" < "$(command -v age)"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > '$remote/recipients.txt'" < "$RUNNER_TEMP/recipients.txt"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "cd '$remote' && python3 -u offsite_backup.py encrypt '$GITHUB_SHA' '$run_id' '$remote/recipients.txt' /opt/cfmeet-core/bin/age" | tee offsite-backup.log
+          echo "backup_run=$run_id" >> "$GITHUB_OUTPUT"
+          mkdir -p offsite
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '/opt/cfmeet-core/backups/$run_id/offsite' -cf - ." | tar -C offsite -xf -
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          m = json.loads(Path('offsite/offsite-manifest.json').read_text())
+          for f in m['files']:
+              data = Path('offsite', f['file']).read_bytes()
+              assert data.startswith(b'age-encryption.org/v1'), f['file']
+              assert hashlib.sha256(data).hexdigest() == f['sha256'], f['file']
+          extra = {p.name for p in Path('offsite').iterdir()} - {f['file'] for f in m['files']} - {'offsite-manifest.json'}
+          assert not extra, extra   # nothing but ciphertext and the manifest leaves the host
+          print('Encrypted files transferred and verified:', len(m['files']))
+          PY
+
+      - name: Store the encrypted copy off-host
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfmeet-offsite-backup-${{ steps.encrypt.outputs.backup_run }}
+          path: offsite/
+          retention-days: ${{ env.RETENTION_DAYS }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cfmeet-offsite-backup-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: offsite-backup.log
+          if-no-files-found: ignore
+
+  drill:
+    name: Restore drill from the off-host copy (separate runner)
+    needs: backup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download the off-host copy
+        uses: actions/download-artifact@v4
+        with:
+          name: cfmeet-offsite-backup-${{ needs.backup.outputs.backup_run }}
+          path: offsite
+
+      - name: Decrypt, restore and verify every database
+        env:
+          IDENTITY: ${{ secrets.CFMEET_BACKUP_AGE_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::Secret CFMEET_BACKUP_AGE_IDENTITY is not set (owner step: backup-and-restore.md, Off-host copy)"; exit 1
+          fi
+          sudo apt-get update -q && sudo apt-get install -y -q age
+          umask 077
+          printf '%s\n' "$IDENTITY" > "$RUNNER_TEMP/identity.txt"
+          status=0
+          python3 infra/calling/production/offsite_drill.py offsite "$RUNNER_TEMP/identity.txt" drill-evidence.json || status=$?
+          rm -f "$RUNNER_TEMP/identity.txt"
+          { echo '### Restore drill'; echo '```json'; cat drill-evidence.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cfmeet-offsite-drill-evidence-${{ needs.backup.outputs.backup_run }}
+          path: drill-evidence.json
+          if-no-files-found: ignore
+
+  record:
+    name: Record the verified off-host copy on the VPS
+    needs: [backup, drill]
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cfmeet-offsite-drill-evidence-${{ needs.backup.outputs.backup_run }}
+
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Record
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          BACKUP_RUN: ${{ needs.backup.outputs.backup_run }}
+          ARTIFACT_ID: ${{ needs.backup.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.backup.outputs.artifact_digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          [[ "$BACKUP_RUN" =~ ^[0-9]{1,20}-[0-9]{1,4}$ ]]
+          python3 - <<'PY'
+          import json, os
+          doc = json.load(open('drill-evidence.json'))
+          assert doc['runId'] == os.environ['BACKUP_RUN'] and doc['verdict'] == 'PASS'
+          doc.update(artifactId=int(os.environ['ARTIFACT_ID']), artifactDigest=os.environ['ARTIFACT_DIGEST'],
+                     runUrl=os.environ['RUN_URL'], retentionDays=int(os.environ['RETENTION_DAYS']),
+                     store='github-actions-artifact')
+          json.dump(doc, open('evidence.json', 'w'))
+          PY
+          remote="/opt/cfmeet-core/offsite-backups/$GITHUB_SHA"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > '$remote/evidence-$BACKUP_RUN.json'" < evidence.json
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "cd '$remote' && python3 -u offsite_backup.py record '$BACKUP_RUN' '$remote/evidence-$BACKUP_RUN.json'" | tee record.log
+          grep -q '"offsiteRecorded"' record.log
+          { echo '### Off-host copy recorded'; echo '```'; cat record.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -19,7 +19,7 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
@@ -155,7 +155,8 @@ jobs:
         with:
           persist-credentials: false
           # certify compares running revisions with the main head: full history.
-          fetch-depth: ${{ inputs.operation == 'certify' && '0' || '1' }}
+          # Activations prove their images equal the deployed release (activation_base.py).
+          fetch-depth: ${{ (inputs.operation == 'certify' || startsWith(inputs.operation, 'activate-') || startsWith(inputs.operation, 'org-cutover-')) && '0' || '1' }}
 
       - name: Offline release tests (resource gate, grants, order, rollback, secrecy)
         run: python3 -m unittest discover -s infra/calling/production -p 'test_*.py' -v
@@ -216,6 +217,30 @@ jobs:
           done
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > '/opt/cfmeet-core/coordinated/registry-$IMAGE_SHA.json'" < "$manifest"
           { echo '### Release images'; echo '```json'; cat "$manifest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Activation base (images of the dispatched head equal the deployed release)
+        # Activations change flags, trust bundles and routing, never images. When the head has
+        # no completed release of its own, prove that no build input of any of the 13 images
+        # changed since the latest completed release; the VPS re-checks the running images.
+        if: startsWith(inputs.operation, 'activate-') || startsWith(inputs.operation, 'org-cutover-')
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          base=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" python3 - <<'PY'
+          import json
+          journal = json.load(open('/opt/cfmeet-core/coordinated/journal.json'))
+          done = [e['sha'] for e in journal if e['operation'] == 'release' and e['status'] == 'done']
+          print(done[-1] if done else '')
+          PY
+          )
+          [[ "$base" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::No completed coordinated release is recorded"; exit 1; }
+          cd infra/calling/production
+          python3 activation_base.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "$base" activation-base.json
+          { echo '### Activation base'; echo '```json'; python3 -c 'import json; d=json.load(open("activation-base.json")); d.pop("inputs"); print(json.dumps(d, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run the operation on the VPS
         env:
