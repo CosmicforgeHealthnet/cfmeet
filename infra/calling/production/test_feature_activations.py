@@ -152,6 +152,21 @@ class DeveloperWebhooks(unittest.TestCase):
         self.assertIn('B=2', cfg['Env'])
 
 
+class UsageExport(unittest.TestCase):
+    def test_usage_export_switches_only_the_three_producers_and_needs_their_targets(self):
+        captured = {}
+        envs = {n: {'CF_DEVELOPER_PLATFORM_BASE_URL': 'https://x'} for n in ('calling', 'messaging', 'meeting-service')}
+        with patch.object(cr, 'env_of', lambda n: envs[n]), \
+                patch.object(cr, 'apply_activation', lambda op, sha, run, changes, **k: captured.update(changes=changes)):
+            cr.activate_usage_export('a' * 40, '1-1', '')
+        self.assertEqual(captured['changes'], [(n, {'CFMEET_USAGE_EXPORT_ENABLED': 'true'})
+                                               for n in ('calling', 'messaging', 'meeting-service')])
+        envs['messaging'] = {}
+        with patch.object(cr, 'env_of', lambda n: envs[n]), self.assertRaisesRegex(RuntimeError, 'messaging'):
+            cr.activate_usage_export('a' * 40, '1-1', '')
+        self.assertEqual(cr.ACTIVATIONS['activate-usage-export'][0], ('activate-developer-webhooks',))
+
+
 class OffsiteBackup(unittest.TestCase):
     RECIPIENT = 'age1' + 'q' * 58
 

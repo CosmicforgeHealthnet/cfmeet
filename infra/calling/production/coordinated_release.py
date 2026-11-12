@@ -260,7 +260,7 @@ FLAGS = (
     'DEVELOPER_SESSION_BRIDGE_ENABLED', 'CALLING_WEBHOOK_AUTHORITY', 'CALLING_WEBHOOK_DELIVERY_ENABLED',
     'CALLING_PUBLIC_EVENTS_DESTINATION', 'MESSAGING_PUBLIC_EVENTS_DESTINATION', 'MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION',
     'API_GATEWAY_DISABLED_DOMAINS', 'DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS',
-    'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_CALLING_SCOPE',
+    'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_CALLING_SCOPE', 'CFMEET_USAGE_EXPORT_ENABLED',
 ) + tuple(sorted(p.SAFE_ENV))
 SECRET_HINT = re.compile(r'(SECRET|PASSWORD|TOKEN|KEY|PEPPER|DATABASE_URL|REDIS_URL|CREDENTIAL|DSN)', re.I)
 
@@ -1722,6 +1722,29 @@ def gateway_family_checks():
     return checks
 
 
+USAGE_STREAMS_SQL = ("SELECT coalesce(json_agg(json_build_object('producer', producer, 'stream', stream, "
+                     "'positionAt', position_at) ORDER BY producer, stream), '[]') FROM devplat_usage_streams;")
+
+
+def activate_usage_export(sha, run_id, confirm):
+    """Part VI §55 unified usage ledger: Calling, Messaging and the Meeting Service export their
+    billing-neutral usage facts (safe refs only; platform application environments only, never
+    CF Meet consumer usage) to the Developer Platform, authenticated by the
+    `developer-event.publish` grants of activate-developer-webhooks. Customer /v1/usage and
+    /v1/limits stay served by Calling (API_GATEWAY_CENTRAL_USAGE_ENABLED is not switched)."""
+    for name in ('calling', 'messaging', 'meeting-service'):
+        if not env_of(name).get('CF_DEVELOPER_PLATFORM_BASE_URL'):
+            raise RuntimeError('%s has no Developer Platform target; run activate-developer-webhooks' % name)
+
+    def post():
+        time.sleep(60)
+        streams = json.loads(release.db_sql('cfmeet_developer_platform', USAGE_STREAMS_SQL) or '[]')
+        emit('usageStreams', {'acknowledgedStreams': streams})
+
+    apply_activation('activate-usage-export', sha, run_id, [
+        (name, {'CFMEET_USAGE_EXPORT_ENABLED': 'true'}) for name in ('calling', 'messaging', 'meeting-service')], post=post)
+
+
 # --- API Gateway public routing (host nginx, api.cfmeet.com) -----------------------------------
 
 # Only the Developer Platform families: every other public family keeps its existing direct
@@ -1870,6 +1893,7 @@ ACTIVATIONS = {
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
+    'activate-usage-export': (('activate-developer-webhooks',), activate_usage_export),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance',)
