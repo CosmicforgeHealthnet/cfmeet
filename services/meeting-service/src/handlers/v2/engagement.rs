@@ -346,6 +346,39 @@ pub async fn dismiss(
     Ok(qa(state.meeting.questions.dismiss(&actor, id, qid).await?))
 }
 
+/// Restore a dismissed question.
+///
+/// Undoes a dismissal. A DISMISSED question returns to ANSWERED when an answer had been recorded
+/// (live or written; the original answer and `answeredAt` are kept) and to OPEN otherwise. The
+/// body, author attribution, anonymity, upvotes and vote history are preserved; the pin removed by
+/// the dismissal is not reinstated. Requires the Q&A dismiss permission (`qna.dismiss`: host,
+/// co-host or moderator by default) and a conference that is not ended or cancelled.
+///
+/// Idempotent: restoring a question that is already OPEN or ANSWERED (a repeated request or a
+/// concurrent moderator) returns it with `changed: false` and emits no event. ARCHIVED is terminal
+/// and returns CONFERENCE_STATE_CONFLICT. On change the question `version` increments, a
+/// `QNA_RESTORE` audit record is written and `qna.question_restored` is delivered in the same
+/// transaction. Anonymous questions never reveal their author.
+#[utoipa::path(
+    post, path = "/api/v2/conferences/{id}/questions/{questionId}/restore", tag = "Q&A (v2)", operation_id = "v2_restore_question",
+    params(("id" = Uuid, Path, description = "Conference id"), ("questionId" = Uuid, Path, description = "Question id")),
+    responses(
+        (status = 200, description = "Restored (`changed: true`) or already OPEN/ANSWERED (`changed: false`)", body = QuestionActionResponse),
+        (status = 401, description = "UNAUTHORIZED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED — caller lacks qna.dismiss", body = ErrorEnvelope),
+        (status = 404, description = "QUESTION_NOT_FOUND — unknown question or not in this conference", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_STATE_CONFLICT — question is ARCHIVED, or the conference has ended", body = ErrorEnvelope)
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn restore(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, qid)): V2Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<QuestionActionResponse>> {
+    Ok(qa(state.meeting.questions.restore(&actor, id, qid).await?))
+}
+
 /// Archive a question.
 ///
 /// Moves a question in any state to ARCHIVED and unpins it, hiding it from attendees. Requires the

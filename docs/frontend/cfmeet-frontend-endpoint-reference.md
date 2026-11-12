@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 245 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 246 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.3.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.16.0 | 129 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.16.0 | 98 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **618** |
+| **Total** | | | **619** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -370,6 +370,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | POST | `/api/v2/conferences/{id}/questions/{questionId}/dismiss` | account session; participant token | Dismiss a question. | 200, 403, 404 | PERMISSION_DENIED, QUESTION_NOT_FOUND | `openapi/meeting-service.json#v2_dismiss_question` |
 | DELETE | `/api/v2/conferences/{id}/questions/{questionId}/pin` | account session; participant token | Unpin a question. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_unpin_question` |
 | POST | `/api/v2/conferences/{id}/questions/{questionId}/pin` | account session; participant token | Pin a question. | 200, 403, 409 | CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_pin_question` |
+| POST | `/api/v2/conferences/{id}/questions/{questionId}/restore` | account session; participant token | Restore a dismissed question. | 200, 401, 403, 404, 409 | CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED, QUESTION_NOT_FOUND | `openapi/meeting-service.json#v2_restore_question` |
 | DELETE | `/api/v2/conferences/{id}/questions/{questionId}/vote` | account session; participant token | Remove the caller's upvote (idempotent). | 200, 404 | QUESTION_NOT_FOUND | `openapi/meeting-service.json#v2_unvote_question` |
 | POST | `/api/v2/conferences/{id}/questions/{questionId}/vote` | account session; participant token | Upvote a question (idempotent). | 200, 404, 409 | CONFERENCE_STATE_CONFLICT, QUESTION_NOT_FOUND | `openapi/meeting-service.json#v2_vote_question` |
 

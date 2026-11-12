@@ -1265,6 +1265,7 @@ impl AdmissionService {
                             room_name: media_context.room_name(&conference),
                             ..RtcParticipantRef::new(&conference, s)
                         },
+                        participant_id: s.conference_participant_id,
                         display_name: participant.display_name.clone(),
                         permissions,
                         ttl,

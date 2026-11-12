@@ -158,8 +158,7 @@ SELECT json_build_object(
 """
 
 LEDGER_SQL = """
-SELECT CASE WHEN to_regclass('public.email_deliveries') IS NULL THEN 'null'::json ELSE
-  (SELECT json_build_object(
+SELECT json_build_object(
      'byStatus', (SELECT coalesce(json_object_agg(status, n), '{}') FROM
         (SELECT status, count(*) n FROM email_deliveries GROUP BY status) s),
      'byCategoryLast24h', (SELECT coalesce(json_object_agg(category || ':' || status, n), '{}') FROM
@@ -171,9 +170,12 @@ SELECT CASE WHEN to_regclass('public.email_deliveries') IS NULL THEN 'null'::jso
           GROUP BY last_error_class) e),
      'providerEvents24h', (SELECT coalesce(json_object_agg(event_type, n), '{}') FROM
         (SELECT event_type, count(*) n FROM email_delivery_events
-          WHERE received_at > now() - interval '24 hours' GROUP BY event_type) v)))
-END;
+          WHERE received_at > now() - interval '24 hours' GROUP BY event_type) v));
 """
+
+# PostgreSQL resolves every relation in a statement while parsing it, so a CASE guard cannot
+# hide a missing table: existence is checked in its own statement first.
+LEDGER_EXISTS_SQL = "SELECT to_regclass('public.email_deliveries') IS NOT NULL;"
 
 
 ORGANIZATIONS_SQL = """
@@ -202,7 +204,8 @@ def diagnose(cr, sha, run_id):
     emit('meetingMail', mail_summary(env))
     emit('meetingMailLogEvidence', log_evidence(meeting))
     emit('legacyRedisEmailQueueLength', redis_queue_length(cr, env))
-    emit('emailLedger', json.loads(cr.meeting_psql(LEDGER_SQL) or 'null'))
+    ledger_present = (cr.meeting_psql(LEDGER_EXISTS_SQL) or '').strip() == 't'
+    emit('emailLedger', json.loads(cr.meeting_psql(LEDGER_SQL) or 'null') if ledger_present else None)
     emit('conferenceLifecycle', json.loads(cr.meeting_psql(LIFECYCLE_SQL % sql_array(REPORTED_MEETING_CODES))))
     emit('meetingHistories', cr.history_state(cr.meeting_psql))
     # Organizations activation (Section 5): is the legacy dataset still empty? Counts only.

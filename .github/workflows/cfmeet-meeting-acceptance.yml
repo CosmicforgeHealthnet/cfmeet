@@ -1,0 +1,70 @@
+name: CF Meet meetings production acceptance
+
+# Authenticated, controlled production acceptance of the Meeting Service collaboration
+# surface that unit/integration tests cannot certify end to end: Q&A restore
+# (POST …/questions/{id}/restore, qna.question_restored) and the canonical participant id
+# in LiveKit credentials (two same-name participants on real LiveKit, hands, spotlight,
+# reconnect). See infra/calling/production/meeting_acceptance.py.
+#
+# Writes only its own meeting space / conference (ended and archived afterwards) with the
+# existing controlled acceptance account; never registers accounts or sends email; changes
+# no container or configuration. It takes the production lock so it never overlaps a release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Meetings acceptance (Q&A restore, LiveKit participant identity)
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Offline tests of the acceptance tooling
+        run: python3 -m unittest infra/calling/production/test_meeting_acceptance.py -v
+
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Run the acceptance journey on the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12)
+          remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "cd '$remote' && python3 -u meeting_acceptance.py '$GITHUB_RUN_ID'" | tee meeting-acceptance.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meeting-acceptance-${{ github.run_id }}
+          path: meeting-acceptance.log
+          if-no-files-found: ignore
