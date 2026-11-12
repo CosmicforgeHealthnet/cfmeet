@@ -53,6 +53,8 @@ class FakeApi:
         if re.fullmatch(r'/v1/projects/\w+/scopes', path):
             return 200, {}
         if path.endswith('/service-accounts'):
+            if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', body['name']):
+                return 400, {'error': {'code': 'VALIDATION_ERROR'}}
             return 201, {'id': self.id()}
         if path.endswith('/credentials') and method == 'POST':
             env = path.split('/')[3]
