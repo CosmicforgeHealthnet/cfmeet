@@ -16,7 +16,7 @@ CF Meet is **not** 100 % activated, and this report does not claim it. Every in-
   - Entitlement and scope enforcement.
   - Usage facts export to the unified ledger.
   - API Gateway customer families for Messaging, Calling account controls and central webhooks, with authentication, tenant isolation, CORS, TLS, quotas and routing verified.
-- **Proof:** authenticated acceptance 30/30 and certify `CERTIFIED_READ_ONLY` (13/13 services).
+- **Proof:** authenticated acceptance 30/30 and certify `CERTIFIED_READ_ONLY` (13/13 services), before and after the last activation.
 - **No service redeploy.** All 13 services still run release `4904ee33`. Activations now act on the deployed release when no image build input changed.
 - **Organizations off-host backup:** encrypted backup, off-host copy, restore drill and a VPS record that the cutover import now requires. Implemented, tested end to end, and on `main`.
 
@@ -54,6 +54,7 @@ What remains, and why:
 | 4 | `certify` (read-only, after) | [43176010902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43176010902) | **CERTIFIED_READ_ONLY**: 13/13 services PASS on every check; every grant of every completed activation present with the issuer's current key; provider safe defaults PASS; Organizations outbox clean; public surface: calling 51, communications 37, developer-platform 33, messaging 40, meetings 38 routes refuse anonymous requests or answer a placeholder 404 (never 2xx, never 5xx); numbering 26, privacy-relay 6, sms 4 unrouted (excluded); 10/10 OpenAPI documents; TLS 39 days |
 | 5 | `developer-acceptance` (authenticated, public API) | [43184898911](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43184898911) | **30/30 PASS** (two fresh, isolated acceptance accounts and developer tenants, everything through `https://api.cfmeet.com`; cleanup complete: webhook deleted, credentials revoked, projects archived, organizations closed). Earlier attempts [43174789147](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43174789147) and [43178627259](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43178627259) stopped on two defects **in the acceptance script** (an upper-case service-account name; a case-sensitive header lookup), fixed in PRs #57 and #59; both cleaned up after themselves. |
 | 6 | `activate-usage-export` | [43192643956](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43192643956) | activation base `58cc5eb8` ≡ `4904ee33`; `CFMEET_USAGE_EXPORT_ENABLED=true` on Calling, Messaging, Meeting; the ledger acknowledged Calling's streams `calling.usage` and `calling.artifact-storage` (exporter authenticated with `developer-event.publish`); regression PASS |
+| 7 | `certify` (read-only, final state) | [43198041905](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43198041905) | **CERTIFIED_READ_ONLY** after every activation of this report (the run fails unless certified) |
 
 ## Developer Platform and API Gateway
 
