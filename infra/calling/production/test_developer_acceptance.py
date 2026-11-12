@@ -22,7 +22,7 @@ class FakeApi:
     def __call__(self, client, method, path, body, expected, token, idempotent):
         bearer = token or client.token
         self.calls.append((method, path.split('?')[0], bearer))
-        client.last_headers = {'Cache-Control': 'no-store', 'x-request-id': 'r'}
+        client.last_headers = {'cache-control': 'no-store', 'x-request-id': 'r'}
         status, value = self.route(method, path, body, bearer)
         if status not in expected:
             raise da.Failed('%s %s %d' % (method, path, status))
@@ -103,10 +103,13 @@ class AcceptanceFlow(unittest.TestCase):
         self.assertLess(order.index('/v1/environments/devAenv/webhooks'),
                         next(i for i, p in enumerate(order) if p.endswith('/credentials')))
 
-    def test_failed_delivery_fails_the_run_but_still_cleans_up(self):
+    def test_failed_delivery_is_recorded_other_checks_still_run_and_cleanup_happens(self):
         api = FakeApi(delivery_status='FAILED')
-        with self.assertRaises(da.Failed):
-            self.run_flow(api)
+        checks = self.run_flow(api)
+        failed = [k for k, v in checks.items() if v == 'FAIL']
+        self.assertEqual(len(failed), 1, failed)
+        self.assertIn('SUCCEEDED', failed[0])
+        self.assertTrue(any(k.startswith('revocation') and v == 'PASS' for k, v in checks.items()))
         self.assertTrue(any(c[1].endswith('/close') for c in api.calls))
 
 
