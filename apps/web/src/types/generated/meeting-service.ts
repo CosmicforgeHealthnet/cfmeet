@@ -3686,6 +3686,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/questions/{questionId}/archive": "v2_archive_question",
   "POST /api/v2/conferences/{id}/questions/{questionId}/dismiss": "v2_dismiss_question",
   "POST /api/v2/conferences/{id}/questions/{questionId}/pin": "v2_pin_question",
+  "POST /api/v2/conferences/{id}/questions/{questionId}/restore": "v2_restore_question",
   "POST /api/v2/conferences/{id}/questions/{questionId}/vote": "v2_vote_question",
   "POST /api/v2/conferences/{id}/reactions": "v2_send_reaction",
   "POST /api/v2/conferences/{id}/realtime/ticket": "v2_realtime_ticket",
