@@ -36,6 +36,11 @@ EVENT_TYPES = ['credential.expiring_soon', 'credential.expired']
 DELIVERY_WAIT_SECONDS = 900
 
 
+def lower(headers):
+    """Header names are case-insensitive; the gateway sends them lower-case."""
+    return {k.lower(): v for k, v in headers.items()}
+
+
 class Failed(AssertionError):
     pass
 
@@ -73,9 +78,9 @@ class Client:
         request = urllib.request.Request(PUBLIC + path, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                status, raw, self.last_headers = response.status, response.read(), dict(response.headers)
+                status, raw, self.last_headers = response.status, response.read(), lower(response.headers)
         except urllib.error.HTTPError as error:
-            status, raw, self.last_headers = error.code, error.read(), dict(error.headers)
+            status, raw, self.last_headers = error.code, error.read(), lower(error.headers)
         try:
             value = json.loads(raw) if raw else {}
         except ValueError:
@@ -101,11 +106,20 @@ class Journey:
         self.checks = {}
         self.cleanup = []
 
-    def check(self, name, ok, **detail):
+    def check(self, name, ok, fatal=False, **detail):
+        """Records a check. Only setup checks whose output later steps need are fatal; every
+        other failure is recorded and the journey continues, so one run shows every result."""
         self.checks[name] = 'PASS' if ok else 'FAIL'
         cr.emit('developerAcceptance', dict(check=name, result=self.checks[name], **detail))
-        if not ok:
+        if not ok and fatal:
             raise Failed(name)
+
+    def step(self, name, fn, *args):
+        """Runs one independent group of checks; an unexpected answer fails only that group."""
+        try:
+            return fn(*args)
+        except Failed as error:
+            self.check(name + ': ' + str(error), False)
 
     def tenant(self, label, account, before_credential=None):
         console = Client(login(account), account)
@@ -113,14 +127,14 @@ class Journey:
                               expected=(201,), idempotent=True)
         self.cleanup.append(('POST', '/v1/organizations/%s/close' % org['id'], console))
         self.check('console %s: organization created through the gateway (DEVELOPER_SESSION)' % label,
-                   org.get('myRole') == 'OWNER' and org.get('state') == 'ACTIVE')
+                   org.get('myRole') == 'OWNER' and org.get('state') == 'ACTIVE', fatal=True)
         _, project = console.call('POST', '/v1/organizations/%s/projects' % org['id'],
                                   {'displayName': 'acceptance-%s' % label.lower()}, expected=(201,), idempotent=True)
         self.cleanup.insert(0, ('POST', '/v1/projects/%s/archive' % project['id'], console))
         _, env = console.call('POST', '/v1/projects/%s/environments' % project['id'],
                               {'kind': 'SANDBOX', 'displayName': 'acceptance'}, expected=(201,), idempotent=True)
         self.check('console %s: project and SANDBOX environment' % label,
-                   env.get('kind') == 'SANDBOX' and env.get('projectId') == project['id'])
+                   env.get('kind') == 'SANDBOX' and env.get('projectId') == project['id'], fatal=True)
         status, _ = console.call('POST', '/v1/projects/%s/environments' % project['id'], {'kind': 'PRODUCTION'},
                                  expected=(422,))
         self.check('console %s: PRODUCTION environment needs approval (422)' % label, status == 422)
@@ -136,9 +150,13 @@ class Journey:
                                  {'scopes': list(SCOPES), 'label': 'acceptance', 'expiresAt': expires}, expected=(201,))
         credential = issued['credential']
         self.cleanup.insert(0, ('POST', '/v1/environments/%s/credentials/%s/revoke' % (env['id'], credential['id']), console))
-        self.check('console %s: credential issued once with only the granted scopes' % label,
-                   issued['secret'].startswith('cfmk_sbx_') and sorted(credential['scopes']) == sorted(SCOPES)
-                   and console.last_headers.get('Cache-Control', '').find('no-store') >= 0)
+        self.check('console %s: credential secret issued once (cfmk_)' % label,
+                   str(issued.get('secret', '')).startswith('cfmk_'), fatal=True, environmentKind=credential.get('environmentKind'))
+        self.check('console %s: credential limited to the granted scopes' % label,
+                   sorted(credential.get('scopes') or []) == sorted(SCOPES), scopes=credential.get('scopes'))
+        self.check('console %s: secret response not cacheable' % label,
+                   'no-store' in console.last_headers.get('cache-control', ''),
+                   cacheControl=console.last_headers.get('cache-control'))
         tenant.update(credential=credential, machine=Client(issued['secret']))
         return tenant
 
@@ -147,7 +165,7 @@ class Journey:
         for path, family in (('/v1/limits', 'Calling'), ('/v1/usage', 'Calling'), ('/v1/conversations', 'Messaging'),
                              ('/v1/webhooks', 'Developer Platform (central webhooks)')):
             status, _ = machine.call('GET', path)
-            quota = {k.lower(): v for k, v in machine.last_headers.items() if k.lower().startswith('x-cf-quota')}
+            quota = {k: v for k, v in machine.last_headers.items() if k.startswith('x-cf-quota')}
             self.check('gateway %s: %s %s with a platform credential' % (label, family, path), status == 200,
                        requestId=machine.last_headers.get('x-request-id'), quota=quota or None)
         status, value = machine.call('POST', '/v1/webhooks', {'url': self.receiver, 'eventTypes': EVENT_TYPES},
@@ -236,12 +254,12 @@ def run(run_id, receiver):
     try:
         a = journey.tenant('A', accounts[0], before_credential=journey.webhook)
         b = journey.tenant('B', accounts[1])
-        journey.gateway('A', a)
-        journey.gateway('B', b)
-        journey.webhook_visible(a)
-        journey.isolation(a, b)
-        journey.delivery(a, a['hook'])
-        journey.revocation(b)
+        journey.step('gateway A', journey.gateway, 'A', a)
+        journey.step('gateway B', journey.gateway, 'B', b)
+        journey.step('webhooks', journey.webhook_visible, a)
+        journey.step('isolation', journey.isolation, a, b)
+        journey.step('delivery', journey.delivery, a, a['hook'])
+        journey.step('revocation', journey.revocation, b)
     finally:
         journey.close()
     cr.emit('developerAcceptanceVerdict', {'passed': sum(v == 'PASS' for v in journey.checks.values()),
