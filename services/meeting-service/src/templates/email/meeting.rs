@@ -3,32 +3,9 @@
 //! from a request.
 
 use super::base::{button, wrap_html, wrap_text};
+pub use super::base::escape_html;
+use super::base::plain;
 use super::EmailTemplate;
-
-/// Minimal HTML escaping for text and attribute values.
-pub fn escape_html(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            c if c.is_control() && c != '\n' => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Plain-text variant: strip control characters (no header injection, no terminal codes).
-fn plain(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect()
-}
 
 /// One notification email: a greeting, paragraphs, an optional call to action.
 pub struct NotificationBody<'a> {

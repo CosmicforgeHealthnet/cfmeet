@@ -82,7 +82,7 @@ pub async fn livekit_webhook(
 }
 
 /// Constant-time-length internal token check (unset token → route hidden).
-fn internal_token_ok(headers: &HeaderMap) -> bool {
+pub(crate) fn internal_token_ok(headers: &HeaderMap) -> bool {
     let expected = std::env::var("INTERNAL_API_TOKEN").unwrap_or_default();
     let presented = headers
         .get("x-internal-token")

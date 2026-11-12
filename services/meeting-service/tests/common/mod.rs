@@ -164,6 +164,10 @@ async fn template(admin: &str) -> String {
             migration::OrganizationIntegrationMigrator::up(&tmpl, None)
                 .await
                 .expect("organization integration migrations apply");
+            // Final completion: durable email delivery and conference presence.
+            migration::LifecycleDeliveryMigrator::up(&tmpl, None)
+                .await
+                .expect("lifecycle delivery migrations apply");
             tmpl.close().await.ok();
             name
         })

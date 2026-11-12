@@ -99,6 +99,14 @@ pub struct AuthPolicy {
     /// (`EMAIL_VERIFICATION_ENFORCEMENT`, default `off` = behaviour unchanged). Effective
     /// only while `EMAIL_VERIFICATION_REQUIRED` is true.
     pub email_verification_enforcement: EmailVerificationEnforcement,
+    /// Gradual enforcement (final completion, Section 9): with `login` enforcement, only
+    /// accounts created at or after this instant are refused at sign-in while unverified
+    /// (`EMAIL_VERIFICATION_ENFORCE_FROM`, RFC 3339). Unset: every pending account.
+    pub email_verification_enforce_from: Option<chrono::DateTime<chrono::Utc>>,
+    /// End of the transition for accounts created before `enforce_from`
+    /// (`EMAIL_VERIFICATION_GRACE_UNTIL`, RFC 3339). Unset: they are never refused at
+    /// sign-in (they are prompted to verify instead).
+    pub email_verification_grace_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// ACC-016: enforcement points for unverified (pending) accounts.
@@ -210,7 +218,14 @@ impl AuthPolicy {
             "login" => EmailVerificationEnforcement::Login,
             _ => EmailVerificationEnforcement::Off,
         };
+        let instant = |k: &str| {
+            get(k)
+                .and_then(|v| chrono::DateTime::parse_from_rfc3339(v.trim()).ok())
+                .map(|t| t.with_timezone(&chrono::Utc))
+        };
         Self {
+            email_verification_enforce_from: instant("EMAIL_VERIFICATION_ENFORCE_FROM"),
+            email_verification_grace_until: instant("EMAIL_VERIFICATION_GRACE_UNTIL"),
             google_token_delivery,
             google_browser_binding,
             client_ip_header,
@@ -229,6 +244,25 @@ impl AuthPolicy {
             && claims
                 .auth_time
                 .is_some_and(|t| t <= now + 60 && now - t <= self.reauth_max_age_secs)
+    }
+
+    /// ACC-016 + Section 9: whether sign-in refuses this pending account. With `login`
+    /// enforcement, accounts created before `EMAIL_VERIFICATION_ENFORCE_FROM` keep signing in
+    /// until `EMAIL_VERIFICATION_GRACE_UNTIL` (if any): existing users are never locked out
+    /// by surprise.
+    pub fn login_requires_verified_email(
+        &self,
+        account_created_at: chrono::DateTime<chrono::Utc>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        if !self.email_verification_enforcement.covers_login() {
+            return false;
+        }
+        match self.email_verification_enforce_from {
+            None => true,
+            Some(from) if account_created_at >= from => true,
+            Some(_) => self.email_verification_grace_until.is_some_and(|g| now >= g),
+        }
     }
 
     /// ACC-016: refuse a communications operation for an account without a verified
@@ -945,6 +979,37 @@ pub async fn list_events(
         None
     };
     Ok((out, next))
+}
+
+#[cfg(test)]
+mod gradual_verification_tests {
+    use super::*;
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn existing_accounts_keep_signing_in_during_the_transition() {
+        let from = Utc.with_ymd_and_hms(2026, 11, 13, 0, 0, 0).unwrap();
+        let p = AuthPolicy::from_lookup(|k| match k {
+            "EMAIL_VERIFICATION_ENFORCEMENT" => Some("login".into()),
+            "EMAIL_VERIFICATION_ENFORCE_FROM" => Some("2026-11-13T00:00:00Z".into()),
+            _ => None,
+        });
+        assert!(p.login_requires_verified_email(from + Duration::hours(1), from + Duration::hours(2)));
+        assert!(!p.login_requires_verified_email(from - Duration::days(30), from + Duration::days(400)));
+        let with_grace = AuthPolicy::from_lookup(|k| match k {
+            "EMAIL_VERIFICATION_ENFORCEMENT" => Some("login".into()),
+            "EMAIL_VERIFICATION_ENFORCE_FROM" => Some("2026-11-13T00:00:00Z".into()),
+            "EMAIL_VERIFICATION_GRACE_UNTIL" => Some("2027-01-31T00:00:00Z".into()),
+            _ => None,
+        });
+        let old = from - Duration::days(30);
+        assert!(!with_grace.login_requires_verified_email(old, from + Duration::days(10)));
+        assert!(with_grace.login_requires_verified_email(old, from + Duration::days(90)));
+        // Without a cutoff, `login` keeps its original meaning (every pending account).
+        let all = AuthPolicy::from_lookup(|k| (k == "EMAIL_VERIFICATION_ENFORCEMENT").then(|| "login".into()));
+        assert!(all.login_requires_verified_email(old, from));
+        assert!(!AuthPolicy::default().login_requires_verified_email(from, from));
+    }
 }
 
 #[cfg(test)]

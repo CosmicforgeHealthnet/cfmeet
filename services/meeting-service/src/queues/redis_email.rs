@@ -1,6 +1,8 @@
 //! Redis Email Queue
 //!
-//! Simple email queue using Redis List (LPUSH/BRPOP).
+//! The former volatile email queue (Redis List). Superseded by the durable ledger
+//! (`services::email_delivery`); kept only so messages left in it at upgrade time are
+//! imported once.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -84,7 +86,7 @@ impl RedisEmailQueue {
             .await
             .map_err(|e| ApiError::InternalError(format!("Redis LPUSH error: {}", e)))?;
 
-        tracing::info!("Email job queued: {} -> {}", job.id, to_email);
+        tracing::info!("Email job queued: {}", job.id);
         Ok(job_id)
     }
 
@@ -107,6 +109,17 @@ impl RedisEmailQueue {
             }
             None => Ok(None),
         }
+    }
+
+    /// Pop one job without blocking (legacy queue import).
+    pub async fn pop_nowait(&self) -> ApiResult<Option<EmailJob>> {
+        let mut conn = self.redis.get_conn().await?;
+        let result: Option<String> = redis::cmd("RPOP")
+            .arg(EMAIL_QUEUE)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| ApiError::InternalError(format!("Redis RPOP error: {}", e)))?;
+        Ok(result.and_then(|json| serde_json::from_str(&json).ok()))
     }
 
     /// Re-queue a job for retry

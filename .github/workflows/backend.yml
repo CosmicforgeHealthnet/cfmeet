@@ -191,7 +191,7 @@ jobs:
       - name: Meeting-service migration histories (release order)
         run: |
           d="$GITHUB_WORKSPACE/services/meeting-service/target/debug"
-          echo "MEETING_SERVICE_MIGRATION_BINS=$d/migration $d/account-security-migration $d/meetings-calendar-migration $d/profile-notifications-migration $d/account-communications-migration $d/account-hardening-migration $d/organization-integration-migration" >> "$GITHUB_ENV"
+          echo "MEETING_SERVICE_MIGRATION_BINS=$d/migration $d/account-security-migration $d/meetings-calendar-migration $d/profile-notifications-migration $d/account-communications-migration $d/account-hardening-migration $d/organization-integration-migration $d/lifecycle-delivery-migration" >> "$GITHUB_ENV"
 
       # New database: every history applies as the MIGRATOR role; the RUNTIME role gets
       # data access only (DML, sequences, triggers fire) and is refused DDL.

@@ -19,7 +19,7 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, developer-acceptance]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, developer-acceptance, diagnose, email-acceptance]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
@@ -50,16 +50,16 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Production operations run from main only"; exit 1; }
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::release_sha must be a full lowercase SHA"; exit 1; }
-          # inspect is read-only and rollback restores the recorded previous containers;
+          # inspect and diagnose are read-only and rollback restores the recorded previous containers;
           # every other operation acts on exactly the main head it was dispatched on
           # (certify uses it as the reference for revision lineage and source comparison).
-          if [[ "$OPERATION" != inspect && "$OPERATION" != rollback && "$RELEASE_SHA" != "$GITHUB_SHA" ]]; then
+          if [[ "$OPERATION" != inspect && "$OPERATION" != diagnose && "$OPERATION" != rollback && "$RELEASE_SHA" != "$GITHUB_SHA" ]]; then
             echo "::error::release_sha ($RELEASE_SHA) must equal the main head ($GITHUB_SHA)"; exit 1
           fi
 
       - name: Require green main CI for this SHA
-        # Read-only operations (inspect, certify) and rollback do not wait for CI.
-        if: inputs.operation != 'inspect' && inputs.operation != 'rollback' && inputs.operation != 'certify'
+        # Read-only operations (inspect, diagnose, certify) and rollback do not wait for CI.
+        if: inputs.operation != 'inspect' && inputs.operation != 'diagnose' && inputs.operation != 'rollback' && inputs.operation != 'certify'
         uses: actions/github-script@v7
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
@@ -241,6 +241,40 @@ jobs:
           cd infra/calling/production
           python3 activation_base.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "$base" activation-base.json
           { echo '### Activation base'; echo '```json'; python3 -c 'import json; d=json.load(open("activation-base.json")); d.pop("inputs"); print(json.dumps(d, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the Resend credentials and the acceptance recipient (never printed)
+        # The dedicated CF Meet Resend API key (and optional webhook signing secret) live in
+        # the production environment's secrets; they reach the VPS only through SSH stdin
+        # into 0400 files of the existing secret store. The acceptance recipient (a
+        # controlled inbox; default Resend's test inbox) is a non-secret variable.
+        if: inputs.operation == 'activate-resend-email' || inputs.operation == 'email-acceptance'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          OPERATION: ${{ inputs.operation }}
+          RESEND_API_KEY: ${{ secrets.CFMEET_RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.CFMEET_RESEND_WEBHOOK_SECRET }}
+          ACCEPTANCE_RECIPIENT: ${{ vars.CFMEET_EMAIL_ACCEPTANCE_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          install_secret() {  # name, value
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+              "umask 077; mkdir -p /opt/cfmeet-core/secrets; cat > '/opt/cfmeet-core/secrets/$1.new' && chmod 0400 '/opt/cfmeet-core/secrets/$1.new' && mv -f '/opt/cfmeet-core/secrets/$1.new' '/opt/cfmeet-core/secrets/$1'" <<< "$2"
+          }
+          if [[ "$OPERATION" == activate-resend-email ]]; then
+            [[ "$RESEND_API_KEY" =~ ^re_[A-Za-z0-9_]{8,200}$ ]] || { echo "::error::CFMEET_RESEND_API_KEY is missing or not a Resend API key"; exit 1; }
+            install_secret resend-api-key "$RESEND_API_KEY"
+            if [[ -n "$RESEND_WEBHOOK_SECRET" ]]; then
+              [[ "$RESEND_WEBHOOK_SECRET" =~ ^whsec_[A-Za-z0-9+/=]{16,200}$ ]] || { echo "::error::CFMEET_RESEND_WEBHOOK_SECRET is not a whsec_ signing secret"; exit 1; }
+              install_secret resend-webhook-secret "$RESEND_WEBHOOK_SECRET"
+            fi
+            echo "Resend credentials installed (webhook secret: $([[ -n "$RESEND_WEBHOOK_SECRET" ]] && echo yes || echo no))"
+          fi
+          if [[ -n "$ACCEPTANCE_RECIPIENT" ]]; then
+            [[ "$ACCEPTANCE_RECIPIENT" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "::error::CFMEET_EMAIL_ACCEPTANCE_RECIPIENT is not an address"; exit 1; }
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > /opt/cfmeet-core/coordinated/email-acceptance-recipient" <<< "$ACCEPTANCE_RECIPIENT"
+          fi
 
       - name: Run the operation on the VPS
         env:

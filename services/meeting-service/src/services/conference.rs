@@ -685,33 +685,10 @@ impl ConferenceService {
             }
             return Ok(ConferenceOutcome::unchanged(conference));
         };
-        let mut am: conference_sessions::ActiveModel = conference.clone().into();
-        am.status = Set(next);
-        am.ending_requested_at = Set(Some(Utc::now()));
-        am.ended_by = Set(Some(authority.audit.reference()));
-        am.termination_reason = Set(Some(reason));
-        let updated = self.apply(&txn, conference, am).await?;
-        // Part G: stop capture first (queued before the room terminate command); the
-        // recording may finish PROCESSING after the conference ended.
-        crate::services::artifacts::recording::RecordingService::stop_all_in_txn(
-            &txn,
-            &self.core,
-            &updated,
-            &authority.audit,
-        )
-        .await?;
-        self.record(
-            &txn,
-            &authority.audit,
-            &updated,
-            action::CONFERENCE_END_REQUEST,
-            &[
-                event::CONFERENCE_ENDING,
-                event::RTC_ROOM_TERMINATE_REQUESTED,
-            ],
-            json!({ "terminationReason": reason }),
-        )
-        .await?;
+        debug_assert_eq!(next, ConferenceStatus::Ending);
+        let updated = self
+            .request_end_locked(&txn, conference, &authority.audit, reason, None)
+            .await?;
         txn.commit().await?;
         if !self.rtc.room_control() {
             // Credential-only provider: ENDING is never faked into ENDED.
@@ -726,6 +703,168 @@ impl ConferenceService {
             Enforcement::Pending
         };
         Ok(ConferenceOutcome::changed(current, enforcement))
+    }
+
+    /// LIVE → ENDING on a row the caller holds `FOR UPDATE` (shared by host end, space
+    /// archive and the empty-conference timeout): recordings are stopped first, then the
+    /// transition is audited and `conference.ending` + the provider terminate command are
+    /// committed with it. ENDED follows once the provider confirms termination.
+    async fn request_end_locked(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        conference: conference_sessions::Model,
+        actor: &AuditActor,
+        reason: TerminationReason,
+        cause: Option<&str>,
+    ) -> ApiResult<conference_sessions::Model> {
+        let mut am: conference_sessions::ActiveModel = conference.clone().into();
+        am.status = Set(ConferenceStatus::Ending);
+        am.ending_requested_at = Set(Some(Utc::now()));
+        am.ended_by = Set(Some(actor.reference()));
+        am.termination_reason = Set(Some(reason));
+        let updated = self.apply(txn, conference, am).await?;
+        // Part G: stop capture first (queued before the room terminate command); the
+        // recording may finish PROCESSING after the conference ended.
+        crate::services::artifacts::recording::RecordingService::stop_all_in_txn(
+            txn,
+            &self.core,
+            &updated,
+            actor,
+        )
+        .await?;
+        let mut metadata = json!({ "terminationReason": reason });
+        if let Some(cause) = cause {
+            metadata["cause"] = json!(cause);
+        }
+        self.record(
+            txn,
+            actor,
+            &updated,
+            action::CONFERENCE_END_REQUEST,
+            &[
+                event::CONFERENCE_ENDING,
+                event::RTC_ROOM_TERMINATE_REQUESTED,
+            ],
+            metadata,
+        )
+        .await?;
+        Ok(updated)
+    }
+
+    /// After commit: drive provider termination (→ ENDED, `conference.ended`) of
+    /// conferences moved to ENDING. A failure leaves them ENDING (joins and credentials
+    /// refused); the outbox relay and the reconciler retry.
+    pub async fn complete_ending(&self, ids: &[Uuid]) {
+        if !self.rtc.room_control() {
+            return;
+        }
+        for id in ids {
+            if let Err(e) = self.enforce(*id).await {
+                tracing::warn!(conference_id = %id, "provider termination deferred: {e}");
+            }
+        }
+    }
+
+    /// Space archive (final completion, Section 4): inside the archive transaction, which
+    /// holds the space row, lock every unfinished conference of the space and end the LIVE
+    /// ones. Locking the CREATED/PREPARING/WAITING rows too makes a concurrent start wait
+    /// for this transaction and then see the archived space (start refuses it), so an
+    /// archived space never keeps or gains a LIVE conference.
+    pub async fn end_live_for_archive(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        space_id: Uuid,
+        actor: &AuditActor,
+        reason: TerminationReason,
+    ) -> ApiResult<Vec<Uuid>> {
+        use sea_orm::QuerySelect;
+        let open = conference_sessions::Entity::find()
+            .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
+            .filter(conference_sessions::Column::Status.is_in([
+                ConferenceStatus::Created,
+                ConferenceStatus::Preparing,
+                ConferenceStatus::Waiting,
+                ConferenceStatus::Live,
+            ]))
+            .order_by_asc(conference_sessions::Column::Id)
+            .lock(sea_orm::sea_query::LockType::Update)
+            .all(txn)
+            .await?;
+        let mut ended = Vec::new();
+        for c in open {
+            if c.status != ConferenceStatus::Live || c.origin == RecordOrigin::Legacy {
+                continue;
+            }
+            let updated = self
+                .request_end_locked(txn, c, actor, reason, Some("SPACE_ARCHIVED"))
+                .await?;
+            ended.push(updated.id);
+        }
+        Ok(ended)
+    }
+
+    /// Empty instant conference (final completion, Section 3): end `id` with
+    /// `EMPTY_TIMEOUT` only if, under the conference row lock, it is still a LIVE v2
+    /// conference, its recorded empty interval is still `empty_since`, and no participant
+    /// session was established or became active since then (a join racing the sweeper wins:
+    /// the interval is reset instead). Returns whether it was ended.
+    pub async fn end_if_still_empty(
+        &self,
+        id: Uuid,
+        empty_since: DateTime<Utc>,
+    ) -> ApiResult<bool> {
+        let txn = self.core.db.begin().await?;
+        let conference = lock_conference(&txn, id).await?;
+        if conference.status != ConferenceStatus::Live || conference.origin != RecordOrigin::V2 {
+            txn.commit().await?;
+            return Ok(false);
+        }
+        let recorded = txn
+            .query_one(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT empty_since FROM conference_presence WHERE conference_id = $1 FOR UPDATE",
+                [id.into()],
+            ))
+            .await?
+            .map(|r| r.try_get::<Option<DateTime<Utc>>>("", "empty_since"))
+            .transpose()?
+            .flatten();
+        let joined_since = txn
+            .query_one(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT EXISTS (SELECT 1 FROM participant_sessions
+                    WHERE conference_id = $1
+                      AND (established_at > $2
+                           OR (state IN ('PENDING', 'CONNECTED') AND updated_at > $2))) AS joined",
+                [id.into(), empty_since.into()],
+            ))
+            .await?
+            .map(|r| r.try_get::<bool>("", "joined"))
+            .transpose()?
+            .unwrap_or(false);
+        if recorded != Some(empty_since) || joined_since {
+            txn.execute(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "UPDATE conference_presence SET empty_since = NULL, last_occupied_at = now(),
+                        last_checked_at = now() WHERE conference_id = $1",
+                [id.into()],
+            ))
+            .await?;
+            txn.commit().await?;
+            return Ok(false);
+        }
+        let actor = AuditActor::system("conference-empty-timeout");
+        self.request_end_locked(
+            &txn,
+            conference,
+            &actor,
+            TerminationReason::EmptyTimeout,
+            Some("NO_PARTICIPANTS"),
+        )
+        .await?;
+        txn.commit().await?;
+        self.complete_ending(&[id]).await;
+        Ok(true)
     }
 
     /// CREATED|PREPARING|WAITING → CANCELLED. For a recurring occurrence this is a

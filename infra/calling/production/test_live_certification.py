@@ -269,7 +269,12 @@ class TrustAndIntegrations(unittest.TestCase):
         self.assertEqual(report[('telephony', 'TELEPHONY_ENABLED')]['state'], 'disabled')
         self.assertEqual(report[('telephony', 'PUBLIC_INBOUND_CALLING_ENABLED')]['state'], 'disabled')  # absent = off
         self.assertEqual(report[('messaging', 'MESSAGING_PUSH_PROVIDER')]['state'], 'enabled')
-        self.assertEqual(report[('meeting-service', 'SMTP_*')]['state'], 'configured')
+        self.assertEqual(report[('meeting-service', 'EMAIL_PROVIDER')]['state'], 'configured')
+        self.assertEqual(report[('meeting-service', 'EMAIL_PROVIDER')]['value'], 'smtp')
+        resend = lc.integrations({'meeting-service': {'EMAIL_PROVIDER': 'resend',
+                                                      'RESEND_API_KEY_FILE': '/run/secrets/resend-api-key'}})
+        self.assertEqual([(r['value'], r['state']) for r in resend if r['variable'] == 'EMAIL_PROVIDER'],
+                         [('resend', 'configured')])
         self.assertNotIn('hunter2', json.dumps(list(report.values())))
 
 
@@ -285,8 +290,10 @@ class VerifyStaysStrict(unittest.TestCase):
     def test_workflow_gate_keeps_main_head_and_skips_ci_wait_only_for_read_only_operations(self):
         text = (Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
         self.assertIn('[[ "$GITHUB_REF" == refs/heads/main ]]', text)
-        self.assertIn('"$OPERATION" != inspect && "$OPERATION" != rollback && "$RELEASE_SHA" != "$GITHUB_SHA"', text)
-        self.assertIn("inputs.operation != 'inspect' && inputs.operation != 'rollback' && inputs.operation != 'certify'", text)
+        self.assertIn('"$OPERATION" != inspect && "$OPERATION" != diagnose && "$OPERATION" != rollback '
+                      '&& "$RELEASE_SHA" != "$GITHUB_SHA"', text)
+        self.assertIn("inputs.operation != 'inspect' && inputs.operation != 'diagnose' && inputs.operation != 'rollback' "
+                      "&& inputs.operation != 'certify'", text)
         self.assertIn('group: deploy-backend-production', text)
 
 

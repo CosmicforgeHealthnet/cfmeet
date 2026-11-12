@@ -88,6 +88,19 @@ pub fn create_routes(state: AppState) -> Router {
             crate::services::communications::public_routes(),
         )
         .merge(crate::services::communications::internal_routes())
+        // Unified email delivery: provider events (signature protected) and operations.
+        .route(
+            "/api/v1/email/provider-events/resend",
+            axum::routing::post(handlers::email::resend_events),
+        )
+        .route(
+            "/internal/operations/email/acceptance",
+            axum::routing::post(handlers::email::acceptance_email),
+        )
+        .route(
+            "/internal/operations/email/deliveries/:id",
+            get(handlers::email::delivery_status),
+        )
         // Internal provider routes (signature / internal-token protected; Part E).
         .route(
             "/internal/rtc/livekit/webhook",
