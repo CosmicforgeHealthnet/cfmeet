@@ -6,7 +6,32 @@ Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · B
 
 **`NOT 100% — ACTIVATION PARTIAL, REMAINDER BLOCKED BY OWNER ACTIONS, AN EXTERNAL ASSESSMENT AND ELAPSED TIME`**
 
-<!-- VERDICT_DETAIL -->
+CF Meet is **not** 100 % activated, and this report does not claim it. Every in-scope feature that could be activated without an owner decision, a provider credential, an independent assessment or elapsed time is now active in production with production evidence:
+
+- **Activated and verified in production:**
+  - Developer Console sessions.
+  - Customer webhooks: signed, delivered, retried and observable, with delivery from a dedicated egress path.
+  - Event publication from Calling, Messaging and the Meeting Service.
+  - Credential lifecycle notices.
+  - Entitlement and scope enforcement.
+  - API Gateway customer families for Messaging, Calling account controls and central webhooks, with authentication, tenant isolation, CORS, TLS, quotas and routing verified.
+- **Proof:** authenticated acceptance 30/30 and certify `CERTIFIED_READ_ONLY` (13/13 services).
+- **No service redeploy.** All 13 services still run release `4904ee33`. Activations now act on the deployed release when no image build input changed.
+- **Organizations off-host backup:** encrypted backup, off-host copy, restore drill and a VPS record that the cutover import now requires. Implemented, tested end to end, and on `main`.
+
+What remains, and why:
+
+| Remaining | Kind | Exactly what is needed |
+|---|---|---|
+| Off-host backup, restore drill → org import → shadow | **owner action** | Create the age key pair(s); set `vars.CFMEET_BACKUP_AGE_RECIPIENTS` and `secrets.CFMEET_BACKUP_AGE_IDENTITY`; dispatch `cfmeet-offsite-backup.yml`. Then `org-cutover-export`, `org-cutover-import offsite-backup-verified`, `org-cutover-shadow`. |
+| Seven-day zero-mismatch evidence | **elapsed time** | 7 days of shadow observation, which can start only after the step above (runbook §5) |
+| Authoritative cutover; organization management, workspaces, teams, policies, organization Messaging; organization-scoped Enterprise Calling and bindings | **owner action** (irreversible gate) | Accept the shadow evidence, block the three legacy write routes, `org-cutover-authoritative offsite-backup-verified,quiesced`, `activate-enterprise-calling`, per-organization service accounts and bindings |
+| Private E2EE messaging | **independent assessment** | Qualified independent cryptographic assessment, an independent key-transparency witness, and owner sign-off. Code refuses production until then. |
+| Push (web, Android, iOS) | **owner credentials + E2EE** | E2EE approval (registration requires E2EE devices), APNs `.p8` and FCM service account, a VAPID public-key route and Calling push dispatcher, client registration, physical-device tests |
+| Healthcare profile | **owner / compliance** | HealthNet appointment-authority endpoint and token, retention decision, DPIA / data classification, owner approval |
+| Production-access workflow | **owner decision** | Named reviewers and the auto-approval policy; then an operator-console identity |
+| Gateway WebSocket proxy; platform-credential `/api/v2`; meeting recording v2; email verification enforcement | **owner decisions** | See the rows below |
+| Transcription, meeting intelligence | **external providers** | STT / AI providers and a data-processing decision |
 
 ## Exclusions (owner, unchanged)
 
@@ -26,11 +51,61 @@ Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · B
 | 2 | `activate-developer-webhooks` | [43173688215](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43173688215) | preconditions: Calling 0 webhook subscriptions, 0 open deliveries, no migration state; Developer Platform API + worker `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED=true`, `…_DELIVERY_MODE=active`, sealed key ring mounted 0400; worker alone on `cfmeet-webhook-egress`; Calling authority retired; Calling, Messaging, Meeting publish to the central ingestion (grants `developer-event.publish`); regression PASS |
 | 3 | `activate-gateway-families` | [43174233820](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43174233820) | grants `calling-request.forward`, `messaging-request.forward` (← gateway); gateway upstreams Calling + Messaging, central webhooks on, domains `numbering,sms,privacy-relay` disabled; **18/18 post-checks PASS** (8 families refuse anonymous requests 401/403, forged credential refused, CORS `https://cfmeet.com` only, `/v1/numbers`, `/v1/sms`, `/v1/privacy-relay` unrouted, internal paths private, Swagger); regression PASS |
 | 4 | `certify` (read-only, after) | [43176010902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43176010902) | **CERTIFIED_READ_ONLY**: 13/13 services PASS on every check; every grant of every completed activation present with the issuer's current key; provider safe defaults PASS; Organizations outbox clean; public surface: calling 51, communications 37, developer-platform 33, messaging 40, meetings 38 routes refuse anonymous requests or answer a placeholder 404 (never 2xx, never 5xx); numbering 26, privacy-relay 6, sms 4 unrouted (excluded); 10/10 OpenAPI documents; TLS 39 days |
-<!-- ACCEPTANCE_ROWS -->
+| 5 | `developer-acceptance` (authenticated, public API) | [43184898911](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43184898911) | **30/30 PASS** (two fresh, isolated acceptance accounts and developer tenants, everything through `https://api.cfmeet.com`; cleanup complete: webhook deleted, credentials revoked, projects archived, organizations closed). Earlier attempts [43174789147](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43174789147) and [43178627259](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43178627259) stopped on two defects **in the acceptance script** (an upper-case service-account name; a case-sensitive header lookup), fixed in PRs #57 and #59; both cleaned up after themselves. |
+| 6 | `activate-usage-export` | pending | dispatched after this report reaches `main` (the step ships with it) |
 
 ## Developer Platform and API Gateway
 
-<!-- DEV_ROWS -->
+Acceptance run [43184898911](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43184898911), checks quoted as recorded:
+
+- console A/B: organization created through the gateway (`DEVELOPER_SESSION`, CF Meet session verified by the Meeting session bridge); project and SANDBOX environment; **PRODUCTION environment needs approval (422)**
+- console A/B: credential secret issued once (`cfmk_`, SANDBOX), limited to the granted scopes `conversations.manage, usage.read, webhooks.read`, response `Cache-Control: no-store`
+- gateway A/B: Calling `/v1/limits` and `/v1/usage`, Messaging `/v1/conversations`, Developer Platform central `/v1/webhooks` with a platform credential → 200, each with gateway quota headers `x-cf-quota-limit-minute: 120`, `x-cf-quota-limit-day: 10000` (SANDBOX entitlement) and a request id
+- gateway: scope enforced (`POST /v1/webhooks` without `webhooks.manage` → 403 `INSUFFICIENT_SCOPE`); forged platform credential → 401; revoked credential → 401
+- isolation: developer B reading A's project, environment and environment webhooks → 404 `NOT_FOUND`; B's credential lists none of A's webhooks
+- webhooks: subscription created with a signing secret; visible to the environment credential through the gateway; a real `credential.expiring_soon` event (worker lifecycle sweep) **delivered: status `SUCCEEDED`, 1 attempt, HTTP 204, attempt recorded** (receiver: a public HTTPS endpoint answering 204, because `api.cfmeet.com` itself resolves to the private TLS proxy on the worker's network and the STRICT policy rightly refuses it)
+
+| Feature | Owner service | Previous state | Final production state | Activation | API availability | Evidence | Remaining dependency | Status |
+|---|---|---|---|---|---|---|---|---|
+| Developer Console sessions (organizations, projects, environments, members, invitations, service accounts, credentials) | Developer Platform + Meeting (session bridge) | every `DEVELOPER_SESSION` request refused (bridge off, no Meeting target) | bridge on; grant `user-session.verify`; fails closed | `activate-developer-console`, run 43169453546 | `/v1/organizations`, `/v1/projects`, `/v1/environments`, `/v1/scopes`, `/v1/invitations`, `/v1/commercial-plans` through the gateway | acceptance 30/30; certify grant check | — | ACTIVE_VERIFIED |
+| Customer webhooks: subscriptions, signing secrets (sealed key ring), signed deliveries | Developer Platform (API + worker) | `WEBHOOKS_ENABLED=false`, mode `shadow`; no egress (core network `--internal`) | enabled, mode `active`, key ring `prod-1` (0400), worker-only egress bridge with the STRICT endpoint policy | `activate-developer-webhooks`, run 43173688215 | console `/v1/environments/{id}/webhooks*`; customer `/v1/webhooks`, `/v1/webhook-deliveries` (central, via the gateway) | real delivery `SUCCEEDED` (HTTP 204, attempt recorded); subscription + signing secret; certify | — | ACTIVE_VERIFIED |
+| Webhook delivery retries, auto-disable, replay and monitoring | Developer Platform worker | not running (shadow) | active: up to 8 attempts, jittered exponential backoff (30 s base, 6 h cap), auto-disable after 50 consecutive failures, replay, deliveries / attempts API, worker metrics | same | `GET …/webhooks/{id}/deliveries`, `GET …/webhook-deliveries/{id}/attempts`, `POST …/replay` | deliveries and attempts read back in production by the acceptance (status, attempt count, HTTP status, failure category); retry schedule exercised by the package's tests (`packages/webhooks`), not by a forced production failure | — | ACTIVE_VERIFIED |
+| Event publication from first-party producers (Calling, Messaging, Meeting) to the central ingestion | Calling, Messaging, Meeting → Developer Platform | Messaging → Calling (events waited PENDING: Calling had no target); Meeting none | all three publish to the Developer Platform; Calling's empty legacy webhook authority retired (`CALLING_WEBHOOK_AUTHORITY=retired`, delivery off; precondition 0 subscriptions / 0 open deliveries) | `activate-developer-webhooks` | internal (`/internal/v1/platform/events`) | grants `developer-event.publish` present with current keys (certify); producer health and regression PASS | an end-to-end producer event needs a platform principal (FIRST_PARTY only), so it was not driven by the external acceptance | ACTIVE_VERIFIED (configuration, grants and health; delivery path verified with the lifecycle event) |
+| Credential lifecycle notices (`credential.expiring_soon` / `expired`) | Developer Platform worker | off (webhooks off) | sweep every 5 minutes | `activate-developer-webhooks` | webhook events | delivered in the acceptance | — | ACTIVE_VERIFIED |
+| Approval and entitlement enforcement (scopes, environment kinds, quotas) | Developer Platform, API Gateway, Platform Access | enforced for the routed families | unchanged code; now exercised on all new families | — | all gateway families | PRODUCTION environment refused without approval (422); credential limited to granted scopes; 403 `INSUFFICIENT_SCOPE`; SANDBOX quota 120/min, 10 000/day returned on every credential call | — | ACTIVE_VERIFIED |
+| Production-access request workflow (submit / review / approve / activate production) | Developer Platform | `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`, auto-approval off | unchanged | not activated | reads work; submit answers 503 `CAPABILITY_UNAVAILABLE` | Approvals need a named human operator (`x-cf-operator`, `x-cf-operator-user-id`; self-approval forbidden) calling `/internal/v1/operator/production-access-requests` with `developer-platform.administer`, which only `cfmeet.operator-console` may hold, and **no operator console exists** (operator-admin-consolidation-map). Turning submissions on with nobody able to review would queue customer requests indefinitely; enabling auto-approval is an owner policy decision that the release gate deliberately refuses. | owner: name the reviewers and decide auto-approval policy for unregulated capabilities; then an operator-console identity and tool (engineering, small) | BLOCKED_OWNER_ACTION |
+| Usage facts export to the unified ledger | Calling, Messaging, Meeting → Developer Platform | off | pending activation | `activate-usage-export` | internal; customer `/v1/usage`, `/v1/limits` stay served by Calling | pending | — | PENDING (not yet run) |
+| API Gateway: Developer Platform families (8) | API Gateway | ACTIVE (run 42713082843) | unchanged | `activate-gateway-routing` | as listed | certify 33 routes auth-enforced; acceptance | — | ALREADY_ACTIVE |
+| API Gateway: Messaging families `/v1/conversations`, `/v1/messaging` | API Gateway → Messaging | unrouted (404) | routed; grant `messaging-request.forward` | `activate-gateway-families`, run 43174233820 | public, platform credential | post-checks 18/18; acceptance 200 with quota headers; certify messaging 40 routes auth-enforced | — | ACTIVE_VERIFIED |
+| API Gateway: Calling account families `/v1/abuse-reports`, `/v1/blocks`, `/v1/limits`, `/v1/usage` | API Gateway → Calling | unrouted | routed; grant `calling-request.forward` | same | public, platform credential | post-checks; acceptance `/v1/limits`, `/v1/usage` 200 | — | ACTIVE_VERIFIED |
+| API Gateway: central customer webhooks `/v1/webhooks`, `/v1/webhook-deliveries` | API Gateway → Developer Platform | unrouted | routed, `API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED=true` | same | public, platform credential | acceptance list 200, scope denial 403, tenant isolation | — | ACTIVE_VERIFIED |
+| API Gateway: authentication, authorization, tenant separation, CORS, TLS, rate limits, public routing | API Gateway | partial (8 families) | all customer families | same | — | anonymous 401/403 on every family; forged and revoked credentials 401; tenant B 404; CORS only `https://cfmeet.com` (evil origin refused); TLS 39 days; quotas; internal/operator/callback paths never public (certify: 25/25 internal, operator and callback routes refused publicly; post-checks) | — | ACTIVE_VERIFIED |
+| Calling `/v1/calls`, `/v1/calling`, `/v1/enterprise`; Messaging `/v1/realtime`; Meeting `/api/v2/*` | Calling, Messaging, Meeting | ACTIVE on direct routes | unchanged (deliberately not re-routed through the gateway) | — | public | certify (calling 51, meetings 38, communications 37 auth-enforced) | — | ALREADY_ACTIVE |
+| WebSocket functionality: Messaging realtime `/v1/realtime`, Calling signaling `/v1/calling/signaling`, conference realtime `/api/v2/conferences/{id}/realtime` | Messaging, Calling, Meeting | ACTIVE on direct routes (ticket / signaling-credential / session auth) | unchanged | — | public WebSocket | Messaging 15/15 (realtime tickets and WebSocket delivery) and Communications 20/20 live acceptance, conference realtime enabled by run 42730700547 (backend closure); not re-run here | — | ALREADY_ACTIVE |
+| API Gateway WebSocket proxy (`API_GATEWAY_WEBSOCKETS_ENABLED`) | API Gateway | off | off | not activated | — | Every supported WebSocket channel is already served and authenticated on its direct route. The flag only matters if those live realtime paths are moved behind the gateway, which would change the transport of every connected client (calls, chat, conferences) for no functional gain and needs nginx `Upgrade` handling on the gateway snippet. | owner decision to move the live realtime channels behind the gateway (then a routing step with WebSocket upgrade headers) | BLOCKED_OWNER_ACTION |
+| Gateway families Numbers, SMS, Privacy Relay | — | unrouted | unrouted; gateway domains disabled | — | none | certify NOT_ROUTED 26 / 4 / 6 | owner exclusions | EXCLUDED_BY_OWNER |
+| Machine (platform-credential) access to the Meeting `/api/v2` operations (`MEETING_PLATFORM_ACCESS_ENABLED`) | Meeting via API Gateway | off | off | not activated | `/api/v2` serves first-party sessions directly | The machine-callable meeting operations reach the Meeting Service only as gateway-forwarded requests, but `/api/v2` is the first-party application's direct route; serving platform credentials there means placing `/api/v2` (the whole web/mobile app API) behind the gateway. | owner decision on the edge topology of the core app API | BLOCKED_OWNER_ACTION |
+
+## Already active first-party features (re-certified)
+
+| Feature | Owner service | State | Evidence | Status |
+|---|---|---|---|---|
+| Accounts, sign-in (incl. Google), sessions, profile, notifications incl. email | Meeting | ACTIVE | certify 43176010902 (SMTP and Google configured); backend closure | ALREADY_ACTIVE |
+| Meetings, calendar, waiting room, conference realtime, webinar mode, collaboration, quality telemetry | Meeting | ACTIVE | first-party features run 42730700547; certify | ALREADY_ACTIVE |
+| Communications Hub | Communications | ACTIVE | Communications 20/20 acceptance; certify | ALREADY_ACTIVE |
+| Personal calling (app calling, LiveKit media); Enterprise Calling core, call recording, voicemail | Calling | ACTIVE | certify integrations: `CALL_RECORDING_ENABLED`, `VOICEMAIL_ENABLED`, `ENTERPRISE_CALLING_ENABLED` = true | ALREADY_ACTIVE |
+| Messaging MANAGED conversations, attachments (scanned), realtime | Messaging | ACTIVE | Messaging 15/15; certify | ALREADY_ACTIVE |
+| Public API documentation (10 OpenAPI documents, Swagger UI) | Meeting docs host | ACTIVE | certify 10/10 documents (Calling's own `CALLING_DOCS_ENABLED` renderer is redundant with this) | ALREADY_ACTIVE |
+
+## Meeting Service features that depend on external providers or owner policy
+
+| Feature | Owner service | State | Remaining dependency | Status |
+|---|---|---|---|---|
+| Meeting recording v2 (composite egress, artefact storage) | Meeting | OFF (`FEATURE_RECORDING_V2_ENABLED`) | Meeting artefact storage is not provisioned (`ARTIFACT_STORAGE_*` unset; the existing MinIO serves Calling) and the recording/artefact **retention policy (DATA-010) is an open owner decision** | BLOCKED_OWNER_ACTION |
+| Transcription / captions v2 | Meeting | OFF | a speech-to-text provider (provider-neutral callbacks; none contracted) + the retention decision | BLOCKED_EXTERNAL_DEPENDENCY |
+| Meeting intelligence (AI summaries) v2 | Meeting | OFF | an AI processing provider and a data-processing decision (none contracted) | BLOCKED_EXTERNAL_DEPENDENCY |
+| Email verification enforcement | Meeting | `off` | owner policy decision (would lock out existing unverified accounts) | BLOCKED_OWNER_ACTION |
+
 
 
 ## Messaging
