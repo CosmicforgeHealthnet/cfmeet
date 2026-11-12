@@ -80,7 +80,7 @@ schema_of() {
 # Every migration binary a service ships, in the order its deployment applies them.
 migrations_for() {
   case "$1" in
-    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration" ;;
+    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration lifecycle-delivery-migration" ;;
     communications) echo "communications-migration" ;;
     developer-platform) echo "developer-platform-migration" ;;
     platform-access) echo "platform-access-migration" ;;

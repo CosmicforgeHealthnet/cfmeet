@@ -21,6 +21,8 @@ pub struct AppState {
     pub platform_access: Arc<dyn PlatformAccessPort>,
     pub sessions: Arc<dyn HumanSessions>,
     pub flags: FeatureFlags,
+    /// Named production-access reviewers (empty: any administering operator).
+    pub production_reviewers: Arc<Vec<String>>,
     /// Central customer webhooks (Section 53); `None`: every webhook route is 404.
     pub webhooks: Option<WebhookService>,
     /// Calling's controlled webhook export (Section 53 migration); unconfigured: every
@@ -36,6 +38,7 @@ impl AppState {
             platform_access: Arc::new(UnconfiguredPlatformAccess),
             sessions: Arc::new(UnconfiguredSessions),
             flags: FeatureFlags::default(),
+            production_reviewers: Arc::new(Vec::new()),
             webhooks: None,
             calling_export: Arc::new(UnconfiguredCalling),
         }
@@ -48,6 +51,11 @@ impl AppState {
 
     pub fn with_sessions(mut self, sessions: Arc<dyn HumanSessions>) -> Self {
         self.sessions = sessions;
+        self
+    }
+
+    pub fn with_production_reviewers(mut self, reviewers: Vec<String>) -> Self {
+        self.production_reviewers = Arc::new(reviewers);
         self
     }
 
