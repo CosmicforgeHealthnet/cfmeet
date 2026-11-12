@@ -172,6 +172,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::engagement::unvote,
         crate::handlers::v2::engagement::answer,
         crate::handlers::v2::engagement::dismiss,
+        crate::handlers::v2::engagement::restore,
         crate::handlers::v2::engagement::archive,
         crate::handlers::v2::engagement::pin,
         crate::handlers::v2::engagement::unpin,

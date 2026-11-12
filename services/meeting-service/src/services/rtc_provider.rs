@@ -91,6 +91,17 @@ pub struct RtcRoomRef {
     pub room_name: String,
 }
 
+/// LiveKit participant attribute (and metadata JSON key) carrying the canonical CF Meet
+/// conference participant id. Clients read it from `participant.attributes` or
+/// `JSON.parse(participant.metadata)`; it is informational only and grants nothing.
+pub const PARTICIPANT_ID_ATTRIBUTE: &str = "participantId";
+
+/// Token metadata of a human participant credential: `{"participantId":"<uuid>"}`.
+/// Holds no account id, email or role — authorization stays server-side.
+pub fn participant_metadata(participant_id: Uuid) -> String {
+    serde_json::json!({ PARTICIPANT_ID_ATTRIBUTE: participant_id }).to_string()
+}
+
 /// Canonical room name of a conference (one room per conference, never reused).
 pub fn room_name_for(conference_id: Uuid) -> String {
     format!("cf-{}", conference_id.simple())
@@ -156,6 +167,11 @@ pub struct RoomInfo {
 #[derive(Debug, Clone)]
 pub struct JoinCredentialRequest {
     pub participant: RtcParticipantRef,
+    /// Canonical CF Meet conference participant id (`conference_participants.id`) of the
+    /// session owner, read from the server's own session row — never from the client.
+    /// Written into the media credential so clients can map a provider participant to
+    /// the participant record used by every collaboration and moderation API.
+    pub participant_id: Uuid,
     pub display_name: String,
     /// Derived from the permission engine — never from the client.
     pub permissions: MediaPermissions,
@@ -603,6 +619,11 @@ impl RtcProvider for LiveKitProvider {
         let credential = AccessToken::with_api_key(&self.api_key, &self.api_secret)
             .with_identity(&p.media_identity)
             .with_name(&request.display_name)
+            .with_metadata(&participant_metadata(request.participant_id))
+            .with_attributes([(
+                PARTICIPANT_ID_ATTRIBUTE.to_string(),
+                request.participant_id.to_string(),
+            )])
             .with_grants(grants)
             .with_ttl(request.ttl)
             .to_jwt()
@@ -883,9 +904,11 @@ mod tests {
             "http://127.0.0.1:1",
             Duration::from_millis(300),
         );
+        let pid = Uuid::new_v4();
         let creds = provider
             .issue_join_credentials(&JoinCredentialRequest {
                 participant: participant_ref(),
+                participant_id: pid,
                 display_name: "A".into(),
                 permissions: MediaPermissions::none(),
                 ttl: Duration::from_secs(60),
@@ -896,7 +919,21 @@ mod tests {
             .verify(&creds.credential)
             .unwrap();
         assert_eq!(claims.sub, "ps_1");
+        assert_eq!(claims.name, "A");
         assert_eq!(claims.video.room, "cf-room");
+        // Canonical participant id travels in metadata and attributes; nothing else does.
+        let meta: serde_json::Value = serde_json::from_str(&claims.metadata).unwrap();
+        assert_eq!(
+            meta,
+            serde_json::json!({ "participantId": pid.to_string() })
+        );
+        assert_eq!(
+            claims.attributes.get(PARTICIPANT_ID_ATTRIBUTE),
+            Some(&pid.to_string())
+        );
+        assert_eq!(claims.attributes.len(), 1);
+        // The client can never rewrite its own metadata/attributes (no forged identity).
+        assert!(!claims.video.can_update_own_metadata);
         assert!(!claims.video.can_publish);
         assert!(!claims.video.room_admin);
         // Unreachable provider → bounded, stable Unavailable (never a fake success).

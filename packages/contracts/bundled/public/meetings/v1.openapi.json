@@ -6107,6 +6107,104 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/questions/{questionId}/restore": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Restore a dismissed question.",
+        "description": "Undoes a dismissal. A DISMISSED question returns to ANSWERED when an answer had been recorded\n(live or written; the original answer and `answeredAt` are kept) and to OPEN otherwise. The\nbody, author attribution, anonymity, upvotes and vote history are preserved; the pin removed by\nthe dismissal is not reinstated. Requires the Q&A dismiss permission (`qna.dismiss`: host,\nco-host or moderator by default) and a conference that is not ended or cancelled.\n\nIdempotent: restoring a question that is already OPEN or ANSWERED (a repeated request or a\nconcurrent moderator) returns it with `changed: false` and emits no event. ARCHIVED is terminal\nand returns CONFERENCE_STATE_CONFLICT. On change the question `version` increments, a\n`QNA_RESTORE` audit record is written and `qna.question_restored` is delivered in the same\ntransaction. Anonymous questions never reveal their author.",
+        "operationId": "v2_restore_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored (`changed: true`) or already OPEN/ANSWERED (`changed: false`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED — caller lacks qna.dismiss",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND — unknown question or not in this conference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT — question is ARCHIVED, or the conference has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_restore_question",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/questions/{questionId}/vote": {
       "post": {
         "tags": [

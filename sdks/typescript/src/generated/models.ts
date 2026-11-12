@@ -6349,6 +6349,11 @@ export namespace Meetings {
       params: { path: { token: string } };
       response: ResolveInvitationResponse;
     };
+    /** POST /api/v2/conferences/{id}/questions/{questionId}/restore; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    v2RestoreQuestion: {
+      params: { path: { id: string; questionId: string } };
+      response: QuestionActionResponse;
+    };
     /** POST /api/v2/conferences/{id}/participants/{participantId}/chat-restriction; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2RestrictChat: {
       params: { path: { id: string; participantId: string } };
