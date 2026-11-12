@@ -71,7 +71,12 @@ async fn qop(app: &TestApp, cid: Uuid, qid: Uuid, op: &str, auth: Auth<'_>) -> (
 }
 
 async fn restore(app: &TestApp, cid: Uuid, qid: Uuid, auth: Auth<'_>) -> (StatusCode, Value) {
-    qop(app, cid, qid, "restore", auth).await
+    app.post(
+        &format!("{}/questions/{qid}/restore", base(cid)),
+        auth,
+        json!({}),
+    )
+    .await
 }
 
 async fn listed(app: &TestApp, cid: Uuid, auth: Auth<'_>, qid: Uuid) -> Option<Value> {
