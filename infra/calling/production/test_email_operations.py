@@ -52,6 +52,42 @@ class LogEvidence(unittest.TestCase):
         self.assertNotIn('ada@example.com', json.dumps(r))
 
 
+class Diagnose(unittest.TestCase):
+    def run_diagnose(self, ledger_present):
+        def psql(sql, url=None):
+            if sql == mail.LEDGER_EXISTS_SQL:
+                return 't' if ledger_present else 'f'
+            if sql == mail.LEDGER_SQL:
+                if not ledger_present:  # what PostgreSQL does: the relation is resolved at parse time
+                    raise RuntimeError('subprocess failed: docker')
+                return '{"byStatus": {}}'
+            if sql.lstrip().startswith('SELECT json_build_object(\n  \'liveByKind\''):
+                return '{"liveInArchivedSpaces": 0}'
+            return '{}'
+        out = io.StringIO()
+        with patch.object(p, 'inspect', lambda name: {}), patch.object(p, 'env_of', lambda c: {}), \
+                patch.object(mail, 'log_evidence', lambda m: {}), \
+                patch.object(mail, 'redis_queue_length', lambda c, e: 0), \
+                patch.object(cr, 'meeting_psql', psql), \
+                patch.object(cr, 'history_state', lambda sql: {}), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: '{}'), \
+                contextlib.redirect_stdout(out):
+            mail.diagnose(cr, 'a' * 40, 'run')
+        return out.getvalue()
+
+    def test_before_the_ledger_migration_diagnose_reports_no_ledger_and_continues(self):
+        text = self.run_diagnose(ledger_present=False)
+        self.assertIn('"emailLedger": null', text)
+        self.assertIn('conferenceLifecycle', text)
+        self.assertIn('organizationsAuthorityMode', text)
+
+    def test_with_the_ledger_diagnose_reports_its_counts(self):
+        self.assertIn('"emailLedger": {"byStatus": {}}', self.run_diagnose(ledger_present=True))
+
+    def test_the_ledger_query_has_no_guard_postgres_cannot_honour(self):
+        self.assertNotIn('CASE WHEN to_regclass', mail.LEDGER_SQL)
+
+
 class ResendActivation(unittest.TestCase):
     def test_refuses_without_a_key_and_mounts_it_read_only(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(p, 'SECRETS', Path(folder)):
