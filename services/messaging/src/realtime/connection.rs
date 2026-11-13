@@ -100,6 +100,9 @@ pub struct Connection {
     last_presence_query: Option<Instant>,
     /// MSG-018: per conversation, when its receipt cursors were last queried.
     last_receipts_query: HashMap<Uuid, Instant>,
+    /// `inbox.subscribe` was accepted: identifier-only signals for the principal's other
+    /// conversations (new conversations, activity, removal, own read cursors).
+    inbox: bool,
     policy: EffectivePolicy,
     announced_online: bool,
     /// When the connection opened (usage: connection seconds, recorded on close).
@@ -157,6 +160,7 @@ impl Connection {
             last_inbound: Instant::now(),
             last_presence_query: None,
             last_receipts_query: HashMap::new(),
+            inbox: false,
             policy,
             announced_online: false,
             opened_at,
@@ -206,6 +210,8 @@ impl Connection {
                 "inboundFramesPerSecond": settings.inbound_frames_per_second,
                 "maxReplay": settings.max_replay,
             },
+            // Optional frames this gateway understands beyond protocol version 1.
+            "capabilities": ["inbox"],
         });
         if !self.send(welcome).await {
             return self.finish().await;
@@ -413,6 +419,16 @@ impl Connection {
                 Some(c) => self.presence_query(c, rid).await,
                 None => self.invalid(rid).await,
             },
+            "inbox.subscribe" => {
+                if !self.state.realtime.hub.enable_inbox(self.handle.id) {
+                    return Flow::Close(CLOSE_RESTART, "CONNECTION_UNREGISTERED");
+                }
+                self.inbox = true;
+                crate::metrics::inc("messaging_realtime_inbox_subscriptions_total", &[]);
+                self.send(json!({ "type": "inbox.subscribed", "requestId": rid }))
+                    .await;
+                Flow::Continue
+            }
             "receipts.query" => match uuid_of("conversationId") {
                 Some(c) => self.receipts_query(c, rid).await,
                 None => self.invalid(rid).await,
@@ -1076,7 +1092,29 @@ impl Connection {
                 }
                 Flow::Continue
             }
-            HubEvent::Resync => self.catch_up().await,
+            HubEvent::Inbox {
+                conversation_id,
+                event_sequence,
+                event_type,
+            } => {
+                if !self.inbox {
+                    return Flow::Continue;
+                }
+                let t = messages::client_type(&event_type);
+                if self.send(json!({ "type": "inbox.event", "conversationId": conversation_id, "eventSequence": event_sequence, "eventType": t })).await {
+                    Flow::Continue
+                } else {
+                    Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT")
+                }
+            }
+            HubEvent::Resync => {
+                // Inbox signals are not replayed: the client re-reads its conversation
+                // list once (subscriptions recover themselves from the database).
+                if self.inbox && !self.send(json!({ "type": "inbox.resync" })).await {
+                    return Flow::Close(CLOSE_SLOW, "SEND_TIMEOUT");
+                }
+                self.catch_up().await
+            }
         }
     }
 

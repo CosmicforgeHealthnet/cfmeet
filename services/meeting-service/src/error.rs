@@ -136,6 +136,11 @@ pub enum ErrorCode {
     ProvisioningPending,
     /// New members join an organization only by accepting an invitation.
     InvitationRequired,
+    /// The invited account already holds a membership of this organization.
+    AlreadyMember,
+    /// No invitable account answers to this CF Meet ID for the inviter (unknown, not
+    /// discoverable, hidden, blocked or inactive: deliberately indistinguishable).
+    InviteeNotFound,
     /// Blueprint Section 12 follow-up: the organization policy (or a feature the
     /// organization turned off) removes the capability this action needs — the same
     /// decision `GET /api/v2/me/workspaces/{id}/capabilities` reports as
@@ -264,6 +269,8 @@ impl ErrorCode {
             ErrorCode::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
             ErrorCode::ProvisioningPending => "PROVISIONING_PENDING",
             ErrorCode::InvitationRequired => "INVITATION_REQUIRED",
+            ErrorCode::AlreadyMember => "ALREADY_MEMBER",
+            ErrorCode::InviteeNotFound => "INVITEE_NOT_FOUND",
             ErrorCode::OrganizationPolicyRestricted => "ORGANIZATION_POLICY_RESTRICTED",
             ErrorCode::TeamNotFound => "TEAM_NOT_FOUND",
             ErrorCode::TeamArchived => "TEAM_ARCHIVED",
@@ -364,7 +371,9 @@ impl ErrorCode {
             ErrorCode::ChatUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::ChatMigrationRefused => StatusCode::CONFLICT,
             ErrorCode::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::OrganizationNotFound | ErrorCode::TeamNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::OrganizationNotFound
+            | ErrorCode::TeamNotFound
+            | ErrorCode::InviteeNotFound => StatusCode::NOT_FOUND,
             ErrorCode::MembershipRequired => StatusCode::FORBIDDEN,
             ErrorCode::OrganizationSuspended
             | ErrorCode::OrganizationArchived
@@ -374,6 +383,7 @@ impl ErrorCode {
             | ErrorCode::IdempotencyConflict
             | ErrorCode::ProvisioningPending
             | ErrorCode::InvitationRequired
+            | ErrorCode::AlreadyMember
             | ErrorCode::OrganizationCallingDisabled
             | ErrorCode::TeamArchived
             | ErrorCode::TeamNameTaken

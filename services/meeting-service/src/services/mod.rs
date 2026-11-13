@@ -37,6 +37,7 @@ pub mod organization_access;
 pub mod organization_calling;
 pub mod organization_events;
 pub mod organization_export;
+pub mod organization_invitees;
 pub mod organization_policy;
 pub mod organizations;
 pub mod organizations_authority;

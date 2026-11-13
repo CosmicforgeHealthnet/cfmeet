@@ -4108,3 +4108,380 @@ async fn org011_organization_managers_oversee_organization_meeting_spaces() {
     assert!(s.is_success(), "{archived}");
     assert_eq!(*fake.state.rejected.lock().unwrap(), 0);
 }
+
+// ---------------------------------------------------------------------------------------
+// Session 3: member identity (display names, email policy) and invitations by identifier
+// ---------------------------------------------------------------------------------------
+
+async fn members_of(app: &TestApp, org: Uuid, user: &User) -> Vec<Value> {
+    let (s, v) = app
+        .call(
+            Method::GET,
+            &format!("/api/v2/organizations/{org}/members"),
+            Auth::Bearer(&user.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    v.as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn session3_member_names_for_members_and_emails_for_owners_and_admins_only() {
+    use sea_orm::ConnectionTrait;
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("dir-owner").await;
+    let admin = app.user("dir-admin").await;
+    let manager = app.user("dir-manager").await;
+    let member = app.user("dir-member").await;
+    let platform = app.admin("dir-platform").await;
+    let gone = Uuid::new_v4(); // a membership whose account no longer exists
+    let org = fake.add_org(
+        "directory-acme",
+        &[
+            (owner.id, "OWNER"),
+            (admin.id, "ADMIN"),
+            (manager.id, "MANAGER"),
+            (member.id, "MEMBER"),
+            (gone, "MEMBER"),
+        ],
+    );
+    let emails = |list: &[Value]| -> Vec<Option<String>> {
+        list.iter()
+            .map(|m| m.get("email").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    };
+
+    // Every member sees display names; the deleted account has none (never invented).
+    for viewer in [&owner, &admin, &manager, &member] {
+        let list = members_of(&app, org, viewer).await;
+        assert_eq!(list.len(), 5);
+        for m in &list {
+            let user = uuid(&m["userId"]);
+            assert_ne!(uuid(&m["id"]), user, "membership id ≠ account id");
+            if user == gone {
+                assert!(m["displayName"].is_null() && m["username"].is_null(), "{m}");
+            } else {
+                assert!(
+                    m["displayName"].as_str().is_some_and(|n| !n.is_empty()),
+                    "{m}"
+                );
+            }
+        }
+    }
+
+    // OWNER, ADMIN and platform administrators see emails (none for the deleted account).
+    for viewer in [&owner, &admin, &platform] {
+        let list = members_of(&app, org, viewer).await;
+        for m in &list {
+            let user = uuid(&m["userId"]);
+            let expected = [&owner, &admin, &manager, &member]
+                .iter()
+                .find(|u| u.id == user)
+                .map(|u| u.email.clone());
+            assert_eq!(
+                m.get("email").and_then(Value::as_str).map(str::to_string),
+                expected
+            );
+        }
+    }
+    // MANAGER and MEMBER never receive the field at all.
+    for viewer in [&manager, &member] {
+        let list = members_of(&app, org, viewer).await;
+        assert!(emails(&list).iter().all(Option::is_none));
+        assert!(list.iter().all(|m| m.get("email").is_none()));
+    }
+
+    // A suspended ADMIN loses email visibility.
+    {
+        let mut members = fake.state.members.lock().unwrap();
+        let m = members
+            .get_mut(&org)
+            .unwrap()
+            .iter_mut()
+            .find(|m| m["userId"] == json!(admin.id))
+            .unwrap();
+        m["status"] = json!("SUSPENDED");
+    }
+    let list = members_of(&app, org, &admin).await;
+    assert!(emails(&list).iter().all(Option::is_none));
+
+    // Paging keeps the policy and the order.
+    let (s, v) = app
+        .call(
+            Method::GET,
+            &format!("/api/v2/organizations/{org}/members?limit=2"),
+            Auth::Bearer(&owner.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v.as_array().unwrap().len(), 2);
+    assert!(v
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m.get("email").is_some()));
+
+    // Display-name changes are reflected immediately (read from the account authority).
+    app.state
+        .db
+        .execute(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "UPDATE users SET display_name = 'Renamed Member' WHERE id = $1",
+            [member.id.into()],
+        ))
+        .await
+        .unwrap();
+    let list = members_of(&app, org, &owner).await;
+    let m = list
+        .iter()
+        .find(|m| m["userId"] == json!(member.id))
+        .unwrap();
+    assert_eq!(m["displayName"], "Renamed Member");
+
+    // Another organization's member list is not readable through this one.
+    let other = fake.add_org("directory-other", &[(manager.id, "OWNER")]);
+    let list = members_of(&app, other, &manager).await;
+    assert_eq!(list.len(), 1);
+    assert!(list.iter().all(|m| m["userId"] == json!(manager.id)));
+}
+
+/// A fake Communications Hub answering the private CF Meet ID translation.
+async fn fake_hub(directory: HashMap<String, Value>) -> (SocketAddr, Arc<Mutex<Vec<Value>>>) {
+    let seen = Arc::new(Mutex::new(vec![]));
+    let (dir, rec) = (Arc::new(directory), seen.clone());
+    let router = Router::new().route(
+        backend::services::communications::ORGANIZATION_INVITEE_PATH,
+        axum::routing::post(move |Json(body): Json<Value>| {
+            let (dir, rec) = (dir.clone(), rec.clone());
+            async move {
+                rec.lock().unwrap().push(body.clone());
+                match body["cfMeetId"].as_str().and_then(|id| dir.get(id)) {
+                    Some(doc) => (StatusCode::OK, Json(doc.clone())),
+                    None => (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"schemaVersion":1,"error":{"code":"NOT_FOUND","message":"x"}})),
+                    ),
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (addr, seen)
+}
+
+#[tokio::test]
+async fn session3_invitations_by_email_or_cf_meet_id_never_disclose_the_invitee() {
+    use backend::services::communications::Bridge;
+    use cf_service_auth::{
+        client::{InternalServiceClient, InternalTargets},
+        ApplicationEnvironmentKind, DelegatedPlatformContext,
+    };
+    use migration::MigratorTrait;
+    use sea_orm::ConnectionTrait;
+
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let mut app = some!(app_with(Some(live)).await);
+    migration::CommunicationsMigrator::up(&app.db.conn, None)
+        .await
+        .expect("communications migrations apply");
+    let owner = app.user("inv-owner").await;
+    let member = app.user("inv-member").await;
+    let target = app.user("inv-target").await;
+    let guest_like = app.user("inv-suspended").await;
+    let org = fake.add_org("invite-acme", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let uri = format!("/api/v2/organizations/{org}/invitations");
+    let internal = format!("/internal/v1/organizations/{org}/invitations");
+
+    // --- EMAIL (identifier form and the original `email` form) ---
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "identifierType": "EMAIL", "identifier": "  New.Person@Example.com ", "role": "MEMBER" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["identifierType"], "EMAIL");
+    assert_eq!(
+        fake.last("POST", &internal).body,
+        json!({ "email": "new.person@example.com", "role": "MEMBER" })
+    );
+    let before = fake.requests().len();
+    for body in [
+        json!({ "email": member.email, "role": "MEMBER" }),
+        json!({ "identifierType": "EMAIL", "identifier": member.email.to_uppercase(), "role": "ADMIN" }),
+    ] {
+        let (s, v) = app.post(&uri, Auth::Bearer(&owner.token), body).await;
+        assert_eq!(
+            (s, v["error"]["code"].as_str()),
+            (StatusCode::CONFLICT, Some("ALREADY_MEMBER")),
+            "{v}"
+        );
+    }
+    for (body, why) in [
+        (
+            json!({ "email": "a@b.co", "identifierType": "EMAIL", "identifier": "a@b.co", "role": "MEMBER" }),
+            "both forms",
+        ),
+        (
+            json!({ "identifierType": "PHONE", "identifier": "+1555", "role": "MEMBER" }),
+            "unknown type",
+        ),
+        (
+            json!({ "identifierType": "EMAIL", "role": "MEMBER" }),
+            "type without identifier",
+        ),
+        (
+            json!({ "email": "a@b.co", "inviteeHint": "Boss", "role": "MEMBER" }),
+            "client hint",
+        ),
+    ] {
+        let (s, v) = app.post(&uri, Auth::Bearer(&owner.token), body).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{why}: {v}");
+    }
+    assert!(
+        fake.requests()[before..]
+            .iter()
+            .all(|r| !(r.method == "POST" && r.path == internal)),
+        "refused requests never reach Organizations"
+    );
+
+    // --- CF_MEET_ID without the Hub configured: unavailable, nothing created ---
+    let cf =
+        |id: &str| json!({ "identifierType": "CF_MEET_ID", "identifier": id, "role": "MEMBER" });
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), cf("cfm-target"))
+        .await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "{v}");
+
+    // --- CF_MEET_ID through the (fake) Hub ---
+    let (hub, seen) = fake_hub(HashMap::from([
+        ("cfm-target".to_string(), json!({"schemaVersion":1,"accountReference":format!("cfmeet-user:{}", target.id),"displayName":"T"})),
+        ("cfm-member".to_string(), json!({"schemaVersion":1,"accountReference":format!("cfmeet-user:{}", member.id),"displayName":"M"})),
+        ("cfm-self".to_string(), json!({"schemaVersion":1,"accountReference":format!("cfmeet-user:{}", owner.id),"displayName":"O","self":true})),
+        ("cfm-suspended".to_string(), json!({"schemaVersion":1,"accountReference":format!("cfmeet-user:{}", guest_like.id),"displayName":"S"})),
+    ]))
+    .await;
+    let scope = DelegatedPlatformContext::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        ApplicationEnvironmentKind::Test,
+        Uuid::new_v4(),
+    );
+    let bundle = json!({ "bundle_version": 1, "receiver": "cfmeet.meeting-service", "runtime_environment": "test", "trusted_issuers": [] });
+    let policy = TrustPolicy::from_json(
+        &bundle.to_string(),
+        &ServiceId::meeting_service(),
+        RuntimeEnvironment::Test,
+    )
+    .unwrap();
+    let mut targets = InternalTargets::new(RuntimeEnvironment::Test);
+    targets
+        .insert(ServiceId::communications(), &format!("http://{hub}"))
+        .unwrap();
+    let client =
+        InternalServiceClient::new(signer.clone(), targets, Duration::from_secs(2)).unwrap();
+    // Account → principal link (otherwise ensured at Platform Access).
+    for u in [&owner, &member] {
+        app.db
+            .conn
+            .execute(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "INSERT INTO communication_principal_links(subject_kind,subject_id,environment_id,principal_id,principal_kind) VALUES('USER',$1,$2,$3,'NATIVE_CF_USER')",
+                [u.id.into(), scope.application_environment_id().into(), Uuid::new_v4().into()],
+            ))
+            .await
+            .unwrap();
+    }
+    app.db
+        .conn
+        .execute(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            "UPDATE users SET status = 'suspended' WHERE id = $1",
+            [guest_like.id.into()],
+        ))
+        .await
+        .unwrap();
+    app.state.communications = Some(Arc::new(Bridge {
+        client: Arc::new(client),
+        verifier: Arc::new(ServiceTokenVerifier::new(policy, Arc::new(SystemClock))),
+        scope,
+    }));
+    app.router = backend::routes::create_routes(app.state.clone());
+
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&owner.token), cf("  cfm-target "))
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(
+        (v["identifierType"].as_str(), v["identifier"].as_str()),
+        (Some("CF_MEET_ID"), Some("cfm-target"))
+    );
+    assert!(
+        !v.to_string()
+            .to_lowercase()
+            .contains(&target.email.to_lowercase()),
+        "the invitee's email never reaches the inviter: {v}"
+    );
+    assert!(v.get("email").is_none());
+    assert_eq!(
+        fake.last("POST", &internal).body,
+        json!({ "email": target.email.to_lowercase(), "role": "MEMBER", "inviteeHint": "CF Meet ID cfm-target" }),
+        "Organizations receives the verified-email address and the non-disclosing hint"
+    );
+    let asked = seen.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(asked["cfMeetId"], "cfm-target");
+    assert_eq!(
+        asked["account"]["accountReference"],
+        json!(format!("cfmeet-user:{}", owner.id)),
+        "resolved for the inviter's own account (discovery rules apply to them)"
+    );
+
+    for (id, status, code) in [
+        ("cfm-unknown", StatusCode::NOT_FOUND, "INVITEE_NOT_FOUND"),
+        ("cfm-suspended", StatusCode::NOT_FOUND, "INVITEE_NOT_FOUND"),
+        (
+            "someone@example.com",
+            StatusCode::NOT_FOUND,
+            "INVITEE_NOT_FOUND",
+        ),
+        ("cfm-member", StatusCode::CONFLICT, "ALREADY_MEMBER"),
+        ("cfm-self", StatusCode::CONFLICT, "ALREADY_MEMBER"),
+    ] {
+        let (s, v) = app.post(&uri, Auth::Bearer(&owner.token), cf(id)).await;
+        assert_eq!(
+            (s, v["error"]["code"].as_str()),
+            (status, Some(code)),
+            "{id}: {v}"
+        );
+    }
+
+    // A MEMBER cannot invite, and cannot use the route to look anyone up.
+    let lookups = seen.lock().unwrap().len();
+    let (s, v) = app
+        .post(&uri, Auth::Bearer(&member.token), cf("cfm-target"))
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        lookups,
+        "no lookup for a non-inviter"
+    );
+    // Nor can a non-member of the organization.
+    let (s, _) = app
+        .post(&uri, Auth::Bearer(&target.token), cf("cfm-member"))
+        .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+    assert_eq!(seen.lock().unwrap().len(), lookups);
+}
