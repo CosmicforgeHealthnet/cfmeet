@@ -315,6 +315,8 @@ The behaviour is documented in [the frontend handover §12](../frontend/cfmeet-f
 | Post-release diagnose | [43317264046](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317264046) |
 | Post-release meetings acceptance | [43317535902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317535902) success |
 | Resend | Not activated: `activate-resend-email` was not run, and the SMTP configuration is preserved. |
+| Subsequent release (parallel Organizations stream) | [43331884110](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43331884110) at `3e11958b`, a descendant of this release that contains it. Replaced organizations, messaging, calling, communications, meeting-service and api-gateway. **Kept** developer-platform(+worker) at `f2f96934` and platform-access, numbering, privacy-relay, sms-gateway and telephony at `9684346e`. Verification 30/30, 0 violations; `lifecycle_delivery_migrations` still applied. Its certify [43336196158](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43336196158) returned `CERTIFIED_READ_ONLY`. |
+| PR [#67](https://github.com/CosmicforgeHealthnet/cfmeet/pull/67) → `staging` · PR [#68](https://github.com/CosmicforgeHealthnet/cfmeet/pull/68) → `main` | `diagnose` fix (§2). #67 merge `d1816323`; #68 merge `991593ad40d23f872774650206f9f4e017e671a4` (112 checks green; one Calling planner-dependent load assertion passed on re-run, §18) |
 
 ## 17. Test results
 
@@ -343,6 +345,7 @@ Final results:
 - **Off-host backup age key** for the Organizations import gate (§10).
 - **Meeting artefact bucket** for recording v2 (§12).
 - **F-1:** regenerate the Swagger descriptions for the archive and instant-meeting behaviour notes in a contracts release.
+- **F-2:** `services/calling/tests/enterprise_load.rs::queue_burst_keeps_fifo_order` asserts which index the PostgreSQL planner picks for about 54 rows. It flaked once on PR #68 (it chose `idx_enterprise_queue_entries_deadline`); the FIFO correctness assertions passed, and so did the re-run. Make the plan check deterministic, for example with `ANALYZE` or planner settings inside the transaction, without removing it.
 
 ## 19. Owner-only actions
 
