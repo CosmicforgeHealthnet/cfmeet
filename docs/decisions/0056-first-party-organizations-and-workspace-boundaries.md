@@ -82,7 +82,7 @@ The blueprint fixes the target: one new **Organizations Service** as the first-p
 
 ### 9. Backups before authority migration (ADR-A13)
 
-* No live authority migration (Organizations cutover, account-table security migrations) runs in production without a verified, encrypted backup held off the production VPS and a passed isolated restore drill. Local same-host copies are not reported as disaster recovery. The off-host storage target is an owner choice (no AWS by default); until it is provided, the cutover gate stays closed.
+* No live authority migration (Organizations cutover, account-table security migrations) runs in production without a verified, encrypted backup held off the production VPS and a passed isolated restore drill. Local same-host copies are not reported as disaster recovery. The off-host storage target is an owner choice (no AWS by default); until it is provided, the cutover gate stays closed. *Exception (owner decision 2026-11-13, [ADR 0059](0059-organizations-empty-dataset-first-activation.md) Amendment 1): the empty-dataset first-time Organizations activation proceeds without a backup prerequisite; the owner accepted the recovery risk. The standard cutover of a non-empty dataset keeps this rule.*
 
 ### 10. Compatibility and retirement (ADR-A15)
 

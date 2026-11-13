@@ -66,7 +66,7 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 | `org-cutover-import` | Organizations data | `confirm` must contain `offsite-backup-verified` (owner gate 1) and a backup ≤ 24 h with restore tests of Meeting **and** Organizations must exist. Import (`organizations-import`, export streamed on stdin), zero conflicts, reconciliation with zero mismatches and the export checksum, a repeated import fully unchanged; the export file is then deleted. |
 | `org-cutover-shadow` | yes | Grant `organization.read/write/act-for-user/administer` (Organizations ← Meeting); `ORGANIZATIONS_AUTHORITY_MODE=shadow` + `CF_ORGANIZATIONS_BASE_URL` on Meeting. Reversible with `rollback`. |
 | `org-cutover-authoritative` | yes, **irreversible** | Owner gates 1 and 6: `confirm=offsite-backup-verified,quiesced` after the legacy write routes are blocked at the ingress (runbook §6.2, manual) and the 7-day zero-mismatch criterion (§5) is accepted. Final export → import → reconciliation, then `ORGANIZATIONS_AUTHORITY_MODE=authoritative`. Never rolled back (runbook §7). |
-| `org-cutover-first-activation` | yes, **irreversible** | Empty-dataset first activation (ADR 0059): `confirm=offsite-backup-verified,empty-dataset`. Refuses unless no cutover step ran, the Meeting Service is `legacy`, and every organization dataset (Meeting, Organizations, organization references in every CF Meet database) is empty. Then fresh verified off-host backup → empty export → import / reconciliation → inventory again → shadow grants + `authoritative` in one step → startup-log and quiescence check (returns to `legacy` automatically while Organizations is still empty). Never rolled back. |
+| `org-cutover-first-activation` | yes, **irreversible** | Empty-dataset first activation (ADR 0059 + Amendment 1): `confirm=empty-dataset`. **No backup prerequisite** (owner decision 2026-11-13; no off-host record, local backup, drill or age key is checked; the run records `backupGate.required=false` and never claims a verified backup). Refuses unless no cutover step ran, the Meeting Service is `legacy`, and every organization dataset (Meeting, Organizations, organization references in every CF Meet database) is empty. Then empty export → import / reconciliation (`backup_gate=False`) → inventory again → shadow grants + `authoritative` in one step → startup-log and quiescence check (returns to `legacy` automatically while Organizations is still empty). Never rolled back. |
 | `activate-enterprise-calling` | yes | Requires authoritative. Grants `platform-principal.ensure` (Platform Access), `calling-request.act-for-organization` (Calling), `messaging-application.delegate` (Messaging), all ← Meeting; `CALLING_ORGANIZATION_FORWARDING_ENABLED=true`; `ORGANIZATION_CALLING_SCOPE=organization` (+ Calling/Messaging URLs if absent) on Meeting. Requires `activate-organization-bindings`: per-organization service bindings are provisioned automatically (ADR 0058 A2). |
 | `activate-developer-platform` | yes | Grants (checklist §4): Platform Access ← API Gateway `platform-credential.authenticate`; Platform Access ← Developer Platform `platform-identity.read`, `platform-identity.delegate`; Developer Platform ← API Gateway `developer-request.forward`, `developer-entitlement.read`, `developer-usage.record`. `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED=true`; gateway `API_GATEWAY_PUBLIC_ROUTING_ENABLED=true` + `CF_DEVELOPER_PLATFORM_BASE_URL`. Still not public. |
 | `activate-gateway-routing` | yes (public) | Requires the previous step. A loopback-only relay (`cfmeet-gateway-ingress`, 127.0.0.1:18110 → `cfmeet-api-gateway:8099`, same confinement as the storage relay) and `/etc/nginx/snippets/cfmeet-api-gateway.conf`, included after the Calling routes, routing **only** the Developer Platform families (`/v1/developer-platform`, `/v1/organizations`, `/v1/projects`, `/v1/environments`, `/v1/scopes`, `/v1/invitations`, `/v1/production-access-requests`, `/v1/commercial-plans`). Refuses if any existing location already serves one of them. Meeting, Calling and Messaging keep their direct routes; `/internal`, operator and provider-callback paths never reach the gateway. `nginx -t`, reload, then: gateway answers 401 unauthenticated, CORS for `https://cfmeet.com`, public smoke, regression; any failure removes the include, snippet and relay. `rollback` undoes it the same way. |
@@ -166,6 +166,8 @@ run org-cutover-import  offsite-backup-verified
 run org-cutover-shadow            # then ≥ 7 days of shadow evidence (runbook §5)
 run backup
 run org-cutover-authoritative offsite-backup-verified,quiesced   # after the §6.2 ingress block
+# Empty dataset (ADR 0059 + Amendment 1), instead of export/backup/import/shadow/authoritative above:
+run org-cutover-first-activation empty-dataset   # no backup prerequisite (owner decision 2026-11-13)
 run activate-enterprise-calling
 run activate-developer-platform
 run activate-gateway-routing
@@ -250,8 +252,13 @@ the release they protect is accepted.
   recipient (`vars.CFMEET_BACKUP_AGE_RECIPIENTS`) and the drill identity
   (`secrets.CFMEET_BACKUP_AGE_IDENTITY`) exist, `cfmeet-offsite-backup.yml` encrypts, stores
   off-host, restore-drills on a separate runner and records the result on the VPS daily;
-  `org-cutover-import` requires that record **and** the owner's `offsite-backup-verified`.
+  The standard `org-cutover-import` requires that record **and** the owner's `offsite-backup-verified`;
+  the empty-dataset `org-cutover-first-activation` does not (ADR 0059 Amendment 1).
 - The shadow evidence (§5) and the quiesce block of the legacy organization write routes (§6.2).
 - Per-organization service accounts, credentials and bindings for Enterprise Calling (§4.4).
-- Provider-dependent features (SMS, PSTN, push, email without credentials, PRIVATE_E2EE).
+- Provider-dependent features (SMS, PSTN, push, email without credentials, PRIVATE_E2EE). Their CI
+  (`telephony.yml`, `telephony-sip-certification.yml`, `sms-gateway.yml`, `numbering.yml`,
+  `privacy-relay.yml`, `communications-e2e.yml`) still runs on every push but is **advisory** in the
+  release gate: it is reported as a warning and never blocks a first-party release (owner decision
+  2026-11-13). The same holds for `backup-restore-drill.yml` and `cfmeet-offsite-backup.yml`.
 - Staging activation (runbook §9) before each production activation step.

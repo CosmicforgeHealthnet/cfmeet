@@ -20,6 +20,7 @@ class FakeCr:
 
     def __init__(self, **over):
         self.calls = []
+        self.emitted = []
         self.journal = over.pop('journal', [])
         self.meeting_env = over.pop('meeting_env', {})
         self.legacy = dict(EMPTY_LEGACY, **over.pop('legacy', {}))
@@ -29,7 +30,6 @@ class FakeCr:
         self.export_counts = over.pop('export_counts', {'organizations': 0, 'memberships': 0})
         self.after_switch = over.pop('after_switch', {'memberships': 0, 'organizationIds': []})
         self.authoritative_ids = over.pop('authoritative_ids', [])
-        self.offsite = over.pop('offsite', True)
         self.INVENTORY_SQL = cr.INVENTORY_SQL
         self.SERVICES = {'organizations': {'db': 'cfmeet_organizations', 'tls': 8450},
                          'meeting-service': {'container': 'cfmeet-production-backend'}}
@@ -38,6 +38,7 @@ class FakeCr:
 
     def emit(self, kind, value):
         self.calls.append(('emit', kind))
+        self.emitted.append((kind, value))
 
     def load_journal(self):
         return self.journal
@@ -70,19 +71,20 @@ class FakeCr:
 
     def fresh_backup(self, hours, required):
         self.calls.append(('fresh_backup', hours, tuple(required)))
-        return {'runId': '7-1'}
+        raise RuntimeError('No verified backup with restore tests within 24 h; run backup')
 
     def require_offsite(self, manifest):
-        if not self.offsite:
-            raise RuntimeError('Backup 7-1 has no verified off-host copy and restore drill')
         self.calls.append(('offsite', manifest['runId']))
+        raise RuntimeError('Backup has no verified off-host copy and restore drill')
 
     def org_export(self, sha, run_id, confirm):
         self.calls.append(('export', run_id))
         return {'counts': self.export_counts}
 
-    def org_import(self, sha, run_id, confirm):
+    def org_import(self, sha, run_id, confirm, backup_gate=True):
         self.calls.append(('import', run_id))
+        if backup_gate:  # the standard import's gate 1 (real behaviour without any backup record)
+            self.require_offsite(self.fresh_backup(24, ('meeting-service', 'organizations')))
 
     def private_url(self, port):
         return 'https://api.cfmeet.com:%d' % port
@@ -98,7 +100,7 @@ class FakeCr:
             raise
 
 
-CONFIRM = 'offsite-backup-verified,empty-dataset'
+CONFIRM = 'empty-dataset'
 
 
 def run(fake, confirm=CONFIRM):
@@ -107,11 +109,11 @@ def run(fake, confirm=CONFIRM):
 
 
 class FirstActivation(unittest.TestCase):
-    def test_empty_dataset_switches_to_authoritative_after_backup_export_and_import(self):
+    def test_empty_dataset_switches_to_authoritative_after_export_and_import_without_any_backup(self):
         fake = FakeCr()
         run(fake)
         steps = [c[0] for c in fake.calls if c[0] != 'emit']
-        self.assertEqual(steps, ['signing', 'tls', 'fresh_backup', 'offsite', 'export', 'import', 'activation'])
+        self.assertEqual(steps, ['signing', 'tls', 'export', 'import', 'activation'])
         activation = [c for c in fake.calls if c[0] == 'activation'][0]
         self.assertEqual(activation[1], 'org-cutover-first-activation')
         self.assertTrue(activation[2], 'the switch is journalled as irreversible')
@@ -120,12 +122,17 @@ class FirstActivation(unittest.TestCase):
         self.assertEqual(fake.meeting_env['ORGANIZATIONS_AUTHORITY_MODE'], 'authoritative')
         self.assertEqual([c[1] for c in fake.calls if c[0] == 'emit'].count('firstActivationInventory'), 2)
 
-    def test_owner_confirmations_are_both_required(self):
-        for confirm in ('', 'offsite-backup-verified', 'empty-dataset', 'quiesced,offsite-backup-verified'):
+    def test_only_the_empty_dataset_confirmation_is_required(self):
+        for confirm in ('', 'offsite-backup-verified', 'quiesced,offsite-backup-verified'):
             fake = FakeCr()
             with self.assertRaisesRegex(RuntimeError, 'confirmation missing'):
                 run(fake, confirm)
             self.assertEqual(fake.calls, [])
+        self.assertEqual(fa.CONFIRMATIONS, ('empty-dataset',))
+        # A leftover offsite-backup-verified word is harmless and changes nothing.
+        fake = FakeCr()
+        run(fake, 'offsite-backup-verified,empty-dataset')
+        self.assertFalse([c for c in fake.calls if c[0] in ('fresh_backup', 'offsite')])
 
     def test_nonempty_or_inconsistent_datasets_are_refused_before_any_change(self):
         cases = [dict(legacy={'organizations': 1}), dict(legacy={'memberships': 2}),
@@ -163,11 +170,41 @@ class FirstActivation(unittest.TestCase):
                             {'operation': 'org-cutover-export', 'status': 'done'}],
                    meeting_env={'ORGANIZATIONS_AUTHORITY_MODE': 'legacy'}))
 
-    def test_gate_one_is_still_required(self):
-        fake = FakeCr(offsite=False)
-        with self.assertRaisesRegex(RuntimeError, 'off-host'):
-            run(fake)
-        self.assertFalse([c for c in fake.calls if c[0] in ('export', 'import', 'activation')])
+    def test_no_backup_prerequisite_and_no_backup_claim(self):
+        # Owner decision 2026-11-13 (ADR 0059 Amendment 1): neither the off-host record, a fresh
+        # local backup, nor a restore drill is consulted; the decision is recorded, never a pass.
+        fake = FakeCr()
+        run(fake)
+        self.assertFalse([c for c in fake.calls if c[0] in ('fresh_backup', 'offsite')])
+        decision = dict(fake.emitted)['backupGate']
+        self.assertEqual((decision['required'], decision['offsiteBackupVerified']), (False, False))
+        self.assertIn('owner decision', decision['reason'])
+        self.assertFalse(dict(fake.emitted)['firstActivation']['backupVerified'])
+        self.assertNotIn('offsiteBackup', dict(fake.emitted))
+        self.assertNotIn('offsite_backup', fa.activate.__code__.co_names)
+
+    def test_works_without_backup_keys_in_the_environment(self):
+        with patch.dict('os.environ', {}, clear=False):
+            for key in ('CFMEET_BACKUP_AGE_RECIPIENTS', 'CFMEET_BACKUP_AGE_IDENTITY'):
+                __import__('os').environ.pop(key, None)
+            run(FakeCr())
+
+    def test_standard_import_keeps_gate_one(self):
+        with patch.object(cr, 'fresh_backup', side_effect=RuntimeError('No verified backup')):
+            with self.assertRaisesRegex(RuntimeError, 'Owner gate 1'):
+                cr.org_import(SHA, '9-1', '')
+            with self.assertRaisesRegex(RuntimeError, 'No verified backup'):
+                cr.org_import(SHA, '9-1', 'offsite-backup-verified')
+
+    def test_first_activation_import_skips_every_backup_check(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, \
+                patch.object(cr, 'fresh_backup', side_effect=AssertionError('backup consulted')), \
+                patch.object(cr, 'require_offsite', side_effect=AssertionError('off-host consulted')), \
+                patch.object(cr, 'CUTOVER', cr.Path(d)):
+            # Past the (absent) gate the real import reads the latest export record.
+            with self.assertRaises(FileNotFoundError):
+                cr.org_import(SHA, '9-1', 'empty-dataset', backup_gate=False)
 
     def test_a_nonempty_export_is_refused(self):
         fake = FakeCr(export_counts={'organizations': 1, 'memberships': 1})

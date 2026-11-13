@@ -1597,11 +1597,14 @@ def import_summary(report):
                 checksum=report['checksum'])
 
 
-def org_import(sha, run_id, confirm):
-    """organizations-cutover-runbook §3: import, reconcile, prove idempotence, delete the export."""
-    if 'offsite-backup-verified' not in confirm:
-        raise RuntimeError('Owner gate 1: confirm with offsite-backup-verified after the off-host copy and drill')
-    require_offsite(fresh_backup(24, ('meeting-service', 'organizations')))
+def org_import(sha, run_id, confirm, backup_gate=True):
+    """organizations-cutover-runbook §3: import, reconcile, prove idempotence, delete the export.
+    backup_gate=False only for the empty-dataset first activation (ADR 0059 Amendment 1: owner
+    decision, no backup prerequisite); the standard import keeps owner gate 1."""
+    if backup_gate:
+        if 'offsite-backup-verified' not in confirm:
+            raise RuntimeError('Owner gate 1: confirm with offsite-backup-verified after the off-host copy and drill')
+        require_offsite(fresh_backup(24, ('meeting-service', 'organizations')))
     latest = json.loads((CUTOVER / 'latest-export.json').read_text())
     export_path = Path(latest['file'])
     if not export_path.exists():

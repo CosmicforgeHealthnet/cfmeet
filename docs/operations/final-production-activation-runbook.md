@@ -16,7 +16,7 @@ Related, authoritative for their own scope (this runbook orders them, it does no
 | # | Check | Evidence |
 |---|---|---|
 | P1 | The release commit is on `staging` and its full matrix is green (incl. Part VI certification, Unified Messaging, Enterprise calling, RTC Egress capture, backup drill). | CI run ids in the closure register |
-| P2 | Off-host backup target and age key custody chosen by the owner; a restore drill against that target passed (the CI real-schema drill `real-schema-drill.sh` proves the tooling over every service's real migrated schema; the owner target is the remaining input). | backup-and-restore.md §Owner setup, §Restore drill |
+| P2 | *Not a prerequisite of the empty-dataset first activation (owner decision 2026-11-13, ADR 0059 Amendment 1; recovery risk accepted).* For the standard cutover: off-host backup target and age key custody chosen by the owner; a restore drill against that target passed (the CI real-schema drill `real-schema-drill.sh` proves the tooling over every service's real migrated schema; the owner target is the remaining input). | backup-and-restore.md §Owner setup, §Restore drill |
 | P3 | A fresh pre-migration snapshot of **every** service database exists and was verified (checksum + isolated restore of at least the Meeting Service and Organizations databases). | snapshot manifest |
 | P4 | Production secrets present and never logged: service signing keys (one per identity), trust bundles, `JWT_SECRET` length confirmed, credential pepper, Messaging token / KT keys. | secret inventory (names only) |
 | P5 | Owner approval recorded for each *owner* step below that will be executed in this release. | approval log |

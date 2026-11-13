@@ -84,12 +84,19 @@ jobs:
             // have its latest completed main run green (its inputs did not change).
             const required = [
               'backend.yml', 'platform-access.yml', 'organizations.yml', 'messaging.yml', 'calling.yml',
-              'communications-hub.yml', 'numbering.yml', 'privacy-relay.yml', 'sms-gateway.yml',
-              'telephony.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
+              'communications-hub.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
               'contracts.yml', 'service-boundaries.yml', 'dependency-security.yml', 'migration-guard.yml',
-              'backup-restore-drill.yml', 'certification.yml', 'unified-messaging-e2e.yml',
-              'enterprise-calling-certification.yml', 'communications-e2e.yml'
+              'certification.yml', 'unified-messaging-e2e.yml', 'enterprise-calling-certification.yml'
             ];
+            // Owner decision 2026-11-13: external-telecom features (PSTN/SIP carrier, number
+            // provisioning, SMS, phone OTP, telecom Privacy Relay) stay disabled until provider
+            // credentials exist. Their CI and certifications still run on every push and are
+            // reported here, but they are advisory: they never block a first-party release.
+            // The backup drill is advisory too (owner decision: no backup prerequisite).
+            const advisory = new Set([
+              'telephony.yml', 'telephony-sip-certification.yml', 'sms-gateway.yml', 'numbering.yml',
+              'privacy-relay.yml', 'communications-e2e.yml', 'backup-restore-drill.yml', 'cfmeet-offsite-backup.yml'
+            ]);
             const ignored = new Set(['Deploy Backend', 'CF Meet coordinated production release']);
             const deadline = Date.now() + 70 * 60 * 1000;
             let stable = 0;
@@ -102,8 +109,13 @@ jobs:
               const all = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
                 owner, repo, head_sha: sha, event: 'push', per_page: 100
               });
-              const runs = all.filter(r => r.head_sha === sha && r.event === 'push' &&
+              const pushed = all.filter(r => r.head_sha === sha && r.event === 'push' &&
                 r.head_branch === 'main' && !ignored.has(r.name));
+              const runs = pushed.filter(r => !advisory.has(r.path.split('/').pop()));
+              for (const r of pushed.filter(r => advisory.has(r.path.split('/').pop()) && r.status === 'completed' &&
+                  !['success', 'skipped', 'neutral'].includes(r.conclusion))) {
+                core.warning('Advisory (external telecom / backup, not blocking): ' + r.name + ': ' + r.conclusion);
+              }
               const bad = runs.filter(r => r.status === 'completed' &&
                 !['success', 'skipped', 'neutral'].includes(r.conclusion));
               if (bad.length) {

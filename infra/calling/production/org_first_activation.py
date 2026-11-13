@@ -4,10 +4,17 @@
 sequence of organizations-cutover-runbook.md for exactly one case: production has never held
 a first-party organization anywhere. With no legacy organization, no membership and no
 organization-scoped state in any service there is nothing to reconcile and nothing a shadow
-period could compare, so the observation window protects no data. Everything else stays:
+period could compare, so the observation window protects no data.
 
-* owner gate 1: a fresh (<= 24 h) backup whose encrypted off-host copy passed its restore
-  drill on a separate runner (`offsite_backup.record`), confirmed with `offsite-backup-verified`;
+Owner decision 2026-11-13 (ADR 0059 Amendment 1): this first-time path does NOT require a
+backup. There is no off-host copy check (`require_offsite`), no fresh local backup or restore
+drill check, no `offsite-backup-verified` confirmation and no age key. The owner accepted the
+increased recovery risk; the run records that decision (`backupGate`) and never reports a
+backup as verified. The off-site tooling (`cfmeet-offsite-backup.yml`, offsite_backup.py) stays
+available for optional use, and the standard non-empty cutover keeps its gate 1 unchanged.
+
+Everything else stays:
+
 * the owner's explicit record of this procedure: `empty-dataset`;
 * the export, the import with reconciliation and the idempotence proof (they run on the empty
   export and are journalled as `org-cutover-export` / `org-cutover-import`, as always);
@@ -42,12 +49,15 @@ import json
 import subprocess
 
 OPERATION = 'org-cutover-first-activation'
-CONFIRMATIONS = ('offsite-backup-verified', 'empty-dataset')
+CONFIRMATIONS = ('empty-dataset',)
 EXCLUSIVE = ('org-cutover-import', 'org-cutover-shadow', 'org-cutover-authoritative', OPERATION)
 # Organizations tables that legitimately hold rows without any organization.
 ORGANIZATIONS_NON_DATA = ('organization_service_nonces',)
 REFERENCE_COLUMNS = ('organization_id', 'organization_ref')
 MODE_LOG = 'Organizations authority mode: authoritative'
+BACKUP_DECISION = {'required': False, 'offsiteBackupVerified': False,
+                   'reason': 'owner decision 2026-11-13: first-time empty-dataset activation proceeds without a '
+                             'verified backup; increased recovery risk accepted (ADR 0059 Amendment 1)'}
 
 _COUNT = ("(xpath('/row/n/text()', query_to_xml(format('SELECT count(*) AS n FROM %%I.%%I%s', "
           "c.table_schema, c.table_name%s), false, true, '')))[1]::text::bigint")
@@ -91,7 +101,7 @@ def confirmations(confirm):
     missing = [c for c in CONFIRMATIONS if c not in given]
     if missing:
         raise RuntimeError('Owner confirmation missing for the empty-dataset first activation: ' + ','.join(missing)
-                           + ' (confirm=offsite-backup-verified,empty-dataset)')
+                           + ' (confirm=empty-dataset)')
 
 
 def first_time(cr):
@@ -175,12 +185,13 @@ def activate(cr, sha, run_id, confirm):
     cr.has_signing_identity('meeting-service')
     cr.tls_route_present(cr.SERVICES['organizations']['tls'])
     inventory(cr)
-    # Owner gate 1, checked mechanically (the import checks it again).
-    cr.require_offsite(cr.fresh_backup(24, ('meeting-service', 'organizations')))
+    # Owner decision (ADR 0059 Amendment 1): no backup prerequisite on this path. Recorded, never
+    # reported as a verified backup.
+    cr.emit('backupGate', BACKUP_DECISION)
     summary = cr.org_export(sha, run_id, confirm)
     if (summary['counts']['organizations'], summary['counts']['memberships']) != (0, 0):
         raise RuntimeError('The export is not empty; use the standard cutover runbook')
-    cr.org_import(sha, run_id, confirm)
+    cr.org_import(sha, run_id, confirm, backup_gate=False)
     inventory(cr)  # immediately before the switch: still empty everywhere
     late = {}
 
@@ -204,4 +215,5 @@ def activate(cr, sha, run_id, confirm):
                            'required (runbook 7); the Meeting Service stays authoritative'
                            % '; '.join(late['problems']))
     cr.emit('firstActivation', {'mode': 'authoritative', 'procedure': 'empty-dataset',
-                                'shadowObservation': 'not applicable: no legacy organization data to compare'})
+                                'shadowObservation': 'not applicable: no legacy organization data to compare',
+                                'backupVerified': False})
