@@ -1008,12 +1008,17 @@ pub struct OrganizationMemberResponse {
     pub version: Option<i64>,
     /// ORG-006: the member's display name (the account's chosen display name, otherwise
     /// its username), from the account authority. `null` when the account no longer
-    /// exists. The email address is never included: the organization policy has no
-    /// email-visibility setting, so only the display identity is shown.
+    /// exists.
     pub display_name: Option<String>,
     /// ORG-006: the member's username (public handle). `null` when the account no
     /// longer exists.
     pub username: Option<String>,
+    /// The member's account email address. Present ONLY when the caller may see member
+    /// emails: an ACTIVE OWNER or ADMIN of this organization, or a platform
+    /// administrator. Absent (not `null`) for every other caller and for accounts that no
+    /// longer exist. Enforced by the backend; never infer it from the client role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -1194,7 +1199,20 @@ pub struct OrganizationOwnershipTransferRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateOrganizationInvitationRequest {
     /// The invitee's email address; only an account with this verified email can accept.
-    pub email: String,
+    /// Send either `email`, or `identifierType` + `identifier`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// `EMAIL` or `CF_MEET_ID`, together with `identifier` (instead of `email`). A
+    /// `CF_MEET_ID` invitation is resolved server-side through the Communications Hub
+    /// under the consumer-discovery rules (discoverable id, visible profile, no block,
+    /// active account); anything the inviter may not discover is `404
+    /// INVITEE_NOT_FOUND`, indistinguishably. The invitee's email is never returned to
+    /// the inviter, not even masked: the invitation shows `CF Meet ID <id>` as its hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifier_type: Option<String>,
+    /// The email address or the CF Meet ID (trimmed; emails are lower-cased).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
     /// ADMIN, MANAGER, MEMBER or GUEST.
     pub role: String,
     /// Blueprint Section 11: also email the invitation link to `email` (default false).
@@ -1212,7 +1230,8 @@ pub struct OrganizationInvitation {
     pub role: String,
     /// PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED.
     pub status: String,
-    /// Masked invitee email, e.g. `a***@example.com`.
+    /// Masked invitee email, e.g. `a***@example.com`; `CF Meet ID <id>` for an invitation
+    /// addressed by CF Meet ID (the email is never shown, not even masked).
     pub invitee_email_hint: String,
     pub invited_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
@@ -1223,6 +1242,12 @@ pub struct OrganizationInvitation {
     /// Creation with `sendEmail: true` only: DISABLED, ACCEPTED or FAILED.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email_delivery: Option<EmailDelivery>,
+    /// Creation by identifier only: the `identifierType` used (`EMAIL` or `CF_MEET_ID`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifier_type: Option<String>,
+    /// Creation by `CF_MEET_ID` only: the CF Meet ID the invitation was addressed to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
 }
 
 /// `POST /api/v2/organization-invitations/accept` and `/decline`.

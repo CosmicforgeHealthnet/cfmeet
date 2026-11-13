@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -360,6 +360,124 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PrincipalResolve"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/organization-invitations/resolve": {
+      "post": {
+        "operationId": "resolveOrganizationInvitee",
+        "summary": "Resolve a CF Meet ID for an organization invitation (Meeting Service only)",
+        "description": "Translates a CF Meet ID into the owning account reference for an organization invitation the Meeting Service creates on the inviter's behalf. Callable by cfmeet.meeting-service only (permission communications-user.forward). The inviter's Hub profile is ensured from `account` exactly like dispatch, and the consumer-discovery rules apply to the inviter: discoverable public id, visible profile, no block in either direction, active account, the discovery.resolve attempt budget (429). Every id the inviter may not discover answers the same 404 as an unknown id. The account reference is never relayed to clients. 1.5.0.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-user.forward",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account that owns the CF Meet ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInviteeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Event identity or payload conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationInviteeResolve"
               }
             }
           }
@@ -1455,6 +1573,51 @@
           "category",
           "optedOut"
         ]
+      },
+      "OrganizationInviteeResolve": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "cfMeetId"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/VerifiedAccount"
+          },
+          "cfMeetId": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "OrganizationInviteeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "accountReference",
+          "displayName"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "accountReference": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "self": {
+            "type": "boolean",
+            "description": "Present (true) when the CF Meet ID is the inviter's own."
+          }
+        }
       },
       "PolicyCheck": {
         "type": "object",
