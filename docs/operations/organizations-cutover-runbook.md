@@ -2,6 +2,8 @@
 
 **Status:** prepared on `staging`; nothing here has been run in production. **Decision record:** [ADR 0056](../decisions/0056-first-party-organizations-and-workspace-boundaries.md) (§2 one writer, §3 ingress, §6 fail closed, §9 backups first). **Internal contract:** [organizations-internal-v1](../api/organizations-internal-v1.md).
 
+> **Empty-dataset first activation ([ADR 0059](../decisions/0059-organizations-empty-dataset-first-activation.md)).** When production has never held a first-party organization anywhere, `org-cutover-first-activation` (`confirm=offsite-backup-verified,empty-dataset`) replaces steps 4–6 below. It verifies the empty dataset in every service, keeps gate 1 and the export/import reconciliation, and switches directly to `authoritative`. It refuses any non-empty or inconsistent dataset, which must follow this runbook unchanged.
+
 This runbook moves first-party organization authority from the meeting-service tables (`organizations`, `organization_memberships`) to the Organizations Service, with **exactly one writer at every moment**. Meeting-service selects its role with one setting:
 
 | `ORGANIZATIONS_AUTHORITY_MODE` | Writer | Reads served from | First-party routes (`/api/v2/organizations*`, invitations, `GET /api/v2/admin/organizations`) |

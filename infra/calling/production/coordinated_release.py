@@ -48,6 +48,7 @@ import production as p
 import communications_release as release
 import email_operations as mail_ops
 import developer_access
+import org_first_activation
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -533,6 +534,10 @@ GRANTS = (
     ('activate-provisioning', 'platform-access', 'organizations', ('platform-identity.provision-first-party',)),
     ('activate-org-events', 'meeting-service', 'organizations', ('meeting-organization-events.apply',)),
     ('org-cutover-shadow', 'organizations', 'meeting-service',
+     ('organization.read', 'organization.write', 'organization.act-for-user', 'organization.administer')),
+    # Empty-dataset first activation (org_first_activation.py): the same Meeting Service grants
+    # as the shadow step it replaces.
+    ('org-cutover-first-activation', 'organizations', 'meeting-service',
      ('organization.read', 'organization.write', 'organization.act-for-user', 'organization.administer')),
     ('activate-enterprise-calling', 'platform-access', 'meeting-service', ('platform-principal.ensure',)),
     ('activate-enterprise-calling', 'calling', 'meeting-service', ('calling-request.act-for-organization',)),
@@ -1964,7 +1969,12 @@ ACTIVATIONS = {
     'org-cutover-import': (('org-cutover-export',), org_import),
     'org-cutover-shadow': (('org-cutover-import',), org_shadow),
     'org-cutover-authoritative': (('org-cutover-shadow',), org_authoritative),
-    'activate-enterprise-calling': (('org-cutover-authoritative',), activate_enterprise_calling),
+    # Owner decision 2026-11-13: an empty dataset may skip import/shadow/7-day observation.
+    'org-cutover-first-activation': (('activate-org-events',), lambda sha, run_id, confirm:
+                                     org_first_activation.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # A tuple inside `requires` lists alternatives: either cutover procedure makes Organizations authoritative.
+    'activate-enterprise-calling': ((('org-cutover-authoritative', 'org-cutover-first-activation'),),
+                                    activate_enterprise_calling),
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
@@ -2037,7 +2047,8 @@ def run(operation, sha, run_id, confirm=''):
             raise RuntimeError('Developer acceptance failed')
     else:
         requires, step = ACTIVATIONS[operation]
-        missing = [r for r in requires if not done(r)]
+        missing = [' or '.join(r) if isinstance(r, tuple) else r for r in requires
+                   if not (any(done(x) for x in r) if isinstance(r, tuple) else done(r))]
         if missing:
             raise RuntimeError('Activation order: complete %s first' % ', '.join(missing))
         p.identity()

@@ -193,11 +193,16 @@ class DependencyOrder(unittest.TestCase):
     def test_activation_requirements_follow_the_runbook_order(self):
         for operation, (requires, _) in cr.ACTIVATIONS.items():
             for required in requires:
-                self.assertIn(required, cr.ACTIVATIONS)
+                for alternative in (required if isinstance(required, tuple) else (required,)):
+                    self.assertIn(alternative, cr.ACTIVATIONS)
         chain = ['activate-provisioning', 'activate-org-events', 'org-cutover-export', 'org-cutover-import',
-                 'org-cutover-shadow', 'org-cutover-authoritative', 'activate-enterprise-calling']
+                 'org-cutover-shadow', 'org-cutover-authoritative']
         for previous, step in zip(chain, chain[1:]):
             self.assertEqual(cr.ACTIVATIONS[step][0], (previous,))
+        # Either cutover procedure (standard, or the empty-dataset first activation) unlocks Calling.
+        self.assertEqual(cr.ACTIVATIONS['org-cutover-first-activation'][0], ('activate-org-events',))
+        self.assertEqual(cr.ACTIVATIONS['activate-enterprise-calling'][0],
+                         (('org-cutover-authoritative', 'org-cutover-first-activation'),))
         self.assertEqual(cr.ACTIVATIONS['activate-gateway-routing'][0], ('activate-developer-platform',))
 
     def test_catalogue_matches_dockerfiles_and_backup_catalog(self):
