@@ -161,7 +161,9 @@ class FakeSocket:
 
     def next_of(self, kind):
         if kind == 'event':
-            return {'type': 'event', 'conversationId': FakeSocket.conversation}
+            # The real server shape: the conversation id is inside `event`.
+            return {'type': 'event', 'event': {'conversationId': FakeSocket.event_conversation or
+                                               FakeSocket.conversation, 'eventSequence': 3}}
         return {'type': kind}
 
     def send(self, value):
@@ -175,12 +177,14 @@ class FakeSocket:
 
 
 FakeSocket.sent = []
+FakeSocket.event_conversation = None
 
 
 class OrganizationAcceptanceTest(unittest.TestCase):
     def journey(self, api):
         events = []
         FakeSocket.conversation = api.conv
+        FakeSocket.event_conversation = None
         journey = oa.Journey(list(api.people.values()), lambda k, v: events.append((k, v)), transport=api,
                              sleep=lambda s: None, websocket=FakeSocket)
         return journey, events
@@ -204,6 +208,16 @@ class OrganizationAcceptanceTest(unittest.TestCase):
         # Both organizations were archived; no operator or internal route was used.
         self.assertTrue(all(not r.startswith('/internal') for _, r in api.requests))
         self.assertEqual(sum(1 for m, r in api.requests if r == '/api/v2/organizations/{id}/archive'), 2)
+
+    def test_realtime_requires_an_event_of_the_organization_conversation(self):
+        # Production run 43483450875: the server nests conversationId inside `event`; an event
+        # of another conversation (or a top-level-only shape) is not proof of delivery.
+        api = FakeApi(accounts())
+        journey, _ = self.journey(api)
+        FakeSocket.event_conversation = 'another-conversation'
+        checks = journey.run()
+        self.assertEqual(checks['organization_realtime_session_and_events'], 'FAIL')
+        self.assertEqual(checks['organization_messaging_unread_and_read_cursor'], 'PASS')
 
     def test_first_failure_stops_the_journey_names_the_check_and_still_cleans_up(self):
         api = FakeApi(accounts(), fail_route=('POST', '/api/v2/organizations/{id}/teams'))

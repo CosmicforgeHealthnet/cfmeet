@@ -406,8 +406,12 @@ class Journey:
             self.require(socket_.next_of('subscribed'), 'subscribed to the organization conversation')
             self.msg(self.a, self.org1, 'POST', 'v1/conversations/%s/messages' % self.conversation,
                      {'clientMessageId': str(uuid.uuid4()), 'text': 'acceptance realtime'}, expected=(200, 201))
+            # Server frame shape (services/messaging/src/realtime/connection.rs): {"type": "event",
+            # "event": {"conversationId": ..., ...}}. A replayed earlier event of the same
+            # conversation is also proof of delivery; another conversation's event is not.
             frame = socket_.next_of('event')
-            self.require(frame and frame.get('conversationId') == self.conversation, 'realtime event delivered')
+            event = (frame or {}).get('event') or {}
+            self.require(event.get('conversationId') == self.conversation, 'realtime event delivered')
         finally:
             socket_.close()
         # Scoped to the organization: B's PERSONAL realtime session cannot subscribe to it.
