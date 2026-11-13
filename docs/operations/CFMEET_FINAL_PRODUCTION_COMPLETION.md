@@ -4,15 +4,33 @@ Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · B
 
 Status vocabulary: `ACTIVE_VERIFIED` (production evidence cited) · `IMPLEMENTED_PENDING_CONFIGURATION` · `PENDING_OWNER_APPROVAL` · `PENDING_EXTERNAL_ASSESSMENT` · `DEFERRED_BY_OWNER` · `FAILED`.
 
-<!-- EVIDENCE-PLACEHOLDER: sections 1, 2, 6, 7, 8, 16, 17 and 20 are completed with run ids after the release. -->
-
 ## 1. Executive summary
 
-_Completed after the production release._
+| Item | Status | Evidence |
+|---|---|---|
+| CI failures A–E on PR #65 (secret scan, Developer Platform image, real-service journeys, SDK parity, Chromium on ubuntu 26.04) and the Rust 1.100 `redis` break | Fixed | §17 |
+| PR #65 → `staging` · PR #66 → `main` | Merged | #65 merge `21976ecd90dfe2a2927b19d495b248014b2beaa9`; #66 merge `1e9364ce6590f6e8f4b2ba68da5bc2b13d03046f` |
+| Production release (Meeting Service and Developer Platform; additive migration `lifecycle_delivery_migrations`) | `ACTIVE_VERIFIED` | release [43309857124](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43309857124) at `f2f9693489bd1289935b695d5d83e6db4d22eb2f`; 30/30 verification checks |
+| Instant conferences end after 10 empty minutes | `ACTIVE_VERIFIED` | 15 stale empty instant conferences ended `EMPTY_TIMEOUT`; 0 LIVE instant conferences without a session for over 10 minutes (§7) |
+| Archived spaces keep no LIVE conference | `ACTIVE_VERIFIED` | `liveInArchivedSpaces = 0`; `swy-hayb-mzk` ENDED (§8) |
+| Durable email ledger, worker and Resend adapter | Deployed, Resend inactive: `IMPLEMENTED_PENDING_CONFIGURATION` | the ledger exists and is empty; SMTP is still the transport; no Resend key is mounted (§6) |
+| Developer Platform production access (named reviewers, no self-approval, manual only) | Deployed, submissions disabled: `PENDING_OWNER_APPROVAL` | `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`; [developer acceptance 43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) 30/30 (§9) |
+| Telecom (SMS/phone OTP, PSTN/SIP, numbers, Privacy Relay) | `DEFERRED_BY_OWNER` | unchanged safe defaults |
+| Full-platform `certify` at the `main` head | **`CERTIFIED_READ_ONLY`** | [certify 43337109332](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337109332) at `0bcdd137e2b9402fbc52c66ba4e74ed6769ba342` (§20) |
 
 ## 2. Starting production state
 
-_Completed from the read-only `diagnose` run of the deployed release._
+Before this release ([inspect 43291592091](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43291592091) and [diagnose 43302325314](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43302325314)):
+
+- **Release.** All 13 containers ran release `4904ee33`. During this work a parallel stream released `9684346e` (Q&A restore and participant identity, all 13 services, [run 43301863683](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43301863683)). That release is the base this release was scoped against.
+- **Mail.**
+  - `EMAIL_PROVIDER` is unset, so SMTP is used implicitly: `smtp.gmail.com:587`, a Gmail username and sender, and a password configured.
+  - No Resend key and no webhook secret.
+  - Over the 168-hour window of the then-current container logs, `diagnose` counted 0 SMTP `535`/BadCredentials, 0 drops after retries and 0 SMTP sends. Those containers had been recreated by the releases, so earlier `535` failures are not in the window.
+  - The legacy Redis `email:queue` held 0 jobs.
+- **Ledger and migrations.** The Meeting database had no `lifecycle_delivery_migrations` history.
+- **Diagnose failure.** The pre-release `diagnose` stopped before the conference-lifecycle section. Its ledger query relied on `CASE WHEN to_regclass(...)`, which PostgreSQL cannot use to hide a missing table, because it resolves relations at parse time. This was fixed in [CosmicforgeHealthnet/cfmeet#67](https://github.com/CosmicforgeHealthnet/cfmeet/pull/67) and promoted by [CosmicforgeHealthnet/cfmeet#68](https://github.com/CosmicforgeHealthnet/cfmeet/pull/68). The lifecycle state of `swy-hayb-mzk` before the release therefore comes from the owner's report: LIVE, no participants, space archived on 2026-11-12 00:23. The post-release record in §7 and §8 shows how it was ended.
+- **Resources.** `memAvailable` was 5272 MiB, leaving 4440 MiB after the release (gate: 832 MiB needed plus a 1024 MiB margin).
 
 ## 3. Work completed per service
 
@@ -38,7 +56,7 @@ _Completed from the read-only `diagnose` run of the deployed release._
 | Area | What was built |
 |---|---|
 | Explicit reviewer roles | `DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS`. When set, only these named operators may review, approve, reject, suspend or reinstate; anyone else gets `422 POLICY_VIOLATION`. |
-| Submission safety | `…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=true` is refused without at least one reviewer. `…_PRODUCTION_AUTO_APPROVAL=true` is refused by configuration (manual approval only). |
+| Submission safety | Without at least one named reviewer, `…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=true` is downgraded to off: submissions stay disabled and the service still starts. `…_PRODUCTION_AUTO_APPROVAL=true` is ignored with a warning (manual approval only). |
 | Review tool | `developer-platform-operator` (in the Developer Platform image). It signs as `cfmeet.operator-console` and sends `x-cf-operator` and `x-cf-operator-user-id`. Supported commands: `list`, `get`, `review`, `approve`, and `reject` (a reason code is mandatory). |
 
 ### Release tooling (`infra/calling/production`)
@@ -93,7 +111,14 @@ Credential lifecycle warnings stay customer webhooks.
 
 ## 6. OTP recovery evidence
 
-_Completed with the `diagnose` (root cause) and `email-acceptance confirm=otp` evidence._
+Production after the release ([diagnose 43317264046](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317264046)):
+- `emailLedger` is present (all counts 0).
+- `emailProvider` is `smtp (implicit)`: the existing transport, preserved as instructed.
+- `resendKeyMounted` is `false`.
+
+Every new email is now queued durably in the ledger and sent by the worker through SMTP. If Gmail keeps rejecting the credentials, messages stay in the ledger with a temporary error class. They are retried and expire with their code, and are no longer silently dropped from Redis.
+
+OTP delivery is not yet recovered. Recovery needs the owner's Resend setup ([resend-email-owner-handoff.md](resend-email-owner-handoff.md)), then `activate-resend-email` and `email-acceptance confirm=otp`. Status: `IMPLEMENTED_PENDING_CONFIGURATION`.
 
 Pre-production evidence: `tests/email_delivery.rs::otp_journey_from_registration_to_session` runs the whole journey against PostgreSQL and Redis:
 1. Register.
@@ -108,7 +133,18 @@ Further tests cover retries, permanent rejection, attempts running out, expiry, 
 
 ## 7. Instant-meeting lifecycle corrections
 
-_Production state of `swy-hayb-mzk` and the sweeper's effect: see §2 and §16._
+Production after the release (Meeting Service started at 22:07:50 UTC; [diagnose 43317264046](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317264046) at 22:10 UTC):
+
+| Measure | Value |
+|---|---|
+| `emptyTimeoutEnded24h` (only the new sweeper writes `EMPTY_TIMEOUT`) | **15** |
+| `liveInstantWithoutActiveSessionOver10Min` | **0** |
+| `liveByKind` | `{}` (no LIVE conference left) |
+| `endingConferences` | 0 (every provider termination confirmed) |
+
+The occupied case, the reset on rejoin, `conference.ended` and the Home/agenda state are verified by the real-PostgreSQL tests listed below. They run in the Meeting Service CI of the released head.
+
+In production, the [meetings acceptance run 43317535902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317535902) passed after this release: a real two-participant LiveKit room with hands, spotlight and reconnect. That confirms the replaced Meeting Service still runs live meetings. It does not exercise the 10-minute timer. No production meeting was deliberately held occupied, or empty, for 10 minutes. The production evidence for the timer is the 15 real stale conferences it ended.
 
 Rules as built:
 - The interval starts at creation.
@@ -129,6 +165,14 @@ Tests (`tests/lifecycle_completion.rs`, real `LiveKitProvider` against the mock 
 
 ## 8. Archiving lifecycle corrections
 
+Production: `liveInArchivedSpaces = 0`. `swy-hayb-mzk` (space ARCHIVED at 2026-11-12 00:23:22 UTC) has conference status ENDED:
+- `endingRequestedAt` 22:07:47.87;
+- `endedAt` 22:07:47.99;
+- reason `ADMIN`, the archive-repair path;
+- 0 active sessions.
+
+The sweeper repaired it on its first pass after the Meeting Service started.
+
 Invariant: **an archived meeting space has zero LIVE conferences.**
 
 It is enforced in four places:
@@ -147,7 +191,13 @@ Tests:
 
 ## 9. Developer Platform activation
 
-_See §16/§20 for the activation state._
+Production state:
+- `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`.
+- No reviewer configured: `vars.CFMEET_PRODUCTION_ACCESS_REVIEWERS` is not set, so production-access submissions stay disabled, as instructed.
+- [Developer acceptance 43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) at `0bcdd137` passed 30/30 against production: console, credentials limited to their scopes, gateway scope enforcement with quota headers, a forged credential refused, tenant isolation, a signed webhook delivered (attempt recorded `SUCCEEDED`), a revoked credential refused, and clean-up with 0 problems.
+- The release's own regression checks passed.
+
+Enabling submissions is `activate-production-access-review`, after the owner names reviewers. Status: `PENDING_OWNER_APPROVAL`.
 
 Manual approval only:
 - The `production` environment of GitHub Actions gates who can dispatch.
@@ -157,7 +207,10 @@ Manual approval only:
 
 ## 10. Organizations activation outcome
 
-_Inventory from `diagnose`._
+Inventory from `diagnose` 43317264046:
+- Legacy dataset: 0 organizations, 0 memberships, 0 duplicates, 0 orphans.
+- Organizations service: 0 organizations, memberships, invitations or import runs.
+- Authority mode: `legacy`.
 
 The runbook has no empty-dataset path. The import requires:
 - `offsite-backup-verified`;
@@ -248,20 +301,92 @@ The behaviour is documented in [the frontend handover §12](../frontend/cfmeet-f
 
 ## 16. Staging and production deployment evidence
 
-_Completed after the release._
+| Step | Result |
+|---|---|
+| PR [#65](https://github.com/CosmicforgeHealthnet/cfmeet/pull/65) → `staging` | merged `21976ecd90dfe2a2927b19d495b248014b2beaa9` (final head `9359d070`, all checks green) |
+| PR [#66](https://github.com/CosmicforgeHealthnet/cfmeet/pull/66) `staging` → `main` | 192 checks green, 1 skipped by design; merged `1e9364ce6590f6e8f4b2ba68da5bc2b13d03046f` |
+| `main` head released | `f2f9693489bd1289935b695d5d83e6db4d22eb2f`. It is `1e9364ce` plus two docs/acceptance-workflow commits from the parallel stream; no image build inputs changed. |
+| Release | [43309857124](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43309857124): gate (green main CI for the exact SHA) → images → backups of 16 databases (restore-tested: meeting-service, organizations, platform-access) → migrations → swap → verify |
+| Release scope | base `9684346e` → changed `meeting-service`, `developer-platform`. Containers replaced: `meeting-service`, `developer-platform`, `developer-platform-worker`. **Kept (not restarted)**: platform-access, organizations, messaging, calling, communications, numbering, privacy-relay, sms-gateway, telephony, api-gateway. Each kept container was checked to run exactly the `9684346e` image. |
+| Images | `ghcr.io/cosmicforgehealthnet/cfmeet-meeting-service:f2f96934…@sha256:fb153c003624add0e6c23ac4f50a87ee9ff55bc984af87d0e4323f4a764b0531` · `ghcr.io/cosmicforgehealthnet/cfmeet-developer-platform:f2f96934…@sha256:7ad9f984c8af34bdbdd9524ed6a08a6aecf26a85606d969c286a72a2f19b8e60` |
+| Migrations | All Meeting histories applied in order. New: `lifecycle_delivery_migrations` 1 applied (`m20261112_000001_email_delivery_and_presence`). Developer Platform: 10 applied (`m20261203_000014_credential_lifecycle_notices`). |
+| Verification | 30/30 checks PASS, 0 violations. `REGRESSION: Meetings health, Messaging/Calling/Platform TLS readiness, both LiveKit keys PASS` |
+| Rollback readiness | The journal records the previous container of each replaced service. `rollback` restores them, with backups `/opt/cfmeet-core/backups/43309857124-1/`. |
+| Post-release diagnose | [43317264046](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317264046) |
+| Post-release meetings acceptance | [43317535902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317535902) success |
+| Resend | Not activated: `activate-resend-email` was not run, and the SMTP configuration is preserved. |
+| Subsequent release (parallel Organizations stream) | [43331884110](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43331884110) at `3e11958b`, a descendant of this release that contains it. Replaced organizations, messaging, calling, communications, meeting-service and api-gateway. **Kept** developer-platform(+worker) at `f2f96934` and platform-access, numbering, privacy-relay, sms-gateway and telephony at `9684346e`. Verification 30/30, 0 violations; `lifecycle_delivery_migrations` still applied. Its certify [43336196158](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43336196158) returned `CERTIFIED_READ_ONLY`. |
+| PR [#67](https://github.com/CosmicforgeHealthnet/cfmeet/pull/67) → `staging` · PR [#68](https://github.com/CosmicforgeHealthnet/cfmeet/pull/68) → `main` | `diagnose` fix (§2). #67 merge `d1816323`; #68 merge `991593ad40d23f872774650206f9f4e017e671a4` (112 checks green; one Calling planner-dependent load assertion passed on re-run, §18) |
 
 ## 17. Test results
 
-_Completed with the CI run ids._
+CI failures on PR #65 and their root causes:
+
+| # | Failure | Root cause | Fix |
+|---|---|---|---|
+| A | Secret scan | The test fixture used a realistic Svix-format secret (base64 of a dummy string); nothing real was exposed | Synthetic `whsec_fixture-not-a-secret-…` fixture; scanner unchanged |
+| B | Developer Platform image check | The image's exact `/app` binary allowlist did not list the new `developer-platform-operator` (the private-key check itself passed) | Allowlist updated |
+| C/D | Real-service journeys and SDK parity | The Developer Platform refused to start with the workflow on and no named reviewer | Downgrade to "submissions disabled" with a warning instead of a startup error; the certification stack names an explicit test reviewer |
+| E | Chromium/Playwright | `ubuntu-latest` moved to 26.04, where the pinned Playwright browser dependencies do not install | Browser jobs pinned to `ubuntu-24.04` |
+| — | Meeting Service compile | Rust 1.100 (never-type fallback) breaks `redis` 0.25.4 (`!: FromRedisValue`) | `redis` 0.25.5 |
+| — | Backup drill | `pg_restore` 17 against PostgreSQL 16 emits `SET transaction_timeout` | `restore.sh` renders to SQL and drops only that setting when the client is newer |
+| — | `diagnose` before the migration | §2 | PR #67 |
+
+Final results:
+- PR #65 head `9359d070`: all checks green, including journeys run 43283416967.
+- PR #66 head `21976ecd`: 192 checks green.
+- Main push CI for `1e9364ce`/`f2f96934`: green (gate passed in release 43309857124).
+- PR #67 head `236e5ae7`: 104 checks green.
+- Release tooling: 274 offline tests OK.
 
 ## 18. Remaining external dependencies
 
-_Completed after the release._
+- **Resend.** Domain `cfmeet.com` verified in Resend, with Hostinger DNS records (`send` MX/TXT, `resend._domainkey`, `_dmarc`). The production secrets `CFMEET_RESEND_API_KEY` and optionally `CFMEET_RESEND_WEBHOOK_SECRET`, and the variable `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT`.
+- **Off-host backup age key** for the Organizations import gate (§10).
+- **Meeting artefact bucket** for recording v2 (§12).
+- **F-1:** regenerate the Swagger descriptions for the archive and instant-meeting behaviour notes in a contracts release.
+- **F-2:** `services/calling/tests/enterprise_load.rs::queue_burst_keeps_fifo_order` asserts which index the PostgreSQL planner picks for about 54 rows. It flaked once on PR #68 (it chose `idx_enterprise_queue_entries_deadline`); the FIFO correctness assertions passed, and so did the re-run. Make the plan check deterministic, for example with `ANALYZE` or planner settings inside the transaction, without removing it.
 
 ## 19. Owner-only actions
 
-_Completed after the release._
+1. Resend: follow [resend-email-owner-handoff.md](resend-email-owner-handoff.md) §1–6, then run `activate-resend-email`, then `email-acceptance` with `confirm=otp`.
+2. Name production-access reviewers in `vars.CFMEET_PRODUCTION_ACCESS_REVIEWERS`, then run `activate-production-access-review`.
+3. Revoke the Gmail app password after Resend has been stable for a few days.
+4. Organizations: create the age key and decide the shadow period (§10).
+5. Recording v2 retention and storage decision (§12).
 
 ## 20. Final production verdict
 
-_Completed after the release._
+**`CERTIFIED_READ_ONLY`**: [certify 43337109332](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337109332) at the `main` head `0bcdd137e2b9402fbc52c66ba4e74ed6769ba342` (2026-11-13). Every applicable read-only check passed:
+
+| Check | Result |
+|---|---|
+| Services | 13/13 PASS: container state, authentication probe, database and migrations complete, source matches `main`. 0 restarts, no OOM. |
+| Revisions | `3e11958b`: organizations, messaging, calling, communications, meeting-service (`cfmeet-production-backend`), api-gateway. `f2f96934`: developer-platform, developer-platform-worker. `9684346e`: platform-access, numbering, privacy-relay, sms-gateway, telephony. |
+| Migrations | Complete for every service, including Meeting `lifecycle_delivery_migrations` (1) |
+| Core identity and authentication | PASS |
+| Calling and Messaging | PASS (service checks; LiveKit media provider; meetings acceptance [43317535902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317535902) 22/22) |
+| Developer Platform and Gateway regressions | PASS: developer acceptance [43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) 30/30. Gateway public routing on, WebSockets off. |
+| Telecom disabled | Provider safe defaults PASS, 0 violations. SMS provider, number providers and porting, PSTN, SIP, callback relay, Privacy Relay, contact vault and relay number pool are all disabled. |
+| Public surface | 236 public and 25 internal routes checked, 0 failures; internal routes not public; CORS preflight from the web app passes; Swagger passes |
+| Secrets | The certify log contains no key, signing secret or private-key material; mail is reported only as `EMAIL_PROVIDER=smtp` (configured) |
+| Email | Ledger, worker and Resend adapter deployed; Resend **not active** (no key mounted); SMTP preserved |
+| Production access | Submissions disabled (`…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`); no reviewer configured |
+
+Final status per objective:
+
+| Objective | Status |
+|---|---|
+| Instant-conference empty auto-end (10 min) | `ACTIVE_VERIFIED` |
+| Archive ends LIVE conferences | `ACTIVE_VERIFIED` |
+| Durable email ledger and worker | `ACTIVE_VERIFIED` (deployed; carrying SMTP) |
+| Resend transport and OTP recovery | `IMPLEMENTED_PENDING_CONFIGURATION` (owner: domain, DNS, API key) |
+| Developer Platform reviewer enforcement and self-approval refusal | Deployed; submissions `PENDING_OWNER_APPROVAL` (reviewers) |
+| Gradual email-verification enforcement | `IMPLEMENTED_PENDING_CONFIGURATION` (off by default) |
+| API Gateway WebSocket proxy | `IMPLEMENTED_PENDING_CONFIGURATION` |
+| Meeting developer API through the gateway | `PENDING_OWNER_APPROVAL` (edge topology) |
+| Recording v2 | `PENDING_OWNER_APPROVAL` / `IMPLEMENTED_PENDING_CONFIGURATION` |
+| Organizations cutover | `PENDING_OWNER_APPROVAL` (age key, shadow period) |
+| SMS/phone OTP, PSTN/SIP, numbers, Privacy Relay | `DEFERRED_BY_OWNER` |
+| Subscription meeting-duration limits | `DEFERRED_BY_OWNER` |
+| Paid backup infrastructure | `DEFERRED_BY_OWNER` |
