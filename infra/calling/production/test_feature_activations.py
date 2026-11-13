@@ -243,5 +243,42 @@ class OffsiteBackup(unittest.TestCase):
             self.assertEqual(cr.require_offsite({'runId': '7-1'})['artifactId'], 99)
 
 
+
+class WebOrigins(unittest.TestCase):
+    def preflight(self, allowed):
+        def fake(url, method='GET', headers=None):
+            origin = headers['Origin']
+            return (204, {'Access-Control-Allow-Origin': origin}) if origin in allowed else (403, {})
+        return fake
+
+    def test_gateway_allows_both_production_web_origins_and_never_a_wildcard(self):
+        self.assertEqual(cr.WEB_ORIGINS, ('https://cfmeet.com', 'https://www.cfmeet.com'))
+        self.assertEqual(cr.SERVICES['api-gateway']['env']['API_GATEWAY_CORS_ALLOWED_ORIGINS'],
+                         'https://cfmeet.com,https://www.cfmeet.com')
+        self.assertEqual(cr.ACTIVATIONS['activate-web-origins'][0], ('activate-gateway-routing',))
+
+    def test_activation_recreates_only_the_gateway_and_verifies_cors(self):
+        applied = []
+
+        def apply(operation, sha, run_id, changes, irreversible=False, post=None):
+            applied.append((operation, changes, irreversible))
+            post()
+
+        with patch.object(cr, 'apply_activation', apply), \
+                patch.object(cr, 'http_status', self.preflight(cr.WEB_ORIGINS)):
+            cr.activate_web_origins('a' * 40, '3-1', '')
+        self.assertEqual(applied, [('activate-web-origins', [('api-gateway', {
+            'API_GATEWAY_CORS_ALLOWED_ORIGINS': 'https://cfmeet.com,https://www.cfmeet.com'})], False)])
+
+    def test_post_check_fails_when_www_is_refused_or_a_foreign_origin_is_allowed(self):
+        def apply(operation, sha, run_id, changes, irreversible=False, post=None):
+            post()
+
+        for allowed in (('https://cfmeet.com',), cr.WEB_ORIGINS + ('https://evil.example',)):
+            with patch.object(cr, 'apply_activation', apply), patch.object(cr, 'http_status', self.preflight(allowed)):
+                with self.assertRaisesRegex(RuntimeError, 'CORS'):
+                    cr.activate_web_origins('a' * 40, '3-1', '')
+
+
 if __name__ == '__main__':
     unittest.main()

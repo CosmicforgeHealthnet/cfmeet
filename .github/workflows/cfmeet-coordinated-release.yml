@@ -19,7 +19,7 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, org-cutover-first-activation, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, developer-acceptance, diagnose, email-acceptance, developer-access-review]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, org-cutover-first-activation, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-web-origins, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, developer-acceptance, diagnose, email-acceptance, developer-access-review]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string

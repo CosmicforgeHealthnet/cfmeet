@@ -31,6 +31,7 @@ from pathlib import Path
 HOST = 'api.cfmeet.com'
 PUBLIC = 'https://' + HOST
 WEB_ORIGIN = 'https://cfmeet.com'
+WWW_ORIGIN = 'https://www.cfmeet.com'
 PLACEHOLDER = '00000000-0000-4000-8000-00000000c0de'
 # Must match coordinated_release.GATEWAY_PREFIXES (asserted by the tests).
 GATEWAY_PREFIXES = ('/v1/commercial-plans', '/v1/developer-platform', '/v1/environments', '/v1/invitations',
@@ -164,6 +165,13 @@ def infrastructure():
     allowed = headers.get('access-control-allow-origin')
     checks['cors_preflight_from_web'] = dict(status=status, allowOrigin=allowed,
                                              result='PASS' if status < 400 and allowed in (WEB_ORIGIN, '*') else 'FAIL')
+    # The web app is served from www.cfmeet.com (cfmeet.com redirects there): the Developer
+    # Portal calls the API Gateway from that origin.
+    status, headers, _ = request('/v1/developer-platform/context', 'OPTIONS', {
+        'Origin': WWW_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
+    allowed = headers.get('access-control-allow-origin')
+    checks['gateway_cors_preflight_from_www'] = dict(status=status, allowOrigin=allowed,
+                                                     result='PASS' if status < 400 and allowed == WWW_ORIGIN else 'FAIL')
     status, _, body = request('/api/v2/me/profile')
     checks['user_api_requires_session'] = dict(status=status, result='PASS' if status == 401 else 'FAIL')
     try:

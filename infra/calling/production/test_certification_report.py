@@ -53,13 +53,27 @@ class PublicSurface(unittest.TestCase):
 
         def fake(path, method='GET', headers=None, attempts=4, limit=400):
             if method == 'OPTIONS':
-                return 204, {'access-control-allow-origin': pc.WEB_ORIGIN}, ''
+                return 204, {'access-control-allow-origin': headers['Origin']}, ''
             return answers.get(path, (200 if path.startswith('/internal') else 401, {}, ''))
 
         with patch.object(pc, 'request', side_effect=fake), patch.object(pc, 'certificate_days', return_value=60):
             result = pc.certify(REPO, pace=0)
         self.assertTrue(result['failed'])
         self.assertTrue(all(f.startswith('internal ') for f in result['failed']))
+
+    def test_gateway_must_answer_cors_for_the_www_origin(self):
+        def fake(path, method='GET', headers=None, attempts=4, limit=400):
+            if method == 'OPTIONS':
+                # The gateway still allows only the apex origin.
+                return (204, {'access-control-allow-origin': pc.WEB_ORIGIN}, '') if headers['Origin'] == pc.WEB_ORIGIN \
+                    else (403, {}, '')
+            if path == '/api-docs/swagger-config.json':
+                return 200, {}, '{"urls":[]}'
+            return (404 if path.startswith('/internal') else 401), {}, ''
+
+        with patch.object(pc, 'request', side_effect=fake), patch.object(pc, 'certificate_days', return_value=60):
+            result = pc.certify(REPO, pace=0)
+        self.assertIn('gateway_cors_preflight_from_www', ' '.join(result['failed']))
 
 
 def sh(cwd, *args):

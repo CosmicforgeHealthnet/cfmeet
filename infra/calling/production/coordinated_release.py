@@ -61,6 +61,9 @@ PG_CLIENT = 'postgres:16-alpine'
 MEETING = 'cfmeet-production-backend'
 PUBLIC = 'https://api.cfmeet.com'
 WEB_ORIGIN = 'https://cfmeet.com'
+# Every browser origin of the production web app: cfmeet.com redirects to www.cfmeet.com
+# (Vercel), so the browser's Origin is normally the www form.
+WEB_ORIGINS = (WEB_ORIGIN, 'https://www.cfmeet.com')
 SHA_RE = re.compile(r'[a-f0-9]{40}')
 RUN_RE = re.compile(r'[0-9]{1,20}(-[0-9]{1,4})?')  # run id, optionally -attempt
 
@@ -140,7 +143,7 @@ SERVICES = {
     # activate-developer-platform + activate-gateway-routing.
     'api-gateway': _service('cfmeet-api-gateway', 8099, '/ready', memory=192,
         env={'API_GATEWAY_BIND_ADDRESS': '0.0.0.0:8099', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED': 'false',
-             'API_GATEWAY_WEBSOCKETS_ENABLED': 'false', 'API_GATEWAY_CORS_ALLOWED_ORIGINS': WEB_ORIGIN}),
+             'API_GATEWAY_WEBSOCKETS_ENABLED': 'false', 'API_GATEWAY_CORS_ALLOWED_ORIGINS': ','.join(WEB_ORIGINS)}),
 }
 
 # Owners before callers (final-production-activation-runbook §1).
@@ -1655,6 +1658,32 @@ def activate_first_party_features(sha, run_id, confirm):
     apply_activation('activate-first-party-features', sha, run_id, changes)
 
 
+def web_origin_checks():
+    """Every production web origin passes the gateway's CORS preflight; a foreign origin does not."""
+    checks = {}
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
+        status, headers = http_status(PUBLIC + '/v1/developer-platform/context', 'OPTIONS', {
+            'Origin': origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
+        got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
+        ok = (status < 400 and got == origin) if allowed else got != origin
+        checks['cors ' + origin] = 'PASS' if ok else 'FAIL %d' % status
+    return checks
+
+
+def activate_web_origins(sha, run_id, confirm):
+    """The API Gateway answers CORS for every production web origin (cfmeet.com and the
+    www.cfmeet.com it redirects to). Exact origins only, never a wildcard; nothing else changes."""
+
+    def post():
+        checks = web_origin_checks()
+        emit('webOriginChecks', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Gateway CORS does not match the production web origins')
+
+    apply_activation('activate-web-origins', sha, run_id, [
+        ('api-gateway', {'API_GATEWAY_CORS_ALLOWED_ORIGINS': ','.join(WEB_ORIGINS)})], post=post)
+
+
 def activate_developer_console(sha, run_id, confirm):
     """Developer Console sessions (Part VI §50): the Developer Platform verifies a CF Meet
     session through the Meeting Service's session bridge (`user-session.verify`); without it
@@ -1793,7 +1822,7 @@ def gateway_family_checks():
         checks['anonymous %s %s' % (method, path)] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
     status, _ = http_status(PUBLIC + '/v1/conversations', headers={'Authorization': 'Bearer cfk_invalid'})
     checks['forged credential'] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
-    for origin, allowed in ((WEB_ORIGIN, True), ('https://evil.example', False)):
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
         _, headers = http_status(PUBLIC + '/v1/conversations', 'OPTIONS', {
             'Origin': origin, 'Access-Control-Request-Method': 'GET'})
         got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
@@ -1978,6 +2007,7 @@ ACTIVATIONS = {
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
+    'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
