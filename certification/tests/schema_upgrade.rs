@@ -199,12 +199,14 @@ fn cases() -> Vec<Case> {
             service: "platform-access",
             bin: "platform-access-migration",
             // Part VI §54 / §55, then Blueprint Section 7 (ADR 0058) and Section 15
-            // (credential last use, TENANT_RENAMED): all newer than the deployed schema and
+            // (credential last use, TENANT_RENAMED), then ADR 0058 Amendment A2 (automatic
+            // organization service bindings): all newer than the deployed schema and
             // upgraded / rolled back together.
             part_vi: &[
                 "m20261120_000004_credential_suspension_production_activation",
                 "m20261121_000005_first_party_organization_scopes",
                 "m20261122_000006_credential_usage_tenant_rename",
+                "m20261123_000007_organization_service_bindings",
             ],
             seed: "INSERT INTO platform_tenants (id, slug, display_name, classification) VALUES \
                      ('7e000000-0000-4000-8000-000000000001', 'acme-upgrade', 'Acme', 'EXTERNAL'); \
