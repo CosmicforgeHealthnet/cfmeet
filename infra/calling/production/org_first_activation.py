@@ -51,6 +51,10 @@ import subprocess
 OPERATION = 'org-cutover-first-activation'
 CONFIRMATIONS = ('empty-dataset',)
 EXCLUSIVE = ('org-cutover-import', 'org-cutover-shadow', 'org-cutover-authoritative', OPERATION)
+# A recorded export / import of an EMPTY dataset (e.g. by an earlier first-activation attempt that
+# stopped before the switch) does not make this a non-first activation: only a running import, or
+# any shadow / authoritative / first-activation step, does. Emptiness itself is proven by `inventory`.
+DONE_ALLOWED = ('org-cutover-import',)
 # Organizations tables that legitimately hold rows without any organization.
 ORGANIZATIONS_NON_DATA = ('organization_service_nonces',)
 REFERENCE_COLUMNS = ('organization_id', 'organization_ref')
@@ -84,6 +88,17 @@ def table_rows_sql(excluded=ORGANIZATIONS_NON_DATA):
             "AND c.table_name NOT IN (" + names + ");\nCOMMIT;\n")
 
 
+# The receipts an import of an EMPTY export leaves behind (the import run row and its
+# `migration.imported` audit event, both without any organization, membership or conflict). They are
+# the procedure's own bookkeeping, not organization data; anything else in these tables still counts.
+EMPTY_IMPORT_SQL = ("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;\n"
+                    "SELECT json_build_object('organization_import_runs', (SELECT count(*) FROM organization_import_runs "
+                    "WHERE organizations_count = 0 AND memberships_count = 0 AND imported = 0 AND unchanged = 0 "
+                    "AND conflicts = '[]'::jsonb), 'organization_audit_events', (SELECT count(*) FROM "
+                    "organization_audit_events WHERE action = 'migration.imported' AND target_type = 'import_run' "
+                    "AND organization_id IS NULL AND (summary->>'imported') = '0' AND (summary->>'unchanged') = '0' "
+                    "AND (summary->>'conflicts') = '0'));\nCOMMIT;\n")
+
 PROJECTION_SQL = ("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;\n"
                   "SELECT json_build_object('memberships', (SELECT count(*) FROM organization_memberships), "
                   "'organizationIds', (SELECT coalesce(json_agg(id::text ORDER BY id), '[]') FROM organizations));\n"
@@ -107,7 +122,8 @@ def confirmations(confirm):
 def first_time(cr):
     """No standard or first-time cutover has run or is running; Meeting is in legacy mode."""
     seen = sorted({e['operation'] for e in cr.load_journal()
-                   if e['operation'] in EXCLUSIVE and e['status'] in ('done', 'running')})
+                   if e['operation'] in EXCLUSIVE and (e['status'] == 'running' or
+                                                       (e['status'] == 'done' and e['operation'] not in DONE_ALLOWED))})
     if seen:
         raise RuntimeError('Not a first-time activation: %s already recorded; use the standard cutover runbook'
                            % ', '.join(seen))
@@ -122,6 +138,9 @@ def inventory(cr):
     legacy = json.loads(cr.meeting_psql(cr.INVENTORY_SQL))
     meeting_refs = json.loads(cr.meeting_psql(reference_sql()))
     organizations = json.loads(cr.release.db_sql(cr.SERVICES['organizations']['db'], table_rows_sql()))
+    receipts = json.loads(cr.release.db_sql(cr.SERVICES['organizations']['db'], EMPTY_IMPORT_SQL)) \
+        if organizations else {}
+    data = {t: n - receipts.get(t, 0) for t, n in organizations.items()}
     others = {}
     for db in cr.core_databases():
         if db == cr.SERVICES['organizations']['db']:
@@ -133,7 +152,8 @@ def inventory(cr):
         legacy={k: legacy[k] for k in ('organizations', 'memberships', 'orphanSpaceOrganizations',
                                        'ownerlessOrganizations', 'duplicateSlugs', 'duplicateLiveMemberships')},
         meetingReferences=nonzero(meeting_refs), meetingReferenceColumns=len(meeting_refs),
-        organizationsService=nonzero(organizations), organizationsTablesChecked=len(organizations),
+        organizationsService=nonzero(data), organizationsTablesChecked=len(organizations),
+        emptyImportReceipts=nonzero(receipts),
         otherServices=others)
     cr.emit('firstActivationInventory', doc)
     problems = [k for k, v in doc['legacy'].items() if v]

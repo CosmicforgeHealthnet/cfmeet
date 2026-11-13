@@ -30,6 +30,8 @@ class FakeCr:
         self.export_counts = over.pop('export_counts', {'organizations': 0, 'memberships': 0})
         self.after_switch = over.pop('after_switch', {'memberships': 0, 'organizationIds': []})
         self.authoritative_ids = over.pop('authoritative_ids', [])
+        self.receipts = over.pop('receipts', {'organization_import_runs': 0, 'organization_audit_events': 0})
+        self.import_writes_receipts = over.pop('import_writes_receipts', True)
         self.INVENTORY_SQL = cr.INVENTORY_SQL
         self.SERVICES = {'organizations': {'db': 'cfmeet_organizations', 'tls': 8450},
                          'meeting-service': {'container': 'cfmeet-production-backend'}}
@@ -56,6 +58,8 @@ class FakeCr:
     def db_sql(self, db, sql):
         if sql == fa.ORGANIZATION_IDS_SQL:
             return json.dumps(self.authoritative_ids)
+        if sql == fa.EMPTY_IMPORT_SQL:
+            return json.dumps(self.receipts)
         if db == 'cfmeet_organizations':
             return json.dumps(self.org_tables)
         return json.dumps(self.refs.get(db, {}))
@@ -83,6 +87,10 @@ class FakeCr:
 
     def org_import(self, sha, run_id, confirm, backup_gate=True):
         self.calls.append(('import', run_id))
+        if self.import_writes_receipts:  # like the real CLI: import + idempotent re-import of an empty export
+            for table in ('organization_import_runs', 'organization_audit_events'):
+                self.org_tables[table] = self.org_tables.get(table, 0) + 2
+                self.receipts[table] = self.receipts.get(table, 0) + 2
         if backup_gate:  # the standard import's gate 1 (real behaviour without any backup record)
             self.require_offsite(self.fresh_backup(24, ('meeting-service', 'organizations')))
 
@@ -149,6 +157,34 @@ class FirstActivation(unittest.TestCase):
                 run(fake)
             self.assertFalse([c for c in fake.calls if c[0] in ('export', 'import', 'activation')], over)
 
+    def test_empty_import_receipts_are_not_organization_data(self):
+        # Production run 43473874426: the inventory right before the switch saw the empty import's
+        # own receipts (2 import runs, 2 migration.imported audit events) and refused.
+        fake = FakeCr()
+        run(fake)
+        self.assertEqual(fake.meeting_env['ORGANIZATIONS_AUTHORITY_MODE'], 'authoritative')
+        inventories = [v for k, v in fake.emitted if k == 'firstActivationInventory']
+        self.assertEqual(inventories[1]['organizationsService'], {})
+        self.assertEqual(inventories[1]['emptyImportReceipts'],
+                         {'organization_audit_events': 2, 'organization_import_runs': 2})
+
+    def test_receipts_with_data_or_other_audit_rows_still_count(self):
+        # An import run that imported anything is not an empty-import receipt: still refused.
+        fake = FakeCr(org_tables={'organization_import_runs': 1, 'organization_audit_events': 3},
+                      receipts={'organization_import_runs': 0, 'organization_audit_events': 1})
+        with self.assertRaisesRegex(RuntimeError, 'not empty'):
+            run(fake)
+        self.assertFalse([c for c in fake.calls if c[0] in ('export', 'import', 'activation')])
+
+    def test_retry_after_an_attempt_that_stopped_after_the_empty_import(self):
+        # The journal holds the failed attempt's export and import; Organizations holds its receipts.
+        fake = FakeCr(journal=[{'operation': 'org-cutover-export', 'status': 'done'},
+                               {'operation': 'org-cutover-import', 'status': 'done'}],
+                      org_tables={'organization_import_runs': 2, 'organization_audit_events': 2},
+                      receipts={'organization_import_runs': 2, 'organization_audit_events': 2})
+        run(fake)
+        self.assertEqual(fake.meeting_env['ORGANIZATIONS_AUTHORITY_MODE'], 'authoritative')
+
     def test_missing_organizations_schema_is_refused(self):
         fake = FakeCr()
         fake.org_tables = {}
@@ -156,7 +192,7 @@ class FirstActivation(unittest.TestCase):
             run(fake)
 
     def test_only_a_first_time_activation_from_legacy_mode(self):
-        for journal in ([{'operation': 'org-cutover-import', 'status': 'done'}],
+        for journal in ([{'operation': 'org-cutover-import', 'status': 'running'}],
                         [{'operation': 'org-cutover-shadow', 'status': 'running'}],
                         [{'operation': 'org-cutover-authoritative', 'status': 'done'}],
                         [{'operation': 'org-cutover-first-activation', 'status': 'done'}]):
@@ -255,7 +291,8 @@ class FirstActivation(unittest.TestCase):
                 cr.run('activate-enterprise-calling', SHA, '5-1')
 
     def test_inventory_sql_reports_counts_only(self):
-        for sql in (fa.reference_sql(), fa.table_rows_sql(), fa.PROJECTION_SQL, fa.ORGANIZATION_IDS_SQL):
+        for sql in (fa.reference_sql(), fa.table_rows_sql(), fa.PROJECTION_SQL, fa.ORGANIZATION_IDS_SQL,
+                    fa.EMPTY_IMPORT_SQL):
             self.assertIn('READ ONLY', sql)
             self.assertNotRegex(sql.lower(), r'\b(insert|update|delete|drop|alter|truncate)\b')
             for column in ('slug', 'email', 'name'):
