@@ -35,7 +35,11 @@
 //! adapter gates with `CALLING_ADMIN_PRINCIPAL_IDS`). Personal calls keep the governed
 //! personal scope (ADR 0056 §4). Nothing here weakens PRIVATE_E2EE or touches Messaging.
 
-use std::{sync::Arc, sync::LazyLock, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock, Mutex},
+    time::Duration,
+};
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method};
 use cf_service_auth::{
@@ -260,6 +264,10 @@ pub struct OrganizationCalling {
     /// Organization-scope Messaging (final closure); `None` when `CF_MESSAGING_BASE_URL`
     /// is not configured (the organization Messaging relay then answers not set up).
     messaging: Option<url::Url>,
+    /// Organization environments (with their mapping version) whose Messaging policy is
+    /// known to be set (the first-party baseline applied here, or a policy someone else
+    /// set). Process-local cache only: a restart re-reads, never re-writes, a set policy.
+    messaging_policy_ready: Mutex<HashSet<(Uuid, i64)>>,
 }
 
 impl std::fmt::Debug for OrganizationCalling {
@@ -320,6 +328,7 @@ impl OrganizationCalling {
             calling,
             platform_access,
             messaging: None,
+            messaging_policy_ready: Mutex::new(HashSet::new()),
         })
     }
 
@@ -766,10 +775,111 @@ impl OrganizationCalling {
         let Some(binding) = scope.messaging else {
             return Err(messaging_not_set_up());
         };
+        self.ensure_messaging_policy(&messaging, &scope, binding)
+            .await;
         let principal = self
             .principal_for(db, &scope, binding, user.user_id)
             .await?;
         Ok((messaging, scope, binding, principal, user.user_id))
+    }
+
+    /// ADR 0058 Amendment A2: an automatically provisioned organization environment starts
+    /// with Messaging's platform defaults, under which MANAGED conversations are not
+    /// available. On first use the Meeting Service (which already holds the delegated
+    /// application authority over the organization's environment) applies the first-party
+    /// baseline: GROUP and DIRECT conversations MANAGED only, attachments on (Messaging's
+    /// managed scan stays required). It is applied ONLY when the environment's application
+    /// policy was never set (version 0, optimistic `expectedVersion: 0`), so a policy an
+    /// operator or administrator set is never overwritten, and PRIVATE_E2EE is never
+    /// enabled here. Best effort: a failure is logged and retried on the next request;
+    /// Messaging itself still enforces whatever policy is in effect.
+    async fn ensure_messaging_policy(
+        &self,
+        messaging: &url::Url,
+        scope: &ResolvedOrganizationScope,
+        binding: CallingServiceBinding,
+    ) {
+        let key = (scope.environment_id, scope.mapping_version);
+        if self
+            .messaging_policy_ready
+            .lock()
+            .map(|ready| ready.contains(&key))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        const PATH: &str = "/internal/v1/delegated/v1/messaging/policy";
+        let read = || {
+            self.exchange(
+                ServiceId::messaging(),
+                messaging,
+                Method::GET,
+                PATH,
+                &[],
+                None,
+                None,
+                Self::scope_context(scope, binding),
+            )
+        };
+        let mut set = false;
+        for _ in 0..2 {
+            let version = match read().await {
+                Ok((200, v)) => v.get("version").and_then(Value::as_i64),
+                _ => None,
+            };
+            match version {
+                Some(0) => {}
+                Some(_) => {
+                    set = true;
+                    break;
+                }
+                None => break,
+            }
+            match self
+                .exchange(
+                    ServiceId::messaging(),
+                    messaging,
+                    Method::PUT,
+                    PATH,
+                    &[],
+                    None,
+                    Some(&first_party_messaging_baseline()),
+                    Self::scope_context(scope, binding),
+                )
+                .await
+            {
+                Ok((200, _)) => {
+                    tracing::info!(
+                        organization_id = %scope.organization_id,
+                        "organization Messaging policy baseline applied"
+                    );
+                    set = true;
+                    break;
+                }
+                // Someone set it concurrently: read again (never overwrite).
+                Ok((409, _)) => continue,
+                Ok((status, _)) => {
+                    tracing::warn!(
+                        organization_id = %scope.organization_id,
+                        status,
+                        "Messaging refused the organization policy baseline"
+                    );
+                    break;
+                }
+                Err(why) => {
+                    tracing::warn!(
+                        error = why,
+                        "organization Messaging policy baseline not applied"
+                    );
+                    break;
+                }
+            }
+        }
+        if set {
+            if let Ok(mut ready) = self.messaging_policy_ready.lock() {
+                ready.insert(key);
+            }
+        }
     }
 
     /// Relays one allowlisted Messaging client operation in the organization's OWN scope
@@ -943,6 +1053,19 @@ fn messaging_unavailable() -> ApiError {
     )
 }
 
+/// The first-party baseline of an organization environment's Messaging policy (only ever
+/// applied over a never-set policy, `expectedVersion: 0`).
+pub fn first_party_messaging_baseline() -> Value {
+    let managed = json!({ "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" });
+    json!({
+        "expectedVersion": 0,
+        "policy": {
+            "contexts": { "GROUP": managed, "DIRECT": managed },
+            "attachments": { "enabled": true }
+        }
+    })
+}
+
 fn messaging_not_set_up() -> ApiError {
     ApiError::domain(
         ErrorCode::FeatureDisabled,
@@ -977,6 +1100,22 @@ mod tests {
     use super::*;
 
     const ID: &str = "0b5f8c9e-2a4d-4c1e-9f3a-7d6b5e4c3a21";
+
+    #[test]
+    fn messaging_baseline_is_managed_only_and_never_overwrites() {
+        let b = first_party_messaging_baseline();
+        // Optimistic concurrency on a never-set policy only.
+        assert_eq!(b["expectedVersion"], 0);
+        for ctx in ["GROUP", "DIRECT"] {
+            assert_eq!(
+                b["policy"]["contexts"][ctx]["allowedProfiles"],
+                json!(["MANAGED"])
+            );
+            assert_eq!(b["policy"]["contexts"][ctx]["defaultProfile"], "MANAGED");
+        }
+        assert!(!b.to_string().contains("PRIVATE_E2EE"));
+        assert_eq!(b["policy"]["attachments"]["enabled"], true);
+    }
 
     #[test]
     fn mode_defaults_to_the_shared_path() {

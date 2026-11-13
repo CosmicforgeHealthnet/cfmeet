@@ -253,7 +253,7 @@ def container_names():
 FLAGS = (
     'CF_RUNTIME_ENVIRONMENT', 'ORGANIZATIONS_PROVISIONING_ENABLED', 'ORGANIZATIONS_EVENT_DESTINATIONS',
     'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_EVENTS_ENABLED', 'ORGANIZATION_CALLING_SCOPE',
-    'CALLING_ORGANIZATION_FORWARDING_ENABLED', 'NOTIFICATIONS_EMAIL_ENABLED', 'EMAIL_VERIFICATION_REQUIRED',
+    'CALLING_ORGANIZATION_FORWARDING_ENABLED', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'NOTIFICATIONS_EMAIL_ENABLED', 'EMAIL_VERIFICATION_REQUIRED',
     'MESSAGING_E2EE_DEVICES_ENABLED', 'MESSAGING_PUSH_PROVIDER', 'SMS_GATEWAY_PROVIDER', 'TELEPHONY_ENABLED',
     'PUBLIC_OUTBOUND_CALLING_ENABLED', 'PUBLIC_INBOUND_CALLING_ENABLED', 'CALLBACK_RELAY_ENABLED',
     'ENTERPRISE_SIP_ENABLED', 'TELEPHONY_SIP_EDGE', 'PRIVACY_RELAY_ENABLED', 'CONTACT_VAULT_ENABLED',
@@ -535,6 +535,10 @@ def service_id(name):
 # (test_coordinated_release.py). Nothing is granted by `release`: new services start dark.
 GRANTS = (
     ('activate-provisioning', 'platform-access', 'organizations', ('platform-identity.provision-first-party',)),
+    # ADR 0058 Amendment A2: automatic Calling / Messaging bindings inside each organization's
+    # own FIRST_PARTY triple (closed scope set; never operator administration).
+    ('activate-organization-bindings', 'platform-access', 'organizations',
+     ('platform-identity.bind-organization-services',)),
     ('activate-org-events', 'meeting-service', 'organizations', ('meeting-organization-events.apply',)),
     ('org-cutover-shadow', 'organizations', 'meeting-service',
      ('organization.read', 'organization.write', 'organization.act-for-user', 'organization.administer')),
@@ -1475,6 +1479,39 @@ def activate_provisioning(sha, run_id, confirm):
                      [('organizations', {'ORGANIZATIONS_PROVISIONING_ENABLED': 'true'})])
 
 
+# The Organizations migration that records automatic bindings (source, verification, expiry).
+BINDINGS_MIGRATION = 'm20261113_000005_automatic_service_bindings'
+BINDING_STATE_SQL = ("SELECT json_build_object('failed', (SELECT count(*) FROM organization_provisioning "
+                     "WHERE state = 'FAILED'), 'automaticBindings', (SELECT count(*) FROM "
+                     "organization_scope_service_bindings WHERE source = 'AUTOMATIC'));")
+
+
+def activate_organization_bindings(sha, run_id, confirm):
+    """ADR 0058 Amendment A2: every organization gets its Calling and Messaging service bindings
+    automatically (Platform Access creates the service account, credential and fixed scope grants
+    inside the organization's own triple; Organizations stores ids only and marks the organization
+    READY only after verifying them). Grants Organizations `platform-identity.bind-organization-services`
+    in the Platform Access bundle and switches ORGANIZATIONS_SERVICE_BINDINGS_ENABLED on."""
+    has_signing_identity('organizations')
+    if env_of('organizations').get('ORGANIZATIONS_PROVISIONING_ENABLED') != 'true':
+        raise RuntimeError('Automatic bindings require Organizations provisioning')
+    db = SERVICES['organizations']['db']
+    applied = release.db_sql(db, "SELECT count(*) FROM organizations_seaql_migrations WHERE version = '%s';"
+                             % BINDINGS_MIGRATION).strip()
+    if applied != '1':
+        raise RuntimeError('Organizations lacks migration %s: release first' % BINDINGS_MIGRATION)
+
+    def post():
+        time.sleep(15)
+        state = json.loads(release.db_sql(db, BINDING_STATE_SQL))
+        emit('organizationBindings', state)
+        if state['failed']:
+            raise RuntimeError('Organization provisioning workflows FAILED after enabling automatic bindings')
+
+    apply_activation('activate-organization-bindings', sha, run_id,
+                     [('organizations', {'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED': 'true'})], post=post)
+
+
 def activate_org_events(sha, run_id, confirm):
     tls_route_present(SERVICES['meeting-service']['tls'])
     applied = history_state(meeting_psql).get('organization_integration_migrations', {}).get('applied', 0)
@@ -1994,6 +2031,7 @@ def undo_gateway_routing(routing, old_snippet=None):
 ACTIVATIONS = {
     'activate-provisioning': ((), activate_provisioning),
     'activate-org-events': (('activate-provisioning',), activate_org_events),
+    'activate-organization-bindings': (('activate-provisioning',), activate_organization_bindings),
     'org-cutover-export': (('activate-org-events',), org_export),
     'org-cutover-import': (('org-cutover-export',), org_import),
     'org-cutover-shadow': (('org-cutover-import',), org_shadow),
@@ -2002,8 +2040,9 @@ ACTIVATIONS = {
     'org-cutover-first-activation': (('activate-org-events',), lambda sha, run_id, confirm:
                                      org_first_activation.activate(sys.modules[__name__], sha, run_id, confirm)),
     # A tuple inside `requires` lists alternatives: either cutover procedure makes Organizations authoritative.
-    'activate-enterprise-calling': ((('org-cutover-authoritative', 'org-cutover-first-activation'),),
-                                    activate_enterprise_calling),
+    # Organization Calling / Messaging need the automatic bindings (ADR 0058 Amendment A2).
+    'activate-enterprise-calling': ((('org-cutover-authoritative', 'org-cutover-first-activation'),
+                                     'activate-organization-bindings'), activate_enterprise_calling),
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
@@ -2019,7 +2058,7 @@ ACTIVATIONS = {
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
-    + ('developer-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
+    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
 # The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
 # (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
 # worker's STRICT endpoint policy refuses as a private address.)
@@ -2065,6 +2104,19 @@ def run(operation, sha, run_id, confirm=''):
         verify(sha, run_id)
     elif operation == 'rollback':
         rollback(sha, run_id)
+    elif operation == 'organization-acceptance':
+        # Writes acceptance data (three fresh accounts, two organizations it archives again)
+        # through the public API only; requires every organization activation it tests.
+        missing = [o for o in ('activate-organization-bindings', 'activate-enterprise-calling') if not done(o)]
+        if not (done('org-cutover-authoritative') or done('org-cutover-first-activation')):
+            missing.insert(0, 'org-cutover-authoritative or org-cutover-first-activation')
+        if missing:
+            raise RuntimeError('Acceptance needs ' + ', '.join(missing))
+        import organization_acceptance
+        checks = organization_acceptance.run(run_id, emit)
+        emit('organizationAcceptanceSummary', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Organization acceptance failed')
     elif operation == 'developer-acceptance':
         # Writes acceptance data through the public API only; requires the activations it tests.
         missing = [o for o in ('activate-developer-console', 'activate-developer-webhooks', 'activate-gateway-families')

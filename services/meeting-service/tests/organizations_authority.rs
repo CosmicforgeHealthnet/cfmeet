@@ -2635,6 +2635,8 @@ struct PeerState {
     calling_answer: Mutex<Option<(u16, Value)>>,
     /// Scripted Platform Access answer for principal ensure.
     ensure_answer: Mutex<Option<(u16, Value)>>,
+    /// The organization environment's Messaging application policy version (0 = never set).
+    policy_version: Mutex<i64>,
 }
 
 struct Peers {
@@ -2741,6 +2743,20 @@ async fn peer_handler(
     if let Some((status, doc)) = state.calling_answer.lock().unwrap().clone() {
         return (StatusCode::from_u16(status).unwrap(), Json(doc)).into_response();
     }
+    if to_messaging && path == "/internal/v1/delegated/v1/messaging/policy" {
+        let mut version = state.policy_version.lock().unwrap();
+        if method == Method::PUT {
+            if body["expectedVersion"].as_i64() != Some(*version) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(envelope("POLICY_VERSION_CONFLICT")),
+                )
+                    .into_response();
+            }
+            *version += 1;
+        }
+        return Json(json!({ "version": *version, "policy": {}, "effective": {} })).into_response();
+    }
     match method.as_str() {
         "POST" => (
             StatusCode::CREATED,
@@ -2771,6 +2787,7 @@ impl Peers {
             principal: Uuid::new_v4(),
             calling_answer: Mutex::new(None),
             ensure_answer: Mutex::new(None),
+            policy_version: Mutex::new(0),
         });
         let router = Router::new()
             .fallback(peer_handler)
@@ -3452,7 +3469,27 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
         )
         .await;
     assert_eq!(s, StatusCode::CREATED, "{v}");
-    let calls = w.messaging_records();
+    // ADR 0058 A2: on first use the never-set organization Messaging policy receives the
+    // first-party MANAGED baseline exactly once (application authority: the binding's
+    // service account, no acting principal), then it is cached.
+    let (policy, calls): (Vec<_>, Vec<_>) = w
+        .messaging_records()
+        .into_iter()
+        .partition(|r| r.path == "/internal/v1/delegated/v1/messaging/policy");
+    assert_eq!(
+        policy.iter().map(|r| r.method.as_str()).collect::<Vec<_>>(),
+        ["GET", "PUT"]
+    );
+    for r in &policy {
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(r.principal, None);
+    }
+    assert_eq!(
+        policy[1].body,
+        backend::services::organization_calling::first_party_messaging_baseline()
+    );
+    assert_eq!(*w.peers.state.policy_version.lock().unwrap(), 1);
     assert_eq!(
         calls
             .iter()

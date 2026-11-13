@@ -34,6 +34,7 @@ pub mod environments;
 pub mod error;
 pub mod handoff;
 pub mod operator;
+pub mod organization_bindings;
 pub mod organization_scopes;
 pub mod principals;
 pub mod restrictions;

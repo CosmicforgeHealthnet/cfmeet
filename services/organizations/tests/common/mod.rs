@@ -368,6 +368,23 @@ impl Harness {
         })
     }
 
+    /// A harness whose HTTP state carries a Platform Access port (operator binding
+    /// rotation, ADR 0058 A2).
+    pub async fn with_platform(
+        platform: std::sync::Arc<dyn organizations::provisioning::PlatformScopes>,
+    ) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier)
+            .with_provisioning(true)
+            .with_platform(Some(platform));
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
     pub fn by<'a>(&'a self, signer: &'a ServiceTokenSigner) -> Call<'a> {
         Call {
             h: self,

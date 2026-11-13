@@ -202,7 +202,9 @@ class DependencyOrder(unittest.TestCase):
         # Either cutover procedure (standard, or the empty-dataset first activation) unlocks Calling.
         self.assertEqual(cr.ACTIVATIONS['org-cutover-first-activation'][0], ('activate-org-events',))
         self.assertEqual(cr.ACTIVATIONS['activate-enterprise-calling'][0],
-                         (('org-cutover-authoritative', 'org-cutover-first-activation'),))
+                         (('org-cutover-authoritative', 'org-cutover-first-activation'),
+                          'activate-organization-bindings'))
+        self.assertEqual(cr.ACTIVATIONS['activate-organization-bindings'][0], ('activate-provisioning',))
         self.assertEqual(cr.ACTIVATIONS['activate-gateway-routing'][0], ('activate-developer-platform',))
 
     def test_catalogue_matches_dockerfiles_and_backup_catalog(self):

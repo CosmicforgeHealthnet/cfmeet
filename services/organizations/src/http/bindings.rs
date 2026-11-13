@@ -1,13 +1,15 @@
 //! Per-organization service bindings of the organization's technical scope (Blueprint
 //! Section 12 follow-up; CAL-007 / ORG-012 / CAL-009; contract §8.5).
 //!
-//! An operator who created a Platform Access service account and credential INSIDE the
-//! organization's own FIRST_PARTY triple (an explicit operator decision, ADR 0058 §1)
-//! records their ids here, so the Meeting Service can forward an organization's
-//! Enterprise Calling requests with that credential named in its signed delegated
-//! context. Organizations stores identifiers only — never a credential value — and
-//! verifies nothing about them: Platform Access re-verifies the credential against the
-//! triple on every use, so a wrong binding can only refuse.
+//! A binding names the Platform Access service account and credential INSIDE the
+//! organization's own FIRST_PARTY triple that the Meeting Service uses for the
+//! organization's Calling / Messaging requests (signed delegated context). Since ADR 0058
+//! Amendment A2 the provisioning saga creates and verifies them automatically
+//! (`source = AUTOMATIC`, see [`crate::provisioning`]); an operator may still record one
+//! manually (`source = OPERATOR`, break-glass), which automation never replaces.
+//! Organizations stores identifiers only — never a credential value; Platform Access
+//! re-verifies the credential against the triple on every use, so a wrong binding can
+//! only refuse.
 
 use axum::{
     body::Bytes,
@@ -31,6 +33,12 @@ use crate::{
     state::AppState,
     store,
 };
+
+/// Binding sources (`organization_scope_service_bindings.source`).
+pub mod provisioning_source {
+    pub const AUTOMATIC: &str = "AUTOMATIC";
+    pub const OPERATOR: &str = "OPERATOR";
+}
 
 /// Consuming services of a binding: Calling (Section 12 follow-up) and Messaging (final
 /// closure: organization-scope Messaging through the Meeting relay).
@@ -59,6 +67,9 @@ pub struct BindingRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
+    pub source: String,
+    pub verified_at: Option<DateTime<Utc>>,
+    pub credential_expires_at: Option<DateTime<Utc>>,
 }
 
 impl BindingRow {
@@ -71,6 +82,9 @@ impl BindingRow {
             "credentialId": self.credential_id,
             "version": self.version,
             "boundBy": self.bound_by,
+            "source": self.source,
+            "verifiedAt": self.verified_at.map(store::rfc3339),
+            "credentialExpiresAt": self.credential_expires_at.map(store::rfc3339),
             "createdAt": store::rfc3339(self.created_at),
             "updatedAt": store::rfc3339(self.updated_at),
         })
@@ -86,9 +100,10 @@ impl BindingRow {
     }
 }
 
-const BINDING_COLUMNS: &str = "organization_id, capability, service, service_account_id, credential_id, bound_by, created_at, updated_at, version";
+const BINDING_COLUMNS: &str = "organization_id, capability, service, service_account_id, credential_id, bound_by, created_at, updated_at, version, source, verified_at, credential_expires_at";
 
-/// The binding of `service` for the organization's `capability` scope, if any.
+/// The binding of `service` for the organization's `capability` scope, if any (a binding
+/// revoked locally — archive, operator removal of an automatic one — is not a binding).
 pub async fn binding<C: ConnectionTrait>(
     c: &C,
     organization: Uuid,
@@ -99,7 +114,7 @@ pub async fn binding<C: ConnectionTrait>(
     db::one(
         c,
         &format!(
-            "SELECT {BINDING_COLUMNS} FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3{}",
+            "SELECT {BINDING_COLUMNS} FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3 AND revoked_at IS NULL{}",
             if lock { " FOR UPDATE" } else { "" }
         ),
         vec![organization.into(), capability.into(), service.into()],
@@ -175,6 +190,20 @@ pub async fn put_binding(
     if !has_triple {
         return Err(ApiError::new(ErrorCode::ProvisioningPending));
     }
+    // A revoked automatic binding whose credential Platform Access has not revoked yet
+    // must not be overwritten (the revocation would be lost).
+    let revoking = db::scalar_i64(
+        &txn,
+        "SELECT count(*)::bigint AS n FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3 AND revoked_at IS NOT NULL AND revocation_applied_at IS NULL",
+        vec![id.into(), provisioning::CAPABILITY.into(), service.into()],
+    )
+    .await?;
+    if revoking > 0 {
+        return Err(ApiError::with_message(
+            ErrorCode::VersionConflict,
+            "The previous binding's revocation is still being applied; retry shortly.",
+        ));
+    }
     let current = binding(&txn, id, provisioning::CAPABILITY, service, true).await?;
     let current_version = current.as_ref().map(|b| b.version).unwrap_or(0);
     if req.expected_version.is_some_and(|v| v != current_version) {
@@ -198,7 +227,9 @@ pub async fn put_binding(
          ON CONFLICT (organization_id, capability, service) DO UPDATE SET \
            service_account_id = EXCLUDED.service_account_id, credential_id = EXCLUDED.credential_id, \
            bound_by = EXCLUDED.bound_by, updated_at = EXCLUDED.updated_at, \
-           version = organization_scope_service_bindings.version + 1",
+           version = organization_scope_service_bindings.version + 1, source = 'OPERATOR', \
+           verified_at = NULL, credential_expires_at = NULL, revoked_at = NULL, revocation_applied_at = NULL, \
+           revocation_attempts = 0, revocation_next_at = NULL, revocation_last_error_class = NULL",
         vec![
             id.into(),
             provisioning::CAPABILITY.into(),
@@ -229,6 +260,7 @@ pub async fn put_binding(
             "credentialId": row.credential_id,
             "version": row.version,
             "replaced": current.is_some(),
+            "source": "OPERATOR",
         }),
     )
     .await?;
@@ -251,10 +283,25 @@ pub async fn delete_binding(
         .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
     let current = binding(&txn, id, provisioning::CAPABILITY, service, true).await?;
     let removed = current.is_some();
-    if let Some(b) = current {
+    if let Some(b) = current
+        .as_ref()
+        .filter(|b| b.source == provisioning_source::AUTOMATIC)
+    {
+        // An automatic binding's credential is revoked at Platform Access (the revocation
+        // sync, retried until applied); it is not recreated automatically.
+        let now = db::now(&txn).await?;
+        provisioning::request_binding_revocation(
+            &txn,
+            &caller.as_operator(),
+            now,
+            id,
+            Some(&b.service),
+        )
+        .await?;
+    } else if let Some(b) = current {
         db::exec(
             &txn,
-            "DELETE FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3",
+            "DELETE FROM organization_scope_service_bindings WHERE organization_id = $1 AND capability = $2 AND service = $3 AND revoked_at IS NULL",
             vec![id.into(), provisioning::CAPABILITY.into(), service.into()],
         )
         .await?;
@@ -282,4 +329,83 @@ pub async fn delete_binding(
         StatusCode::OK,
         json!({ "organizationId": id, "capability": provisioning::CAPABILITY, "service": service, "removed": removed }),
     ))
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/rotate`
+/// — operator credential rotation of an AUTOMATIC binding: Platform Access issues a
+/// successor credential (the predecessor is revoked), Organizations verifies the answer
+/// server-side and records the new credential id (version + 1, audited
+/// `scope.service_binding_rotated`). Refused for an operator binding (replace it with
+/// `PUT`), an archived organization, or while automatic bindings are not enabled.
+pub async fn rotate_binding(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path((id, service)): Path<(Uuid, String)>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let service = service_of(&service)?;
+    let org = store::org(&state.db, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let Some(port) = state.platform.clone().filter(|p| p.bindings_enabled()) else {
+        return Err(ApiError::with_message(
+            ErrorCode::ServiceUnavailable,
+            "Automatic service bindings are not enabled.",
+        ));
+    };
+    let current = binding(&state.db, id, provisioning::CAPABILITY, service, false)
+        .await?
+        .ok_or_else(not_bound)?;
+    if current.source != provisioning_source::AUTOMATIC {
+        return Err(ApiError::validation(
+            "Only automatic bindings are rotated here; replace an operator binding with PUT",
+        ));
+    }
+    let triple = provisioning::mapping(&state.db, id, provisioning::CAPABILITY, false)
+        .await?
+        .and_then(|m| {
+            m.tenant_id
+                .zip(m.application_id)
+                .zip(m.environment_id)
+                .map(|((t, a), e)| (t, a, e))
+        })
+        .ok_or(ApiError::new(ErrorCode::ProvisioningPending))?;
+    let facts = match port
+        .rotate_binding(id, provisioning::CAPABILITY, service)
+        .await
+    {
+        Ok(f) => f,
+        Err(provisioning::PortError::Refused { status: 404, .. }) => return Err(not_bound()),
+        Err(e) => {
+            tracing::warn!(organization_id = %id, service, error_class = %e.binding_class(), "binding rotation failed");
+            return Err(ApiError::new(ErrorCode::ServiceUnavailable));
+        }
+    };
+    if !facts.verifies(id, provisioning::CAPABILITY, service, triple)
+        || facts.service_account_id != current.service_account_id
+    {
+        tracing::error!(organization_id = %id, service, "rotated binding does not verify");
+        return Err(ApiError::new(ErrorCode::ServiceUnavailable));
+    }
+    let txn = state.db.begin().await?;
+    store::org(&txn, id, true).await?;
+    let now = db::now(&txn).await?;
+    provisioning::upsert_automatic_binding(
+        &txn,
+        &caller.as_operator(),
+        now,
+        id,
+        provisioning::CAPABILITY,
+        service,
+        &facts,
+    )
+    .await?;
+    let row = binding(&txn, id, provisioning::CAPABILITY, service, false)
+        .await?
+        .ok_or_else(not_bound)?;
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, row.to_json()))
 }

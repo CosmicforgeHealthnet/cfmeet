@@ -101,6 +101,7 @@ INTEGRATIONS = (
     ('api-gateway', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED', 'API gateway public routing', (None, 'false')),
     ('api-gateway', 'API_GATEWAY_WEBSOCKETS_ENABLED', 'API gateway WebSockets', (None, 'false')),
     ('organizations', 'ORGANIZATIONS_PROVISIONING_ENABLED', 'Organization provisioning', (None, 'false')),
+    ('organizations', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'Automatic organization service bindings', (None, 'false')),
 )
 
 UPSTREAM_URL = re.compile(r'^CF_[A-Z_]+_BASE_URL$')

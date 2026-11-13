@@ -201,6 +201,7 @@ class FirstActivation(unittest.TestCase):
         self.assertEqual([g[1:] for g in grants], [g[1:] for g in shadow])
         journal = [{'operation': 'activate-provisioning', 'status': 'done'},
                    {'operation': 'activate-org-events', 'status': 'done'},
+                   {'operation': 'activate-organization-bindings', 'status': 'done'},
                    {'operation': 'org-cutover-first-activation', 'status': 'done'}]
         seen = []
         with patch.object(cr, 'load_journal', lambda: journal), patch.object(cr.p, 'identity', lambda: None), \
@@ -212,7 +213,7 @@ class FirstActivation(unittest.TestCase):
             with patch.object(cr.Path, 'mkdir', lambda *a, **k: None):
                 cr.run('activate-enterprise-calling', SHA, '5-1')
         self.assertEqual(len(seen), 1)
-        with patch.object(cr, 'load_journal', lambda: journal[:2]), patch.object(cr.Path, 'mkdir', lambda *a, **k: None):
+        with patch.object(cr, 'load_journal', lambda: journal[:3]), patch.object(cr.Path, 'mkdir', lambda *a, **k: None):
             with self.assertRaisesRegex(RuntimeError, 'org-cutover-authoritative or org-cutover-first-activation'):
                 cr.run('activate-enterprise-calling', SHA, '5-1')
 

@@ -342,6 +342,14 @@ pub enum InternalPermission {
     /// grants, principals or any EXTERNAL tenant.
     #[serde(rename = "platform-identity.provision-first-party")]
     PlatformIdentityProvisionFirstParty,
+    /// Platform Access (ADR 0058 Amendment A2, automatic organization service bindings):
+    /// create or return, read back, rotate and revoke the Calling / Messaging service
+    /// account and credential of one first-party organization INSIDE that organization's
+    /// own provisioned FIRST_PARTY triple, with a closed, fixed scope set per service.
+    /// The credential secret is never returned. Organizations only; never any other
+    /// tenant, no operator administration, no EXTERNAL tenant.
+    #[serde(rename = "platform-identity.bind-organization-services")]
+    PlatformIdentityBindOrganizationServices,
     /// Calling (Blueprint Section 12 follow-up, CAL-007): receive a first-party
     /// organization request the Meeting Service authenticated for a human member. The
     /// signed delegated context names the organization's Calling credential (id only,
@@ -938,6 +946,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Create or return, verify and suspend / resume the dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment of one first-party organization (opaque organization id); Organizations only, never credentials, verifiers, scope grants or EXTERNAL tenants",
     },
     PermissionDefinition {
+        permission: InternalPermission::PlatformIdentityBindOrganizationServices,
+        name: "platform-identity.bind-organization-services",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::ORGANIZATIONS],
+        sensitive: true,
+        description: "Create or return, verify, rotate and revoke the Calling / Messaging service account and credential of one first-party organization inside that organization's own provisioned FIRST_PARTY triple, with a closed scope set per service; the credential secret is never returned; Organizations only, never another tenant or operator administration",
+    },
+    PermissionDefinition {
         permission: InternalPermission::CallingRequestActForOrganization,
         name: "calling-request.act-for-organization",
         receiver: services::CALLING,
@@ -1044,6 +1060,7 @@ impl InternalPermission {
         InternalPermission::OrganizationAdminister,
         InternalPermission::OrganizationMigrate,
         InternalPermission::PlatformIdentityProvisionFirstParty,
+        InternalPermission::PlatformIdentityBindOrganizationServices,
         InternalPermission::CallingRequestActForOrganization,
         InternalPermission::MeetingOrganizationEventsApply,
     ];
@@ -1611,6 +1628,12 @@ mod tests {
             [
                 (
                     "platform-identity.provision-first-party",
+                    services::PLATFORM_ACCESS,
+                    &[services::ORGANIZATIONS][..],
+                    true
+                ),
+                (
+                    "platform-identity.bind-organization-services",
                     services::PLATFORM_ACCESS,
                     &[services::ORGANIZATIONS][..],
                     true

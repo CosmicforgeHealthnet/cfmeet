@@ -32,6 +32,12 @@ an operator created inside the organization's own triple for Enterprise Calling;
 never stores a credential value and never verifies the ids — Platform Access re-verifies the
 credential against the triple on every forwarded request.
 
+ADR 0058 Amendment A2 (1.5.0): with `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` the provisioning
+saga creates, verifies and records the Calling and Messaging bindings itself
+(`source: AUTOMATIC`; `verifiedAt`, `credentialExpiresAt`) and the organization is READY only
+once both are verified; `POST …/service-bindings/{calling|messaging}/rotate`
+(`organization.administer`) rotates an automatic binding's credential.
+
 The registry in `packages/service-auth/src/permissions.rs` refuses any trust bundle that
 grants these elsewhere.
 

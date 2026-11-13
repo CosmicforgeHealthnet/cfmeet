@@ -71,7 +71,9 @@ Grant `meeting-organization-events.apply` in the Meeting Service bundle; set `OR
 Follow organizations-cutover-runbook.md exactly (export → import → reconciliation → shadow with the zero-mismatch criterion → quiesce → final import → authoritative). Rehearsed across real processes in CI (`organizations_cutover_shadow_and_rollback_rehearsal`).
 
 ### 4.4 Per-organization Enterprise Calling and Messaging
-For each organization that opts in: an operator creates a service account and credential **inside that organization's own FIRST_PARTY triple** in Platform Access, then records them: `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling` and `/messaging`. Bootstrap the organization environment's Messaging policy to allow MANAGED (delegated `PUT /v1/messaging/policy`). Then set `ORGANIZATION_CALLING_SCOPE=organization` (+ `CF_MESSAGING_BASE_URL`) on Meeting and `CALLING_ORGANIZATION_FORWARDING_ENABLED=true` on Calling.
+**Automatic since ADR 0058 Amendment A2:** run `activate-organization-bindings` (grants Platform Access `platform-identity.bind-organization-services` to Organizations, sets `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true`). Every organization then receives its Calling and Messaging service account and credential inside its own triple automatically and becomes READY only after both are verified; the Meeting Service applies the organization environment's Messaging baseline (MANAGED) on first use. Then `activate-enterprise-calling`. The manual procedure below remains only as break-glass.
+
+Manual (break-glass) — for each organization that opts in: an operator creates a service account and credential **inside that organization's own FIRST_PARTY triple** in Platform Access, then records them: `PUT /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling` and `/messaging`. Bootstrap the organization environment's Messaging policy to allow MANAGED (delegated `PUT /v1/messaging/policy`). Then set `ORGANIZATION_CALLING_SCOPE=organization` (+ `CF_MESSAGING_BASE_URL`) on Meeting and `CALLING_ORGANIZATION_FORWARDING_ENABLED=true` on Calling.
 
 ## 5. Health verification
 

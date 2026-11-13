@@ -7,7 +7,9 @@ It owns organizations, profiles, memberships (with history), invitations, teams 
 members (Section 6), typed organization policies (Section 6), their audit events and
 outbox, and organization ↔ Platform Access scope mappings with the provisioning saga
 (Section 7, [ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md);
-off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`).
+off by default: `ORGANIZATIONS_PROVISIONING_ENABLED`), including the automatic Calling and
+Messaging service bindings of each organization (ADR 0058 Amendment A2; off by default:
+`ORGANIZATIONS_SERVICE_BINDINGS_ENABLED`, see `docs/OPERATIONS.md`).
 
 * **Contract:** [`docs/api/organizations-internal-v1.md`](../../docs/api/organizations-internal-v1.md)
   (machine-readable: `packages/contracts/organizations/internal/v1.openapi.json`, served at

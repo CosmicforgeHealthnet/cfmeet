@@ -280,5 +280,59 @@ class WebOrigins(unittest.TestCase):
                     cr.activate_web_origins('a' * 40, '3-1', '')
 
 
+
+class OrganizationBindingsActivationTest(unittest.TestCase):
+    """ADR 0058 Amendment A2: automatic Calling / Messaging bindings."""
+
+    def test_grant_is_the_narrow_binding_permission_for_organizations_only(self):
+        rows = [g for g in cr.GRANTS if g[0] == 'activate-organization-bindings']
+        self.assertEqual(rows, [('activate-organization-bindings', 'platform-access', 'organizations',
+                                 ('platform-identity.bind-organization-services',))])
+        # Never operator administration for a service.
+        self.assertFalse([g for g in cr.GRANTS if g[2] == 'organizations' and 'platform-identity.administer' in g[3]])
+
+    def _env(self, provisioning='true'):
+        return lambda name: {'ORGANIZATIONS_PROVISIONING_ENABLED': provisioning}
+
+    def test_activation_switches_only_the_organizations_flag_and_checks_failed_workflows(self):
+        applied = []
+
+        def apply(operation, sha, run_id, changes, irreversible=False, post=None):
+            applied.append((operation, changes, irreversible))
+            post()
+
+        answers = iter(['1', '{"failed": 0, "automaticBindings": 4}'])
+        with patch.object(cr, 'has_signing_identity', lambda name: None), \
+                patch.object(cr, 'env_of', self._env()), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: next(answers)), \
+                patch.object(cr.time, 'sleep', lambda s: None), \
+                patch.object(cr, 'apply_activation', apply):
+            cr.activate_organization_bindings('a' * 40, '3-1', '')
+        self.assertEqual(applied, [('activate-organization-bindings', [
+            ('organizations', {'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED': 'true'})], False)])
+
+    def test_refused_without_provisioning_or_the_migration_and_failed_after_failed_workflows(self):
+        def apply(operation, sha, run_id, changes, irreversible=False, post=None):
+            post()
+
+        with patch.object(cr, 'has_signing_identity', lambda name: None), \
+                patch.object(cr, 'env_of', self._env('false')):
+            with self.assertRaisesRegex(RuntimeError, 'provisioning'):
+                cr.activate_organization_bindings('a' * 40, '3-1', '')
+        with patch.object(cr, 'has_signing_identity', lambda name: None), \
+                patch.object(cr, 'env_of', self._env()), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: '0'):
+            with self.assertRaisesRegex(RuntimeError, 'migration'):
+                cr.activate_organization_bindings('a' * 40, '3-1', '')
+        answers = iter(['1', '{"failed": 1, "automaticBindings": 0}'])
+        with patch.object(cr, 'has_signing_identity', lambda name: None), \
+                patch.object(cr, 'env_of', self._env()), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: next(answers)), \
+                patch.object(cr.time, 'sleep', lambda s: None), \
+                patch.object(cr, 'apply_activation', apply):
+            with self.assertRaisesRegex(RuntimeError, 'FAILED'):
+                cr.activate_organization_bindings('a' * 40, '3-1', '')
+
+
 if __name__ == '__main__':
     unittest.main()
