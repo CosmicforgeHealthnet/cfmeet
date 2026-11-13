@@ -14,9 +14,9 @@ Status vocabulary: `ACTIVE_VERIFIED` (production evidence cited) · `IMPLEMENTED
 | Instant conferences end after 10 empty minutes | `ACTIVE_VERIFIED` | 15 stale empty instant conferences ended `EMPTY_TIMEOUT`; 0 LIVE instant conferences without a session for over 10 minutes (§7) |
 | Archived spaces keep no LIVE conference | `ACTIVE_VERIFIED` | `liveInArchivedSpaces = 0`; `swy-hayb-mzk` ENDED (§8) |
 | Durable email ledger, worker and Resend adapter | Deployed, Resend inactive: `IMPLEMENTED_PENDING_CONFIGURATION` | the ledger exists and is empty; SMTP is still the transport; no Resend key is mounted (§6) |
-| Developer Platform production access (named reviewers, no self-approval, manual only) | Deployed, submissions disabled: `PENDING_OWNER_APPROVAL` | `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`; developer acceptance 30/30 (§9) |
+| Developer Platform production access (named reviewers, no self-approval, manual only) | Deployed, submissions disabled: `PENDING_OWNER_APPROVAL` | `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`; [developer acceptance 43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) 30/30 (§9) |
 | Telecom (SMS/phone OTP, PSTN/SIP, numbers, Privacy Relay) | `DEFERRED_BY_OWNER` | unchanged safe defaults |
-| Full-platform `certify` at the `main` head | See §20 | — |
+| Full-platform `certify` at the `main` head | **`CERTIFIED_READ_ONLY`** | [certify 43337109332](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337109332) at `0bcdd137e2b9402fbc52c66ba4e74ed6769ba342` (§20) |
 
 ## 2. Starting production state
 
@@ -194,7 +194,7 @@ Tests:
 Production state:
 - `DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`.
 - No reviewer configured: `vars.CFMEET_PRODUCTION_ACCESS_REVIEWERS` is not set, so production-access submissions stay disabled, as instructed.
-- After the release, developer acceptance passed 30/30 in [run 43317264046](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317264046): console, credentials limited to their scopes, gateway scope enforcement, a forged credential refused, tenant isolation, a signed webhook delivered, and a revoked credential refused.
+- [Developer acceptance 43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) at `0bcdd137` passed 30/30 against production: console, credentials limited to their scopes, gateway scope enforcement with quota headers, a forged credential refused, tenant isolation, a signed webhook delivered (attempt recorded `SUCCEEDED`), a revoked credential refused, and clean-up with 0 problems.
 - The release's own regression checks passed.
 
 Enabling submissions is `activate-production-access-review`, after the owner names reviewers. Status: `PENDING_OWNER_APPROVAL`.
@@ -357,4 +357,36 @@ Final results:
 
 ## 20. Final production verdict
 
-_Completed after the release._
+**`CERTIFIED_READ_ONLY`**: [certify 43337109332](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337109332) at the `main` head `0bcdd137e2b9402fbc52c66ba4e74ed6769ba342` (2026-11-13). Every applicable read-only check passed:
+
+| Check | Result |
+|---|---|
+| Services | 13/13 PASS: container state, authentication probe, database and migrations complete, source matches `main`. 0 restarts, no OOM. |
+| Revisions | `3e11958b`: organizations, messaging, calling, communications, meeting-service (`cfmeet-production-backend`), api-gateway. `f2f96934`: developer-platform, developer-platform-worker. `9684346e`: platform-access, numbering, privacy-relay, sms-gateway, telephony. |
+| Migrations | Complete for every service, including Meeting `lifecycle_delivery_migrations` (1) |
+| Core identity and authentication | PASS |
+| Calling and Messaging | PASS (service checks; LiveKit media provider; meetings acceptance [43317535902](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43317535902) 22/22) |
+| Developer Platform and Gateway regressions | PASS: developer acceptance [43337892242](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43337892242) 30/30. Gateway public routing on, WebSockets off. |
+| Telecom disabled | Provider safe defaults PASS, 0 violations. SMS provider, number providers and porting, PSTN, SIP, callback relay, Privacy Relay, contact vault and relay number pool are all disabled. |
+| Public surface | 236 public and 25 internal routes checked, 0 failures; internal routes not public; CORS preflight from the web app passes; Swagger passes |
+| Secrets | The certify log contains no key, signing secret or private-key material; mail is reported only as `EMAIL_PROVIDER=smtp` (configured) |
+| Email | Ledger, worker and Resend adapter deployed; Resend **not active** (no key mounted); SMTP preserved |
+| Production access | Submissions disabled (`…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=false`); no reviewer configured |
+
+Final status per objective:
+
+| Objective | Status |
+|---|---|
+| Instant-conference empty auto-end (10 min) | `ACTIVE_VERIFIED` |
+| Archive ends LIVE conferences | `ACTIVE_VERIFIED` |
+| Durable email ledger and worker | `ACTIVE_VERIFIED` (deployed; carrying SMTP) |
+| Resend transport and OTP recovery | `IMPLEMENTED_PENDING_CONFIGURATION` (owner: domain, DNS, API key) |
+| Developer Platform reviewer enforcement and self-approval refusal | Deployed; submissions `PENDING_OWNER_APPROVAL` (reviewers) |
+| Gradual email-verification enforcement | `IMPLEMENTED_PENDING_CONFIGURATION` (off by default) |
+| API Gateway WebSocket proxy | `IMPLEMENTED_PENDING_CONFIGURATION` |
+| Meeting developer API through the gateway | `PENDING_OWNER_APPROVAL` (edge topology) |
+| Recording v2 | `PENDING_OWNER_APPROVAL` / `IMPLEMENTED_PENDING_CONFIGURATION` |
+| Organizations cutover | `PENDING_OWNER_APPROVAL` (age key, shadow period) |
+| SMS/phone OTP, PSTN/SIP, numbers, Privacy Relay | `DEFERRED_BY_OWNER` |
+| Subscription meeting-duration limits | `DEFERRED_BY_OWNER` |
+| Paid backup infrastructure | `DEFERRED_BY_OWNER` |
