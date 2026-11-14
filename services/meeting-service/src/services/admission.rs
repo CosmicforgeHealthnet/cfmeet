@@ -1201,6 +1201,20 @@ impl AdmissionService {
         } else {
             None
         };
+        // Multi-device policy: remember which sign-in opened this media session, so ending
+        // that sign-in (device replaced or revoked) ends only this device's media.
+        if let (Some(s), Some(sid)) = (
+            session.as_ref(),
+            ctx.registered().and_then(|r| r.account_session_id),
+        ) {
+            crate::services::account_devices::record_session_media(
+                &txn,
+                sid,
+                s.id,
+                s.conference_id,
+            )
+            .await?;
+        }
         txn.commit().await?;
 
         // 14. RTC credentials only after the authoritative state committed. Part F: the

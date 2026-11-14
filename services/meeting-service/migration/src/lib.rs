@@ -35,6 +35,7 @@ mod m20261108_000002_meeting_notifications;
 mod m20261109_000001_account_hardening;
 mod m20261110_000001_organization_integration;
 mod m20261112_000001_email_delivery_and_presence;
+mod m20261115_000001_account_devices;
 
 pub mod phase2_backfill;
 
@@ -254,7 +255,10 @@ pub struct AccountSecurityMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for AccountSecurityMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261106_000001_account_security::Migration)]
+        vec![
+            Box::new(m20261106_000001_account_security::Migration),
+            Box::new(m20261115_000001_account_devices::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("account_security_migrations").into_iden()

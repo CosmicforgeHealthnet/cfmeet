@@ -53,7 +53,8 @@ def execute(sha, run_id, scope, stage, verification=False):
         tag,'python','-u','/acceptance.py']
     with (folder/'execution.private.log').open('w') as log:
         result=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
-        deadline=time.monotonic()+420;progress=time.monotonic()+30
+        # Includes waiting for a real signaling credential to expire (default lifetime 600 s).
+        deadline=time.monotonic()+1140;progress=time.monotonic()+30
         try:
             while result.poll() is None:
                 assert time.monotonic()<deadline,'Communications media acceptance timed out'
@@ -115,6 +116,7 @@ class Journey:
         self.c=context
         self.report={'checks':{},'phase':'authentication'}
         self.calls=[]
+        self.invitations={}
 
     def request(self,owner,path,method='GET',body=None,token=None,actor=None,expected=(200,),key=None):
         headers={'Content-Type':'application/json','Idempotency-Key':key or str(uuid.uuid4())}
@@ -264,6 +266,7 @@ class Journey:
             if invitation:break
             time.sleep(.25)
         else:raise AssertionError('Incoming ringing invitation missing')
+        self.invitations[call]=invitation
         self.request('calling','/v1/calling/invitations/'+invitation['invitationId']+'/accept','POST',{'expectedVersion':invitation['callVersion']},b['signaling'])
         clients=[]
         try:
@@ -320,6 +323,49 @@ class Journey:
             assert next(x for x in self.hub(a,'/calls/history?limit=50')['data'] if x['callId']==call)['origin']=='CONVERSATION'
             self.done('hub_conversation_launched_call_connects_and_writes_one_card_per_viewer')
 
+    def calling_api_checks(self,a,b):
+        """Direct production checks of three Calling API behaviors (release 8a64b480):
+        callerDisplayName on a Hub-launched invitation and canViewRecordings on the Call read.
+        The expired-credential check runs at the end of the journey (expired_signaling_check)."""
+        launched=[c for c in self.calls if c in self.invitations]
+        assert launched,'No Hub-launched invitation was observed'
+        invitation=self.invitations[launched[-1]]
+        name=invitation.get('callerDisplayName')
+        assert isinstance(name,str) and name.strip(),'Hub-launched invitation lacks callerDisplayName'
+        assert '@' not in name and a['principalId'] not in name and b['principalId'] not in name,'callerDisplayName leaks an identifier'
+        self.report['callerDisplayNamePresent']=True
+        self.done('calling_invitation_carries_caller_display_name')
+        call=self.request('calling','/v1/calls/'+launched[-1],token=self.c['scope']['token'])
+        assert 'canViewRecordings' in call and isinstance(call['canViewRecordings'],bool),'Call read lacks canViewRecordings'
+        # The acceptance credential holds calls.read/write only (no enterprise.recording.read).
+        assert call['canViewRecordings'] is False,'canViewRecordings must follow enterprise.recording.read'
+        self.done('call_read_reports_can_view_recordings_from_the_credential_scope')
+
+    def expired_signaling_check(self,expiring):
+        """A genuine signaling credential past its lifetime answers 401 SIGNALING_CREDENTIAL_EXPIRED
+        with WWW-Authenticate error="invalid_token"; a forged one keeps AUTHENTICATION_FAILED."""
+        import datetime
+        expires=datetime.datetime.fromisoformat(expiring['expiresAt'].replace('Z','+00:00'))
+        wait=(expires-datetime.datetime.now(datetime.timezone.utc)).total_seconds()+2
+        assert wait<900,'Signaling credential lifetime is longer than the acceptance bound'
+        if wait>0:
+            self.report['phase']='waiting_for_signaling_credential_expiry';time.sleep(wait)
+        def probe(token):
+            req=urllib.request.Request(self.c['urls']['calling']+'/v1/calling/invitations',headers={'Authorization':'Bearer '+token})
+            try:
+                with urllib.request.urlopen(req,timeout=25) as r:return r.status,{},{}
+            except urllib.error.HTTPError as e:
+                try:body=json.loads(e.read())
+                except ValueError:body={}
+                return e.code,body,{k.lower():v for k,v in e.headers.items()}
+        status,body,headers=probe(expiring['token'])
+        assert status==401 and body.get('error',{}).get('code')=='SIGNALING_CREDENTIAL_EXPIRED',(status,body.get('error',{}).get('code'))
+        assert 'error="invalid_token"' in headers.get('www-authenticate',''),'Expired credential lacks WWW-Authenticate invalid_token'
+        forged=expiring['token'][:-4]+('AAAA' if not expiring['token'].endswith('AAAA') else 'BBBB')
+        status,body,_=probe(forged)
+        assert status==401 and body.get('error',{}).get('code')=='AUTHENTICATION_FAILED',(status,body.get('error',{}).get('code'))
+        self.done('expired_signaling_credential_answers_signaling_credential_expired')
+
     def hub_launch_denied(self,a,cid):
         """Blocked or no-longer-accepted contacts cannot be called through the Hub."""
         denied=self.hub(a,'/contacts/'+cid+'/calls','POST',{'kind':'VOICE','clientRequestId':str(uuid.uuid4()),
@@ -369,6 +415,9 @@ class Journey:
                 'endpointKey':'comm-'+uuid.uuid4().hex,'endpointKind':'WEB','capabilities':{'audio':True,'video':True}},self.c['scope']['token'],expected=(201,))
             a0['endpointId']=endpoint['endpointId']
             a0['signaling']=self.request('calling','/v1/calling/signaling-credentials','POST',{'principalId':a0['principalId'],'endpointId':a0['endpointId']},self.c['scope']['token'],expected=(200,201))['token']
+        # A separate credential of A, left unused until it expires (end of the journey).
+        expiring=None if self.c['stage'] else self.request('calling','/v1/calling/signaling-credentials','POST',
+            {'principalId':a['principalId'],'endpointId':a['endpointId']},self.c['scope']['token'],expected=(200,201))
         # Fresh dedicated accounts must have no implicit personal permission.
         # Previously accepted production fixtures are removed through their API.
         contacts=self.hub(a,'/contacts')['data']
@@ -412,6 +461,8 @@ class Journey:
         self.done('native_voice_video_ringing_accept_media_credentials_and_bidirectional_frames')
         if self.c['scope'].get('launchCredentialId'):
             self.hub_media_calls(a,b,conversation)
+            if not self.c['stage']:
+                self.calling_api_checks(a,b)
         contact=self.hub(a,'/contacts')['data'][0]
         self.hub(a,'/contacts/'+contact['contactId'],'PATCH',{'expectedVersion':contact['version'],'alias':'My saved contact','favorite':True})
         assert self.hub(b,'/contacts')['data'][0]['alias'] is None
@@ -459,6 +510,8 @@ class Journey:
         for contact in self.hub(a,'/contacts')['data']:
             if contact['cfMeetId']==b['cfMeetId']:self.hub(a,'/contacts/'+contact['contactId'],'DELETE')
         self.done('fixture_relationship_cleanup')
+        if expiring:
+            self.expired_signaling_check(expiring)
         self.report['limitations']=self.report.get('limitations',[])+['Real media uses controlled synthetic audio tones and video frames, not browser microphone or camera permissions.',
             'MANAGED messages are exercised only in the isolated TEST application; production MLS activation remains the next milestone.']
 

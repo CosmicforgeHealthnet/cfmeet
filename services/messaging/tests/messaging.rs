@@ -1086,3 +1086,260 @@ async fn managed_text_is_plain_text_never_interpreted_markup() {
     let bad = h.send_managed(&c, &conv, people[0], "bell\u{7}").await;
     assert_eq!(bad.code(), "CONTENT_REJECTED", "{}", bad.text);
 }
+
+/// Multi-device personal E2EE (linked devices): one account with a primary mobile and two
+/// web devices talks to another account through REAL OpenMLS clients. Every device of the
+/// account receives and decrypts locally; sends from one device reach the account's other
+/// devices; the mobile is replaced (revoked, removed by an MLS commit at the next epoch)
+/// while both web devices keep working; the removed mobile cannot decrypt anything after
+/// the rekey; the new mobile joins with fresh keys and gets future messages only.
+#[tokio::test]
+async fn one_account_with_mobile_and_two_web_devices_replaces_its_mobile() {
+    use common::{flows::*, *};
+    use serde_json::json;
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let alice = h.principal(&c);
+    let mut mobile_a = h.device_of(&c, alice, 0).await;
+    let mut web_a = h.device_of(&c, alice, 1).await;
+    let mut web_b = h.device_of(&c, alice, 1).await;
+    let mut bob = h.member(&c, 1).await;
+    let r = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob.principal }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conv = r.json;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let gid = unb64(&conv["encryption"]["mlsGroupId"]);
+    mobile_a.group = Some(mobile_a.device.create_group(&gid).unwrap());
+    h.add_member_devices(
+        &c,
+        &conv,
+        &mut mobile_a,
+        &mut [&mut web_a, &mut web_b, &mut bob],
+        &mut [],
+    )
+    .await;
+    let mut members = mobile_a.group.as_ref().unwrap().member_devices();
+    members.sort();
+    let mut want = vec![
+        mobile_a.device_id(),
+        web_a.device_id(),
+        web_b.device_id(),
+        bob.device_id(),
+    ];
+    want.sort();
+    assert_eq!(members, want, "one leaf per authorized device");
+
+    // Bob → every device of Alice decrypts locally.
+    let r = h
+        .send_e2ee(&c, &conv, &mut bob, "multi-device hello from bob")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let old_bob_seq = r.json["sequence"].as_i64().unwrap();
+    for d in [&mut mobile_a, &mut web_a, &mut web_b] {
+        let got = h.receive(&c, &conv, d).await;
+        assert_eq!(got.last().unwrap().1, "multi-device hello from bob");
+    }
+    // Web A → Bob, and Alice's own mobile and Web B (conversation sync across devices).
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut web_a, "sent from web a")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut bob, &mut mobile_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "sent from web a"
+        );
+    }
+    // Mobile → web.
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_a, "sent from mobile a")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut web_a, &mut web_b, &mut bob] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "sent from mobile a"
+        );
+    }
+    // A retried delivery is idempotent (same id and bytes: no duplicate message).
+    let id = uuid::Uuid::new_v4();
+    let ct = h.encrypt_for(&c, &conv, &mut web_b, id, "retry once");
+    let body = json!({ "clientMessageId": id, "deviceId": web_b.device_id(), "epoch": web_b.group.as_ref().unwrap().epoch(), "ciphertext": b64(&ct) });
+    let path = format!("/v1/conversations/{cid}/messages");
+    let first = h.post(&c, Some(alice), &path, body.clone()).await;
+    assert_eq!(first.status, StatusCode::CREATED, "{}", first.text);
+    let again = h.post(&c, Some(alice), &path, body).await;
+    assert!(again.status.is_success(), "{}", again.text);
+    assert_eq!(again.json["messageId"], first.json["messageId"]);
+    for d in [&mut web_a, &mut mobile_a, &mut bob] {
+        let got = h.receive(&c, &conv, d).await;
+        assert_eq!(got.iter().filter(|(_, t)| t == "retry once").count(), 1);
+    }
+
+    // Mobile replacement: the old mobile is revoked; sends wait for the rekey commit that
+    // removes it; Web A commits the removal; Web B and Bob process it.
+    let r = h
+        .post(
+            &c,
+            Some(alice),
+            &format!("/v1/messaging/devices/{}/revoke", mobile_a.device_id()),
+            json!({ "reason": "REPLACED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let state = h
+        .get(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["rekeyRequired"], true, "{}", state.text);
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut web_b, "too early").await.code(),
+        "MLS_REKEY_REQUIRED"
+    );
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_a, "revoked")
+            .await
+            .code(),
+        "DEVICE_REVOKED"
+    );
+    let epoch = web_a.group.as_ref().unwrap().epoch();
+    let out = web_a
+        .device
+        .remove_devices(web_a.group.as_mut().unwrap(), &[mobile_a.device_id()])
+        .unwrap();
+    let r = h
+        .commit(
+            &c,
+            &cid,
+            &web_a,
+            &out.commit,
+            epoch,
+            None,
+            &[],
+            &[mobile_a.device_id()],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    web_a.cursor = r.json["sequence"].as_i64().unwrap();
+    for d in [&mut web_b, &mut bob] {
+        h.receive(&c, &conv, d).await;
+        assert_eq!(d.group.as_ref().unwrap().epoch(), epoch + 1);
+    }
+    assert!(!web_b
+        .group
+        .as_ref()
+        .unwrap()
+        .member_devices()
+        .contains(&mobile_a.device_id()));
+
+    // After the rekey boundary the removed mobile cannot decrypt new traffic.
+    let r = h.send_e2ee(&c, &conv, &mut bob, "after replacement").await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let fresh = h
+        .get(
+            &c,
+            Some(alice),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                r.json["sequence"].as_i64().unwrap() - 1
+            ),
+        )
+        .await;
+    let ciphertext = unb64(&fresh.json["messages"][0]["e2ee"]["ciphertext"]);
+    assert!(mobile_a
+        .device
+        .process(mobile_a.group.as_mut().unwrap(), &ciphertext)
+        .is_err());
+    for d in [&mut web_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "after replacement"
+        );
+    }
+
+    // The new mobile enrolls with FRESH keys and is added by a web device; it reads
+    // future messages only (no old decryption secrets are handed over).
+    let mut mobile_b = h.device_of(&c, alice, 1).await;
+    h.add_member_devices(
+        &c,
+        &conv,
+        &mut web_a,
+        &mut [&mut mobile_b],
+        &mut [&mut web_b, &mut bob],
+    )
+    .await;
+    assert_ne!(
+        mobile_b.device.signature_public_key(),
+        mobile_a.device.signature_public_key()
+    );
+    let old = h
+        .get(
+            &c,
+            Some(alice),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                old_bob_seq - 1
+            ),
+        )
+        .await;
+    let old_ct = unb64(&old.json["messages"][0]["e2ee"]["ciphertext"]);
+    assert!(
+        mobile_b
+            .device
+            .process(mobile_b.group.as_mut().unwrap(), &old_ct)
+            .is_err(),
+        "no history without an explicit transfer"
+    );
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut bob, "welcome new phone")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    for d in [&mut mobile_b, &mut web_a, &mut web_b] {
+        assert_eq!(
+            h.receive(&c, &conv, d).await.last().unwrap().1,
+            "welcome new phone"
+        );
+    }
+    assert_eq!(
+        h.send_e2ee(&c, &conv, &mut mobile_b, "new phone writes")
+            .await
+            .status,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        h.receive(&c, &conv, &mut bob).await.last().unwrap().1,
+        "new phone writes"
+    );
+
+    // The server holds ciphertext only: no phrase is stored anywhere in Messaging.
+    for phrase in [
+        "multi-device hello",
+        "sent from web a",
+        "after replacement",
+        "new phone writes",
+    ] {
+        let n = h
+            .scalar(&format!(
+                "SELECT count(*) FROM messaging_messages WHERE conversation_id = '{cid}' AND (position(convert_to('{phrase}', 'UTF8') in coalesce(mls_ciphertext, ''::bytea)) > 0 OR managed_sealed IS NOT NULL)"
+            ))
+            .await;
+        assert_eq!(n, 0, "{phrase}");
+    }
+}

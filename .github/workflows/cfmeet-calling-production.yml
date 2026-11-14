@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, livekit-webhook-inspect, livekit-webhook, livekit-webhook-rollback, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, livekit-webhook-inspect, livekit-webhook, livekit-webhook-rollback, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, messaging-e2ee-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -22,7 +22,7 @@ jobs:
   production:
     runs-on: ubuntu-24.04
     environment: production
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +43,17 @@ jobs:
       - name: Prove the storage relay survives store recreation before changing production
         if: inputs.operation == 'storage-routes'
         run: python3 infra/calling/ingress-ci/storage_relay_ci.py
+      - name: Build the multi-device E2EE acceptance client (real OpenMLS clients, static)
+        if: inputs.operation == 'messaging-e2ee-verify' || inputs.operation == 'messaging-verify'
+        run: |
+          set -euo pipefail
+          command -v musl-gcc >/dev/null || { sudo apt-get update -q; sudo apt-get install -y -q musl-tools; }
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --locked --manifest-path certification/Cargo.toml \
+            --target x86_64-unknown-linux-musl --bin cfmeet-e2ee-acceptance
+          mkdir -p infra/calling/production/bin
+          install -m 0555 certification/target/x86_64-unknown-linux-musl/release/cfmeet-e2ee-acceptance \
+            infra/calling/production/bin/cfmeet-e2ee-acceptance
       - name: Configure existing production SSH access
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}

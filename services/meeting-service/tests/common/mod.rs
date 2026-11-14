@@ -956,6 +956,54 @@ impl TestApp {
         }
     }
 
+    /// Multi-device policy: give `user` a real sign-in bound to a TRUSTED (bootstrap) web
+    /// device, as a production client gets by declaring its first device. Replaces the
+    /// user's token with that session's access token. Personal E2EE enrollment requires it.
+    pub async fn trust_device(&self, user: &mut User) {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let session = Uuid::new_v4();
+        let refresh = Uuid::new_v4();
+        let device = Uuid::new_v4();
+        let mut key = [0u8; 32];
+        key[..16].copy_from_slice(device.as_bytes());
+        key[16..].copy_from_slice(session.as_bytes());
+        let thumb = backend::services::account_devices::thumbprint(&key);
+        let inst =
+            backend::services::account_devices::installation_digest(user.id, &device.to_string());
+        let row = self
+            .db
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "WITH d AS (INSERT INTO account_devices (id, user_id, installation_digest, device_class, platform, \
+                    public_key, key_thumbprint, trust, trusted_via, trusted_at, state) \
+                    VALUES ($1, $2, $3, 'WEB', 'WEB', $4, $5, 'TRUSTED', 'BOOTSTRAP', now(), 'ACTIVE') RETURNING id) \
+                 INSERT INTO account_sessions (id, user_id, auth_method, authenticated_at, absolute_expires_at, \
+                    current_refresh_id, device_id) \
+                 SELECT $6, $2, 'PASSWORD', now(), now() + interval '30 days', $7, d.id FROM d \
+                 RETURNING floor(extract(epoch FROM authenticated_at))::bigint AS auth_time",
+                [
+                    device.into(),
+                    user.id.into(),
+                    inst.into(),
+                    key.to_vec().into(),
+                    thumb.into(),
+                    session.into(),
+                    refresh.into(),
+                ],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let auth_time: i64 = row.try_get("", "auth_time").unwrap();
+        let (access, _) = self
+            .state
+            .jwt_service
+            .session_tokens(user.id, "user", auth_time, session, refresh)
+            .unwrap();
+        user.token = access;
+    }
+
     pub async fn admin(&self, name: &str) -> User {
         let u = self.user(name).await;
         self.db

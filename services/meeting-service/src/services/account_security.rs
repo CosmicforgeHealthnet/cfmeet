@@ -107,6 +107,9 @@ pub struct AuthPolicy {
     /// (`EMAIL_VERIFICATION_GRACE_UNTIL`, RFC 3339). Unset: they are never refused at
     /// sign-in (they are prompted to verify instead).
     pub email_verification_grace_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Multi-device policy (web device limit, linking window, proof window, email step-up,
+    /// E2EE enrollment gate). See [`crate::services::account_devices`].
+    pub devices: crate::services::account_devices::DevicePolicy,
 }
 
 /// ACC-016: enforcement points for unverified (pending) accounts.
@@ -223,7 +226,9 @@ impl AuthPolicy {
                 .and_then(|v| chrono::DateTime::parse_from_rfc3339(v.trim()).ok())
                 .map(|t| t.with_timezone(&chrono::Utc))
         };
+        let devices = crate::services::account_devices::DevicePolicy::from_lookup(&get);
         Self {
+            devices,
             email_verification_enforce_from: instant("EMAIL_VERIFICATION_ENFORCE_FROM"),
             email_verification_grace_until: instant("EMAIL_VERIFICATION_GRACE_UNTIL"),
             google_token_delivery,
@@ -445,6 +450,28 @@ pub async fn authorize_user_token(
     user_id: Uuid,
     expected: TokenKind,
 ) -> ApiResult<TokenAuthorization> {
+    authorize_inner(state, claims, user_id, expected, false).await
+}
+
+/// As [`authorize_user_token`], but also accepts the sign-in of a mobile whose
+/// primary-mobile replacement is still pending. Used ONLY by the device endpoints, so
+/// the new mobile can complete (or cancel) its replacement.
+pub async fn authorize_user_token_allow_pending(
+    state: &AppState,
+    claims: &Claims,
+    user_id: Uuid,
+    expected: TokenKind,
+) -> ApiResult<TokenAuthorization> {
+    authorize_inner(state, claims, user_id, expected, true).await
+}
+
+async fn authorize_inner(
+    state: &AppState,
+    claims: &Claims,
+    user_id: Uuid,
+    expected: TokenKind,
+    allow_pending_device: bool,
+) -> ApiResult<TokenAuthorization> {
     if !claims.is_kind(expected) {
         return Err(ApiError::Unauthorized("Invalid token type".into()));
     }
@@ -461,16 +488,27 @@ pub async fn authorize_user_token(
                 .db
                 .query_one(Statement::from_sql_and_values(
                     DbBackend::Postgres,
-                    "SELECT user_id, revoked_at IS NULL AND absolute_expires_at > now() AS open \
-                     FROM account_sessions WHERE id = $1",
+                    "SELECT s.user_id, s.revoked_at IS NULL AND s.absolute_expires_at > now() AS open, \
+                            d.state AS device_state \
+                     FROM account_sessions s LEFT JOIN account_devices d ON d.id = s.device_id \
+                     WHERE s.id = $1",
                     [session_id.into()],
                 ))
                 .await?
                 .ok_or_else(revoked)?;
             let owner: Uuid = row.try_get("", "user_id")?;
             let open: bool = row.try_get("", "open")?;
-            if owner != user_id || !open {
+            let device_state: Option<String> = row.try_get("", "device_state")?;
+            if owner != user_id || !open || device_state.as_deref() == Some("REVOKED") {
                 return Err(revoked());
+            }
+            // Multi-device policy: a new mobile waiting for its primary-mobile replacement
+            // has no authority until the replacement completes.
+            if device_state.as_deref() == Some("REPLACEMENT_PENDING") && !allow_pending_device {
+                return Err(ApiError::domain(
+                    crate::error::ErrorCode::DeviceReplacementPending,
+                    "Confirm this phone as your primary mobile first (approve it from a trusted device or with the emailed code)",
+                ));
             }
             Ok(TokenAuthorization {
                 session_verified: true,
@@ -564,8 +602,17 @@ pub async fn rotate_session(
     state: &AppState,
     claims: &Claims,
     user: &users::Model,
+    device_proof: Option<&crate::services::account_devices::DeviceProof>,
 ) -> ApiResult<(String, String)> {
     let session_id = claims.session_id().ok_or_else(revoked)?;
+    // A device-bound sign-in refreshes only with a proof of the device key.
+    crate::services::account_devices::check_refresh_binding(
+        &state.db,
+        &state.auth_policy.devices,
+        session_id,
+        device_proof,
+    )
+    .await?;
     let presented = claims.refresh_id();
     let txn = state.db.begin().await?;
     let row = txn
@@ -668,6 +715,10 @@ pub async fn revoke_all<C: ConnectionTrait>(
             [user_id.into(), reason.as_str().into()],
         ))
         .await?;
+    // Sign-out everywhere also ends every linked device (multi-device policy).
+    if reason == RevokeReason::LogoutAll {
+        crate::services::account_devices::revoke_all_devices(db, user_id).await?;
+    }
     Ok(result.rows_affected())
 }
 
@@ -691,6 +742,9 @@ pub struct SessionRecord {
     pub end_reason: Option<String>,
     /// True for the session the request was made with.
     pub current: bool,
+    /// The linked device this sign-in belongs to (`GET /api/v2/me/devices`); absent for
+    /// unclassified sign-ins.
+    pub device_id: Option<Uuid>,
 }
 
 /// The user's sessions, newest first (open ones, plus ended ones on request).
@@ -703,7 +757,7 @@ pub async fn list_sessions(
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "SELECT id, auth_method, authenticated_at, created_at, last_refreshed_at,                     absolute_expires_at, client_label, revoked_at, revoke_reason,                     revoked_at IS NULL AND absolute_expires_at > now() AS open              FROM account_sessions              WHERE user_id = $1 AND ($2 OR (revoked_at IS NULL AND absolute_expires_at > now()))              ORDER BY created_at DESC LIMIT 100",
+            "SELECT id, auth_method, authenticated_at, created_at, last_refreshed_at,                     absolute_expires_at, client_label, revoked_at, revoke_reason, device_id,                     revoked_at IS NULL AND absolute_expires_at > now() AS open              FROM account_sessions              WHERE user_id = $1 AND ($2 OR (revoked_at IS NULL AND absolute_expires_at > now()))              ORDER BY created_at DESC LIMIT 100",
             [user_id.into(), include_ended.into()],
         ))
         .await?;
@@ -732,6 +786,7 @@ pub async fn list_sessions(
                 ended_at: revoked_at.or((!open).then_some(expires_at)),
                 end_reason: r.try_get("", "revoke_reason")?,
                 current: current == Some(id),
+                device_id: r.try_get("", "device_id")?,
             })
         })
         .collect::<Result<Vec<_>, sea_orm::DbErr>>()

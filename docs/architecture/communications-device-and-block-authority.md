@@ -7,6 +7,7 @@ Blueprint v1.0 Section 14. Decision record for the audit's "four device registri
 | Store | Decision | Why |
 |---|---|---|
 | Account `account_sessions` | **Authority for sign-ins** (root credential of a device's CF Meet access) | ADR 0057 Decision 2 |
+| Account `account_devices` | **Authority for linked devices** (one browser profile or mobile installation, Ed25519-bound; one primary mobile, `ACCOUNT_MAX_WEB_DEVICES` web devices; trust and replacement) | [ADR 0060](../decisions/0060-account-linked-devices-and-production-personal-e2ee.md); a sign-in belongs to at most one device |
 | Messaging `messaging_devices` (+ key packages) | **Authority** for E2EE devices | Only Messaging can verify MLS state |
 | Messaging `messaging_session_devices` | **Authority** for MANAGED session devices; bound to an account session | ADR 0049 A1 |
 | Messaging `messaging_push_registrations` | **Authority**, subordinate to the Messaging device (not a separate registry) | push tokens never leave Messaging |

@@ -171,6 +171,18 @@ SMTP_FROM_EMAIL=noreply@cfmeet.com
 SWAGGER_PUBLIC_SERVER_URL=https://api.cfmeet.com
 ```
 
+### Linked devices (multi-device policy)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ACCOUNT_MAX_WEB_DEVICES` | `4` (1-20) | Active web devices (browser profiles) per account. One primary mobile is always allowed in addition; tabs of one browser profile are one device. |
+| `ACCOUNT_DEVICE_LINK_TTL_SECS` | `300` (60-900) | Lifetime of a one-time device-linking challenge. |
+| `ACCOUNT_DEVICE_PROOF_WINDOW_SECS` | `300` (30-900) | Accepted clock skew of a device proof of possession (nonces are single-use). |
+| `ACCOUNT_DEVICE_EMAIL_STEP_UP` | `true` | A new device can be approved with an emailed code when no trusted device is at hand (web-only recovery, lost phone). Never SMS. |
+| `ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE` | `true` | Personal E2EE (Messaging) device enrollment needs a trusted account device. |
+
+See [the handover](architecture/multi-device-linked-devices-handover.md).
+
 ### Feature Flags
 
 | Variable | Required | Default | Description |

@@ -1,3 +1,4 @@
+use crate::services::account_devices::DeviceProof;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -107,6 +108,10 @@ pub struct VerifyEmailRequest {
 pub struct RefreshTokenRequest {
     #[validate(length(min = 1, message = "Refresh token is required"))]
     pub refresh_token: String,
+    /// Required when the sign-in is bound to a linked device (multi-device policy): a
+    /// proof of the device key with purpose `REFRESH` and context = the session id.
+    #[serde(default, alias = "deviceProof")]
+    pub device_proof: Option<DeviceProof>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

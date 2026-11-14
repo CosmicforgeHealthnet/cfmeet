@@ -592,7 +592,7 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     let app = meeting_app(&world).await;
     let um = um(&app);
     let ops = app.admin("ops").await;
-    let (owner, cid, guests) = collab::meeting(&app, collab::public(), 2).await;
+    let (mut owner, cid, guests) = collab::meeting(&app, collab::public(), 2).await;
     let host = collab::owner_joined(&app, cid, &owner).await;
     let (g0, g1) = (&guests[0], &guests[1]);
     let base = collab::base(cid);
@@ -849,6 +849,8 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
     );
 
     // ---- Scenario 2: native identity — CF Meet login → principal → device → client token.
+    // Multi-device policy: the native E2EE device is enrolled from a trusted account device.
+    app.trust_device(&mut owner).await;
     let bridge = "/api/v2/messaging";
     let (s, ch) = app
         .post(

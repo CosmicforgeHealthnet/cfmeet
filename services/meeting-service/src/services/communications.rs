@@ -452,6 +452,11 @@ pub async fn credentials_ended(state: &AppState, user_id: Uuid, reason: &'static
 /// its MANAGED-realtime session devices end at once (best effort, bounded by their token
 /// lifetime) and the Hub devices it linked end through the durable account outbox.
 pub async fn session_ended(state: &AppState, user_id: Uuid, session_id: Uuid) -> ApiResult<()> {
+    // Multi-device policy: only this sign-in's meeting media end (other devices of the
+    // same participant keep their sessions). Durable: provider removal is an outbox job.
+    if let Err(e) = crate::services::account_devices::end_session_media(state, session_id).await {
+        tracing::error!(%session_id, "ending the meeting media of an ended sign-in failed: {e}");
+    }
     if let Some(um) = state.meeting.core.unified.as_ref() {
         um.revoke_session_devices_for(user_id, session_id).await;
     }
@@ -679,6 +684,7 @@ async fn delegated_actor(
             // The Hub reaches this route only for a session the Account relay verified
             // against the revocation store (`relay` refuses unchecked sessions).
             revocation_checked: true,
+            account_session_id: None,
         }),
         verified_organizations,
         request_id: crate::middleware::request_id::current_request_id(),

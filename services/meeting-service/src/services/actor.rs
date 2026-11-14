@@ -37,6 +37,10 @@ pub struct RegisteredActor {
     /// Whether the token was checked against the revocation store (Redis). `false`
     /// means the store was unreachable; strict security profiles then fail closed.
     pub revocation_checked: bool,
+    /// The account session (sign-in) the token belongs to; `None` for pre-session tokens.
+    /// Meeting media opened by this request are tied to it, so ending one sign-in ends
+    /// only its own device's media (multi-device policy).
+    pub account_session_id: Option<Uuid>,
 }
 
 impl RegisteredActor {
@@ -344,6 +348,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                     verified_email: email_verified.then(|| user.email.to_ascii_lowercase()),
                     platform_admin: user.role == UserRole::Admin,
                     revocation_checked,
+                    account_session_id: authorization.session_id,
                 }),
                 verified_organizations,
                 request_id,
@@ -398,6 +403,7 @@ mod tests {
             verified_email: Some("Alice@Example.COM".into()),
             platform_admin: false,
             revocation_checked: true,
+            account_session_id: None,
         };
         assert_eq!(actor.verified_domain().as_deref(), Some("example.com"));
         actor.verified_email = None;

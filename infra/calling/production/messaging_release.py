@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 import production as p
 
-SAFE_FLAGS = ('CF_RUNTIME_ENVIRONMENT', 'MESSAGING_E2EE_DEVICES_ENABLED',
+SAFE_FLAGS = ('CF_RUNTIME_ENVIRONMENT', 'MESSAGING_E2EE_DEVICES_ENABLED', 'MESSAGING_E2EE_PRODUCTION_RELEASE_FILE',
     'MESSAGING_PUSH_PROVIDER', 'MESSAGING_REALTIME_REQUIRE_TLS', 'MESSAGING_KT_LOG_ID',
     'MESSAGING_ATTACHMENTS_S3_SERVER_SIDE_ENCRYPTION')
 DEPENDENCIES = {
@@ -91,9 +91,16 @@ def run(operation, sha, run_id):
     elif operation == 'messaging-ingress':
         import messaging_runtime
         messaging_runtime.reinstall_ingress(run_id)
-    elif operation == 'messaging-verify':
-        import messaging_acceptance
-        messaging_acceptance.execute(sha, run_id)
+    elif operation in ('messaging-verify', 'messaging-e2ee-verify'):
+        import e2ee_acceptance
+        env = p.env_of(p.inspect('cfmeet-messaging'))
+        if operation == 'messaging-e2ee-verify' or e2ee_acceptance.release_status(env):
+            # Personal E2EE is on under the owner's release record: the real multi-device
+            # encrypted exchange replaces the guard-only journey.
+            e2ee_acceptance.execute(sha, run_id)
+        else:
+            import messaging_acceptance
+            messaging_acceptance.execute(sha, run_id)
         receipt = inspect_runtime(sha, run_id)
         assert all(code == 200 for code in receipt['privateProbes'].values()), 'Messaging probes failed'
         p.regression()

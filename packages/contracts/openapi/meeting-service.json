@@ -10722,6 +10722,743 @@
         ]
       }
     },
+    "/api/v2/me/device-links": {
+      "get": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "List link requests awaiting approval",
+        "description": "For a trusted device: open link requests of the account, newest first, with the\nrequesting device's platform, label and key thumbprint. Comparison codes are never\nlisted; the user reads it on the new device.",
+        "operationId": "v2_list_pending_device_links",
+        "responses": {
+          "200": {
+            "description": "Pending links",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingLinkListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Request to link this device",
+        "description": "Called by a new, untrusted device (or a pending mobile): creates a one-time linking\nchallenge (default 5 minutes) bound to the account and this device. Proof purpose\n`LINK_REQUEST`, context = this `deviceId`. The response carries the 6-digit comparison\ncode (and an optional QR payload) to show on this device; a trusted device must enter\nit to approve. At most 10 requests per account per hour.",
+        "operationId": "v2_create_device_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProofOnlyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Link challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "DEVICE_NOT_FOUND (declare the device first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DEVICE_DECLARATION_REFUSED (already trusted)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}": {
+      "get": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Read my link request",
+        "description": "For the device that requested the link: its status (`PENDING`, `APPROVED`, ...).",
+        "operationId": "v2_get_device_link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}/approve": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Approve a link request",
+        "description": "From a trusted device: enter the comparison code shown on the new device and sign with\nthis device's key (purpose `LINK_APPROVE`, context = `{linkId}|{keyThumbprint of the\nnew device}`). Five wrong codes reject the request.",
+        "operationId": "v2_approve_device_link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (code mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}/cancel": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Cancel my link request",
+        "description": "For the device that requested the link: withdraws its own open request (for example to\nstart again with a new comparison code).",
+        "operationId": "v2_cancel_device_link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}/complete": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Complete my link",
+        "description": "The requesting device finishes its link after approval (or with `emailCode`), proving\npossession of its key (purpose `LINK_COMPLETE`, context = `{linkId}`). A web device\nbecomes trusted. A pending mobile becomes the primary mobile atomically: the previous\nprimary mobile is revoked (its sign-ins, Messaging device, Calling endpoint, push and\nmeeting media end) and trusted web devices stay signed in. The account's email gets a\nnotice and the security log records it.",
+        "operationId": "v2_complete_device_link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Linked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOutcome"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "DEVICE_PROOF_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (not approved / wrong code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}/email-code": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Email me a step-up code for this link",
+        "description": "For the requesting device when no trusted device is available (web-only recovery,\nreplacing a lost phone): sends a 6-digit code to the account's email address (once per\nminute). Proves control of the account mailbox; never SMS.",
+        "operationId": "v2_send_device_link_email_code",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Code sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-links/{linkId}/reject": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Reject a link request",
+        "description": "From a trusted device: refuses an open link request of the account (for example one the\nuser did not start). The requesting device stays untrusted and the request cannot be\napproved or completed afterwards.",
+        "operationId": "v2_reject_device_link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceLinkView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "DEVICE_LINK_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/device-policy": {
+      "get": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Read my device policy and state",
+        "description": "The account's multi-device state (`WEB_ONLY`, `MOBILE_PRIMARY`,\n`DEVICE_REPLACEMENT_PENDING`), the backend limits (one primary mobile,\n`maxWebDevices` web devices), the linking methods available to a new device and the\nstatus of the calling sign-in's device. Accepts a pending mobile's sign-in.",
+        "operationId": "v2_get_my_device_policy",
+        "responses": {
+          "200": {
+            "description": "Policy and state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevicePolicyView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/devices": {
+      "get": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "List my devices",
+        "description": "Logical devices of the account (one per browser profile or mobile installation), with\nplatform, trust, primary-mobile flag, open sign-ins and revocation state. Sign-ins are\nlisted by `GET /api/v2/me/sessions` (`deviceId`).",
+        "operationId": "v2_list_my_devices",
+        "parameters": [
+          {
+            "name": "includeRevoked",
+            "in": "query",
+            "description": "Also return revoked devices (most recent 100 in total).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/devices/current": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Declare this sign-in's device",
+        "description": "Binds the calling sign-in to a device right after signing in on it (within the\nre-authentication window). The device proves possession of its Ed25519 key (purpose\n`DECLARE`, context = the session id). The same installation signing in again reuses\nits device (older sign-ins of it end: `SUPERSEDED`), never a new one.\n\n* WEB: refused with `WEB_DEVICE_LIMIT_REACHED` beyond `maxWebDevices` active web devices.\n* The first device of an account that never had a trusted device is trusted\n(`BOOTSTRAP`); a first mobile then becomes the primary mobile.\n* Any other new device is `UNTRUSTED`; a new MOBILE is `REPLACEMENT_PENDING` (its\nsign-in is refused elsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a\nlink: approval by a trusted device or an email step-up.",
+        "operationId": "v2_declare_my_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclareDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Device declared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED / DEVICE_PROOF_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "WEB_DEVICE_LIMIT_REACHED / DEVICE_DECLARATION_REFUSED / DEVICE_KEY_IN_USE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/devices/{deviceId}/revoke": {
+      "post": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Revoke a device",
+        "description": "Ends every sign-in of the device and every credential it holds downstream (Messaging\nE2EE device — removed from its MLS groups at the next commit —, push registration,\nCalling endpoint and live invitations, realtime connections, its meeting media\nsessions). Other devices are untouched; revoking the primary mobile leaves the account\n`WEB_ONLY`. Revoking another device needs a trusted calling device and a `REVOKE` proof.",
+        "operationId": "v2_revoke_my_device",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "Device id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked (or already revoked)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOutcome"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED / DEVICE_PROOF_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "DEVICE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
@@ -10858,6 +11595,68 @@
           },
           "409": {
             "description": "USERNAME_TAKEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/security-events": {
+      "get": {
+        "tags": [
+          "Account devices (v2)"
+        ],
+        "summary": "Read my security log",
+        "description": "The account's own security events, newest first: sign-ins, device declarations, link\nrequests and approvals, primary-mobile replacements and device revocations. Surviving\ndevices use it to tell the user about an unexpected replacement. Never contains\npasswords, tokens, email or network addresses.",
+        "operationId": "v2_list_my_security_events",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "`nextCursor` from the previous page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1-100, default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySecurityEventPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
@@ -13181,6 +13980,16 @@
               }
             }
           },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (link this device to the account first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "503": {
             "description": "CHAT_UNAVAILABLE",
             "content": {
@@ -13230,6 +14039,16 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (link this device to the account first)",
             "content": {
               "application/json": {
                 "schema": {
@@ -19038,6 +19857,23 @@
           }
         }
       },
+      "ApproveLinkRequest": {
+        "type": "object",
+        "required": [
+          "comparisonCode",
+          "proof"
+        ],
+        "properties": {
+          "comparisonCode": {
+            "type": "string",
+            "description": "The 6-digit code shown on the new device (typed or scanned from its QR code)."
+          },
+          "proof": {
+            "$ref": "#/components/schemas/DeviceProof"
+          }
+        },
+        "additionalProperties": false
+      },
       "ArchiveOrganizationTeamRequest": {
         "type": "object",
         "description": "`POST /api/v2/organizations/{id}/teams/{teamId}/archive`.",
@@ -20409,6 +21245,23 @@
           }
         }
       },
+      "CompleteLinkRequest": {
+        "type": "object",
+        "required": [
+          "proof"
+        ],
+        "properties": {
+          "emailCode": {
+            "type": "string",
+            "description": "Required only for the email step-up (6 digits from the email).",
+            "nullable": true
+          },
+          "proof": {
+            "$ref": "#/components/schemas/DeviceProof"
+          }
+        },
+        "additionalProperties": false
+      },
       "ConferenceActionResponse": {
         "type": "object",
         "required": [
@@ -21416,6 +22269,44 @@
           }
         }
       },
+      "DeclareDeviceRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/me/devices/current` body. Proof purpose `DECLARE`, context = this\nsign-in's `sessionId` (from `GET /api/v2/me/sessions`, `current: true`).",
+        "required": [
+          "installationId",
+          "deviceClass",
+          "platform",
+          "publicKey",
+          "proof"
+        ],
+        "properties": {
+          "deviceClass": {
+            "type": "string",
+            "description": "`WEB` or `MOBILE`."
+          },
+          "installationId": {
+            "type": "string",
+            "description": "Random id generated once per installation / browser profile and kept with the key\n(16-128 characters of `[A-Za-z0-9_-]`). Never derived from hardware identifiers."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional user-visible name (1-80 characters, no control characters).",
+            "nullable": true
+          },
+          "platform": {
+            "type": "string",
+            "description": "`WEB` (with `WEB`), `IOS` or `ANDROID` (with `MOBILE`)."
+          },
+          "proof": {
+            "$ref": "#/components/schemas/DeviceProof"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Ed25519 public key, base64url (32 bytes), generated on the device; the private key\nnever leaves it (non-extractable Web Crypto key / platform keystore)."
+          }
+        },
+        "additionalProperties": false
+      },
       "DenyRequest": {
         "type": "object",
         "properties": {
@@ -21497,6 +22388,305 @@
           "user_id": {
             "type": "string",
             "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "DeviceLinkView": {
+        "type": "object",
+        "description": "A linking challenge created by a new device.",
+        "required": [
+          "linkId",
+          "deviceId",
+          "deviceClass",
+          "platform",
+          "status",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "comparisonCode": {
+            "type": "string",
+            "description": "Shown ONLY to the requesting device (and in its QR payload); a trusted device must\ntype or scan it to approve. Never listed to other devices.",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deviceClass": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The requesting (new) device."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "linkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "type": "string",
+            "description": "`DEVICE_APPROVAL` or `EMAIL_STEP_UP` once approved.",
+            "nullable": true
+          },
+          "platform": {
+            "type": "string"
+          },
+          "qrPayload": {
+            "type": "string",
+            "description": "`cfmeet-device-link:v1:{linkId}:{comparisonCode}` for an optional QR code (requesting\ndevice only). A copy of it is useless without a trusted device's key and session.",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "`PENDING`, `APPROVED`, `COMPLETED`, `CANCELLED`, `EXPIRED` or `REJECTED`."
+          }
+        }
+      },
+      "DeviceListResponse": {
+        "type": "object",
+        "required": [
+          "devices"
+        ],
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceView"
+            }
+          }
+        }
+      },
+      "DeviceOutcome": {
+        "type": "object",
+        "description": "Result of a completed link or declaration.",
+        "required": [
+          "device",
+          "endedSessions"
+        ],
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/DeviceView"
+          },
+          "endedSessions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sign-ins ended by this operation (replaced mobile, superseded sign-ins)."
+          },
+          "replacedDeviceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The primary mobile this completion replaced (revoked), if any.",
+            "nullable": true
+          }
+        }
+      },
+      "DevicePolicyView": {
+        "type": "object",
+        "description": "The account's device policy and state.",
+        "required": [
+          "accountState",
+          "maxPrimaryMobiles",
+          "maxWebDevices",
+          "activeWebDevices",
+          "pendingMobileDeviceIds",
+          "linkingMethods",
+          "trustedDevices",
+          "e2eeRequiresTrustedDevice",
+          "currentDeviceStatus",
+          "proofWindowSecs",
+          "linkTtlSecs"
+        ],
+        "properties": {
+          "accountState": {
+            "type": "string",
+            "description": "`WEB_ONLY`, `MOBILE_PRIMARY` or `DEVICE_REPLACEMENT_PENDING` (a new mobile waits)."
+          },
+          "activeWebDevices": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currentDeviceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The current sign-in: its device (absent while unclassified).",
+            "nullable": true
+          },
+          "currentDeviceStatus": {
+            "type": "string",
+            "description": "`UNCLASSIFIED` (sign-in has declared no device), `TRUSTED`, `UNTRUSTED` or\n`REPLACEMENT_PENDING`."
+          },
+          "e2eeRequiresTrustedDevice": {
+            "type": "boolean",
+            "description": "Personal E2EE device enrollment needs a trusted device."
+          },
+          "linkTtlSecs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "linkingMethods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ways a new device can be approved: `DEVICE_APPROVAL` (when a trusted device exists)\nand `EMAIL_STEP_UP` (when enabled)."
+          },
+          "maxPrimaryMobiles": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Always 1: at most one primary mobile."
+          },
+          "maxWebDevices": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pendingMobileDeviceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "primaryMobileDeviceId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "proofWindowSecs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "trustedDevices": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "DeviceProof": {
+        "type": "object",
+        "description": "Proof of possession of a device key: an Ed25519 signature (base64url, 64 bytes) over\n`cfmeet-account-device-proof:v1\\n{purpose}\\n{keyThumbprint}\\n{context}\\n{issuedAt}\\n{nonce}`\nwhere `keyThumbprint` is the lowercase hex SHA-256 of the 32-byte public key and the\ncontext is defined per operation (see each endpoint). `issuedAt` is Unix seconds\n(accepted within the policy window); `nonce` is 16-64 random bytes, base64url, never\nreused.",
+        "required": [
+          "issuedAt",
+          "nonce",
+          "signature"
+        ],
+        "properties": {
+          "issuedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeviceView": {
+        "type": "object",
+        "description": "One logical device as shown to its owner.",
+        "required": [
+          "deviceId",
+          "deviceClass",
+          "platform",
+          "state",
+          "trust",
+          "primary",
+          "keyThumbprint",
+          "openSessions",
+          "current",
+          "createdAt",
+          "lastSeenAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True when the request was made from this device."
+          },
+          "deviceClass": {
+            "type": "string",
+            "description": "`WEB` or `MOBILE`."
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "keyThumbprint": {
+            "type": "string",
+            "description": "Lowercase hex SHA-256 of the device public key (compare across devices)."
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "openSessions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open sign-ins of this device (normally 1)."
+          },
+          "platform": {
+            "type": "string",
+            "description": "`WEB`, `IOS` or `ANDROID`."
+          },
+          "primary": {
+            "type": "boolean",
+            "description": "True for the account's ACTIVE mobile."
+          },
+          "promotedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "replacedByDeviceId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "revokeReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "description": "`ACTIVE`, `REPLACEMENT_PENDING` or `REVOKED`."
+          },
+          "trust": {
+            "type": "string",
+            "description": "`TRUSTED` or `UNTRUSTED`."
+          },
+          "trustedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "trustedVia": {
+            "type": "string",
+            "description": "`BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).",
             "nullable": true
           }
         }
@@ -21686,6 +22876,14 @@
           "USERNAME_TAKEN",
           "REAUTHENTICATION_REQUIRED",
           "EMAIL_VERIFICATION_REQUIRED",
+          "DEVICE_PROOF_INVALID",
+          "WEB_DEVICE_LIMIT_REACHED",
+          "DEVICE_REPLACEMENT_PENDING",
+          "DEVICE_NOT_TRUSTED",
+          "DEVICE_DECLARATION_REFUSED",
+          "DEVICE_NOT_FOUND",
+          "DEVICE_KEY_IN_USE",
+          "DEVICE_LINK_INVALID",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -23402,6 +24600,25 @@
           }
         }
       },
+      "MySecurityEventPage": {
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecurityEventRecord"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        }
+      },
       "NetworkType": {
         "type": "string",
         "enum": [
@@ -24574,6 +25791,40 @@
           }
         }
       },
+      "PendingLinkListResponse": {
+        "type": "object",
+        "required": [
+          "links"
+        ],
+        "properties": {
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingLinkView"
+            }
+          }
+        }
+      },
+      "PendingLinkView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DeviceLinkView"
+          },
+          {
+            "type": "object",
+            "required": [
+              "keyThumbprint"
+            ],
+            "properties": {
+              "keyThumbprint": {
+                "type": "string",
+                "description": "Thumbprint of the requesting device's key (part of the approval proof context)."
+              }
+            }
+          }
+        ],
+        "description": "A pending link as listed to a trusted device (no comparison code)."
+      },
       "PhoneVerificationStatus": {
         "type": "object",
         "description": "Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or\nverification provider is approved, and never required.",
@@ -25418,6 +26669,18 @@
         },
         "additionalProperties": false
       },
+      "ProofOnlyRequest": {
+        "type": "object",
+        "required": [
+          "proof"
+        ],
+        "properties": {
+          "proof": {
+            "$ref": "#/components/schemas/DeviceProof"
+          }
+        },
+        "additionalProperties": false
+      },
       "ProviderDispatch": {
         "type": "string",
         "enum": [
@@ -26220,6 +27483,14 @@
           "refresh_token"
         ],
         "properties": {
+          "device_proof": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeviceProof"
+              }
+            ],
+            "nullable": true
+          },
           "refresh_token": {
             "type": "string"
           }
@@ -26657,6 +27928,20 @@
           }
         }
       },
+      "RevokeDeviceRequest": {
+        "type": "object",
+        "properties": {
+          "proof": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeviceProof"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "Role": {
         "type": "string",
         "enum": [
@@ -27067,6 +28352,12 @@
           "current": {
             "type": "boolean",
             "description": "True for the session the request was made with."
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The linked device this sign-in belongs to (`GET /api/v2/me/devices`); absent for\nunclassified sign-ins.",
+            "nullable": true
           },
           "endReason": {
             "type": "string",
@@ -28666,6 +29957,10 @@
     {
       "name": "Account sessions (v2)",
       "description": "Blueprint Section 2: the signed-in user's account sessions (one per sign-in, 30-day absolute lifetime, rotating single-use refresh tokens), per-session and everywhere sign-out, and the platform-administrator read of the append-only account security audit."
+    },
+    {
+      "name": "Account devices (v2)",
+      "description": "Multi-device policy: one account identity with one replaceable primary mobile and up to `maxWebDevices` web devices (browser profiles); web-only accounts need no phone. Devices are bound to device-generated Ed25519 keys (proof of possession, single-use nonces). New devices are linked by approval from a trusted device (comparison code) or an email step-up; a new mobile replaces the previous primary mobile atomically without signing out trusted web devices."
     },
     {
       "name": "API Keys",

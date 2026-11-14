@@ -101,6 +101,10 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
             .decode(session.split('.').nth(1).context("JWT claims")?)?,
     )?;
     let id = Uuid::parse_str(claims["sub"].as_str().context("JWT subject")?)?;
+    // Multi-device policy: the first device of a new account is declared right after
+    // signing in and becomes its trusted (bootstrap) web device, which personal E2EE
+    // enrollment requires.
+    declare_web_device(s, &session, claims["sid"].as_str().context("session id")?).await?;
     let profile = status(
         request(
             s,
@@ -193,6 +197,50 @@ async fn connected(s: &PersonalStack, a: &Account, b: &Account) -> anyhow::Resul
         "connection acceptance",
     )?;
     Ok(())
+}
+
+/// Declare the sign-in's browser device with a fresh Ed25519 key (proof purpose DECLARE,
+/// context = session id). Returns the device's view.
+async fn declare_web_device(s: &PersonalStack, session: &str, sid: &str) -> anyhow::Result<Value> {
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::RngCore;
+    use sha2::Digest;
+    let thumbprint = |k: &[u8]| hex::encode(sha2::Sha256::digest(k));
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let mut seed = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut seed);
+    let key = SigningKey::from_bytes(&seed);
+    let public = key.verifying_key().to_bytes();
+    let mut nonce = [0u8; 18];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let nonce = b64.encode(nonce);
+    let issued_at = chrono::Utc::now().timestamp();
+    let statement = format!(
+        "cfmeet-account-device-proof:v1\nDECLARE\n{}\n{sid}\n{issued_at}\n{nonce}",
+        thumbprint(&public)
+    );
+    let signature = b64.encode(key.sign(statement.as_bytes()).to_bytes());
+    let body = status(
+        request(
+            s,
+            "meeting-service",
+            Some(session),
+            None,
+            Method::POST,
+            "/api/v2/me/devices/current",
+            Some(json!({
+                "installationId": format!("cert-{}", Uuid::new_v4().simple()),
+                "deviceClass": "WEB", "platform": "WEB",
+                "publicKey": b64.encode(public),
+                "proof": {"issuedAt": issued_at, "nonce": nonce, "signature": signature},
+            })),
+        )
+        .await?,
+        200,
+        "declare the account's first device",
+    )?;
+    assert_eq!(body["device"]["trust"], "TRUSTED");
+    Ok(body)
 }
 
 async fn native_message_request(

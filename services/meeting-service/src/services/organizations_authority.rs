@@ -1737,6 +1737,7 @@ mod tests {
             verified_email: Some("Alice@Example.COM".into()),
             platform_admin: false,
             revocation_checked: true,
+            account_session_id: None,
         };
         let acting = ActingUser::of(&actor);
         assert_eq!(acting.user_id(), actor.user_id);

@@ -80,6 +80,48 @@ async fn relay(
     ))
 }
 
+/// Multi-device policy: a personal E2EE (MLS) device can be enrolled only from a sign-in
+/// that belongs to a trusted account device (bootstrap, approval by a trusted device or
+/// email step-up), unless the deployment switched the gate off. Knowing the password alone
+/// never yields an E2EE identity that would receive the account's future messages.
+async fn require_trusted_device_for_e2ee(state: &AppState, actor: &ActorContext) -> ApiResult<()> {
+    if !state.auth_policy.devices.e2ee_requires_trusted_device {
+        return Ok(());
+    }
+    let session = actor.registered().and_then(|r| r.account_session_id);
+    let trusted = match session {
+        Some(s) => {
+            crate::services::account_devices::session_is_trusted_device(&state.db, s).await?
+        }
+        None => false,
+    };
+    if !trusted {
+        return Err(ApiError::domain(
+            ErrorCode::DeviceNotTrusted,
+            "Link this device to your account (POST /api/v2/me/devices/current, then a device link) before enrolling end-to-end encryption",
+        ));
+    }
+    Ok(())
+}
+
+/// [`relay`] for personal E2EE device enrollment: the same integration and account checks
+/// first, then the trusted-device gate.
+async fn relay_enrollment(
+    state: &AppState,
+    actor: &ActorContext,
+    op: BridgeOperation,
+    body: Option<Value>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let um = integration(state)?;
+    let user = verified_user(state, actor)?;
+    require_trusted_device_for_e2ee(state, actor).await?;
+    let (status, value) = um.bridge(user, op, body).await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
+}
+
 /// Start a device registration (the challenge the device signs with its own key).
 ///
 /// First step of registering a Messaging device for the signed-in user; complete it with
@@ -90,7 +132,7 @@ async fn relay(
 #[utoipa::path(
     post, path = "/api/v2/messaging/devices/registration-challenges", tag = "Messaging (v2)", operation_id = "v2_messaging_registration_challenge",
     request_body = Object,
-    responses((status = 201, description = "Challenge (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 201, description = "Challenge (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "DEVICE_NOT_TRUSTED (link this device to the account first)", body = ErrorEnvelope), (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn registration_challenge(
@@ -98,7 +140,7 @@ pub async fn registration_challenge(
     actor: ActorContext,
     V2Json(body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(
+    relay_enrollment(
         &state,
         &actor,
         BridgeOperation::RegistrationChallenge,
@@ -117,7 +159,7 @@ pub async fn registration_challenge(
 #[utoipa::path(
     post, path = "/api/v2/messaging/devices", tag = "Messaging (v2)", operation_id = "v2_messaging_register_device",
     request_body = Object,
-    responses((status = 201, description = "Device (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 201, description = "Device (Messaging contract)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "DEVICE_NOT_TRUSTED (link this device to the account first)", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn register_device(
@@ -125,7 +167,7 @@ pub async fn register_device(
     actor: ActorContext,
     V2Json(body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
+    relay_enrollment(&state, &actor, BridgeOperation::RegisterDevice, Some(body)).await
 }
 
 /// Publish one-time KeyPackages of the caller's device.

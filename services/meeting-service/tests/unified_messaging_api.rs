@@ -199,7 +199,21 @@ async fn the_identity_bridge_acts_only_for_verified_cf_meet_accounts() {
     let Some(app) = app(Some(gw.clone()), RedisMode::FromEnv).await else {
         return;
     };
-    let user = app.user("bridge-user").await;
+    let mut user = app.user("bridge-user").await;
+    // Multi-device policy: personal E2EE enrollment needs a trusted account device.
+    let (s, v) = app
+        .post(
+            &format!("{BRIDGE}/devices/registration-challenges"),
+            Auth::Bearer(&user.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("DEVICE_NOT_TRUSTED")),
+        "{v}"
+    );
+    app.trust_device(&mut user).await;
     let device = Uuid::new_v4();
     for (path, body, expected) in bridge_calls(device) {
         let (s, v) = app.post(&path, Auth::Bearer(&user.token), body).await;

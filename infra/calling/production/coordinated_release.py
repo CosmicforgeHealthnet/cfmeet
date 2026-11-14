@@ -1233,6 +1233,10 @@ def safe_defaults():
     if done('activate-developer-webhooks'):
         for name in ('developer-platform', 'developer-platform-worker'):
             rules[name]['DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE'] = (None, 'shadow', 'active')
+    # Personal E2EE devices may be on only after the owner's recorded release decision
+    # (activate-personal-e2ee), and only with the release record mounted (checked below).
+    if done('activate-personal-e2ee'):
+        rules['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = (None, 'false', 'true')
     return rules
 
 
@@ -1251,6 +1255,9 @@ def safe_default_violations(envs):
     messaging = envs.get('messaging') or {}
     for var in sorted(v for v in messaging if v.startswith(PUSH_ADAPTER_PREFIXES) and messaging[v]):
         violations.append('messaging ' + var)
+    if messaging.get('MESSAGING_E2EE_DEVICES_ENABLED') == 'true' \
+            and messaging.get('MESSAGING_E2EE_PRODUCTION_RELEASE_FILE') != E2EE_RELEASE_TARGET:
+        violations.append('messaging MESSAGING_E2EE_PRODUCTION_RELEASE_FILE')
     meeting = envs.get('meeting-service')
     if meeting and meeting.get('NOTIFICATIONS_EMAIL_ENABLED') == 'true' and not mail_available(meeting):
         violations.append('meeting-service NOTIFICATIONS_EMAIL_ENABLED without mail credentials')
@@ -1725,6 +1732,60 @@ def first_party_feature_changes(meeting_env):
         meeting['NOTIFICATIONS_EMAIL_ENABLED'] = 'true'
     # MANAGED realtime only: session devices never acquire E2EE privileges.
     return [('messaging', {'MESSAGING_SESSION_DEVICES_ENABLED': 'true'}), ('meeting-service', meeting)]
+
+
+# --- Personal E2EE (owner release decision) ---------------------------------------------------
+
+E2EE_RELEASE_SOURCE = p.ROOT / 'messaging' / 'e2ee-production-release.json'
+E2EE_RELEASE_TARGET = '/run/messaging/e2ee-production-release.json'
+E2EE_CONFIRM = 'owner-approved-e2ee-without-independent-assessment'
+E2EE_DECISION_LOG = 'production personal E2EE enabled by owner release decision'
+
+
+def e2ee_release_record(run_id, witnessed, now=None):
+    """The owner's release decision as Messaging validates it. It states the ACTUAL status:
+    no independent cryptographic assessment was performed, and (without witnesses) the
+    key-transparency log is unwitnessed. It is never a certification claim."""
+    now = now or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    risks = ['NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT', 'WEB_CODE_DELIVERY_TRUST']
+    if not witnessed:
+        risks.insert(1, 'KEY_TRANSPARENCY_UNWITNESSED')
+    return {'version': 1, 'decisionId': 'OWNER-E2EE-PRODUCTION-RUN-' + run_id, 'decidedByRole': 'PRODUCT_OWNER',
+            'decidedAt': now, 'scope': 'PERSONAL_PRIVATE_E2EE', 'independentAssessment': 'NOT_PERFORMED',
+            'acceptedResidualRisks': risks}
+
+
+def activate_personal_e2ee(sha, run_id, confirm):
+    """Owner decision (2026-11-15): enable personal PRIVATE_E2EE devices in production WITHOUT an
+    independent cryptographic assessment, with the residual risks recorded. Messaging refuses to
+    start unless the mounted release record validates; the multi-device Account policy (trusted
+    devices only) gates enrollment. Organization MANAGED messaging is unchanged."""
+    if confirm != E2EE_CONFIRM:
+        raise RuntimeError('activate-personal-e2ee needs confirm=' + E2EE_CONFIRM + ' (owner decision)')
+    messaging, meeting = env_of('messaging'), env_of('meeting-service')
+    if messaging.get('CF_RUNTIME_ENVIRONMENT') != 'production':
+        raise RuntimeError('Messaging is not the production runtime')
+    missing = [k for k in ('MESSAGING_KT_LOG_ID', 'MESSAGING_KT_SIGNING_KEY_FILE', 'MESSAGING_KT_CHECKPOINT_FILE')
+               if not messaging.get(k)]
+    if missing:
+        raise RuntimeError('Key transparency is not fully configured: ' + ', '.join(missing))
+    if meeting.get('ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE', '').strip().lower() in ('false', '0', 'off', 'no'):
+        raise RuntimeError('The trusted-device gate for E2EE enrollment is switched off on the Meeting Service')
+    record = e2ee_release_record(run_id, bool(messaging.get('MESSAGING_KT_WITNESSES_FILE')))
+    release.save(E2EE_RELEASE_SOURCE, json.dumps(record, indent=2, sort_keys=True) + '\n', False)
+    emit('e2eeRelease', {k: record[k] for k in ('decisionId', 'independentAssessment', 'acceptedResidualRisks')})
+
+    def started():
+        out = subprocess.run(['docker', 'logs', '--since', '10m', SERVICES['messaging']['container']],
+                             capture_output=True, text=True, timeout=60)
+        if E2EE_DECISION_LOG not in out.stdout + out.stderr:
+            raise RuntimeError('Messaging did not log the owner release decision at startup')
+        emit('e2eeStartup', 'release decision validated by Messaging')
+
+    apply_activation('activate-personal-e2ee', sha, run_id, [
+        ('messaging', {'MESSAGING_E2EE_DEVICES_ENABLED': 'true',
+                       'MESSAGING_E2EE_PRODUCTION_RELEASE_FILE': E2EE_RELEASE_TARGET},
+         {'mounts': [(str(E2EE_RELEASE_SOURCE), E2EE_RELEASE_TARGET)]})], post=started)
 
 
 def activate_first_party_features(sha, run_id, confirm):
@@ -2206,6 +2267,8 @@ ACTIVATIONS = {
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
+    # Owner decision 2026-11-15: personal E2EE without an independent assessment (recorded).
+    'activate-personal-e2ee': (('activate-first-party-features',), activate_personal_e2ee),
     'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
     'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),

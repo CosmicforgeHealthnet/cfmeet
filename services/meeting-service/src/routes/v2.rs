@@ -674,6 +674,56 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/admin/audit-events",
             get(crate::handlers::v2::account_sessions::list_account_audit_events),
         )
+        // Multi-device policy: linked devices, linking challenges, primary-mobile replacement
+        .route(
+            "/me/device-policy",
+            get(crate::handlers::v2::account_devices::get_device_policy),
+        )
+        .route(
+            "/me/devices",
+            get(crate::handlers::v2::account_devices::list_devices),
+        )
+        .route(
+            "/me/devices/current",
+            post(crate::handlers::v2::account_devices::declare_device),
+        )
+        .route(
+            "/me/devices/:device_id/revoke",
+            post(crate::handlers::v2::account_devices::revoke_device),
+        )
+        .route(
+            "/me/device-links",
+            get(crate::handlers::v2::account_devices::list_pending_links)
+                .post(crate::handlers::v2::account_devices::create_link),
+        )
+        .route(
+            "/me/device-links/:link_id",
+            get(crate::handlers::v2::account_devices::get_link),
+        )
+        .route(
+            "/me/device-links/:link_id/approve",
+            post(crate::handlers::v2::account_devices::approve_link),
+        )
+        .route(
+            "/me/device-links/:link_id/reject",
+            post(crate::handlers::v2::account_devices::reject_link),
+        )
+        .route(
+            "/me/device-links/:link_id/email-code",
+            post(crate::handlers::v2::account_devices::send_email_code),
+        )
+        .route(
+            "/me/device-links/:link_id/complete",
+            post(crate::handlers::v2::account_devices::complete_link),
+        )
+        .route(
+            "/me/device-links/:link_id/cancel",
+            post(crate::handlers::v2::account_devices::cancel_link),
+        )
+        .route(
+            "/me/security-events",
+            get(crate::handlers::v2::account_devices::list_my_security_events),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::platform_auth::platform_credential,

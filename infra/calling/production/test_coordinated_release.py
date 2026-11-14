@@ -417,10 +417,35 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         envs['meeting-service']['NOTIFICATIONS_EMAIL_ENABLED'] = 'true'
         self.assertEqual(sorted(cr.safe_default_violations(envs)), [
             'meeting-service NOTIFICATIONS_EMAIL_ENABLED without mail credentials',
-            'messaging MESSAGING_E2EE_DEVICES_ENABLED', 'sms-gateway SMS_GATEWAY_PROVIDER', 'telephony TELEPHONY_ENABLED'])
+            'messaging MESSAGING_E2EE_DEVICES_ENABLED', 'messaging MESSAGING_E2EE_PRODUCTION_RELEASE_FILE',
+            'sms-gateway SMS_GATEWAY_PROVIDER', 'telephony TELEPHONY_ENABLED'])
         envs['meeting-service'].update(SMTP_HOST='h', SMTP_USERNAME='u', SMTP_PASSWORD='p')
         self.assertNotIn('meeting-service NOTIFICATIONS_EMAIL_ENABLED without mail credentials',
                          cr.safe_default_violations(envs))
+
+    def test_personal_e2ee_is_allowed_only_after_the_owner_activation_with_its_record(self):
+        envs = {'messaging': {'MESSAGING_E2EE_DEVICES_ENABLED': 'true'}}
+        with patch.object(cr, 'done', lambda op: False):
+            self.assertIn('messaging MESSAGING_E2EE_DEVICES_ENABLED', cr.safe_default_violations(envs))
+        with patch.object(cr, 'done', lambda op: op == 'activate-personal-e2ee'):
+            self.assertEqual(cr.safe_default_violations(envs), ['messaging MESSAGING_E2EE_PRODUCTION_RELEASE_FILE'])
+            envs['messaging']['MESSAGING_E2EE_PRODUCTION_RELEASE_FILE'] = cr.E2EE_RELEASE_TARGET
+            self.assertEqual(cr.safe_default_violations(envs), [])
+            envs['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = 'yes'
+            self.assertIn('messaging MESSAGING_E2EE_DEVICES_ENABLED', cr.safe_default_violations(envs))
+
+    def test_the_e2ee_release_record_states_the_actual_assessment_status(self):
+        record = cr.e2ee_release_record('123', witnessed=False, now='2026-11-15T00:00:00Z')
+        self.assertEqual(record['independentAssessment'], 'NOT_PERFORMED')
+        self.assertEqual(record['scope'], 'PERSONAL_PRIVATE_E2EE')
+        self.assertEqual(record['acceptedResidualRisks'], [
+            'NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT', 'KEY_TRANSPARENCY_UNWITNESSED', 'WEB_CODE_DELIVERY_TRUST'])
+        self.assertNotIn('KEY_TRANSPARENCY_UNWITNESSED',
+                         cr.e2ee_release_record('1', witnessed=True)['acceptedResidualRisks'])
+        self.assertNotIn('assessmentReference', record)
+        with self.assertRaisesRegex(RuntimeError, 'owner decision'):
+            cr.activate_personal_e2ee('a' * 40, '1', '')
+        self.assertEqual(cr.ACTIVATIONS['activate-personal-e2ee'][0], ('activate-first-party-features',))
 
     def test_new_services_are_private_bounded_and_dark(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(p, 'SECRETS', Path(folder)):

@@ -318,6 +318,13 @@ export interface ApiKeyResponse {
   used_count: number;
 }
 
+
+export interface ApproveLinkRequest {
+  /** The 6-digit code shown on the new device (typed or scanned from its QR code). */
+  comparisonCode: string;
+  proof: DeviceProof;
+}
+
 /** `POST /api/v2/organizations/{id}/teams/{teamId}/archive`. */
 export interface ArchiveOrganizationTeamRequest {
   /** Optional team `version` the archive is based on. */
@@ -727,6 +734,13 @@ export interface CollaborationStateResponse {
 }
 
 
+export interface CompleteLinkRequest {
+  /** Required only for the email step-up (6 digits from the email). */
+  emailCode?: string | null;
+  proof: DeviceProof;
+}
+
+
 export interface ConferenceActionResponse {
   /** False when the request was an idempotent no-op (e.g. already LIVE). */
   changed: boolean;
@@ -1067,6 +1081,30 @@ export interface DeactivateAccountRequest {
   current_password?: string | null;
 }
 
+/**
+ * `POST /api/v2/me/devices/current` body. Proof purpose `DECLARE`, context = this
+ * sign-in's `sessionId` (from `GET /api/v2/me/sessions`, `current: true`).
+ */
+export interface DeclareDeviceRequest {
+  /** `WEB` or `MOBILE`. */
+  deviceClass: string;
+  /**
+   * Random id generated once per installation / browser profile and kept with the key
+   * (16-128 characters of `[A-Za-z0-9_-]`). Never derived from hardware identifiers.
+   */
+  installationId: string;
+  /** Optional user-visible name (1-80 characters, no control characters). */
+  label?: string | null;
+  /** `WEB` (with `WEB`), `IOS` or `ANDROID` (with `MOBILE`). */
+  platform: string;
+  proof: DeviceProof;
+  /**
+   * Ed25519 public key, base64url (32 bytes), generated on the device; the private key
+   * never leaves it (non-extractable Web Crypto key / platform keystore).
+   */
+  publicKey: string;
+}
+
 
 export interface DenyRequest {
   all?: boolean;
@@ -1091,6 +1129,120 @@ export interface DetailedParticipantResponse {
   role: string;
   status: string;
   user_id?: string | null;
+}
+
+/** A linking challenge created by a new device. */
+export interface DeviceLinkView {
+  /**
+   * Shown ONLY to the requesting device (and in its QR payload); a trusted device must
+   * type or scan it to approve. Never listed to other devices.
+   */
+  comparisonCode?: string | null;
+  createdAt: string;
+  deviceClass: string;
+  /** The requesting (new) device. */
+  deviceId: string;
+  expiresAt: string;
+  label?: string | null;
+  linkId: string;
+  /** `DEVICE_APPROVAL` or `EMAIL_STEP_UP` once approved. */
+  method?: string | null;
+  platform: string;
+  /**
+   * `cfmeet-device-link:v1:{linkId}:{comparisonCode}` for an optional QR code (requesting
+   * device only). A copy of it is useless without a trusted device's key and session.
+   */
+  qrPayload?: string | null;
+  /** `PENDING`, `APPROVED`, `COMPLETED`, `CANCELLED`, `EXPIRED` or `REJECTED`. */
+  status: string;
+}
+
+
+export interface DeviceListResponse {
+  devices: Array<DeviceView>;
+}
+
+/** Result of a completed link or declaration. */
+export interface DeviceOutcome {
+  device: DeviceView;
+  /** Sign-ins ended by this operation (replaced mobile, superseded sign-ins). */
+  endedSessions: number;
+  /** The primary mobile this completion replaced (revoked), if any. */
+  replacedDeviceId?: string | null;
+}
+
+/** The account's device policy and state. */
+export interface DevicePolicyView {
+  /** `WEB_ONLY`, `MOBILE_PRIMARY` or `DEVICE_REPLACEMENT_PENDING` (a new mobile waits). */
+  accountState: string;
+  activeWebDevices: number;
+  /** The current sign-in: its device (absent while unclassified). */
+  currentDeviceId?: string | null;
+  /**
+   * `UNCLASSIFIED` (sign-in has declared no device), `TRUSTED`, `UNTRUSTED` or
+   * `REPLACEMENT_PENDING`.
+   */
+  currentDeviceStatus: string;
+  /** Personal E2EE device enrollment needs a trusted device. */
+  e2eeRequiresTrustedDevice: boolean;
+  linkTtlSecs: number;
+  /**
+   * Ways a new device can be approved: `DEVICE_APPROVAL` (when a trusted device exists)
+   * and `EMAIL_STEP_UP` (when enabled).
+   */
+  linkingMethods: Array<string>;
+  /** Always 1: at most one primary mobile. */
+  maxPrimaryMobiles: number;
+  maxWebDevices: number;
+  pendingMobileDeviceIds: Array<string>;
+  primaryMobileDeviceId?: string | null;
+  proofWindowSecs: number;
+  trustedDevices: number;
+}
+
+/**
+ * Proof of possession of a device key: an Ed25519 signature (base64url, 64 bytes) over
+ * `cfmeet-account-device-proof:v1\n{purpose}\n{keyThumbprint}\n{context}\n{issuedAt}\n{nonce}`
+ * where `keyThumbprint` is the lowercase hex SHA-256 of the 32-byte public key and the
+ * context is defined per operation (see each endpoint). `issuedAt` is Unix seconds
+ * (accepted within the policy window); `nonce` is 16-64 random bytes, base64url, never
+ * reused.
+ */
+export interface DeviceProof {
+  issuedAt: number;
+  nonce: string;
+  signature: string;
+}
+
+/** One logical device as shown to its owner. */
+export interface DeviceView {
+  createdAt: string;
+  /** True when the request was made from this device. */
+  current: boolean;
+  /** `WEB` or `MOBILE`. */
+  deviceClass: string;
+  deviceId: string;
+  /** Lowercase hex SHA-256 of the device public key (compare across devices). */
+  keyThumbprint: string;
+  label?: string | null;
+  lastSeenAt: string;
+  /** Open sign-ins of this device (normally 1). */
+  openSessions: number;
+  /** `WEB`, `IOS` or `ANDROID`. */
+  platform: string;
+  /** True for the account's ACTIVE mobile. */
+  primary: boolean;
+  promotedAt?: string | null;
+  replacedByDeviceId?: string | null;
+  revokeReason?: string | null;
+  revokedAt?: string | null;
+  /** `ACTIVE`, `REPLACEMENT_PENDING` or `REVOKED`. */
+  state: string;
+  /** `TRUSTED` or `UNTRUSTED`. */
+  trust: string;
+  trustedAt?: string | null;
+  /** `BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only). */
+  trustedVia?: string | null;
 }
 
 
@@ -1124,7 +1276,7 @@ export interface ErrorBody {
 }
 
 /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
 
 /** OpenAPI description of the public error envelope. */
 export interface ErrorEnvelope {
@@ -1700,6 +1852,12 @@ export interface MyOrganizationResponse {
 }
 
 
+export interface MySecurityEventPage {
+  events: Array<SecurityEventRecord>;
+  nextCursor?: number | null;
+}
+
+
 export type NetworkType = "WIFI" | "CELLULAR" | "ETHERNET" | "UNKNOWN";
 
 /** Who performed an audited organization change. */
@@ -2134,6 +2292,17 @@ export interface ParticipantsListResponse {
   success: boolean;
 }
 
+
+export interface PendingLinkListResponse {
+  links: Array<PendingLinkView>;
+}
+
+/** A pending link as listed to a trusted device (no comparison code). */
+export type PendingLinkView = (DeviceLinkView & {
+  /** Thumbprint of the requesting device's key (part of the approval proof context). */
+  keyThumbprint: string;
+});
+
 /**
  * Phone binding is provider-gated (ADR 0056 §8): `PROVIDER_BLOCKED` until an SMS or
  * verification provider is approved, and never required.
@@ -2403,6 +2572,11 @@ export interface ProfilePolicyUpdateRequest {
 }
 
 
+export interface ProofOnlyRequest {
+  proof: DeviceProof;
+}
+
+
 export type ProviderDispatch = "DISPATCHED" | "PENDING_RETRY" | "NOT_REQUIRED";
 
 /** Provider enforcement state for operations whose media effect is Part E. */
@@ -2659,6 +2833,7 @@ export type RecurrenceStatus = "ACTIVE" | "ENDED";
 
 
 export interface RefreshTokenRequest {
+  device_proof?: DeviceProof | null;
   refresh_token: string;
 }
 
@@ -2816,6 +2991,11 @@ export interface RevokeApiKeyResponse {
 }
 
 
+export interface RevokeDeviceRequest {
+  proof?: DeviceProof | null;
+}
+
+
 export type Role = "OWNER" | "HOST" | "CO_HOST" | "MODERATOR" | "PRESENTER" | "PARTICIPANT" | "VIEWER";
 
 
@@ -2949,6 +3129,11 @@ export interface SessionRecord {
   createdAt: string;
   /** True for the session the request was made with. */
   current: boolean;
+  /**
+   * The linked device this sign-in belongs to (`GET /api/v2/me/devices`); absent for
+   * unclassified sign-ins.
+   */
+  deviceId?: string | null;
   endReason?: string | null;
   endedAt?: string | null;
   /** The session ends here at the latest, whatever the refresh activity. */
@@ -3584,8 +3769,13 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/transcripts/{artifactId}": "v2_get_transcript",
   "GET /api/v2/conferences/{id}/waiting-room": "v2_get_waiting_room",
   "GET /api/v2/me/conferences": "v2_my_conferences",
+  "GET /api/v2/me/device-links": "v2_list_pending_device_links",
+  "GET /api/v2/me/device-links/{linkId}": "v2_get_device_link",
+  "GET /api/v2/me/device-policy": "v2_get_my_device_policy",
+  "GET /api/v2/me/devices": "v2_list_my_devices",
   "GET /api/v2/me/organizations": "v2_my_organizations",
   "GET /api/v2/me/profile": "v2_get_my_profile",
+  "GET /api/v2/me/security-events": "v2_list_my_security_events",
   "GET /api/v2/me/sessions": "v2_list_my_sessions",
   "GET /api/v2/me/workspaces": "v2_my_workspaces",
   "GET /api/v2/me/workspaces/{workspaceId}/capabilities": "v2_my_workspace_capabilities",
@@ -3731,6 +3921,14 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/waiting-room/deny": "v2_deny",
   "POST /api/v2/instant-meetings": "v2_create_instant_meeting",
   "POST /api/v2/invitations/{token}/resolve": "v2_resolve_invitation",
+  "POST /api/v2/me/device-links": "v2_create_device_link",
+  "POST /api/v2/me/device-links/{linkId}/approve": "v2_approve_device_link",
+  "POST /api/v2/me/device-links/{linkId}/cancel": "v2_cancel_device_link",
+  "POST /api/v2/me/device-links/{linkId}/complete": "v2_complete_device_link",
+  "POST /api/v2/me/device-links/{linkId}/email-code": "v2_send_device_link_email_code",
+  "POST /api/v2/me/device-links/{linkId}/reject": "v2_reject_device_link",
+  "POST /api/v2/me/devices/current": "v2_declare_my_device",
+  "POST /api/v2/me/devices/{deviceId}/revoke": "v2_revoke_my_device",
   "POST /api/v2/me/sessions/revoke-all": "v2_revoke_all_my_sessions",
   "POST /api/v2/me/sessions/{sessionId}/revoke": "v2_revoke_my_session",
   "POST /api/v2/meeting-spaces": "v2_create_meeting_space",

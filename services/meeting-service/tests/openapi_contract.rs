@@ -385,6 +385,20 @@ fn every_v2_route_is_documented() {
         // Blueprint Section 9 — personal account profile
         ("get", "/api/v2/me/profile"),
         ("patch", "/api/v2/me/profile"),
+        // Multi-device policy — linked devices, linking challenges, security log
+        ("get", "/api/v2/me/device-policy"),
+        ("get", "/api/v2/me/devices"),
+        ("post", "/api/v2/me/devices/current"),
+        ("post", "/api/v2/me/devices/{deviceId}/revoke"),
+        ("get", "/api/v2/me/device-links"),
+        ("post", "/api/v2/me/device-links"),
+        ("get", "/api/v2/me/device-links/{linkId}"),
+        ("post", "/api/v2/me/device-links/{linkId}/approve"),
+        ("post", "/api/v2/me/device-links/{linkId}/reject"),
+        ("post", "/api/v2/me/device-links/{linkId}/email-code"),
+        ("post", "/api/v2/me/device-links/{linkId}/complete"),
+        ("post", "/api/v2/me/device-links/{linkId}/cancel"),
+        ("get", "/api/v2/me/security-events"),
     ];
     for (method, path) in expected {
         assert!(

@@ -447,10 +447,13 @@ pub async fn refresh_token(
     ) {
         return Err(ApiError::Unauthorized("Account is unavailable".into()));
     }
-    security::authorize_user_token(&state, &claims, user.id, TokenKind::Refresh).await?;
+    // A new mobile awaiting its primary-mobile replacement may keep its (restricted)
+    // sign-in alive; every other endpoint still refuses it.
+    security::authorize_user_token_allow_pending(&state, &claims, user.id, TokenKind::Refresh)
+        .await?;
 
     let (access_token, refresh_token) = if claims.session_id().is_some() {
-        security::rotate_session(&state, &claims, &user).await?
+        security::rotate_session(&state, &claims, &user, payload.device_proof.as_ref()).await?
     } else {
         upgrade_legacy_refresh(&state, &claims, &payload.refresh_token, &user).await?
     };

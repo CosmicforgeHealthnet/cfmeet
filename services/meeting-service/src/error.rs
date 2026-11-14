@@ -164,6 +164,27 @@ pub enum ErrorCode {
     /// Blueprint Sections 2-3 (ACC-016): the account's email address must be verified first
     /// (only where the deployment enforces verification).
     EmailVerificationRequired,
+    /// Multi-device policy: the device proof (signature, freshness or nonce) is invalid
+    /// or was already used.
+    DeviceProofInvalid,
+    /// Multi-device policy: the account already has the maximum number of active web
+    /// devices (`ACCOUNT_MAX_WEB_DEVICES`); revoke one first.
+    WebDeviceLimitReached,
+    /// Multi-device policy: this sign-in belongs to a new mobile that must complete the
+    /// primary-mobile replacement (approval by a trusted device or email step-up) first.
+    DeviceReplacementPending,
+    /// Multi-device policy: the operation needs a trusted device of this account.
+    DeviceNotTrusted,
+    /// Multi-device policy: this session already belongs to a device, or the session is
+    /// not eligible to declare one (unclassified sign-ins older than the re-auth window).
+    DeviceDeclarationRefused,
+    /// Multi-device policy: the device does not exist or is not the caller's.
+    DeviceNotFound,
+    /// Multi-device policy: the device key is already bound to another live device.
+    DeviceKeyInUse,
+    /// Multi-device policy: the linking challenge does not exist, is not the caller's,
+    /// has expired or is no longer open.
+    DeviceLinkInvalid,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -279,6 +300,14 @@ impl ErrorCode {
             ErrorCode::UsernameTaken => "USERNAME_TAKEN",
             ErrorCode::ReauthenticationRequired => "REAUTHENTICATION_REQUIRED",
             ErrorCode::EmailVerificationRequired => "EMAIL_VERIFICATION_REQUIRED",
+            ErrorCode::DeviceProofInvalid => "DEVICE_PROOF_INVALID",
+            ErrorCode::WebDeviceLimitReached => "WEB_DEVICE_LIMIT_REACHED",
+            ErrorCode::DeviceReplacementPending => "DEVICE_REPLACEMENT_PENDING",
+            ErrorCode::DeviceNotTrusted => "DEVICE_NOT_TRUSTED",
+            ErrorCode::DeviceDeclarationRefused => "DEVICE_DECLARATION_REFUSED",
+            ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
+            ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
+            ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -391,6 +420,15 @@ impl ErrorCode {
             ErrorCode::OrganizationPolicyRestricted
             | ErrorCode::ReauthenticationRequired
             | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
+            ErrorCode::DeviceProofInvalid => StatusCode::UNAUTHORIZED,
+            ErrorCode::DeviceReplacementPending | ErrorCode::DeviceNotTrusted => {
+                StatusCode::FORBIDDEN
+            }
+            ErrorCode::WebDeviceLimitReached
+            | ErrorCode::DeviceDeclarationRefused
+            | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,
+            ErrorCode::DeviceNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -675,6 +713,14 @@ mod tests {
             ErrorCode::TeamNotFound,
             ErrorCode::TeamArchived,
             ErrorCode::TeamNameTaken,
+            ErrorCode::DeviceProofInvalid,
+            ErrorCode::WebDeviceLimitReached,
+            ErrorCode::DeviceReplacementPending,
+            ErrorCode::DeviceNotTrusted,
+            ErrorCode::DeviceDeclarationRefused,
+            ErrorCode::DeviceNotFound,
+            ErrorCode::DeviceKeyInUse,
+            ErrorCode::DeviceLinkInvalid,
         ];
         for c in all {
             let s = c.as_str();

@@ -1886,6 +1886,9 @@ fn deployment_view(state: &AppState, effective: &policy::EffectivePolicy) -> Val
         "profiles": profiles,
         "usableProfiles": usable,
         "contextsWithoutUsableProfile": unusable,
+        // The actual production release decision for personal E2EE (independent-assessment
+        // status and accepted residual risks); null outside production or while disabled.
+        "e2eeProductionRelease": state.devices.production_release.as_ref().map(|r| r.summary()),
     })
 }
 

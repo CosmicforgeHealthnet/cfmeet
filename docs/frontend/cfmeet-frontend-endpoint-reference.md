@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 246 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 259 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.3.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 129 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.16.0 | 98 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **619** |
+| **Total** | | | **632** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -35,6 +35,24 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | GET | `/api/v1/api-keys/{id}` | account session | Get a specific API key by ID | 200, 401, 404 | — | `openapi/meeting-service.json#get_api_key` |
 | POST | `/api/v1/api/meetings` | legacy API key | **DEPRECATED** Create a new meeting via API key | 201, 400, 401, 403 | — | `openapi/meeting-service.json#api_create_meeting` |
 | POST | `/api/v1/api/meetings/{id}/join` | legacy API key | Join a meeting via API key | 200, 400, 401, 403, 404, 409 | — | `openapi/meeting-service.json#api_join_meeting` |
+
+### Account devices (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/me/device-links` | account session | List link requests awaiting approval | 200, 403 | DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_list_pending_device_links` |
+| POST | `/api/v2/me/device-links` | account session | Request to link this device | 201, 401, 404, 409, 429 | DEVICE_DECLARATION_REFUSED, DEVICE_NOT_FOUND, DEVICE_PROOF_INVALID, RATE_LIMITED | `openapi/meeting-service.json#v2_create_device_link` |
+| GET | `/api/v2/me/device-links/{linkId}` | account session | Read my link request | 200, 410 | DEVICE_LINK_INVALID | `openapi/meeting-service.json#v2_get_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/approve` | account session | Approve a link request | 200, 400, 401, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID, VALIDATION_ERROR | `openapi/meeting-service.json#v2_approve_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/cancel` | account session | Cancel my link request | 200, 410 | DEVICE_LINK_INVALID | `openapi/meeting-service.json#v2_cancel_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/complete` | account session | Complete my link | 200, 401, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_complete_device_link` |
+| POST | `/api/v2/me/device-links/{linkId}/email-code` | account session | Email me a step-up code for this link | 200, 404, 410, 429 | DEVICE_LINK_INVALID, FEATURE_DISABLED, RATE_LIMITED | `openapi/meeting-service.json#v2_send_device_link_email_code` |
+| POST | `/api/v2/me/device-links/{linkId}/reject` | account session | Reject a link request | 200, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_reject_device_link` |
+| GET | `/api/v2/me/device-policy` | account session | Read my device policy and state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_device_policy` |
+| GET | `/api/v2/me/devices` | account session | List my devices | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_devices` |
+| POST | `/api/v2/me/devices/current` | account session | Declare this sign-in's device | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, DEVICE_DECLARATION_REFUSED, DEVICE_KEY_IN_USE, DEVICE_PROOF_INVALID, VALIDATION_ERROR, WEB_DEVICE_LIMIT_REACHED | `openapi/meeting-service.json#v2_declare_my_device` |
+| POST | `/api/v2/me/devices/{deviceId}/revoke` | account session | Revoke a device | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_FOUND, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_revoke_my_device` |
+| GET | `/api/v2/me/security-events` | account session | Read my security log | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_security_events` |
 
 ### Account profile (v2)
 
@@ -257,8 +275,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 |---|---|---|---|---|---|---|
 | POST | `/api/v2/messaging/client-sessions/revoke-all` | account session | End every Messaging client session of the caller (all devices). | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_all_sessions` |
 | POST | `/api/v2/messaging/client-tokens` | account session | Issue a short-lived, device-bound Messaging client token (for the realtime gateway). | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_client_token` |
-| POST | `/api/v2/messaging/devices` | account session | Register a device with its proof-of-possession KeyPackage. | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_register_device` |
-| POST | `/api/v2/messaging/devices/registration-challenges` | account session | Start a device registration (the challenge the device signs with its own key). | 201, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_registration_challenge` |
+| POST | `/api/v2/messaging/devices` | account session | Register a device with its proof-of-possession KeyPackage. | 201, 401, 403, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_messaging_register_device` |
+| POST | `/api/v2/messaging/devices/registration-challenges` | account session | Start a device registration (the challenge the device signs with its own key). | 201, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, DEVICE_NOT_TRUSTED, FEATURE_DISABLED | `openapi/meeting-service.json#v2_messaging_registration_challenge` |
 | POST | `/api/v2/messaging/devices/{deviceId}/key-packages` | account session | Publish one-time KeyPackages of the caller's device. | 201, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_publish_key_packages` |
 | POST | `/api/v2/messaging/devices/{deviceId}/revoke` | account session | Revoke one of the caller's devices. | 200, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE | `openapi/meeting-service.json#v2_messaging_revoke_device` |
 | GET | `/api/v2/messaging/directory` | account session | Colleagues (active members of the caller's organizations) the caller may message. | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_messaging_directory` |

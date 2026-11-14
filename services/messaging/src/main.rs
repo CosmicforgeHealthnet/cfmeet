@@ -77,6 +77,15 @@ async fn main() -> anyhow::Result<()> {
     if !config.devices.enabled {
         tracing::warn!("E2EE device registration and KeyPackage publication are disabled (MESSAGING_E2EE_DEVICES_ENABLED)");
     }
+    if let Some(release) = &config.devices.production_release {
+        // Never a certification claim: the record states the actual assessment status.
+        tracing::warn!(
+            decision_id = %release.decision_id,
+            independent_assessment = %release.independent_assessment,
+            accepted_residual_risks = ?release.accepted_residual_risks,
+            "production personal E2EE enabled by owner release decision"
+        );
+    }
     tracing::info!(
         service = %service_auth.signer().issuer(),
         runtime_environment = %runtime,
