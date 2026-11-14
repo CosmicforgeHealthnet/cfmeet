@@ -5,7 +5,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [media-diagnose, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
+        options: [media-diagnose, livekit-webhook-inspect, livekit-webhook, livekit-webhook-rollback, resource-inventory, resource-scanners, scan-gateway-configure, scan-gateway-verify, scan-gateway-disable, resource-recover, messaging-inspect, messaging-configure, messaging-ingress, messaging-verify, communications-inspect, communications-stage, communications-release, communications-verify, communications-rollback, private-tls-inspect, private-tls-durable, private-tls-rollback, storage-routes-inspect, storage-routes, storage-routes-rollback, inspect, compatibility, release-backend, test-enterprise, test-recording, test-voicemail, encrypt-storage, complete-safe-infrastructure, provision, harden-egress, storage-ingress, configure-capture, verify, activate, rollback]
         default: inspect
         required: true
       image_sha:
@@ -15,7 +15,7 @@ on:
 
 permissions: { contents: read, packages: read }
 concurrency:
-  group: ${{ ((startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || (startsWith(inputs.operation, 'private-tls-') && inputs.operation != 'private-tls-inspect') || (startsWith(inputs.operation, 'storage-routes') && inputs.operation != 'storage-routes-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners' || inputs.operation == 'private-tls-inspect' || inputs.operation == 'storage-routes-inspect') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
+  group: ${{ ((startsWith(inputs.operation, 'livekit-webhook') && inputs.operation != 'livekit-webhook-inspect') || (startsWith(inputs.operation, 'communications-') && inputs.operation != 'communications-inspect') || (startsWith(inputs.operation, 'messaging-') && inputs.operation != 'messaging-inspect') || startsWith(inputs.operation, 'scan-gateway-') || (startsWith(inputs.operation, 'private-tls-') && inputs.operation != 'private-tls-inspect') || (startsWith(inputs.operation, 'storage-routes') && inputs.operation != 'storage-routes-inspect') || inputs.operation == 'resource-recover') && 'deploy-backend-production' || (inputs.operation == 'inspect' || inputs.operation == 'media-diagnose' || inputs.operation == 'livekit-webhook-inspect' || inputs.operation == 'resource-inventory' || inputs.operation == 'resource-scanners' || inputs.operation == 'private-tls-inspect' || inputs.operation == 'storage-routes-inspect') && 'cfmeet-calling-inspect' || 'cfmeet-calling-production' }}
   cancel-in-progress: false
 
 jobs:
