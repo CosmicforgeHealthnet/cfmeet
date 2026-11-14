@@ -1460,6 +1460,11 @@ impl Control {
             .map(|(c, w)| (c, w.expect("webhooks configured")))
     }
 
+    /// A harness whose state is further configured by `configure` (no webhooks).
+    pub async fn with_state(configure: impl FnOnce(AppState) -> AppState) -> Option<Self> {
+        Self::build_with(None, configure).await.map(|(c, _)| c)
+    }
+
     async fn build(webhooks: Option<WebhookSettings>) -> Option<(Self, Option<Webhooks>)> {
         Self::build_with(webhooks, |s| s).await
     }

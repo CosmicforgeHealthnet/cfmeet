@@ -109,6 +109,8 @@ pub mod event {
     pub const QNA_QUESTION_ANSWERED: &str = "qna.question_answered";
     pub const QNA_QUESTION_DISMISSED: &str = "qna.question_dismissed";
     pub const QNA_QUESTION_ARCHIVED: &str = "qna.question_archived";
+    /// DISMISSED → OPEN/ANSWERED (moderator undo of a dismissal).
+    pub const QNA_QUESTION_RESTORED: &str = "qna.question_restored";
     pub const QNA_QUESTION_PINNED: &str = "qna.question_pinned";
     pub const QNA_QUESTION_UNPINNED: &str = "qna.question_unpinned";
 
@@ -222,6 +224,7 @@ pub mod action {
     pub const QNA_PIN: &str = "QNA_PIN";
     pub const QNA_UNPIN: &str = "QNA_UNPIN";
     pub const QNA_ARCHIVE: &str = "QNA_ARCHIVE";
+    pub const QNA_RESTORE: &str = "QNA_RESTORE";
     pub const CONSENT_RECORDED: &str = "CONSENT_RECORDED";
     // Parts G–I
     pub const RECORDING_START: &str = "RECORDING_START";

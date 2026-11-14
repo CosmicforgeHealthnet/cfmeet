@@ -48,6 +48,7 @@ pub const BINARIES: &[&str] = &[
     "profile-notifications-migration",
     "account-hardening-migration",
     "organization-integration-migration",
+    "lifecycle-delivery-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -353,6 +354,8 @@ impl Stack {
             // Blueprint Sections 2-3 hardening: hashed legacy secrets, required at startup.
             db::migrate(&self.bin("account-hardening-migration"), &url)?;
             db::migrate(&self.bin("organization-integration-migration"), &url)?;
+            // Final completion: durable email delivery and conference presence.
+            db::migrate(&self.bin("lifecycle-delivery-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under
@@ -677,6 +680,12 @@ impl Stack {
             kv(
                 "DEVELOPER_PLATFORM_PRODUCTION_ACCESS_WORKFLOW_ENABLED",
                 "true".into(),
+            ),
+            // Submissions need a named reviewer: the certification operator (an explicit
+            // test reviewer; self-approval stays refused by membership).
+            kv(
+                "DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS",
+                crate::provision::OPERATOR_NAME.into(),
             ),
             kv("DEVELOPER_PLATFORM_WORKER_INTERVAL_MS", "500".into()),
             kv("CF_PLATFORM_ACCESS_BASE_URL", url(self, PLATFORM_ACCESS)),

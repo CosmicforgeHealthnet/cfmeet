@@ -57,8 +57,11 @@ class MessagingJourney(Journey):
         assert not any(path.startswith('/internal/') for path in swagger['paths'])
         self.report['servedSwagger'] = {'version': swagger['info']['version'], 'operations': len(operations), 'nativeBindings': 71}
         self.done('served_consumer_swagger_matches_native_backend_contract')
-        for path in ('/metrics', '/internal/v1/communications/policy/check', '/v1/messaging/policy'):
+        for path in ('/metrics', '/internal/v1/communications/policy/check'):
             self.request('meeting-service', path, expected=(404,))
+        # Since activate-gateway-families the /v1/messaging family is a public API Gateway family
+        # (platform credentials, scope-enforced): never anonymously reachable, but no longer unrouted.
+        self.request('meeting-service', '/v1/messaging/policy', expected=(401, 403))
         self.done('private_admin_and_metrics_not_publicly_routed')
         self.request('meeting-service', '/v1/realtime/tickets', 'POST', {}, expected=(401,))
         self.request('meeting-service', '/v1/realtime', expected=(400, 401, 426))

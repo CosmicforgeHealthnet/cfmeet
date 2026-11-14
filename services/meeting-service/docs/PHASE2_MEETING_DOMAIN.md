@@ -222,7 +222,7 @@ out. Everything lives inside meeting-service.
 | `create_room(conference)` | RoomService `CreateRoom` (idempotent; canonical name `cf-<conference uuid>`) |
 | `get_room(conference)` | `ListRooms` filtered by name |
 | `terminate_room(conference, reason)` | `DeleteRoom` (absent room = success) |
-| `issue_join_credentials(session, permissions, ttl)` | signed access token; identity = server media identity `ps_<session>`; grants from `MeetingPermissionService` only; never admin/record/create |
+| `issue_join_credentials(session, permissions, ttl)` | signed access token; identity = server media identity `ps_<session>`; name = display name; metadata `{"participantId":"<conference participant uuid>"}` and attribute `participantId` (from the session row; `canUpdateOwnMetadata = false`); grants from `MeetingPermissionService` only; never admin/record/create |
 | `remove_participant(session, reason)` | `RemoveParticipant` (absent = success) |
 | `update_permissions(session, permissions)` | `UpdateParticipant` (publish sources / subscribe / data) |
 | `mute_track(session, track_kind)` | `GetParticipant` + `MutePublishedTrack` per matching track |
@@ -440,7 +440,11 @@ export links an anonymous answer to a participant.
 
 ### Q&A
 
-`OPEN → ANSWERED | DISMISSED | ARCHIVED` plus pin / unpin. Votes are recomputed under a row lock
+`OPEN → ANSWERED | DISMISSED | ARCHIVED` plus pin / unpin. `POST …/questions/{qid}/restore`
+(`qna.dismiss`) undoes a dismissal: `DISMISSED → ANSWERED` when an answer was recorded, otherwise
+`DISMISSED → OPEN`; body, author, anonymity, answer, votes and history are kept, the pin is not.
+Restoring an OPEN/ANSWERED question is a no-op (`changed: false`, no event); ARCHIVED is terminal
+(`CONFERENCE_STATE_CONFLICT`). Votes are recomputed under a row lock
 (no self-vote, one vote per participant); the first answer wins. Anonymous questions never expose
 the author in any projection or event.
 
@@ -474,7 +478,7 @@ rules). Every durable event is recoverable through cursor replay and the REST re
 | `poll.started/closed/archived` | conference | poll (answers revealed only in results state) | outbox | — | `GET …/polls/{pid}` |
 | `poll.response_recorded` | responder | pollId | outbox | anonymous: no identity | `GET …/polls/{pid}` |
 | `poll.results_updated` | `poll.view_results` holders / per visibility | aggregates | outbox | anonymous aggregates only after CLOSED | `GET …/polls/{pid}/results` |
-| `qna.question_*` | conference | question projection | outbox | anonymous: no author | `GET …/questions` |
+| `qna.question_*` (incl. `qna.question_restored`) | conference | question projection | outbox | anonymous: no author | `GET …/questions` |
 
 Subscribers are re-authorized (and re-scoped) on `breakout.opened/closed`, policy changes and
 their own `breakout.participant_moved`. Provider commands (`rtc.screenshare_stop_requested`,

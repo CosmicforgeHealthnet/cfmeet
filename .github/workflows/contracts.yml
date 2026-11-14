@@ -144,7 +144,8 @@ jobs:
   # (an external $ref) must be reported.
   swagger-render:
     name: Swagger UI renders every bundle (Chromium, schema host blocked)
-    runs-on: ubuntu-latest
+    # Pinned: Playwright's Chromium is not supported on the ubuntu-latest (26.04) image.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: scripts/contracts/swagger-render

@@ -220,6 +220,26 @@
           "required": [
             "type"
           ],
+          "description": "Inbox signals (optional capability `inbox`, advertised in welcome.capabilities): after inbox.subscribed the connection also receives identifier-only inbox.event frames for every conversation of its principal that it is NOT subscribed to (new conversations, activity, its own removal) and read-cursor.synced for its own read cursors there. Idempotent.",
+          "properties": {
+            "type": {
+              "const": "inbox.subscribe"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
           "properties": {
             "type": {
               "const": "ping"
@@ -273,6 +293,14 @@
             },
             "limits": {
               "type": "object"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "description": "Optional frames this gateway understands beyond protocol version 1 (currently `inbox`)."
             }
           },
           "additionalProperties": true
@@ -845,6 +873,66 @@
             "readSequence": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "description": "inbox.subscribe accepted.",
+          "properties": {
+            "type": {
+              "const": "inbox.subscribed"
+            },
+            "requestId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "conversationId",
+            "eventSequence",
+            "eventType"
+          ],
+          "description": "A committed event of a conversation of this principal that the connection is not subscribed to. Identifiers only (never content): refresh that conversation's inbox summary by REST (GET v1/conversations/{id}), or subscribe to it with afterEventSequence. eventType is the durable event type without the `messaging.` prefix (e.g. message.created, message.deleted, member.added, member.removed, conversation.updated). Best effort: after reconnect or inbox.resync, re-read the conversation list once.",
+          "properties": {
+            "type": {
+              "const": "inbox.event"
+            },
+            "conversationId": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "eventSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "eventType": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "description": "Inbox signals may have been lost (broker interruption): re-read the conversation list once. Subscriptions recover by themselves.",
+          "properties": {
+            "type": {
+              "const": "inbox.resync"
             }
           },
           "additionalProperties": true

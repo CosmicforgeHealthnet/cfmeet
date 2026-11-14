@@ -11,10 +11,11 @@
 //! | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging` or `production` |
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the receiver-authoritative trust bundle of `cfmeet.organizations` |
 //! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
+//! | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`): the saga also creates, verifies, renews and (on archive) revokes each organization's Calling and Messaging service bindings through Platform Access (`platform-identity.bind-organization-services`, ADR 0058 A2); an organization is READY only once both are verified. Refused without provisioning |
 //! | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated consumers that receive organization events (today only `cfmeet.meeting-service`); empty (default): events stay PENDING in the outbox |
 //! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning or event delivery | `kid` of the Organizations signing key |
 //! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning or event delivery | PKCS#8 PEM Ed25519 private key FILE |
-//! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`) |
+//! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`; with service bindings also `platform-identity.bind-organization-services`) |
 //! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
@@ -108,6 +109,8 @@ pub struct OrganizationsConfig {
     pub trust_bundle_file: PathBuf,
     /// `Some` iff `ORGANIZATIONS_PROVISIONING_ENABLED=true`.
     pub provisioning: Option<OutboundSettings>,
+    /// `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning).
+    pub service_bindings_enabled: bool,
     /// Consumers organization events are delivered to (empty: delivery disabled).
     pub event_consumers: Vec<EventConsumer>,
     /// `Some` iff provisioning or event delivery is enabled.
@@ -123,6 +126,7 @@ impl fmt::Debug for OrganizationsConfig {
             .field("worker_interval", &self.worker_interval)
             .field("runtime_environment", &self.runtime_environment)
             .field("provisioning_enabled", &self.provisioning.is_some())
+            .field("service_bindings_enabled", &self.service_bindings_enabled)
             .field(
                 "event_destinations",
                 &self
@@ -230,6 +234,23 @@ impl OrganizationsConfig {
                 ))
             }
         };
+        let service_bindings_enabled =
+            match get("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED").as_deref() {
+                None | Some("false") => false,
+                Some("true") if enabled => true,
+                Some("true") => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED",
+                        "requires ORGANIZATIONS_PROVISIONING_ENABLED=true",
+                    ))
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_SERVICE_BINDINGS_ENABLED",
+                        "must be `true` or `false`",
+                    ))
+                }
+            };
         let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
         let mut event_consumers: Vec<EventConsumer> = Vec::new();
         for name in get("ORGANIZATIONS_EVENT_DESTINATIONS")
@@ -309,6 +330,7 @@ impl OrganizationsConfig {
             runtime_environment,
             trust_bundle_file,
             provisioning,
+            service_bindings_enabled,
             event_consumers,
             signing,
         })
@@ -388,7 +410,9 @@ impl OrganizationsConfig {
             .map_err(|e| invalid("CF_PLATFORM_ACCESS_BASE_URL", e.to_string()))?;
         let client = InternalServiceClient::new(signer, targets, s.http_timeout)
             .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
-        Ok(Some(Arc::new(HttpPlatformScopes::new(Arc::new(client)))))
+        Ok(Some(Arc::new(
+            HttpPlatformScopes::new(Arc::new(client)).with_bindings(self.service_bindings_enabled),
+        )))
     }
 
     pub fn database_url(&self) -> &str {
@@ -484,6 +508,47 @@ mod tests {
             let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
             assert!(!err.to_string().contains(value), "{var}");
         }
+    }
+
+    #[test]
+    fn service_bindings_are_off_by_default_and_require_provisioning() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(!cfg.service_bindings_enabled);
+        let mut alone: Vec<_> = BASE.to_vec();
+        alone.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "true"));
+        let err = OrganizationsConfig::from_lookup(lookup(&alone)).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED"));
+        let mut on: Vec<_> = BASE.to_vec();
+        on.extend([
+            ("ORGANIZATIONS_PROVISIONING_ENABLED", "true"),
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            (
+                "CF_SERVICE_AUTH_PRIVATE_KEY_FILE",
+                "/run/secrets/organizations.pem",
+            ),
+            (
+                "CF_PLATFORM_ACCESS_BASE_URL",
+                "https://platform-access.internal:8443",
+            ),
+        ]);
+        assert!(
+            !OrganizationsConfig::from_lookup(lookup(&on))
+                .unwrap()
+                .service_bindings_enabled
+        );
+        let mut both = on.clone();
+        both.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "true"));
+        assert!(
+            OrganizationsConfig::from_lookup(lookup(&both))
+                .unwrap()
+                .service_bindings_enabled
+        );
+        let mut bad = on.clone();
+        bad.push(("ORGANIZATIONS_SERVICE_BINDINGS_ENABLED", "maybe-later"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad)).unwrap_err();
+        assert!(!err.to_string().contains("maybe-later"));
     }
 
     #[test]

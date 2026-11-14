@@ -16,6 +16,9 @@ Operations
                                order: migrations (migrator role) -> swap -> health -> image check.
   verify                       images == release SHA, health, migration histories, safe
                                provider defaults, public smoke, Organizations delivery counts.
+                               Strict: only a SHA with a completed coordinated release.
+  certify                      read-only live-production certification of the deployed
+                               topology, whatever revisions it runs (live_certification.py).
   rollback                     restores the containers of the latest journal entry (a release
                                or one activation). Migrations are never rolled back.
   activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS).
@@ -43,6 +46,9 @@ from urllib.parse import urlsplit, quote
 
 import production as p
 import communications_release as release
+import email_operations as mail_ops
+import developer_access
+import org_first_activation
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -55,6 +61,9 @@ PG_CLIENT = 'postgres:16-alpine'
 MEETING = 'cfmeet-production-backend'
 PUBLIC = 'https://api.cfmeet.com'
 WEB_ORIGIN = 'https://cfmeet.com'
+# Every browser origin of the production web app: cfmeet.com redirects to www.cfmeet.com
+# (Vercel), so the browser's Origin is normally the www form.
+WEB_ORIGINS = (WEB_ORIGIN, 'https://www.cfmeet.com')
 SHA_RE = re.compile(r'[a-f0-9]{40}')
 RUN_RE = re.compile(r'[0-9]{1,20}(-[0-9]{1,4})?')  # run id, optionally -attempt
 
@@ -113,7 +122,8 @@ SERVICES = {
     'meeting-service': _service(MEETING, 8080, '/health', tls=8448,
         migrations=['migration', 'account-security-migration', 'meetings-calendar-migration',
                     'profile-notifications-migration', 'account-hardening-migration',
-                    'organization-integration-migration', 'account-communications-migration'],
+                    'organization-integration-migration', 'account-communications-migration',
+                    'lifecycle-delivery-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -133,7 +143,7 @@ SERVICES = {
     # activate-developer-platform + activate-gateway-routing.
     'api-gateway': _service('cfmeet-api-gateway', 8099, '/ready', memory=192,
         env={'API_GATEWAY_BIND_ADDRESS': '0.0.0.0:8099', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED': 'false',
-             'API_GATEWAY_WEBSOCKETS_ENABLED': 'false', 'API_GATEWAY_CORS_ALLOWED_ORIGINS': WEB_ORIGIN}),
+             'API_GATEWAY_WEBSOCKETS_ENABLED': 'false', 'API_GATEWAY_CORS_ALLOWED_ORIGINS': ','.join(WEB_ORIGINS)}),
 }
 
 # Owners before callers (final-production-activation-runbook §1).
@@ -243,7 +253,7 @@ def container_names():
 FLAGS = (
     'CF_RUNTIME_ENVIRONMENT', 'ORGANIZATIONS_PROVISIONING_ENABLED', 'ORGANIZATIONS_EVENT_DESTINATIONS',
     'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_EVENTS_ENABLED', 'ORGANIZATION_CALLING_SCOPE',
-    'CALLING_ORGANIZATION_FORWARDING_ENABLED', 'NOTIFICATIONS_EMAIL_ENABLED', 'EMAIL_VERIFICATION_REQUIRED',
+    'CALLING_ORGANIZATION_FORWARDING_ENABLED', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'NOTIFICATIONS_EMAIL_ENABLED', 'EMAIL_VERIFICATION_REQUIRED',
     'MESSAGING_E2EE_DEVICES_ENABLED', 'MESSAGING_PUSH_PROVIDER', 'SMS_GATEWAY_PROVIDER', 'TELEPHONY_ENABLED',
     'PUBLIC_OUTBOUND_CALLING_ENABLED', 'PUBLIC_INBOUND_CALLING_ENABLED', 'CALLBACK_RELAY_ENABLED',
     'ENTERPRISE_SIP_ENABLED', 'TELEPHONY_SIP_EDGE', 'PRIVACY_RELAY_ENABLED', 'CONTACT_VAULT_ENABLED',
@@ -254,6 +264,13 @@ FLAGS = (
     'API_GATEWAY_WEBSOCKETS_ENABLED', 'API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED', 'API_GATEWAY_CENTRAL_USAGE_ENABLED',
     'FEATURE_CONFERENCE_REALTIME_ENABLED', 'FEATURE_WEBINAR_MODE_ENABLED', 'FEATURE_QUALITY_TELEMETRY_ENABLED',
     'FEATURE_HEALTHCARE_PROFILE_ENABLED', 'MESSAGING_SESSION_DEVICES_ENABLED', 'EMAIL_VERIFICATION_ENFORCEMENT',
+    'DEVELOPER_SESSION_BRIDGE_ENABLED', 'CALLING_WEBHOOK_AUTHORITY', 'CALLING_WEBHOOK_DELIVERY_ENABLED',
+    'CALLING_PUBLIC_EVENTS_DESTINATION', 'MESSAGING_PUBLIC_EVENTS_DESTINATION', 'MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION',
+    'API_GATEWAY_DISABLED_DOMAINS', 'DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS',
+    'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_CALLING_SCOPE', 'CFMEET_USAGE_EXPORT_ENABLED',
+    'EMAIL_PROVIDER', 'EMAIL_FROM_ADDRESS', 'EMAIL_VERIFICATION_REQUIRED', 'EMAIL_VERIFICATION_ENFORCE_FROM',
+    'EMAIL_VERIFICATION_GRACE_UNTIL', 'FEATURE_MEETING_V2_ENABLED', 'FEATURE_RTC_PROVIDER_CONTROL_V2',
+    'CONFERENCE_EMPTY_TIMEOUT_SECS', 'FEATURE_RECORDING_V2_ENABLED',
 ) + tuple(sorted(p.SAFE_ENV))
 SECRET_HINT = re.compile(r'(SECRET|PASSWORD|TOKEN|KEY|PEPPER|DATABASE_URL|REDIS_URL|CREDENTIAL|DSN)', re.I)
 
@@ -275,7 +292,14 @@ def safe_flags(env):
 
 def mail_presence(env):
     return {'smtpHostConfigured': bool(env.get('SMTP_HOST')),
-            'smtpCredentialsConfigured': bool(env.get('SMTP_USERNAME')) and bool(env.get('SMTP_PASSWORD'))}
+            'smtpCredentialsConfigured': bool(env.get('SMTP_USERNAME')) and bool(env.get('SMTP_PASSWORD')),
+            'resendConfigured': env.get('EMAIL_PROVIDER') == 'resend' and bool(env.get('RESEND_API_KEY_FILE'))}
+
+
+def mail_available(env):
+    """A working transport is configured: Resend (key mounted) or SMTP host + credentials."""
+    m = mail_presence(env)
+    return m['resendConfigured'] or (m['smtpHostConfigured'] and m['smtpCredentialsConfigured'])
 
 
 def scrub(text):
@@ -323,6 +347,52 @@ def verify_running(container, image_id, sha):
 
 def image_of(name):
     return SERVICES[name]['image'] or name
+
+
+RELEASE_SCOPE = Path(__file__).resolve().parent / 'release-scope.json'
+
+
+def expected_image(name, sha, manifest=None):
+    """(image id, revision) a service must run under the completed release `sha`: the
+    release's own image, or — for a service the release kept because its build inputs did
+    not change — the exact image it kept running (recorded in the journal entry)."""
+    entry = last_release(sha)
+    kept = (entry or {}).get('kept') or {}
+    if name in kept:
+        return kept[name]['imageId'], kept[name]['revision']
+    manifest = manifest or registry(sha)
+    return manifest[image_of(name)]['imageId'], sha
+
+
+def release_scope(sha, path=None):
+    """Images to replace for this release (release_scope.py on the runner). A service is kept
+    only when the runner proved its build inputs unchanged since the previous completed
+    release and the VPS sees it running exactly that release's recorded image."""
+    path = path or RELEASE_SCOPE
+    previous = last_release()
+    if not path.exists() or not previous:
+        return set(IMAGES), {}
+    doc = json.loads(path.read_text())
+    if doc.get('head') != sha or doc.get('base') != previous['sha']:
+        emit('releaseScope', 'scope document does not match this release: full release')
+        return set(IMAGES), {}
+    unchanged = set(doc.get('unchanged') or []) & set(IMAGES)
+    kept = {}
+    for name in ORDER:
+        if image_of(name) not in unchanged or SERVICES[name]['container'] not in container_names():
+            continue
+        try:
+            image_id, revision = expected_image(name, previous['sha'])
+            verify_running(SERVICES[name]['container'], image_id, revision)
+        except (RuntimeError, KeyError):
+            unchanged.discard(image_of(name))
+            continue
+        kept[name] = {'imageId': image_id, 'revision': revision}
+    # A service sharing its image with a replaced one is replaced too.
+    for name in list(kept):
+        if image_of(name) not in unchanged:
+            del kept[name]
+    return set(IMAGES) - unchanged, kept
 
 
 # --- Health --------------------------------------------------------------------------------
@@ -465,8 +535,16 @@ def service_id(name):
 # (test_coordinated_release.py). Nothing is granted by `release`: new services start dark.
 GRANTS = (
     ('activate-provisioning', 'platform-access', 'organizations', ('platform-identity.provision-first-party',)),
+    # ADR 0058 Amendment A2: automatic Calling / Messaging bindings inside each organization's
+    # own FIRST_PARTY triple (closed scope set; never operator administration).
+    ('activate-organization-bindings', 'platform-access', 'organizations',
+     ('platform-identity.bind-organization-services',)),
     ('activate-org-events', 'meeting-service', 'organizations', ('meeting-organization-events.apply',)),
     ('org-cutover-shadow', 'organizations', 'meeting-service',
+     ('organization.read', 'organization.write', 'organization.act-for-user', 'organization.administer')),
+    # Empty-dataset first activation (org_first_activation.py): the same Meeting Service grants
+    # as the shadow step it replaces.
+    ('org-cutover-first-activation', 'organizations', 'meeting-service',
      ('organization.read', 'organization.write', 'organization.act-for-user', 'organization.administer')),
     ('activate-enterprise-calling', 'platform-access', 'meeting-service', ('platform-principal.ensure',)),
     ('activate-enterprise-calling', 'calling', 'meeting-service', ('calling-request.act-for-organization',)),
@@ -476,6 +554,20 @@ GRANTS = (
      ('platform-identity.read', 'platform-identity.delegate')),
     ('activate-developer-platform', 'developer-platform', 'api-gateway',
      ('developer-request.forward', 'developer-entitlement.read', 'developer-usage.record')),
+    # Developer Console sessions: the Meeting Service verifies its own CF Meet sessions for
+    # the Developer Platform (session bridge); it never shares the session secret.
+    ('activate-developer-console', 'meeting-service', 'developer-platform', ('user-session.verify',)),
+    # Production-access review: the operator console (no container; key in the secret
+    # store) administers the Developer Platform; manual decisions by named reviewers only.
+    ('activate-production-access-review', 'developer-platform', 'operator-console',
+     ('developer-platform.administer',)),
+    # Customer webhooks: every first-party producer publishes to the central ingestion.
+    ('activate-developer-webhooks', 'developer-platform', 'meeting-service', ('developer-event.publish',)),
+    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
+    ('activate-developer-webhooks', 'developer-platform', 'messaging', ('developer-event.publish',)),
+    # Customer API families through the gateway (receivers authorize the gateway's forwards).
+    ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),
+    ('activate-gateway-families', 'messaging', 'api-gateway', ('messaging-request.forward',)),
 )
 
 
@@ -529,7 +621,13 @@ def current_bundle(c):
     return target, source, json.loads(Path(source).read_text())
 
 
+# Issuers without a container of their own (operator tooling identities).
+OPERATOR_IDENTITIES = ('operator-console',)
+
+
 def issuer_key(name):
+    if name == 'operator-console':
+        return developer_access.operator_public_key(sys.modules[__name__])
     c = p.inspect(SERVICES[name]['container'])
     e = p.env_of(c)
     if not e.get('CF_SERVICE_AUTH_PRIVATE_KEY_FILE') or not e.get('CF_SERVICE_AUTH_KEY_ID'):
@@ -689,14 +787,25 @@ def cfmeet_containers(names):
     return [n for n in names if (n.startswith('cfmeet-') and not n.startswith('cfmeet-staging-')) or n == 'lk-server']
 
 
+def image_revision(image_id):
+    try:
+        meta = json.loads(p.run('docker', 'image', 'inspect', image_id))[0]
+    except (RuntimeError, OSError, ValueError, IndexError):
+        return None
+    return ((meta.get('Config') or {}).get('Labels') or {}).get('org.opencontainers.image.revision')
+
+
 def summarize(c):
     labels = c['Config'].get('Labels') or {}
     env = p.env_of(c)
     h = c['HostConfig']
+    # `revision` is the image's own label (authoritative). A container cloned by a release
+    # keeps the label of the image it was first created from: reported separately.
     return dict(name=c['Name'].lstrip('/'), state=c['State']['Status'],
                 health=(c['State'].get('Health') or {}).get('Status', 'not_configured'),
                 image=c['Config']['Image'], imageId=c['Image'],
-                revision=labels.get('org.opencontainers.image.revision'), memoryMiB=(h.get('Memory') or 0) // 1048576,
+                revision=image_revision(c['Image']), containerLabelRevision=labels.get('org.opencontainers.image.revision'),
+                releaseSha=labels.get('com.cfmeet.release.sha'), memoryMiB=(h.get('Memory') or 0) // 1048576,
                 restart=(h.get('RestartPolicy') or {}).get('Name'), networks=sorted(c['NetworkSettings']['Networks']),
                 ports=h.get('PortBindings') or {}, environmentNames=sorted(env), flags=safe_flags(env))
 
@@ -731,8 +840,20 @@ def planned_new(names=None):
 
 # --- backup ----------------------------------------------------------------------------------
 
-def run_binary(args, stdin_path=None, stdout_path=None):
-    """Like production.run for binary streams; stderr (may hold credentials) is discarded."""
+def safe_stderr(raw, lines=3, limit=400):
+    """The last lines of a tool's stderr, safe to print: URLs (credentials) redacted, quoted and
+    key-value literals masked (they can carry row data), bounded."""
+    text = scrub(raw.decode(errors='replace') if isinstance(raw, bytes) else raw)
+    text = re.sub(r'\(([^()]*)\)=\(([^()]*)\)', r'(\1)=(...)', text)
+    text = re.sub(r'"[^"\n]{1,200}"', '"..."', text)
+    text = re.sub(r"'[^'\n]{1,200}'", "'...'", text)
+    tail = [l.strip() for l in text.splitlines() if l.strip()][-lines:]
+    return ' | '.join(tail)[:limit]
+
+
+def run_binary(args, stdin_path=None, stdout_path=None, step=None):
+    """Like production.run for binary streams. stderr (may hold credentials) is never printed
+    raw: a failure reports only a scrubbed, value-masked tail (safe_stderr)."""
     stdin = open(stdin_path, 'rb') if stdin_path else subprocess.DEVNULL
     stdout = open(stdout_path, 'wb') if stdout_path else subprocess.PIPE
     try:
@@ -743,7 +864,8 @@ def run_binary(args, stdin_path=None, stdout_path=None):
         if stdout_path:
             stdout.close()
     if proc.returncode:
-        raise RuntimeError('subprocess failed: ' + ' '.join(args[:2]))
+        raise RuntimeError('subprocess failed: %s%s (exit %d): %s' % (
+            ' '.join(args[:2]), ' [%s]' % step if step else '', proc.returncode, safe_stderr(proc.stderr)))
     return proc.stdout
 
 
@@ -757,34 +879,55 @@ def sha256(path):
 
 def toc_entries(dump, major):
     listing = run_binary(['docker', 'run', '--rm', '-i', '--network', 'none', 'postgres:%d-alpine' % major,
-                          'pg_restore', '--list'], stdin_path=dump).decode()
+                          'pg_restore', '--list'], stdin_path=dump, step='pg_restore --list').decode()
     return [line for line in listing.splitlines() if line.strip() and not line.startswith(';')]
 
 
+def docker_step(args, step, input=None):
+    """production.run with a diagnosable failure: the step and a safe stderr tail (no credentials
+    are ever passed to these throwaway, network-less containers)."""
+    proc = subprocess.run(args, input=input, capture_output=True, text=True)
+    if proc.returncode:
+        raise RuntimeError('subprocess failed: %s [%s] (exit %d): %s' % (
+            ' '.join(args[:2]), step, proc.returncode, safe_stderr(proc.stderr)))
+    return proc.stdout.strip()
+
+
 def restore_test(dump, major, expected, run_id, label):
-    """Restore into a throwaway, network-less PostgreSQL and compare every migration history."""
+    """Restore into a throwaway, network-less PostgreSQL and compare every migration history.
+
+    The image's entrypoint first runs a temporary server on the Unix socket only (initdb and
+    init scripts), stops it and starts the real one. Readiness over the socket can therefore
+    report the temporary server; the real server is the only one listening on TCP, so readiness
+    and every step use 127.0.0.1 (the loopback exists with --network none)."""
     name = 'cfmeet-restore-test-%s-%s' % (run_id, label)
     _own(name)
-    p.run('docker', 'run', '-d', '--name', name, '--network', 'none', '--memory', '512m',
-          '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:%d-alpine' % major)
+    tcp = ['-h', '127.0.0.1', '-U', 'postgres']
+    docker_step(['docker', 'run', '-d', '--name', name, '--network', 'none', '--memory', '512m',
+                 '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:%d-alpine' % major], 'restore container ' + label)
     try:
-        for _ in range(60):
-            try:
-                p.run('docker', 'exec', name, 'pg_isready', '-q', '-U', 'postgres')
+        for _ in range(120):
+            if subprocess.run(['docker', 'exec', name, 'pg_isready', '-q'] + tcp, capture_output=True).returncode == 0:
                 break
-            except RuntimeError:
-                time.sleep(1)
-        p.run('docker', 'exec', name, 'createdb', '-U', 'postgres', 'restore_test')
-        run_binary(['docker', 'exec', '-i', name, 'pg_restore', '-U', 'postgres', '-d', 'restore_test',
-                    '--no-owner', '--no-privileges'], stdin_path=dump)
-        sql = lambda q: p.run('docker', 'exec', '-i', name, 'psql', '-XAtq', '-U', 'postgres', '-d', 'restore_test', input=q)
+            time.sleep(1)
+        else:
+            raise RuntimeError('Restore test PostgreSQL did not become ready: ' + label)
+        docker_step(['docker', 'exec', name, 'createdb'] + tcp + ['restore_test'], 'createdb ' + label)
+        run_binary(['docker', 'exec', '-i', name, 'pg_restore'] + tcp + ['-d', 'restore_test',
+                    '--no-owner', '--no-privileges'], stdin_path=dump, step='restore test ' + label)
+        sql = lambda q: docker_step(['docker', 'exec', '-i', name, 'psql', '-XAtq'] + tcp + ['-d', 'restore_test'],
+                                    'restore query ' + label, input=q)
         restored = {t: v['applied'] for t, v in history_state(sql).items()}
         if restored != expected:
             raise RuntimeError('Restore test history mismatch: ' + label)
         tables = int(sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='public';"))
         return {'status': 'PASS', 'tables': tables, 'histories': restored}
     finally:
-        remove(name)
+        # Never mask the step's own failure with a cleanup failure.
+        try:
+            remove(name)
+        except RuntimeError:
+            emit('restoreTestCleanup', {'container': name, 'removed': False})
 
 
 def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'platform-access')):
@@ -812,20 +955,21 @@ def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'pla
             try:
                 run_binary(['docker', 'run', '--rm', '--network', 'container:' + MEETING, '--env-file', str(env),
                             'postgres:%d-alpine' % meeting_major, 'sh', '-c', 'exec pg_dump -Fc "$DATABASE_URL"'],
-                           stdout_path=dump)
+                           stdout_path=dump, step='pg_dump meeting-service')
             finally:
                 env.unlink(missing_ok=True)
             major = meeting_major
         else:
             histories = {t: v['applied'] for t, v in history_state(lambda q, d=db: release.db_sql(d, q)).items()}
-            run_binary(['docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'pg_dump', '-Fc', '-d', db], stdout_path=dump)
+            run_binary(['docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'pg_dump', '-Fc', '-d', db], stdout_path=dump,
+                       step='pg_dump ' + label)
             major = core_major
         os.chmod(dump, 0o600)
         toc = toc_entries(dump, major)
         if not toc or not all(any(' ' + t + ' ' in line for line in toc) for t in histories):
             raise RuntimeError('Backup table of contents incomplete: ' + label)
         item = dict(label=label, file=dump.name, bytes=dump.stat().st_size, sha256=sha256(dump),
-                    tocEntries=len(toc), histories=histories, restoreTest='NOT_RUN')
+                    tocEntries=len(toc), histories=histories, restoreTest='NOT_RUN', postgresMajor=major)
         if label in restore_labels:
             item['restoreTest'] = restore_test(dump, major, histories, run_id, label)
         entries.append(item)
@@ -839,6 +983,18 @@ def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'pla
     emit('backupManifest', {'path': str(folder / 'manifest.json'), 'databases': len(entries),
                             'restoreTested': [e['label'] for e in entries if e['restoreTest'] != 'NOT_RUN']})
     return manifest
+
+
+def require_offsite(manifest):
+    """Owner gate 1 is also checked mechanically: the fresh backup must have an encrypted
+    off-host copy whose restore drill passed on a separate host (offsite_backup.record)."""
+    import offsite_backup
+    doc = offsite_backup.verified(manifest['runId'], ('meeting-service', 'organizations'))
+    if not doc:
+        raise RuntimeError('Backup %s has no verified off-host copy and restore drill; run the off-host backup '
+                           'workflow (cfmeet-offsite-backup.yml) first' % manifest['runId'])
+    emit('offsiteBackup', {'runId': manifest['runId'], 'artifactId': doc['artifactId'], 'runUrl': doc['runUrl']})
+    return doc
 
 
 def fresh_backup(max_age_hours, required):
@@ -1025,7 +1181,13 @@ def deploy(name, image_id, sha, run_id, entry):
         if not c['State']['Running']:
             raise RuntimeError('Existing service container is not running; refusing to replace it: ' + container)
         cfg = release.clone(c, container, image_id, {}, False)
-        cfg.setdefault('Labels', {})['com.cfmeet.release.sha'] = sha
+        labels = cfg.setdefault('Labels', {}) or {}
+        cfg['Labels'] = labels
+        # The cloned container labels would shadow the new image's OCI labels (Docker keeps
+        # explicit container labels): drop them so the container reports the release image.
+        for key in [k for k in labels if k.startswith('org.opencontainers.image.')]:
+            del labels[key]
+        labels['com.cfmeet.release.sha'] = sha
         component = swap(name, cfg, run_id, entry)
     else:
         if s['existing']:
@@ -1059,18 +1221,38 @@ SAFE_DEFAULTS = {
 }
 
 
+PUSH_ADAPTER_PREFIXES = ('MESSAGING_PUSH_APNS_', 'MESSAGING_PUSH_FCM_', 'MESSAGING_PUSH_WEB_')
+
+
+def safe_defaults():
+    """SAFE_DEFAULTS, widened only by a completed activation that owns the setting: customer
+    webhook delivery may be `active` once activate-developer-webhooks is recorded. Production
+    auto-approval and every provider-dependent switch stay fixed."""
+    rules = copy.deepcopy(SAFE_DEFAULTS)
+    rules['developer-platform-worker'] = dict(rules['developer-platform'])
+    if done('activate-developer-webhooks'):
+        for name in ('developer-platform', 'developer-platform-worker'):
+            rules[name]['DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE'] = (None, 'shadow', 'active')
+    return rules
+
+
 def safe_default_violations(envs):
     """envs: {service: env}. Provider-dependent features must stay off in production."""
     violations = []
-    for name, rules in SAFE_DEFAULTS.items():
+    for name, rules in safe_defaults().items():
         env = envs.get(name)
         if env is None:
             continue
         for var, allowed in rules.items():
             if env.get(var) not in allowed:
                 violations.append('%s %s' % (name, var))
+    # The push adapters switch on from their credential variables whatever
+    # MESSAGING_PUSH_PROVIDER says (services/messaging/src/config/mod.rs): none may be present.
+    messaging = envs.get('messaging') or {}
+    for var in sorted(v for v in messaging if v.startswith(PUSH_ADAPTER_PREFIXES) and messaging[v]):
+        violations.append('messaging ' + var)
     meeting = envs.get('meeting-service')
-    if meeting and meeting.get('NOTIFICATIONS_EMAIL_ENABLED') == 'true' and not all(mail_presence(meeting).values()):
+    if meeting and meeting.get('NOTIFICATIONS_EMAIL_ENABLED') == 'true' and not mail_available(meeting):
         violations.append('meeting-service NOTIFICATIONS_EMAIL_ENABLED without mail credentials')
     return violations
 
@@ -1084,6 +1266,8 @@ def release_all(sha, run_id):
     p.identity()
     manifest = registry(sha)
     images = {service: verify_image(service, sha, manifest) for service in IMAGES if service != 'security-scan-gateway'}
+    scope, kept = release_scope(sha)
+    emit('releaseScope', {'replaced': sorted(n for n in ORDER if n not in kept), 'kept': sorted(kept)})
     violations = safe_default_violations(running_envs())
     if violations:
         raise RuntimeError('Provider-dependent features are not at their safe defaults: ' + ', '.join(violations))
@@ -1091,8 +1275,13 @@ def release_all(sha, run_id):
     backup(sha, run_id)
     provision(sha, run_id)
     entry = begin('release', sha, run_id)
+    entry['kept'] = kept
+    commit(entry)
     try:
         for name in ORDER:
+            if name in kept:
+                emit('kept', {'service': name, 'revision': kept[name]['revision']})
+                continue
             image_id = images[image_of(name)]
             # Additive migrations, before the image that needs them; never rolled back.
             if SERVICES[name]['container'] not in container_names() or p.inspect(SERVICES[name]['container'])['Image'] != image_id:
@@ -1106,7 +1295,9 @@ def release_all(sha, run_id):
         commit(entry)
         raise
     scan_failed = False
-    if 'cosmicforge-scan-gateway' in container_names():
+    if 'security-scan-gateway' not in scope:
+        entry['scanGateway'] = 'kept (build inputs unchanged)'
+    elif 'cosmicforge-scan-gateway' in container_names():
         # Shared component with its own verified upgrade and self-rollback (scan_gateway.py).
         import scan_gateway
         try:
@@ -1158,13 +1349,16 @@ def event_delivery():
 def verify(sha, run_id):
     entry = last_release(sha)
     if not entry:
-        raise RuntimeError('No completed coordinated release of this SHA is recorded')
+        latest = last_release()
+        raise RuntimeError('No completed coordinated release of this SHA is recorded (latest completed release: %s). '
+                           'verify certifies a coordinated release only; use certify for the live deployment'
+                           % (latest['sha'] if latest else 'none'))
     manifest = registry(sha)
     checks = {}
     for name in ORDER:
         try:
             health(name, attempts=10)
-            verify_running(SERVICES[name]['container'], manifest[image_of(name)]['imageId'], sha)
+            verify_running(SERVICES[name]['container'], *expected_image(name, sha, manifest))
             checks['running ' + name] = 'PASS'
         except Exception:
             checks['running ' + name] = 'FAIL'
@@ -1194,7 +1388,8 @@ def verify(sha, run_id):
 
 def rollback(sha, run_id):
     journal = load_journal()
-    candidates = [e for e in journal if e['status'] in ('done', 'failed') and (e['components'] or e.get('routing'))]
+    candidates = [e for e in journal if e['status'] in ('done', 'failed')
+                  and (e['components'] or e.get('routing') or e.get('edge'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1203,6 +1398,12 @@ def rollback(sha, run_id):
                            % entry['operation'])
     if entry.get('routing'):
         undo_gateway_routing(entry['routing'])
+    if entry['operation'] == 'activate-gateway-families' and GATEWAY_SNIPPET.exists():
+        # Families leave the edge before the gateway loses their upstreams (no 5xx window).
+        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES, docs=done('activate-gateway-docs')))
+        p.reload_host_nginx()
+    if entry.get('edge'):
+        undo_gateway_docs(entry['edge'])
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -1219,35 +1420,66 @@ def rollback(sha, run_id):
 
 # --- activation steps ------------------------------------------------------------------------
 
-def recreate(name, overrides, bundle, run_id, entry):
-    """Same image, preserved configuration, changed flags and/or trust bundle."""
+def recreate(name, overrides, bundle, run_id, entry, extra=None):
+    """Same image, preserved configuration, changed flags and/or trust bundle; `extra` may add
+    read-only secret mounts ([(source, target)]) and networks ([name])."""
     container = SERVICES[name]['container']
     c = p.inspect(container)
     cfg = release.clone(c, container, c['Image'], overrides, False)
     if bundle:
         set_mount(cfg, bundle[0], bundle[1])
+    for source, target in (extra or {}).get('mounts', ()):
+        release.add_mount(cfg, source, target)
+    for network in (extra or {}).get('networks', ()):
+        cfg['NetworkingConfig']['EndpointsConfig'].setdefault(network, {'Aliases': [container]})
     component = swap(name, cfg, run_id, entry)
     checked(component, name, entry, run_id, lambda: health(name))
 
 
+ACTIVATION_BASE = Path(__file__).resolve().parent / 'activation-base.json'
+
+
+def activation_base(sha, path=None):
+    """The released SHA an activation of `sha` acts on: `sha` itself when it was released,
+    otherwise the latest completed release, provided the runner proved (activation_base.py)
+    that no image build input changed between that release and `sha`."""
+    if last_release(sha):
+        return sha
+    latest = last_release()
+    if not latest:
+        raise RuntimeError('Activation requires a completed coordinated release')
+    path = path or ACTIVATION_BASE
+    if not path.exists():
+        raise RuntimeError('Activation requires the completed coordinated release of this SHA, or the runner\'s '
+                           'proof that its images equal the latest release (%s)' % latest['sha'])
+    doc = json.loads(path.read_text())
+    if doc.get('head') != sha or doc.get('base') != latest['sha'] or doc.get('equivalent') is not True \
+            or doc.get('changed') or not doc.get('inputs'):
+        raise RuntimeError('Image build inputs changed since the latest release %s (or the proof does not match); '
+                           'release this SHA first' % latest['sha'])
+    emit('activationBase', {'head': sha, 'release': latest['sha'], 'buildInputsChecked': len(doc['inputs'])})
+    return latest['sha']
+
+
 def require_release(sha):
-    entry = last_release(sha)
-    if not entry:
-        raise RuntimeError('Activation requires the completed coordinated release of this SHA')
-    manifest = registry(sha)
+    base = activation_base(sha)
+    manifest = registry(base)
     for name in ORDER:
-        verify_running(SERVICES[name]['container'], manifest[image_of(name)]['imageId'], sha)
+        verify_running(SERVICES[name]['container'], *expected_image(name, base, manifest))
+    return base
 
 
 def apply_activation(operation, sha, run_id, changes, irreversible=False, post=None):
-    """changes: [(service, env overrides)], applied in order; receivers of new grants are
-    recreated first (with any overrides of their own). Failure restores the whole step."""
+    """changes: [(service, env overrides[, extra])], applied in order; receivers of new grants
+    are recreated first (with any overrides of their own). Failure restores the whole step."""
     bundles = bundles_for(operation, run_id)
-    plan = [(name, {}) for name in bundles if name not in dict(changes)] + list(changes)
+    changes = [tuple(c) + ({},) * (3 - len(c)) for c in changes]
+    listed = {c[0] for c in changes}
+    plan = [(name, {}, {}) for name in bundles if name not in listed] + changes
     entry = begin(operation, sha, run_id, irreversible)
     try:
-        for name, overrides in plan:
-            recreate(name, overrides, bundles.get(name), run_id, entry)
+        for name, overrides, extra in plan:
+            recreate(name, overrides, bundles.get(name), run_id, entry, extra)
             emit('activated', {'operation': operation, 'service': name, 'flags': safe_flags(overrides),
                                'trustBundleChanged': name in bundles})
         if post:
@@ -1283,6 +1515,39 @@ def activate_provisioning(sha, run_id, confirm):
     has_signing_identity('organizations')
     apply_activation('activate-provisioning', sha, run_id,
                      [('organizations', {'ORGANIZATIONS_PROVISIONING_ENABLED': 'true'})])
+
+
+# The Organizations migration that records automatic bindings (source, verification, expiry).
+BINDINGS_MIGRATION = 'm20261113_000005_automatic_service_bindings'
+BINDING_STATE_SQL = ("SELECT json_build_object('failed', (SELECT count(*) FROM organization_provisioning "
+                     "WHERE state = 'FAILED'), 'automaticBindings', (SELECT count(*) FROM "
+                     "organization_scope_service_bindings WHERE source = 'AUTOMATIC'));")
+
+
+def activate_organization_bindings(sha, run_id, confirm):
+    """ADR 0058 Amendment A2: every organization gets its Calling and Messaging service bindings
+    automatically (Platform Access creates the service account, credential and fixed scope grants
+    inside the organization's own triple; Organizations stores ids only and marks the organization
+    READY only after verifying them). Grants Organizations `platform-identity.bind-organization-services`
+    in the Platform Access bundle and switches ORGANIZATIONS_SERVICE_BINDINGS_ENABLED on."""
+    has_signing_identity('organizations')
+    if env_of('organizations').get('ORGANIZATIONS_PROVISIONING_ENABLED') != 'true':
+        raise RuntimeError('Automatic bindings require Organizations provisioning')
+    db = SERVICES['organizations']['db']
+    applied = release.db_sql(db, "SELECT count(*) FROM organizations_seaql_migrations WHERE version = '%s';"
+                             % BINDINGS_MIGRATION).strip()
+    if applied != '1':
+        raise RuntimeError('Organizations lacks migration %s: release first' % BINDINGS_MIGRATION)
+
+    def post():
+        time.sleep(15)
+        state = json.loads(release.db_sql(db, BINDING_STATE_SQL))
+        emit('organizationBindings', state)
+        if state['failed']:
+            raise RuntimeError('Organization provisioning workflows FAILED after enabling automatic bindings')
+
+    apply_activation('activate-organization-bindings', sha, run_id,
+                     [('organizations', {'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED': 'true'})], post=post)
 
 
 def activate_org_events(sha, run_id, confirm):
@@ -1370,11 +1635,14 @@ def import_summary(report):
                 checksum=report['checksum'])
 
 
-def org_import(sha, run_id, confirm):
-    """organizations-cutover-runbook §3: import, reconcile, prove idempotence, delete the export."""
-    if 'offsite-backup-verified' not in confirm:
-        raise RuntimeError('Owner gate 1: confirm with offsite-backup-verified after the off-host copy and drill')
-    fresh_backup(24, ('meeting-service', 'organizations'))
+def org_import(sha, run_id, confirm, backup_gate=True):
+    """organizations-cutover-runbook §3: import, reconcile, prove idempotence, delete the export.
+    backup_gate=False only for the empty-dataset first activation (ADR 0059 Amendment 1: owner
+    decision, no backup prerequisite); the standard import keeps owner gate 1."""
+    if backup_gate:
+        if 'offsite-backup-verified' not in confirm:
+            raise RuntimeError('Owner gate 1: confirm with offsite-backup-verified after the off-host copy and drill')
+        require_offsite(fresh_backup(24, ('meeting-service', 'organizations')))
     latest = json.loads((CUTOVER / 'latest-export.json').read_text())
     export_path = Path(latest['file'])
     if not export_path.exists():
@@ -1453,7 +1721,7 @@ def first_party_feature_changes(meeting_env):
     a compliance decision and is never switched here."""
     meeting = {'FEATURE_CONFERENCE_REALTIME_ENABLED': 'true', 'FEATURE_WEBINAR_MODE_ENABLED': 'true',
                'FEATURE_QUALITY_TELEMETRY_ENABLED': 'true'}
-    if all(mail_presence(meeting_env).values()):
+    if mail_available(meeting_env):
         meeting['NOTIFICATIONS_EMAIL_ENABLED'] = 'true'
     # MANAGED realtime only: session devices never acquire E2EE privileges.
     return [('messaging', {'MESSAGING_SESSION_DEVICES_ENABLED': 'true'}), ('meeting-service', meeting)]
@@ -1466,6 +1734,206 @@ def activate_first_party_features(sha, run_id, confirm):
     if 'NOTIFICATIONS_EMAIL_ENABLED' not in changes[1][1]:
         emit('notificationEmail', 'not enabled: SMTP credentials are not configured on the Meeting Service')
     apply_activation('activate-first-party-features', sha, run_id, changes)
+
+
+def web_origin_checks():
+    """Every production web origin passes the gateway's CORS preflight; a foreign origin does not."""
+    checks = {}
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
+        status, headers = http_status(PUBLIC + '/v1/developer-platform/context', 'OPTIONS', {
+            'Origin': origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
+        got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
+        ok = (status < 400 and got == origin) if allowed else got != origin
+        checks['cors ' + origin] = 'PASS' if ok else 'FAIL %d' % status
+    return checks
+
+
+def activate_web_origins(sha, run_id, confirm):
+    """The API Gateway answers CORS for every production web origin (cfmeet.com and the
+    www.cfmeet.com it redirects to). Exact origins only, never a wildcard; nothing else changes."""
+
+    def post():
+        checks = web_origin_checks()
+        emit('webOriginChecks', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Gateway CORS does not match the production web origins')
+
+    apply_activation('activate-web-origins', sha, run_id, [
+        ('api-gateway', {'API_GATEWAY_CORS_ALLOWED_ORIGINS': ','.join(WEB_ORIGINS)})], post=post)
+
+
+def activate_developer_console(sha, run_id, confirm):
+    """Developer Console sessions (Part VI §50): the Developer Platform verifies a CF Meet
+    session through the Meeting Service's session bridge (`user-session.verify`); without it
+    every DEVELOPER_SESSION request is refused and no customer can create an organization,
+    project, environment, credential or webhook. The bridge fails closed (revocation store
+    must be reachable; guests and participants never authenticate a developer)."""
+    tls_route_present(SERVICES['meeting-service']['tls'])
+    has_signing_identity('developer-platform')
+    if not env_of('meeting-service').get('CF_SERVICE_TRUST_BUNDLE_FILE'):
+        raise RuntimeError('Meeting Service has no receiver trust bundle')
+    apply_activation('activate-developer-console', sha, run_id, [
+        ('meeting-service', {'DEVELOPER_SESSION_BRIDGE_ENABLED': 'true'}),
+        ('developer-platform', {'CF_MEETING_SERVICE_BASE_URL': private_url(SERVICES['meeting-service']['tls'])})])
+
+
+WEBHOOK_KEY = 'developer-platform-webhook-secret.key'
+WEBHOOK_KEY_TARGET = '/run/secrets/webhook-secret.key'
+WEBHOOK_KEY_ID = 'prod-1'
+WEBHOOK_EGRESS_NET = 'cfmeet-webhook-egress'
+CALLING_WEBHOOK_STATE_SQL = ("SELECT (SELECT count(*) FROM webhook_subscriptions WHERE status <> 'DELETED') || ',' || "
+                             "(SELECT count(*) FROM webhook_deliveries WHERE status NOT IN "
+                             "('SUCCEEDED','FAILED','CANCELLED','EXPIRED'));")
+
+
+def webhook_preconditions():
+    """The Developer Platform becomes the only webhook authority without the Calling export
+    only when Calling holds no customer webhook state, and no Calling migration ever began."""
+    subscriptions, open_deliveries = release.db_sql('cfmeet_calling', CALLING_WEBHOOK_STATE_SQL).split(',')
+    if int(subscriptions) or int(open_deliveries):
+        raise RuntimeError('Calling holds %s webhook subscriptions / %s open deliveries: follow the webhook '
+                           'migration runbook (phase-06) instead' % (subscriptions, open_deliveries))
+    started = release.db_sql('cfmeet_developer_platform', 'SELECT count(*) FROM devplat_webhook_migration_state;')
+    if int(started):
+        raise RuntimeError('A Calling webhook migration is recorded; finish it with the migration runbook')
+    emit('webhookPreconditions', {'callingSubscriptions': 0, 'callingOpenDeliveries': 0, 'migrationState': 'none'})
+
+
+def webhook_egress_network():
+    """A dedicated, non-internal bridge for the delivery worker only (cfmeet-core-private is
+    --internal). The worker's STRICT endpoint policy (packages/webhooks) allows https only and
+    refuses private, loopback, link-local and metadata addresses, re-checked at connect time,
+    so this network reaches public customer endpoints and nothing on the host."""
+    if WEBHOOK_EGRESS_NET not in p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines():
+        p.run('docker', 'network', 'create', '--driver', 'bridge', '--opt',
+              'com.docker.network.bridge.enable_icc=false', WEBHOOK_EGRESS_NET)
+    return WEBHOOK_EGRESS_NET
+
+
+def activate_developer_webhooks(sha, run_id, confirm):
+    """Customer webhooks on the Developer Platform: signed (HMAC, sealed per-subscription
+    secrets under a 32-byte key ring), retried with jittered exponential backoff, auto-disabled
+    after repeated failures, observable through deliveries/attempts and replay. Calling's
+    legacy webhook authority is retired (it holds no customer state, checked first) and every
+    first-party producer publishes to the central ingestion."""
+    if env_of('developer-platform').get('DEVELOPER_PLATFORM_GATEWAY_API_ENABLED') != 'true':
+        raise RuntimeError('Run activate-developer-platform first')
+    tls_route_present(SERVICES['developer-platform']['tls'])
+    webhook_preconditions()
+    uid = SERVICES['developer-platform']['uid']
+    key = p.SECRETS / WEBHOOK_KEY
+    secret_file(key, lambda: base64.b64encode(secrets.token_bytes(32)).decode() + '\n', uid=uid, mode=0o400)
+    network = webhook_egress_network()
+    dp = private_url(SERVICES['developer-platform']['tls'])
+    webhooks = {'DEVELOPER_PLATFORM_WEBHOOKS_ENABLED': 'true', 'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': 'active',
+                'DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_FILE': WEBHOOK_KEY_TARGET,
+                'DEVELOPER_PLATFORM_WEBHOOK_SECRET_KEY_ID': WEBHOOK_KEY_ID}
+    mount = {'mounts': [(key, WEBHOOK_KEY_TARGET)]}
+    apply_activation('activate-developer-webhooks', sha, run_id, [
+        ('developer-platform', webhooks, mount),
+        # Credential lifecycle notices (credential.expiring_soon / expired) every 5 minutes.
+        ('developer-platform-worker', dict(webhooks, DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS='300'),
+         dict(mount, networks=[network])),
+        ('calling', {'CALLING_WEBHOOK_AUTHORITY': 'retired', 'CALLING_WEBHOOK_DELIVERY_ENABLED': 'false',
+                     'CALLING_PUBLIC_EVENTS_DESTINATION': 'developer-platform', 'CF_DEVELOPER_PLATFORM_BASE_URL': dp}),
+        ('messaging', {'MESSAGING_PUBLIC_EVENTS_DESTINATION': 'developer-platform', 'CF_DEVELOPER_PLATFORM_BASE_URL': dp}),
+        ('meeting-service', {'MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION': 'developer-platform',
+                             'CF_DEVELOPER_PLATFORM_BASE_URL': dp})])
+
+
+# Customer API families the gateway serves in addition to the Developer Platform families.
+# Calling's /v1/calls, /v1/calling and /v1/enterprise and Messaging's /v1/realtime keep their
+# existing direct routes (working production functionality is not re-routed). Numbers, SMS
+# and Privacy Relay stay unrouted and their gateway domains disabled (excluded by the owner).
+FAMILY_PREFIXES = ('/v1/abuse-reports', '/v1/blocks', '/v1/conversations', '/v1/limits', '/v1/messaging',
+                   '/v1/usage', '/v1/webhook-deliveries', '/v1/webhooks')
+DISABLED_DOMAINS = 'numbering,sms,privacy-relay'
+# One real route of each family (a bare prefix can be unknown to the route table).
+FAMILY_PROBES = (('GET', '/v1/abuse-reports'), ('GET', '/v1/blocks'), ('GET', '/v1/conversations'),
+                 ('GET', '/v1/limits'), ('GET', '/v1/messaging/audit'), ('GET', '/v1/usage'),
+                 ('POST', '/v1/webhook-deliveries/00000000-0000-4000-8000-000000000000/replay'),
+                 ('GET', '/v1/webhooks'))
+
+
+def activate_gateway_families(sha, run_id, confirm):
+    """Messaging (/v1/conversations, /v1/messaging), Calling account controls (/v1/abuse-reports,
+    /v1/blocks, /v1/limits, /v1/usage) and central customer webhooks (/v1/webhooks,
+    /v1/webhook-deliveries → Developer Platform) through the API Gateway: platform credential
+    authentication at the gateway, entitlement quotas and rate limits, a request-bound service
+    token that the receiver authorizes by grant, tenant context delegated, never forwarded."""
+    if env_of('api-gateway').get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true' or not GATEWAY_SNIPPET.exists():
+        raise RuntimeError('Run activate-gateway-routing first')
+    site = SITE.read_text()
+    snippets = [f.read_text() for f in Path('/etc/nginx/snippets').glob('cfmeet-*.conf') if f != GATEWAY_SNIPPET]
+    collisions = route_collisions([site] + snippets, FAMILY_PREFIXES)
+    if collisions:
+        raise RuntimeError('Existing public routes already serve: ' + ', '.join(collisions))
+    old_snippet = GATEWAY_SNIPPET.read_text()
+
+    def post():
+        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES + FAMILY_PREFIXES,
+                                                   docs=done('activate-gateway-docs')))
+        try:
+            p.reload_host_nginx()
+            checks = gateway_family_checks()
+            emit('gatewayFamilies', checks)
+            if any(v != 'PASS' for v in checks.values()):
+                raise RuntimeError('Gateway family checks failed')
+        except Exception:
+            GATEWAY_SNIPPET.write_text(old_snippet)
+            p.reload_host_nginx()
+            raise
+
+    apply_activation('activate-gateway-families', sha, run_id, [
+        ('api-gateway', {'CF_CALLING_BASE_URL': private_url(SERVICES['calling']['tls']),
+                         'CF_MESSAGING_BASE_URL': private_url(SERVICES['messaging']['tls']),
+                         'API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED': 'true',
+                         'API_GATEWAY_DISABLED_DOMAINS': DISABLED_DOMAINS})], post=post)
+
+
+def gateway_family_checks():
+    """Unauthenticated requests on every new family are refused by the gateway (401/403, never
+    2xx/404/5xx); a forged bearer is refused; CORS answers the web origin only; excluded
+    families stay unrouted; internal paths stay private."""
+    checks = {}
+    for method, path in FAMILY_PROBES:
+        status, _ = http_status(PUBLIC + path, method, {'Content-Type': 'application/json'} if method == 'POST' else None)
+        checks['anonymous %s %s' % (method, path)] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
+    status, _ = http_status(PUBLIC + '/v1/conversations', headers={'Authorization': 'Bearer cfk_invalid'})
+    checks['forged credential'] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
+        _, headers = http_status(PUBLIC + '/v1/conversations', 'OPTIONS', {
+            'Origin': origin, 'Access-Control-Request-Method': 'GET'})
+        got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
+        checks['cors ' + origin] = 'PASS' if (got == origin) == allowed else 'FAIL'
+    for path in ('/v1/numbers', '/v1/sms/messages', '/v1/privacy-relay/contexts'):
+        status, _ = http_status(PUBLIC + path)
+        checks['excluded ' + path] = 'PASS' if status in (401, 403, 404) else 'FAIL %d' % status
+    checks.update(public_smoke())
+    return checks
+
+
+USAGE_STREAMS_SQL = ("SELECT coalesce(json_agg(json_build_object('producer', producer, 'stream', stream, "
+                     "'positionAt', position_at) ORDER BY producer, stream), '[]') FROM devplat_usage_streams;")
+
+
+def activate_usage_export(sha, run_id, confirm):
+    """Part VI §55 unified usage ledger: Calling, Messaging and the Meeting Service export their
+    billing-neutral usage facts (safe refs only; platform application environments only, never
+    CF Meet consumer usage) to the Developer Platform, authenticated by the
+    `developer-event.publish` grants of activate-developer-webhooks. Customer /v1/usage and
+    /v1/limits stay served by Calling (API_GATEWAY_CENTRAL_USAGE_ENABLED is not switched)."""
+    for name in ('calling', 'messaging', 'meeting-service'):
+        if not env_of(name).get('CF_DEVELOPER_PLATFORM_BASE_URL'):
+            raise RuntimeError('%s has no Developer Platform target; run activate-developer-webhooks' % name)
+
+    def post():
+        time.sleep(60)
+        streams = json.loads(release.db_sql('cfmeet_developer_platform', USAGE_STREAMS_SQL) or '[]')
+        emit('usageStreams', {'acknowledgedStreams': streams})
+
+    apply_activation('activate-usage-export', sha, run_id, [
+        (name, {'CFMEET_USAGE_EXPORT_ENABLED': 'true'}) for name in ('calling', 'messaging', 'meeting-service')], post=post)
 
 
 # --- API Gateway public routing (host nginx, api.cfmeet.com) -----------------------------------
@@ -1484,24 +1952,43 @@ GATEWAY_INCLUDE = 'include /etc/nginx/snippets/cfmeet-api-gateway.conf;'
 ROUTES_ANCHOR = 'include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
 
 
-def gateway_snippet():
+# The API Gateway's public documentation (services/api-gateway/src/docs.rs): the catalogue, the
+# aggregate OpenAPI and the read-only reference are exact paths; the per-domain documents the
+# reference and the catalogue link to live under /openapi/. GET only (and CORS preflight).
+DOCS_EXACT = ('/discovery', '/openapi.json', '/docs')
+DOCS_PREFIX = '/openapi'
+
+
+def gateway_snippet(prefixes=GATEWAY_PREFIXES, docs=False):
     common = ('    proxy_pass http://127.0.0.1:%d;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n'
               '    proxy_set_header X-Forwarded-Proto https;\n    client_max_body_size 1m;\n    proxy_read_timeout 60s;\n'
               % GATEWAY_RELAY_PORT)
-    out = ['# CF Meet API Gateway: Developer Platform public families only (coordinated release).',
+    scope = 'Developer Platform families' if tuple(prefixes) == GATEWAY_PREFIXES else 'customer API families'
+    out = ['# CF Meet API Gateway: public %s only (coordinated release).' % scope,
            '# Never /internal, operator or provider-callback paths; existing routes are unchanged.']
-    for prefix in GATEWAY_PREFIXES:
+    for prefix in prefixes:
         assert prefix.startswith('/v1/') and '/internal' not in prefix and '/admin' not in prefix
         out.append('location = %s {\n%s}' % (prefix, common))
         out.append('location ^~ %s/ {\n%s}' % (prefix, common))
+    if docs:
+        read_only = common + '    limit_except GET OPTIONS { deny all; }\n'
+        out.append('# Public API documentation and discovery (activate-gateway-docs).')
+        for path in DOCS_EXACT:
+            out.append('location = %s {\n%s}' % (path, read_only))
+        out.append('location ^~ %s/ {\n%s}' % (DOCS_PREFIX, read_only))
     return '\n'.join(out) + '\n'
 
 
-def route_collisions(texts):
+def edge_prefixes():
+    """The /v1 families the edge currently routes to the gateway (journal-derived)."""
+    return GATEWAY_PREFIXES + (FAMILY_PREFIXES if done('activate-gateway-families') else ())
+
+
+def route_collisions(texts, prefixes=GATEWAY_PREFIXES):
     """Existing explicit locations for any gateway prefix (refuse rather than shadow them)."""
     found = []
     for text in texts:
-        for prefix in GATEWAY_PREFIXES:
+        for prefix in prefixes:
             if re.search(r'location\s+(=|\^~|~\*?)?\s*%s(/|\s|\{)' % re.escape(prefix), text):
                 found.append(prefix)
     return sorted(set(found))
@@ -1587,6 +2074,106 @@ def activate_gateway_routing(sha, run_id, confirm):
     commit(entry)
 
 
+def http_document(url, headers=None, limit=4 * 2**20):
+    """(status, headers, body bytes) of a bounded GET."""
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, dict(response.headers), response.read(limit)
+    except urllib.error.HTTPError as error:
+        return error.code, dict(error.headers), b''
+
+
+def gateway_docs_checks():
+    """The documentation is served by the gateway, with truthful family states, CORS for the web
+    origins only, GET only; gateway health stays private; existing routes are unchanged."""
+    checks = {}
+    status, headers, body = http_document(PUBLIC + '/discovery', {'Origin': 'https://www.cfmeet.com'})
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        doc = {}
+    checks['discovery'] = 'PASS' if status == 200 and doc.get('service') == 'cfmeet.api-gateway' and \
+        doc.get('documentation') == {'aggregate': '/openapi.json', 'reference': '/docs'} else 'FAIL %d' % status
+    families = {f.get('domain'): f for f in doc.get('families', [])}
+    off = [d for d in ('numbering', 'sms', 'privacy-relay') if families.get(d, {}).get('enabled') is not False]
+    checks['discovery: excluded telecom families reported disabled'] = 'PASS' if families and not off else \
+        'FAIL ' + ','.join(off)
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
+        _, headers, _ = http_document(PUBLIC + '/discovery', {'Origin': origin})
+        got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
+        checks['cors GET /discovery ' + origin] = 'PASS' if (got == origin) == allowed else 'FAIL'
+    status, _, body = http_document(PUBLIC + '/openapi.json')
+    try:
+        aggregate = json.loads(body)
+    except ValueError:
+        aggregate = {}
+    checks['openapi aggregate'] = 'PASS' if status == 200 and str(aggregate.get('openapi', '')).startswith('3.') \
+        and not any(p.startswith('/internal') for p in aggregate.get('paths', {})) else 'FAIL %d' % status
+    status, headers, body = http_document(PUBLIC + '/docs')
+    kind = {k.lower(): v for k, v in headers.items()}.get('content-type', '')
+    checks['docs reference'] = 'PASS' if status == 200 and kind.startswith('text/html') and b'swagger-ui' in body \
+        else 'FAIL %d' % status
+    for domain in [d for d, f in sorted(families.items()) if f.get('enabled')][:3] or ['calling']:
+        status, _, _ = http_document(PUBLIC + '/openapi/%s.json' % domain)
+        checks['openapi domain ' + domain] = 'PASS' if status == 200 else 'FAIL %d' % status
+    status, _ = http_status(PUBLIC + '/discovery', 'POST', {'Content-Type': 'application/json'})
+    checks['documentation is read-only (POST refused)'] = 'PASS' if status in (403, 404, 405) else 'FAIL %d' % status
+    # The edge's /health is the Meeting Service's own public health route; the gateway's /health
+    # and /ready must never answer there (they identify as "api-gateway").
+    for path in ('/ready', '/health'):
+        _, _, body = http_document(PUBLIC + path)
+        checks['gateway %s not public' % path] = 'FAIL' if b'api-gateway' in body else 'PASS'
+    status, _ = http_status(PUBLIC + '/v1/developer-platform/context')
+    checks['existing gateway family unchanged'] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
+    checks.update(public_smoke())
+    return checks
+
+
+def activate_gateway_docs(sha, run_id, confirm):
+    """Routes the API Gateway's public documentation (/discovery, /openapi.json, /docs and the
+    per-domain /openapi/{domain}.json they link to) at the api.cfmeet.com edge, for the Developer
+    Console's Docs page. Edge only: no container, flag or grant changes. Refuses to shadow an
+    existing location; any failed check restores the previous snippet."""
+    if env_of('api-gateway').get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true' or not GATEWAY_SNIPPET.exists():
+        raise RuntimeError('Run activate-gateway-routing first')
+    site = SITE.read_text()
+    if GATEWAY_INCLUDE not in site:
+        raise RuntimeError('The gateway snippet is not included by the public site')
+    snippets = [f.read_text() for f in Path('/etc/nginx/snippets').glob('cfmeet-*.conf') if f != GATEWAY_SNIPPET]
+    collisions = route_collisions([site] + snippets, DOCS_EXACT + (DOCS_PREFIX,))
+    if collisions:
+        raise RuntimeError('Existing public routes already serve: ' + ', '.join(collisions))
+    old_snippet = GATEWAY_SNIPPET.read_text()
+    p.write_private(WORK / 'gateway-docs' / run_id / 'snippet.before', old_snippet)
+    entry = begin('activate-gateway-docs', sha, run_id)
+    entry['edge'] = {'docs': True, 'prefixes': list(edge_prefixes())}
+    commit(entry)
+    try:
+        GATEWAY_SNIPPET.write_text(gateway_snippet(edge_prefixes(), docs=True))
+        p.reload_host_nginx()  # nginx -t first
+        checks = gateway_docs_checks()
+        emit('gatewayDocs', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Gateway documentation checks failed')
+        p.regression()
+    except Exception:
+        GATEWAY_SNIPPET.write_text(old_snippet)
+        p.reload_host_nginx()
+        entry['status'] = 'failed'
+        commit(entry)
+        raise
+    entry['status'] = 'done'
+    commit(entry)
+
+
+def undo_gateway_docs(edge):
+    """Removes only the documentation locations; the /v1 families stay as they are."""
+    if GATEWAY_SNIPPET.exists():
+        GATEWAY_SNIPPET.write_text(gateway_snippet(edge_prefixes(), docs=False))
+        p.reload_host_nginx()
+
+
 def undo_gateway_routing(routing, old_snippet=None):
     """Removes only this step's include, snippet and relay; later site changes are kept."""
     SITE.write_text(SITE.read_text().replace('\n    ' + GATEWAY_INCLUDE, ''))
@@ -1604,16 +2191,39 @@ def undo_gateway_routing(routing, old_snippet=None):
 ACTIVATIONS = {
     'activate-provisioning': ((), activate_provisioning),
     'activate-org-events': (('activate-provisioning',), activate_org_events),
+    'activate-organization-bindings': (('activate-provisioning',), activate_organization_bindings),
     'org-cutover-export': (('activate-org-events',), org_export),
     'org-cutover-import': (('org-cutover-export',), org_import),
     'org-cutover-shadow': (('org-cutover-import',), org_shadow),
     'org-cutover-authoritative': (('org-cutover-shadow',), org_authoritative),
-    'activate-enterprise-calling': (('org-cutover-authoritative',), activate_enterprise_calling),
+    # Owner decision 2026-11-13: an empty dataset may skip import/shadow/7-day observation.
+    'org-cutover-first-activation': (('activate-org-events',), lambda sha, run_id, confirm:
+                                     org_first_activation.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # A tuple inside `requires` lists alternatives: either cutover procedure makes Organizations authoritative.
+    # Organization Calling / Messaging need the automatic bindings (ADR 0058 Amendment A2).
+    'activate-enterprise-calling': ((('org-cutover-authoritative', 'org-cutover-first-activation'),
+                                     'activate-organization-bindings'), activate_enterprise_calling),
     'activate-developer-platform': ((), activate_developer_platform),
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
+    'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
+    'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
+    'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
+    'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
+    'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
+    'activate-usage-export': (('activate-developer-webhooks',), activate_usage_export),
+    # Final completion: Resend becomes the email provider only after a verified send.
+    'activate-resend-email': ((), lambda sha, run_id, confirm: mail_ops.activate_resend_email(
+        sys.modules[__name__], sha, run_id, confirm)),
+    'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
+                                          developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
 }
-OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback') + tuple(ACTIVATIONS)
+OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
+    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
+# The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
+# (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
+# worker's STRICT endpoint policy refuses as a private address.)
+ACCEPTANCE_WEBHOOK_RECEIVER = 'https://httpbin.org/status/204'
 
 
 def run(operation, sha, run_id, confirm=''):
@@ -1621,10 +2231,30 @@ def run(operation, sha, run_id, confirm=''):
         raise RuntimeError('Unknown coordinated release operation')
     if not SHA_RE.fullmatch(sha) or not RUN_RE.fullmatch(run_id):
         raise RuntimeError('Invalid SHA or run id')
+    if operation == 'certify':
+        # Read-only: no journal entry, no work directories, no confirmation accepted.
+        if confirm:
+            raise RuntimeError('certify takes no confirmation')
+        import live_certification
+        live_certification.certify(sha, run_id)
+        return
     for folder in (WORK, WORK / 'run', WORK / 'env', WORK / 'trust'):
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     if operation == 'inspect':
         inspect(sha, run_id)
+    elif operation == 'diagnose':
+        # Read-only: mail configuration and failure evidence, email ledger, conference lifecycle.
+        if confirm:
+            raise RuntimeError('diagnose takes no confirmation')
+        mail_ops.diagnose(sys.modules[__name__], sha, run_id)
+    elif operation == 'developer-access-review':
+        # One audited operator decision (or read) by a named reviewer; no image change.
+        developer_access.review(sys.modules[__name__], sha, run_id, confirm)
+    elif operation == 'email-acceptance':
+        # Writes one acceptance email (and with confirm=otp one deactivated acceptance account).
+        if not done('activate-resend-email'):
+            raise RuntimeError('Acceptance needs activate-resend-email')
+        mail_ops.email_acceptance(sys.modules[__name__], sha, run_id, confirm)
     elif operation == 'backup':
         backup(sha, run_id)
     elif operation == 'provision':
@@ -1635,9 +2265,33 @@ def run(operation, sha, run_id, confirm=''):
         verify(sha, run_id)
     elif operation == 'rollback':
         rollback(sha, run_id)
+    elif operation == 'organization-acceptance':
+        # Writes acceptance data (three fresh accounts, two organizations it archives again)
+        # through the public API only; requires every organization activation it tests.
+        missing = [o for o in ('activate-organization-bindings', 'activate-enterprise-calling') if not done(o)]
+        if not (done('org-cutover-authoritative') or done('org-cutover-first-activation')):
+            missing.insert(0, 'org-cutover-authoritative or org-cutover-first-activation')
+        if missing:
+            raise RuntimeError('Acceptance needs ' + ', '.join(missing))
+        import organization_acceptance
+        checks = organization_acceptance.run(run_id, emit)
+        emit('organizationAcceptanceSummary', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Organization acceptance failed')
+    elif operation == 'developer-acceptance':
+        # Writes acceptance data through the public API only; requires the activations it tests.
+        missing = [o for o in ('activate-developer-console', 'activate-developer-webhooks', 'activate-gateway-families')
+                   if not done(o)]
+        if missing:
+            raise RuntimeError('Acceptance needs ' + ', '.join(missing))
+        import developer_acceptance
+        checks = developer_acceptance.run(run_id, ACCEPTANCE_WEBHOOK_RECEIVER)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Developer acceptance failed')
     else:
         requires, step = ACTIVATIONS[operation]
-        missing = [r for r in requires if not done(r)]
+        missing = [' or '.join(r) if isinstance(r, tuple) else r for r in requires
+                   if not (any(done(x) for x in r) if isinstance(r, tuple) else done(r))]
         if missing:
             raise RuntimeError('Activation order: complete %s first' % ', '.join(missing))
         p.identity()

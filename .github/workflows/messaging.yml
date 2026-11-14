@@ -150,7 +150,8 @@ jobs:
   # and not the shipped web app.
   crypto-browser:
     name: client crypto runtime in Chromium (wasm32)
-    runs-on: ubuntu-latest
+    # Pinned: Playwright's Chromium is not supported on the ubuntu-latest (26.04) image.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: packages/messaging-crypto/web-harness

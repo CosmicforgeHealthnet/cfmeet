@@ -306,6 +306,10 @@ fn every_v2_route_is_documented() {
         ),
         (
             "post",
+            "/api/v2/conferences/{id}/questions/{questionId}/restore",
+        ),
+        (
+            "post",
             "/api/v2/conferences/{id}/questions/{questionId}/archive",
         ),
         (

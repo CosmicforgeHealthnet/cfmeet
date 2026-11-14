@@ -55,6 +55,13 @@ pub enum HubEvent {
         state: Arc<str>,
         last_seen_at: Option<Arc<str>>,
     },
+    /// A committed event of a conversation this inbox-enabled connection's principal
+    /// belongs to (or was just removed from) but is not subscribed to. Identifiers only.
+    Inbox {
+        conversation_id: Uuid,
+        event_sequence: i64,
+        event_type: Arc<str>,
+    },
     /// Messages may have been lost: re-check every subscription's head.
     Resync,
 }
@@ -85,6 +92,7 @@ struct Entry {
     device_id: Uuid,
     session_id: Uuid,
     subscriptions: HashSet<Uuid>,
+    inbox: bool,
 }
 
 #[derive(Default)]
@@ -93,6 +101,8 @@ struct State {
     by_conversation: HashMap<Uuid, HashSet<u64>>,
     by_device: HashMap<Uuid, HashSet<u64>>,
     by_session: HashMap<Uuid, HashSet<u64>>,
+    /// Inbox-enabled connections by principal id.
+    by_inbox: HashMap<Uuid, HashSet<u64>>,
     per_tenant: HashMap<Uuid, usize>,
     per_principal: HashMap<(Uuid, Uuid), usize>,
     reserved: usize,
@@ -200,6 +210,7 @@ impl Hub {
                 device_id: a.device_id,
                 session_id: a.session_id,
                 subscriptions: HashSet::new(),
+                inbox: false,
             },
         );
         *s.per_tenant.entry(a.tenant_id).or_default() += 1;
@@ -258,6 +269,7 @@ impl Hub {
         for (map, key) in [
             (&mut st.by_device, e.device_id),
             (&mut st.by_session, e.session_id),
+            (&mut st.by_inbox, e.principal_key.1),
         ] {
             if let Some(set) = map.get_mut(&key) {
                 set.remove(&id);
@@ -298,6 +310,33 @@ impl Hub {
             .or_default()
             .insert(id);
         true
+    }
+
+    /// Routes inbox signals of the connection's principal to `id` (idempotent).
+    pub fn enable_inbox(&self, id: u64) -> bool {
+        let mut s = self.state.write().unwrap();
+        let Some(e) = s.conns.get_mut(&id) else {
+            return false;
+        };
+        e.inbox = true;
+        let principal = e.principal_key.1;
+        s.by_inbox.entry(principal).or_default().insert(id);
+        true
+    }
+
+    /// Inbox-enabled connections of `principal` that are not subscribed to `conversation`.
+    fn inbox_targets<'a>(
+        s: &'a State,
+        principal: &Uuid,
+        conversation: &'a Uuid,
+    ) -> impl Iterator<Item = &'a Entry> + 'a {
+        let subscribed = s.by_conversation.get(conversation);
+        s.by_inbox
+            .get(principal)
+            .into_iter()
+            .flatten()
+            .filter(move |id| !subscribed.is_some_and(|set| set.contains(id)))
+            .filter_map(|id| s.conns.get(id))
     }
 
     pub fn unsubscribe(&self, id: u64, conversation: Uuid) {
@@ -361,6 +400,7 @@ impl Hub {
                 event_sequence,
                 event_type,
                 subject_principal_id,
+                recipients,
             } => {
                 let s = self.state.read().unwrap();
                 let event_type: Arc<str> = Arc::from(event_type.as_str());
@@ -373,6 +413,18 @@ impl Hub {
                                 event_sequence: *event_sequence,
                                 event_type: event_type.clone(),
                                 subject_principal_id: *subject_principal_id,
+                            },
+                        );
+                    }
+                }
+                for principal in recipients {
+                    for e in Self::inbox_targets(&s, principal, conversation_id) {
+                        self.offer(
+                            e,
+                            HubEvent::Inbox {
+                                conversation_id: *conversation_id,
+                                event_sequence: *event_sequence,
+                                event_type: event_type.clone(),
                             },
                         );
                     }
@@ -417,6 +469,16 @@ impl Hub {
                             },
                         );
                     }
+                }
+                // The principal's other inbox views follow its unread count too.
+                for e in Self::inbox_targets(&s, principal_id, conversation_id) {
+                    self.offer(
+                        e,
+                        HubEvent::ReadCursor {
+                            conversation_id: *conversation_id,
+                            read_sequence: *read_sequence,
+                        },
+                    );
                 }
             }
             BrokerMessage::Typing {
@@ -589,6 +651,7 @@ mod tests {
                 event_sequence: i,
                 event_type: "messaging.message.created".into(),
                 subject_principal_id: None,
+                recipients: vec![],
             })));
         }
         assert!(h.lagging.load(Ordering::SeqCst));
@@ -603,7 +666,65 @@ mod tests {
             event_sequence: 11,
             event_type: "x".into(),
             subject_principal_id: None,
+            recipients: vec![],
         })));
         assert_eq!(other.rx.len(), 0);
+    }
+
+    #[test]
+    fn inbox_signals_reach_members_that_are_not_subscribed_only() {
+        let hub = Hub::new(RealtimeSettings::default());
+        let (alice, bob, carol) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let tenant = Uuid::new_v4();
+        let a = hub.register(adm(tenant, alice, Uuid::new_v4())).unwrap();
+        let mut b = hub.register(adm(tenant, bob, Uuid::new_v4())).unwrap();
+        let mut c = hub.register(adm(tenant, carol, Uuid::new_v4())).unwrap();
+        let conv = Uuid::new_v4();
+        // Alice is subscribed (gets the durable event, not an inbox duplicate); Bob only
+        // enabled the inbox; Carol enabled the inbox but is not a recipient.
+        assert!(hub.subscribe(a.id, conv));
+        assert!(hub.enable_inbox(a.id));
+        assert!(hub.enable_inbox(b.id));
+        assert!(hub.enable_inbox(c.id));
+        hub.route(BrokerDelivery::Message(Arc::new(BrokerMessage::Durable {
+            conversation_id: conv,
+            event_sequence: 3,
+            event_type: "messaging.message.created".into(),
+            subject_principal_id: None,
+            recipients: vec![alice, bob],
+        })));
+        assert_eq!(a.rx.len(), 1);
+        match b.rx.try_recv().unwrap() {
+            HubEvent::Inbox {
+                conversation_id,
+                event_sequence,
+                ..
+            } => assert_eq!((conversation_id, event_sequence), (conv, 3)),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(c.rx.try_recv().is_err(), "no signal for a non-member");
+        // Bob's own read cursor reaches his inbox view; Carol's does not reach Bob.
+        hub.route(BrokerDelivery::Message(Arc::new(
+            BrokerMessage::ReadCursor {
+                conversation_id: conv,
+                principal_id: bob,
+                read_sequence: 3,
+            },
+        )));
+        assert!(matches!(
+            b.rx.try_recv().unwrap(),
+            HubEvent::ReadCursor { .. }
+        ));
+        assert!(c.rx.try_recv().is_err());
+        // After unregistering, nothing is routed to the closed connection.
+        hub.unregister(b.id);
+        hub.route(BrokerDelivery::Message(Arc::new(BrokerMessage::Durable {
+            conversation_id: conv,
+            event_sequence: 4,
+            event_type: "messaging.message.created".into(),
+            subject_principal_id: None,
+            recipients: vec![bob],
+        })));
+        assert!(b.rx.try_recv().is_err());
     }
 }

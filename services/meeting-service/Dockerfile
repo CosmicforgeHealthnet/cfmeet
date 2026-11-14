@@ -28,7 +28,7 @@ COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
@@ -52,6 +52,7 @@ COPY --from=builder /app/services/meeting-service/target/release/profile-notific
 COPY --from=builder /app/services/meeting-service/target/release/account-hardening-migration ./account-hardening-migration
 COPY --from=builder /app/services/meeting-service/target/release/organization-integration-migration ./organization-integration-migration
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
+COPY --from=builder /app/services/meeting-service/target/release/lifecycle-delivery-migration ./lifecycle-delivery-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
 

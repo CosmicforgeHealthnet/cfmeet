@@ -3,7 +3,9 @@
 //! Organization and team member lists carry only ids from the Organizations Service. The
 //! Meeting Service owns the accounts, so it joins the display identity here: the
 //! presentation name (chosen display name, otherwise the username) and the username.
-//! Never an email address, a status or any other account attribute.
+//! The account email is looked up too, but callers disclose it only where the
+//! organization member-directory policy authorizes it (OWNER / ADMIN, platform
+//! administrators); [`enrich_members`] never adds it. No status or other attribute.
 //!
 //! Enrichment is best effort: a database failure leaves the names `null` (logged) and
 //! never fails a request whose authoritative answer already succeeded (for example a
@@ -25,6 +27,8 @@ const CHUNK: usize = 500;
 pub struct DisplayIdentity {
     pub display_name: String,
     pub username: String,
+    /// Disclosed only where authorized (see the module documentation).
+    pub email: String,
 }
 
 /// The display identity of every known account in `ids` (unknown ids are absent).
@@ -52,6 +56,7 @@ pub async fn lookup<C: ConnectionTrait>(
                         DisplayIdentity {
                             display_name,
                             username: u.username,
+                            email: u.email,
                         },
                     );
                 }

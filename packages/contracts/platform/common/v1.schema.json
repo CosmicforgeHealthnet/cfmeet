@@ -156,6 +156,7 @@
         "organization.administer",
         "organization.migrate",
         "platform-identity.provision-first-party",
+        "platform-identity.bind-organization-services",
         "calling-request.act-for-organization",
         "meeting-organization-events.apply"
       ]

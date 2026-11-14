@@ -284,8 +284,12 @@ pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
 /// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity.
 pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] =
     &["platform-identity.read", "platform-identity.delegate"];
-/// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes.
-pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &["platform-identity.provision-first-party"];
+/// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes
+/// and (Amendment A2) the Calling / Messaging bindings inside them.
+pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &[
+    "platform-identity.provision-first-party",
+    "platform-identity.bind-organization-services",
+];
 pub const NUMBERING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
@@ -293,6 +297,11 @@ pub const NUMBERING_PERMISSIONS: &[&str] = &[
 ];
 
 pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
+    service_auth_with(ORGANIZATIONS_PERMISSIONS)
+}
+
+/// [`service_auth`] with a different grant for the Organizations identity.
+pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRuntime, Peers) {
     let env = RuntimeEnvironment::Test;
     let clock = cf_service_auth::ManualClock::new(SERVICE_T0);
     let shared: cf_service_auth::SharedClock = Arc::new(clock.clone());
@@ -342,7 +351,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
                 (
                     cf_service_auth::services::ORGANIZATIONS,
                     vec![organizations.public_jwk()],
-                    ORGANIZATIONS_PERMISSIONS,
+                    organizations_permissions,
                 ),
                 (
                     cf_service_auth::services::OPERATOR_CONSOLE,
@@ -418,8 +427,26 @@ impl Harness {
         Some(Self::on(Arc::new(db), ring))
     }
 
+    /// A harness whose Organizations identity holds only `permissions`.
+    pub async fn with_organizations_permissions(permissions: &[&str]) -> Option<Self> {
+        let db = TestDb::new().await?;
+        Some(Self::on_with(
+            Arc::new(db),
+            keyring(TEST_PEPPER),
+            service_auth_with(permissions),
+        ))
+    }
+
     /// Another deployment over the same database (e.g. a different keyring).
     pub fn on(db: Arc<TestDb>, ring: VerifierKeyring) -> Self {
+        Self::on_with(db, ring, service_auth())
+    }
+
+    fn on_with(
+        db: Arc<TestDb>,
+        ring: VerifierKeyring,
+        (service_auth, peers): (ServiceAuthRuntime, Peers),
+    ) -> Self {
         let clock = ManualClock::new(t0());
         let ring = Arc::new(ring);
         let registry = Arc::new(ScopeRegistry::standard());
@@ -432,7 +459,6 @@ impl Harness {
         );
         let authenticator =
             CredentialAuthenticator::new(db.conn.clone(), ring, registry, Arc::new(clock.clone()));
-        let (service_auth, peers) = service_auth();
         let state = AppState::new(platform, authenticator, service_auth);
         let app = http::app(state.clone());
         Self {

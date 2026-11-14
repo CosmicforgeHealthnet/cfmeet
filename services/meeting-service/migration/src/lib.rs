@@ -34,6 +34,7 @@ mod m20261108_000001_account_profile;
 mod m20261108_000002_meeting_notifications;
 mod m20261109_000001_account_hardening;
 mod m20261110_000001_organization_integration;
+mod m20261112_000001_email_delivery_and_presence;
 
 pub mod phase2_backfill;
 
@@ -369,6 +370,31 @@ pub async fn organization_integration_ready<C: sea_orm_migration::sea_orm::Conne
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<OrganizationIntegrationMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Final production completion: durable email delivery (Resend / SMTP provider ledger) and
+/// conference presence (empty instant-conference auto-end). A SEPARATE additive history so
+/// the previously deployed image still starts after it is applied (rollback safety).
+pub struct LifecycleDeliveryMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for LifecycleDeliveryMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261112_000001_email_delivery_and_presence::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("lifecycle_delivery_migrations").into_iden()
+    }
+}
+
+/// The lifecycle-delivery history satisfies the DATA-011 target rule.
+pub async fn lifecycle_delivery_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<LifecycleDeliveryMigrator, _>(db)
         .await?
         .is_empty())
 }

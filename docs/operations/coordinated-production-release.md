@@ -52,21 +52,35 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 
 | Operation | Changes production | What it does |
 |---|---|---|
-| `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, revision label, limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |
+| `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, image revision label (`revision`; the container's own, possibly stale, label is `containerLabelRevision`), limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |
 | `backup` | files only | `pg_dump -Fc` of every `cfmeet_*` database in `cfmeet-core-db` and of the Meeting database; sha256; `pg_restore --list` must list every migration history; isolated restore test (network-less throwaway PostgreSQL, histories compared row for row) of Meeting, Platform Access and Organizations (once it exists). Manifest: `/opt/cfmeet-core/backups/<run>/manifest.json`. Disk gate: 2 × database size + 5 GiB free. |
 | `provision` | yes (idempotent, additive) | For the new services: database + `<svc>_migrator` / `<svc>` roles (the `cfmeet-core-db.yml` SQL), Ed25519 service keys (`/opt/cfmeet-core/secrets/<svc>-service-auth.pem`), SMS Gateway content/fingerprint keys, empty receiver trust bundles, private TLS routes 8450–8455 (`nginx -t`, reload, restore on failure). |
 | `release` | yes | See below. |
 | `verify` | no | Every container runs the manifest image of the SHA with revision label = SHA and is healthy; migration histories present; provider-dependent features off; public smoke (`/api-docs/swagger-config.json`, CORS preflight from `https://cfmeet.com`, `/internal/*` not public); Organizations outbox counts by state (`DEAD` must be 0); the existing production regression. |
+| `certify` | no | Read-only live-production certification of the deployed topology, whatever revisions it runs (see below). `verify` is unchanged and stays strictly same-SHA. |
 | `rollback` | yes | Restores the containers of the **latest** journal entry (a release or one activation), newest component first; new services are stopped and renamed `…-rolled-back-…`. Migrations and databases are kept (every migration is additive and the previous images start on the migrated schema). Refuses `org-cutover-authoritative`. Repeat to unwind further. |
 | `activate-provisioning` | yes | Grant `platform-identity.provision-first-party` (Platform Access ← Organizations); `ORGANIZATIONS_PROVISIONING_ENABLED=true`. |
+| `activate-organization-bindings` | yes | ADR 0058 A2 (after `activate-provisioning`): grant `platform-identity.bind-organization-services` (Platform Access ← Organizations); `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true`. Refuses unless Organizations migration `m20261113_000005_automatic_service_bindings` is applied; fails (and restores) if any provisioning workflow is FAILED afterwards. Required by `activate-enterprise-calling`. |
 | `activate-org-events` | yes | Pre: Meeting has `organization_integration_migrations`, private route 8448. Grant `meeting-organization-events.apply` (Meeting ← Organizations) and `ORGANIZATION_EVENTS_ENABLED=true` on Meeting, then `ORGANIZATIONS_EVENT_DESTINATIONS=cfmeet.meeting-service` + `CF_MEETING_SERVICE_BASE_URL` on Organizations. Post: no `DEAD` events. |
 | `org-cutover-export` | file only | Runbook §1 inventory (counts only, read-only transaction) and §2 export with the Meeting image's `export-organizations`. Refuses rows the import would refuse; ownerless organizations need `confirm=ownerless-accepted`. Export counts must equal the inventory. |
 | `org-cutover-import` | Organizations data | `confirm` must contain `offsite-backup-verified` (owner gate 1) and a backup ≤ 24 h with restore tests of Meeting **and** Organizations must exist. Import (`organizations-import`, export streamed on stdin), zero conflicts, reconciliation with zero mismatches and the export checksum, a repeated import fully unchanged; the export file is then deleted. |
 | `org-cutover-shadow` | yes | Grant `organization.read/write/act-for-user/administer` (Organizations ← Meeting); `ORGANIZATIONS_AUTHORITY_MODE=shadow` + `CF_ORGANIZATIONS_BASE_URL` on Meeting. Reversible with `rollback`. |
 | `org-cutover-authoritative` | yes, **irreversible** | Owner gates 1 and 6: `confirm=offsite-backup-verified,quiesced` after the legacy write routes are blocked at the ingress (runbook §6.2, manual) and the 7-day zero-mismatch criterion (§5) is accepted. Final export → import → reconciliation, then `ORGANIZATIONS_AUTHORITY_MODE=authoritative`. Never rolled back (runbook §7). |
-| `activate-enterprise-calling` | yes | Requires authoritative. Grants `platform-principal.ensure` (Platform Access), `calling-request.act-for-organization` (Calling), `messaging-application.delegate` (Messaging), all ← Meeting; `CALLING_ORGANIZATION_FORWARDING_ENABLED=true`; `ORGANIZATION_CALLING_SCOPE=organization` (+ Calling/Messaging URLs if absent) on Meeting. The per-organization service bindings (runbook §4.4) remain operator API steps. |
+| `org-cutover-first-activation` | yes, **irreversible** | Empty-dataset first activation (ADR 0059 + Amendment 1): `confirm=empty-dataset`. **No backup prerequisite** (owner decision 2026-11-13; no off-host record, local backup, drill or age key is checked; the run records `backupGate.required=false` and never claims a verified backup). Refuses unless no cutover step ran, the Meeting Service is `legacy`, and every organization dataset (Meeting, Organizations, organization references in every CF Meet database) is empty. Then empty export → import / reconciliation (`backup_gate=False`) → inventory again → shadow grants + `authoritative` in one step → startup-log and quiescence check (returns to `legacy` automatically while Organizations is still empty). Never rolled back. |
+| `activate-enterprise-calling` | yes | Requires authoritative. Grants `platform-principal.ensure` (Platform Access), `calling-request.act-for-organization` (Calling), `messaging-application.delegate` (Messaging), all ← Meeting; `CALLING_ORGANIZATION_FORWARDING_ENABLED=true`; `ORGANIZATION_CALLING_SCOPE=organization` (+ Calling/Messaging URLs if absent) on Meeting. Requires `activate-organization-bindings`: per-organization service bindings are provisioned automatically (ADR 0058 A2). |
 | `activate-developer-platform` | yes | Grants (checklist §4): Platform Access ← API Gateway `platform-credential.authenticate`; Platform Access ← Developer Platform `platform-identity.read`, `platform-identity.delegate`; Developer Platform ← API Gateway `developer-request.forward`, `developer-entitlement.read`, `developer-usage.record`. `DEVELOPER_PLATFORM_GATEWAY_API_ENABLED=true`; gateway `API_GATEWAY_PUBLIC_ROUTING_ENABLED=true` + `CF_DEVELOPER_PLATFORM_BASE_URL`. Still not public. |
 | `activate-gateway-routing` | yes (public) | Requires the previous step. A loopback-only relay (`cfmeet-gateway-ingress`, 127.0.0.1:18110 → `cfmeet-api-gateway:8099`, same confinement as the storage relay) and `/etc/nginx/snippets/cfmeet-api-gateway.conf`, included after the Calling routes, routing **only** the Developer Platform families (`/v1/developer-platform`, `/v1/organizations`, `/v1/projects`, `/v1/environments`, `/v1/scopes`, `/v1/invitations`, `/v1/production-access-requests`, `/v1/commercial-plans`). Refuses if any existing location already serves one of them. Meeting, Calling and Messaging keep their direct routes; `/internal`, operator and provider-callback paths never reach the gateway. `nginx -t`, reload, then: gateway answers 401 unauthenticated, CORS for `https://cfmeet.com`, public smoke, regression; any failure removes the include, snippet and relay. `rollback` undoes it the same way. |
+| `activate-developer-console` | yes | Requires `activate-developer-platform`. Grant `user-session.verify` (Meeting ← Developer Platform); Meeting `DEVELOPER_SESSION_BRIDGE_ENABLED=true`; Developer Platform `CF_MEETING_SERVICE_BASE_URL`. Developer Console (DEVELOPER_SESSION) requests stop being refused; the bridge fails closed (revocation store required; guests never authenticate). |
+| `activate-developer-webhooks` | yes | Requires the console step. Refuses unless Calling holds **no** webhook subscriptions or open deliveries and no Calling→DP migration was ever recorded (otherwise: phase-06 webhook migration runbook). Generates the 32-byte sealing key ring (`/opt/cfmeet-core/secrets/developer-platform-webhook-secret.key`, 0400, uid 10001) and mounts it read-only into the Developer Platform API and worker; `DEVELOPER_PLATFORM_WEBHOOKS_ENABLED=true`, `…_DELIVERY_MODE=active`. Attaches **only the worker** to `cfmeet-webhook-egress` (non-internal bridge, inter-container traffic off; `cfmeet-core-private` is `--internal`); the worker's STRICT endpoint policy allows https only and refuses private, loopback, link-local and metadata addresses at connect time. Calling `CALLING_WEBHOOK_AUTHORITY=retired`, `CALLING_WEBHOOK_DELIVERY_ENABLED=false`; Calling, Messaging and Meeting publish to the central ingestion (`…_PUBLIC_EVENTS_DESTINATION=developer-platform`, grants `developer-event.publish`). `SAFE_DEFAULTS` accept `active` only once this step is recorded; auto-approval stays refused. |
+| `activate-gateway-families` | yes (public) | Requires gateway routing and webhooks. Grants `calling-request.forward` (Calling ← gateway) and `messaging-request.forward` (Messaging ← gateway); gateway `CF_CALLING_BASE_URL`, `CF_MESSAGING_BASE_URL`, `API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED=true`, `API_GATEWAY_DISABLED_DOMAINS=numbering,sms,privacy-relay`. Extends the gateway snippet with `/v1/conversations`, `/v1/messaging`, `/v1/abuse-reports`, `/v1/blocks`, `/v1/limits`, `/v1/usage`, `/v1/webhooks`, `/v1/webhook-deliveries` (refuses existing locations). Calling's `/v1/calls`, `/v1/calling`, `/v1/enterprise` and Messaging's `/v1/realtime` keep their direct routes. Post-checks: every family refuses anonymous and forged credentials (401/403), CORS only for `https://cfmeet.com`, `/v1/numbers`, `/v1/sms`, `/v1/privacy-relay` stay unrouted, internal paths private; any failure restores the snippet and the containers. `rollback` removes the families from the edge first. |
+| `activate-gateway-docs` | yes (public, edge only) | Requires gateway routing. Adds the API Gateway's public documentation to the gateway snippet: exact `location = /discovery`, `/openapi.json`, `/docs` and `location ^~ /openapi/` (the per-domain documents the reference and the catalogue link to), GET/OPTIONS only (`limit_except`). No container, flag or grant changes; refuses to shadow an existing location. Post-checks: discovery served by `cfmeet.api-gateway` with numbering / sms / privacy-relay reported `enabled: false`, aggregate OpenAPI 3.x without `/internal` paths, the Swagger UI reference, per-domain documents, CORS on `GET /discovery` for both web origins and never a foreign one, POST refused, the gateway's `/ready` and `/health` still not public, existing families and public smoke unchanged; any failure restores the previous snippet. `rollback` removes only the documentation locations. For the Developer Console Docs page. |
+| `activate-usage-export` | yes | Requires the webhooks step (its `developer-event.publish` grants and Developer Platform targets). `CFMEET_USAGE_EXPORT_ENABLED=true` on Calling, Messaging and the Meeting Service: billing-neutral usage facts (safe refs only; platform application environments only) to the unified ledger. Post: the ledger's acknowledged usage streams are reported. Customer `/v1/usage` and `/v1/limits` stay with Calling. |
+| `developer-acceptance` | acceptance data only | Requires the three developer/gateway activations. Public API only (`developer_acceptance.py`): two fresh acceptance accounts, each with a developer organization, project, SANDBOX environment, granted scopes and a credential; credential calls to Calling, Messaging and central webhooks through the gateway; scope denial; forged/revoked credentials refused; tenant B gets 404 for tenant A; a console webhook receives a real `credential.expiring_soon` delivery (SUCCEEDED, attempt recorded) at `ACCEPTANCE_WEBHOOK_RECEIVER`. Cleanup always runs (webhook deleted, credentials revoked, projects archived, organizations closed). |
+| `diagnose` | no | Read-only (no CI wait, any SHA like `inspect`). The Meeting Service's mail configuration (non-secret values; presence for secrets), mail failure signatures in its logs (counts and first/last timestamps only: `535`, `BadCredentials`, dropped jobs, provider outcomes), the legacy Redis `email:queue` length, the email ledger (status / category / error-class counts, provider events) and the conference lifecycle (LIVE conferences by kind, ENDING, LIVE instant conferences without an active session for more than 10 minutes, LIVE conferences of archived spaces, the reported meeting codes). |
+| `activate-resend-email` | yes | Requires the durable email ledger (`lifecycle-delivery-migration`). Installs `CFMEET_RESEND_API_KEY` (and `CFMEET_RESEND_WEBHOOK_SECRET`) from the production environment into 0400 files, recreates **only** the Meeting Service with `EMAIL_PROVIDER=resend`, `RESEND_API_KEY_FILE`, sender `CF Meet <no-reply@cfmeet.com>`; post-check: a controlled acceptance email to `vars.CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` (default Resend's test inbox) must be ACCEPTED by Resend (and DELIVERED when the webhook secret is set). Any failure restores the previous container (SMTP). Owner procedure: [resend-email-owner-handoff.md](resend-email-owner-handoff.md). |
+| `email-acceptance` | acceptance data only | Requires `activate-resend-email`. The acceptance email again; with `confirm=otp` also the public OTP journey (register a labelled acceptance account → Resend accepts the verification email → wrong / right / reused code → sign in → profile → deactivate). Prints statuses only. |
+| `activate-production-access-review` | yes | Requires `activate-developer-console` and the owner's `vars.CFMEET_PRODUCTION_ACCESS_REVIEWERS` (`github-<login>=<CF Meet user id>`, …). Creates the `cfmeet.operator-console` Ed25519 identity (secret store), grants it `developer-platform.administer` on the Developer Platform, sets `DEVELOPER_PLATFORM_PRODUCTION_REVIEWERS` and only then `…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=true` (API + worker). Automatic approval stays refused. Post: the review tool lists the queue. |
+| `developer-access-review` | Developer Platform data | One operator command (`confirm` = `list` / `get` / `review` / `approve` / `reject`, `request_id`, `reason_code` for reject) by the dispatching GitHub account, which must be a named reviewer; run with the Developer Platform image's `developer-platform-operator` (signed as `cfmeet.operator-console`, `x-cf-operator` = `github-<login>`, self-approval refused by the Developer Platform). Approve / reject email the applicant through the Meeting Service's unified email delivery. |
 | `activate-first-party-features` | yes | No prerequisites. Meeting: `FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_QUALITY_TELEMETRY_ENABLED` = `true`, and `NOTIFICATIONS_EMAIL_ENABLED=true` **only** when the Meeting Service already carries SMTP host + credentials. Messaging: `MESSAGING_SESSION_DEVICES_ENABLED=true` (MANAGED realtime; refuses if PRIVATE_E2EE devices are on). The healthcare profile is never switched (compliance decision). Reversible with `rollback`. |
 
 Activation order is enforced: provisioning → org events → export → import → shadow →
@@ -77,6 +91,15 @@ changed flags and/or a **new** trust-bundle file version); receivers get their g
 callers switch on. A failed health check restores every container the step changed.
 
 ### Release
+
+**Release scope (final completion).** The runner (`release_scope.py`, full history) compares
+every image's build inputs (Dockerfile `COPY` sources) between the latest completed release
+and the release SHA. On the VPS, a service whose image inputs did not change is **kept**:
+it must run exactly the image recorded for the previous release (re-checked), it is not
+migrated or swapped, and the journal entry records it under `kept`. Only changed services
+are migrated and replaced (a Meeting-only change no longer restarts all 13 containers).
+`verify`, activations (`require_release`) and `rollback` follow the kept images. Without a
+previous release, or a scope document that does not match, the release is a full release.
 
 1. Workflow gates: `refs/heads/main`; `release_sha` = the dispatched main head; every push
    workflow of that SHA green (a required service CI that did not run because its paths did
@@ -132,7 +155,8 @@ run() { gh workflow run cfmeet-coordinated-release.yml --ref main -f operation="
 run inspect                       # read-only; check the resource-gate preview and flags
 run backup                        # optional dry run of the backup and restore tests
 run release                       # gates → backup → provision → ordered release → verify
-run verify                        # any time later
+run verify                        # any time later (only a SHA with a completed release)
+run certify                       # read-only live certification of what is actually deployed
 
 # Activation steps: one owner approval each, in this order, re-running verify between steps.
 run activate-provisioning
@@ -143,6 +167,8 @@ run org-cutover-import  offsite-backup-verified
 run org-cutover-shadow            # then ≥ 7 days of shadow evidence (runbook §5)
 run backup
 run org-cutover-authoritative offsite-backup-verified,quiesced   # after the §6.2 ingress block
+# Empty dataset (ADR 0059 + Amendment 1), instead of export/backup/import/shadow/authoritative above:
+run org-cutover-first-activation empty-dataset   # no backup prerequisite (owner decision 2026-11-13)
 run activate-enterprise-calling
 run activate-developer-platform
 run activate-gateway-routing
@@ -152,9 +178,60 @@ run rollback                      # restores the latest release or activation
 gh run watch                      # each run uploads its log as an artifact
 ```
 
-Activation and verify runs act on the dispatched main head, which must be the released SHA:
-if `main` moved, release the new head first. `rollback` (and `inspect`) may be dispatched
+`verify` acts on the dispatched main head, which must be the released SHA. Activations
+act on the deployed release: when the head has no completed release of its own, the workflow
+proves on the runner (`activation_base.py`) that no build input of any of the 13 images
+(Dockerfile `COPY` sources, as `certify` defines them) changed between the latest completed
+release and the head, and the VPS still checks that every container runs exactly that
+release's recorded image. A head that changed any build input must be released first. `rollback` (and `inspect`) may be dispatched
 with any SHA; rollback always restores the latest recorded entry.
+
+## Live-production certification (`certify`)
+
+`verify` certifies one coordinated release: every container must run the image of exactly
+the dispatched SHA, and the journal must record a completed release of it. After a release,
+`main` usually advances (docs, tooling), and other operations can redeploy single services,
+so `verify` on the latest head correctly refuses: *No completed coordinated release of this
+SHA is recorded*. `certify` answers the different question "is what is deployed right now
+healthy, authentic and current?" without weakening `verify`.
+
+It changes nothing: no container lifecycle or configuration change, no file written on the
+host (credentials reach `psql` only through the docker CLI's environment), read-only SQL
+sessions, no image pull (`--pull never`; ephemeral `--rm --read-only` psql containers only;
+HTTP probes run the host's `curl` inside each service's network namespace via `nsenter -n`,
+with names pinned to Docker's own addresses so TLS is verified), no journal entry, no
+confirmation accepted. It takes the same production lock as every
+production operation, so it never runs during a release.
+
+Per service (all 13 containers, `live_certification.py` on the VPS and
+`certification_report.py` on the runner):
+
+| Check | Passes when |
+|---|---|
+| container | running, not restarting, not OOM-killed; restart count unchanged during the run |
+| image | the image's own `org.opencontainers.image.revision` is a SHA, the image is the local `ghcr.io/cosmicforgehealthnet/cfmeet-<svc>:<revision>` tag, source label is this repository |
+| revision on main | that revision is an ancestor of the dispatched main head |
+| source equals main | none of the image's build inputs (Dockerfile `COPY` sources) changed since that revision |
+| readiness | `/ready` or `/health` answers 200 from inside the service's network namespace |
+| database | `psql` with the service's own `DATABASE_URL`, from its own namespace, read-only session; database matches the catalogue |
+| migrations | history tables present and every migration defined at the running revision applied |
+| authentication | a credential-free GET is rejected by the auth layer (401; the gateway answers 404 while public routing is off) |
+| service auth | signing key mounted; trust bundle is the production bundle of this receiver; every grant of a completed activation is present with the issuer's current public key |
+| service-to-service | every configured `CF_*_BASE_URL` upstream answers its readiness route from the caller's namespace (private TLS verified) |
+
+Platform: provider-dependent features at safe defaults, external integrations reported as
+enabled/disabled, Organizations outbox without `DEAD` events, the VPS public smoke. From the
+runner (`public_certification.py`, unauthenticated GET/OPTIONS only): `/health`, Swagger and
+every OpenAPI document, CORS preflight, TLS certificate ≥ 14 days, every public GET route of
+`infra/api-gateway/route-manifest.json` (401/403 or unrouted; activated gateway families must
+route; any 5xx or unauthenticated 2xx fails), and every internal/operator/provider-callback GET
+route of the source contracts must not answer on the public host.
+
+Verdict: `CERTIFIED_READ_ONLY` only when every applicable check passes; otherwise
+`NOT_CERTIFIED` (a check failed) or `INCOMPLETE` (collection did not finish). The run fails
+unless certified and uploads `certification.md` / `certification.json`. Authenticated
+end-to-end journeys are outside its scope (they write sessions and data) and are always listed
+as an outstanding requirement for full production readiness.
 
 ## Records on the VPS
 
@@ -172,10 +249,17 @@ the release they protect is accepted.
 
 ## Not automated (owner decisions)
 
-- Off-host, encrypted backup copy and its restore drill (backup-and-restore.md): the release
-  backup is a same-host 0600 copy; the cutover steps require the owner's explicit
-  `offsite-backup-verified` confirmation.
+- The owner's age key pair for the off-host copy (backup-and-restore.md). Once the public
+  recipient (`vars.CFMEET_BACKUP_AGE_RECIPIENTS`) and the drill identity
+  (`secrets.CFMEET_BACKUP_AGE_IDENTITY`) exist, `cfmeet-offsite-backup.yml` encrypts, stores
+  off-host, restore-drills on a separate runner and records the result on the VPS daily;
+  The standard `org-cutover-import` requires that record **and** the owner's `offsite-backup-verified`;
+  the empty-dataset `org-cutover-first-activation` does not (ADR 0059 Amendment 1).
 - The shadow evidence (§5) and the quiesce block of the legacy organization write routes (§6.2).
 - Per-organization service accounts, credentials and bindings for Enterprise Calling (§4.4).
-- Provider-dependent features (SMS, PSTN, push, email without credentials, PRIVATE_E2EE).
+- Provider-dependent features (SMS, PSTN, push, email without credentials, PRIVATE_E2EE). Their CI
+  (`telephony.yml`, `telephony-sip-certification.yml`, `sms-gateway.yml`, `numbering.yml`,
+  `privacy-relay.yml`, `communications-e2e.yml`) still runs on every push but is **advisory** in the
+  release gate: it is reported as a warning and never blocks a first-party release (owner decision
+  2026-11-13). The same holds for `backup-restore-drill.yml` and `cfmeet-offsite-backup.yml`.
 - Staging activation (runbook §9) before each production activation step.

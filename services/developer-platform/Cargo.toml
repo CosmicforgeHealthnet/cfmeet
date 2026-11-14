@@ -23,6 +23,10 @@ path = "src/bin/developer-platform-worker.rs"
 
 # DATA-017: report-only reconciliation of the foreign references this service holds.
 [[bin]]
+name = "developer-platform-operator"
+path = "src/bin/developer-platform-operator.rs"
+
+[[bin]]
 name = "developer-platform-reconcile-references"
 path = "src/bin/developer-platform-reconcile-references.rs"
 

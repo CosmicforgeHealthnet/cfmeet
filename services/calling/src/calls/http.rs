@@ -73,7 +73,9 @@ async fn get_call(
         .calls
         .call_detail(CallScope::of_platform(&ctx), call_id)
         .await?;
-    Ok(no_store(CallView::from(&detail)))
+    let mut view = CallView::from(&detail);
+    view.can_view_recordings = ctx.has_scope(names::ENTERPRISE_RECORDING_READ);
+    Ok(no_store(view))
 }
 
 async fn list_calls(

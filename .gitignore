@@ -68,3 +68,6 @@ tmp/
 
 # Part VI local bootstrap output (keys, bundles, env files): never commit.
 infra/api-gateway/local/.generated/
+
+# Local Redis snapshots (test data; never commit or ship)
+*.rdb

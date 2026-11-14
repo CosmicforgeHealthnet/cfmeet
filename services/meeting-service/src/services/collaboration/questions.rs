@@ -1,8 +1,9 @@
 //! QuestionService — Q&A, separate from chat (Part F §49–§52).
 //!
-//! States: `OPEN → ANSWERED`, `OPEN|ANSWERED → DISMISSED`, any non-archived →
-//! `ARCHIVED` (HIDDEN is a legacy alias treated like DISMISSED). Pinning is a flag on
-//! OPEN/ANSWERED questions. Upvotes are one row per (question, participant) and the
+//! States: `OPEN → ANSWERED`, `OPEN|ANSWERED → DISMISSED`, `DISMISSED → OPEN|ANSWERED`
+//! (restore: back to ANSWERED when an answer was recorded, else OPEN), and any
+//! non-archived → `ARCHIVED`, which is terminal (HIDDEN is a legacy alias treated like
+//! DISMISSED). Pinning is a flag on OPEN/ANSWERED questions. Upvotes are one row per (question, participant) and the
 //! count is recomputed from the vote rows under the question row lock, so it can never
 //! be forged or double counted.
 //!
@@ -80,7 +81,19 @@ pub fn question_transition_allowed(from: QuestionStatus, to: QuestionStatus) -> 
             | (Open, Archived)
             | (Answered, Archived)
             | (Dismissed, Archived)
+            | (Dismissed, Open)
+            | (Dismissed, Answered)
     )
+}
+
+/// Where a dismissed question returns on restore: ANSWERED when it was answered before it
+/// was dismissed (live or written answer), otherwise OPEN.
+pub fn restore_target(q: &meeting_questions::Model) -> QuestionStatus {
+    if q.answered_at.is_some() || q.answer_text.is_some() {
+        QuestionStatus::Answered
+    } else {
+        QuestionStatus::Open
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -469,7 +482,9 @@ impl QuestionService {
             .await?;
         let permission = match op {
             Moderation::Answer(_) => Permission::QnaAnswer,
-            Moderation::Dismiss | Moderation::Archive => Permission::QnaDismiss,
+            Moderation::Dismiss | Moderation::Archive | Moderation::Restore => {
+                Permission::QnaDismiss
+            }
             Moderation::Pin(_) => Permission::QnaPin,
         };
         c.require(permission, "Your role does not allow moderating Q&A")?;
@@ -485,7 +500,10 @@ impl QuestionService {
                 if status == QuestionStatus::Answered {
                     // Two hosts answering: the first committed answer wins (idempotent).
                     (false, action::QNA_ANSWER, event::QNA_QUESTION_ANSWERED)
-                } else if !question_transition_allowed(status, QuestionStatus::Answered) {
+                } else if status != QuestionStatus::Open
+                    || !question_transition_allowed(status, QuestionStatus::Answered)
+                {
+                    // DISMISSED → ANSWERED exists only as a restore of an earlier answer.
                     return Err(ApiError::domain(
                         ErrorCode::ConferenceStateConflict,
                         "Only open questions can be answered",
@@ -512,6 +530,24 @@ impl QuestionService {
                     am.pinned_at = Set(None);
                     am.pinned_by = Set(None);
                     (true, action::QNA_DISMISS, event::QNA_QUESTION_DISMISSED)
+                }
+            }
+            Moderation::Restore => {
+                let target = restore_target(&q);
+                if status.is_live() {
+                    // Never dismissed, or already restored (repeat / concurrent moderator):
+                    // no transition, no event, no audit.
+                    (false, action::QNA_RESTORE, event::QNA_QUESTION_RESTORED)
+                } else if !question_transition_allowed(status, target) {
+                    return Err(ApiError::domain(
+                        ErrorCode::ConferenceStateConflict,
+                        "Archived questions cannot be restored",
+                    ));
+                } else {
+                    // Body, author, anonymity, answer, votes and history are untouched; the
+                    // pin cleared by the dismissal stays cleared.
+                    am.status = Set(target.as_str().into());
+                    (true, action::QNA_RESTORE, event::QNA_QUESTION_RESTORED)
                 }
             }
             Moderation::Archive => {
@@ -559,7 +595,11 @@ impl QuestionService {
                     action: act,
                     target_type: Some("QUESTION"),
                     target_ref: Some(updated.id.to_string()),
-                    metadata: json!({}),
+                    metadata: if matches!(op, Moderation::Restore) {
+                        json!({ "from": status.as_str(), "to": updated.status })
+                    } else {
+                        json!({})
+                    },
                 },
             )
             .await?;
@@ -627,6 +667,18 @@ impl QuestionService {
             .await
     }
 
+    /// Undo a dismissal: DISMISSED → ANSWERED (answer recorded) or OPEN. Idempotent for
+    /// OPEN/ANSWERED questions (`changed: false`); ARCHIVED is terminal.
+    pub async fn restore(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        question_id: Uuid,
+    ) -> ApiResult<(QuestionView, bool)> {
+        self.moderate(ctx, conference_id, question_id, Moderation::Restore)
+            .await
+    }
+
     pub async fn archive(
         &self,
         ctx: &ActorContext,
@@ -652,6 +704,7 @@ impl QuestionService {
 enum Moderation {
     Answer(Option<String>),
     Dismiss,
+    Restore,
     Archive,
     Pin(bool),
 }
@@ -689,10 +742,43 @@ mod tests {
         assert!(question_transition_allowed(Open, Answered));
         assert!(question_transition_allowed(Answered, Dismissed));
         assert!(question_transition_allowed(Dismissed, Archived));
-        assert!(!question_transition_allowed(Dismissed, Open));
-        assert!(!question_transition_allowed(Archived, Answered));
-        assert!(!question_transition_allowed(Dismissed, Answered));
+        // Restore.
+        assert!(question_transition_allowed(Dismissed, Open));
+        assert!(question_transition_allowed(Dismissed, Answered));
+        // ARCHIVED is terminal; restore never applies to live questions.
+        for to in [Open, Answered, Dismissed] {
+            assert!(!question_transition_allowed(Archived, to), "{to:?}");
+        }
+        assert!(!question_transition_allowed(Answered, Open));
+        assert!(!question_transition_allowed(Open, Open));
         assert_eq!(QuestionStatus::parse("HIDDEN"), Dismissed);
+    }
+
+    #[test]
+    fn restore_target_follows_recorded_answer() {
+        let mut q = model(false);
+        q.status = "DISMISSED".into();
+        assert_eq!(restore_target(&q), QuestionStatus::Open);
+        // Answered live (no text) still restores to ANSWERED.
+        q.answered_at = Some(Utc::now());
+        assert_eq!(restore_target(&q), QuestionStatus::Answered);
+        q.answered_at = None;
+        q.answer_text = Some("At noon".into());
+        assert_eq!(restore_target(&q), QuestionStatus::Answered);
+    }
+
+    #[test]
+    fn restored_event_payload_is_privacy_safe() {
+        let mut q = model(true);
+        q.status = "OPEN".into();
+        q.version = 4;
+        let p = event_payload(&q, Some("Alice"));
+        assert_eq!(p["status"], "OPEN");
+        assert_eq!(p["version"], 4);
+        assert_eq!(p["upvoteCount"], 2);
+        assert_eq!(p["pinned"], false);
+        assert!(p["participantId"].is_null() && p["displayName"].is_null());
+        assert!(!p.to_string().contains(&q.participant_id.to_string()));
     }
 
     #[test]

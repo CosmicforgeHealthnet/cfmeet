@@ -1827,6 +1827,68 @@ pub async fn run_expiry(state: AppState, interval: std::time::Duration) {
 // Application policy
 // ---------------------------------------------------------------------------------------
 
+/// Whether this deployment can run a security profile at all, and why not: PRIVATE_E2EE
+/// needs E2EE devices (`MESSAGING_E2EE_DEVICES_ENABLED`), MANAGED needs the managed key ring.
+/// A policy can allow a profile the deployment cannot run; this makes that visible and
+/// keeps new policy writes from relying on it.
+pub(crate) fn deployment_unavailable(
+    state: &AppState,
+    profile: SecurityProfile,
+) -> Option<&'static str> {
+    match profile {
+        SecurityProfile::PrivateE2ee if !state.devices.enabled => Some("E2EE_DEVICES_DISABLED"),
+        SecurityProfile::Managed if state.managed_keys.is_none() => {
+            Some("MANAGED_ENCRYPTION_NOT_CONFIGURED")
+        }
+        _ => None,
+    }
+}
+
+fn profile_name(profile: SecurityProfile) -> String {
+    serde_json::to_value(profile)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// Per enabled context: the allowed profiles this deployment can actually run.
+fn deployment_view(state: &AppState, effective: &policy::EffectivePolicy) -> Value {
+    let mut profiles = serde_json::Map::new();
+    for profile in [SecurityProfile::PrivateE2ee, SecurityProfile::Managed] {
+        let reason = deployment_unavailable(state, profile);
+        profiles.insert(
+            profile_name(profile),
+            json!({ "available": reason.is_none(), "reason": reason }),
+        );
+    }
+    let mut usable = serde_json::Map::new();
+    let mut unusable = Vec::new();
+    for (class, context) in &effective.contexts {
+        if !context.enabled {
+            continue;
+        }
+        let name = serde_json::to_value(class)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let list: Vec<String> = context
+            .allowed_profiles
+            .iter()
+            .filter(|p| deployment_unavailable(state, **p).is_none())
+            .map(|p| profile_name(*p))
+            .collect();
+        if list.is_empty() {
+            unusable.push(Value::String(name.clone()));
+        }
+        usable.insert(name, json!(list));
+    }
+    json!({
+        "profiles": profiles,
+        "usableProfiles": usable,
+        "contextsWithoutUsableProfile": unusable,
+    })
+}
+
 pub async fn policy_view(state: &AppState, ctx: &TrustedContext) -> Result<Value> {
     let (overrides, version) =
         policy::load_application_policy(&state.db, ctx.scope.environment_id, false).await?;
@@ -1838,6 +1900,7 @@ pub async fn policy_view(state: &AppState, ctx: &TrustedContext) -> Result<Value
         "effective": effective.to_value(),
         "digest": effective.digest(),
         "platformPolicyVersion": policy::PLATFORM_POLICY_VERSION,
+        "deployment": deployment_view(state, &effective),
     }))
 }
 
@@ -1855,6 +1918,31 @@ pub async fn update_policy(
 ) -> Result<Value> {
     let resolved =
         policy::resolve(&update.policy, update.expected_version + 1).map_err(Error::validation)?;
+    // A context this update configures must leave at least one allowed profile that this
+    // deployment can actually run (otherwise no conversation of it could ever be created).
+    for class in update.policy.contexts.keys() {
+        let context = resolved.context(*class);
+        if !context.enabled {
+            continue;
+        }
+        let unavailable: Vec<String> = context
+            .allowed_profiles
+            .iter()
+            .filter_map(|p| {
+                deployment_unavailable(state, *p).map(|r| format!("{} ({r})", profile_name(*p)))
+            })
+            .collect();
+        if unavailable.len() == context.allowed_profiles.len() {
+            let name = serde_json::to_value(class)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            return Err(Error::validation(format!(
+                "{name}: none of the allowed profiles is available in this deployment: {}",
+                unavailable.join(", ")
+            )));
+        }
+    }
     let st = state.clone();
     let ctx2 = ctx.clone();
     let request_ctx = request_context();

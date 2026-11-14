@@ -42,6 +42,7 @@ pub fn broker_message(event: &OutboxEvent) -> Option<BrokerMessage> {
                 .starts_with("messaging.member.")
                 .then(|| uuid_at(&event.payload, "principal_id"))
                 .flatten(),
+            recipients: Vec::new(),
         });
     }
     match event.event_type.as_str() {
@@ -64,6 +65,57 @@ pub fn broker_message(event: &OutboxEvent) -> Option<BrokerMessage> {
     }
 }
 
+/// At most this many member principals travel with one event for inbox routing; a
+/// larger conversation is delivered to subscribed connections only.
+pub const MAX_INBOX_RECIPIENTS: usize = 1024;
+
+/// The inbox recipients of a durable conversation event: the conversation's ACTIVE
+/// member principals now (after the commit), plus the event's subject (a removed member
+/// learns about its own removal). Empty above [`MAX_INBOX_RECIPIENTS`] or on a database
+/// error: inbox signals are a best-effort hint, and clients reconcile by REST.
+async fn inbox_recipients(
+    state: &AppState,
+    conversation_id: Uuid,
+    subject: Option<Uuid>,
+) -> Vec<Uuid> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        principal_id: Uuid,
+    }
+    let rows: Vec<Row> = match crate::db::all(
+        &state.db,
+        "SELECT principal_id FROM messaging_conversation_members \
+          WHERE conversation_id = $1 AND state = 'ACTIVE' LIMIT $2",
+        vec![
+            conversation_id.into(),
+            ((MAX_INBOX_RECIPIENTS + 1) as i64).into(),
+        ],
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(error = %crate::db::summarize_db_error(&e), "inbox recipients unavailable");
+            crate::metrics::inc("messaging_realtime_inbox_recipient_failures_total", &[]);
+            return Vec::new();
+        }
+    };
+    with_subject(rows.into_iter().map(|r| r.principal_id).collect(), subject)
+}
+
+/// Bounds the member list and adds the event's subject once.
+pub fn with_subject(mut members: Vec<Uuid>, subject: Option<Uuid>) -> Vec<Uuid> {
+    if members.len() > MAX_INBOX_RECIPIENTS {
+        return Vec::new();
+    }
+    if let Some(s) = subject {
+        if !members.contains(&s) {
+            members.push(s);
+        }
+    }
+    members
+}
+
 #[async_trait::async_trait]
 impl EventTransport for RealtimeTransport {
     async fn deliver(&self, _envelope: &Value) -> Delivery {
@@ -80,7 +132,24 @@ impl EventTransport for RealtimeTransport {
                 return Delivery::Retryable(format!("push fan-out: {e}"));
             }
         }
-        match broker_message(event) {
+        let message = match broker_message(event) {
+            Some(BrokerMessage::Durable {
+                conversation_id,
+                event_sequence,
+                event_type,
+                subject_principal_id,
+                ..
+            }) => Some(BrokerMessage::Durable {
+                recipients: inbox_recipients(&self.state, conversation_id, subject_principal_id)
+                    .await,
+                conversation_id,
+                event_sequence,
+                event_type,
+                subject_principal_id,
+            }),
+            other => other,
+        };
+        match message {
             None => Delivery::Delivered,
             Some(m) => match self.state.realtime.broker.publish(&m).await {
                 Ok(()) => Delivery::Delivered,
@@ -90,5 +159,23 @@ impl EventTransport for RealtimeTransport {
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbox_recipients_are_bounded_and_include_the_subject_once() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        assert_eq!(with_subject(vec![a], Some(b)), vec![a, b]);
+        assert_eq!(with_subject(vec![a, b], Some(b)), vec![a, b]);
+        assert_eq!(with_subject(vec![a], None), vec![a]);
+        let many = (0..=MAX_INBOX_RECIPIENTS as u128)
+            .map(Uuid::from_u128)
+            .collect();
+        assert!(with_subject(many, Some(a)).is_empty());
     }
 }

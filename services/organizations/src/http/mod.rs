@@ -170,6 +170,10 @@ pub fn app(state: AppState) -> Router {
                 .put(bindings::put_binding)
                 .delete(bindings::delete_binding),
         )
+        .route(
+            "/admin/organizations/:id/scopes/primary/service-bindings/:service/rotate",
+            post(bindings::rotate_binding),
+        )
         .route("/admin/event-delivery", get(outbox::status))
         .route("/admin/event-delivery/replay", post(outbox::replay))
         .route(

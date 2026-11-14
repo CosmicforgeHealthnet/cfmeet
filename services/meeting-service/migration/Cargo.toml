@@ -47,3 +47,7 @@ path = "src/account-hardening-main.rs"
 [[bin]]
 name = "organization-integration-migration"
 path = "src/organization-integration-main.rs"
+
+[[bin]]
+name = "lifecycle-delivery-migration"
+path = "src/lifecycle-delivery-main.rs"

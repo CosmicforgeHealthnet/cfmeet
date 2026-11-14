@@ -82,6 +82,8 @@ pub struct RecoveredInvitation {
     pub expires_at: String,
     pub terminal_reason: Option<&'static str>,
     pub session_id: Option<Uuid>,
+    /// The Call initiator's display name, when the Call was created with one.
+    pub caller_display_name: Option<String>,
 }
 
 /// What a finished ring round led to.
@@ -902,6 +904,7 @@ impl AppCallService {
                 expires_at: time(invitation.expires_at),
                 terminal_reason: invitation.terminal_reason.map(|r| r.as_str()),
                 session_id: invitation.session_id,
+                caller_display_name: super::caller_display_name(self.db(), call.id).await?,
             });
         }
         Ok(out)

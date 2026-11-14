@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
                 "outboxDelivery": if dispatcher.enabled() { "enabled" } else { "disabled" },
                 "eventDestinations": dispatcher.destinations(),
                 "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
+                "serviceBindings": if config.service_bindings_enabled { "enabled" } else { "disabled" },
             })
         );
         return Ok(());
@@ -47,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         runtime_environment = %config.runtime_environment,
         provisioning = platform_scopes.is_some(),
+        service_bindings = config.service_bindings_enabled,
         event_destinations = ?dispatcher.destinations(),
         "organizations configuration loaded"
     );
@@ -54,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
     let worker_db = db.clone();
     let interval = config.worker_interval;
     let provisioning_enabled = platform_scopes.is_some();
+    let platform_port = platform_scopes.clone();
     let worker = tokio::spawn(worker::run_with(
         worker_db,
         dispatcher,
@@ -61,7 +64,11 @@ async fn main() -> anyhow::Result<()> {
         interval,
         organizations::shutdown_signal(),
     ));
-    let app = http::app(AppState::new(db, verifier).with_provisioning(provisioning_enabled));
+    let app = http::app(
+        AppState::new(db, verifier)
+            .with_provisioning(provisioning_enabled)
+            .with_platform(platform_port),
+    );
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "organizations listening");
     axum::serve(listener, app)

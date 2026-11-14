@@ -107,6 +107,23 @@ counters!(
     organizations_relay_unavailable,
     organizations_projection_upserts,
     organizations_projection_failures,
+    // Final completion: unified email delivery (label-free; never addresses or content).
+    email_enqueued,
+    email_enqueue_duplicates,
+    email_provider_accepted,
+    email_provider_temporary_failures,
+    email_provider_permanent_failures,
+    email_failed,
+    email_expired,
+    email_delivered,
+    email_bounced,
+    email_complained,
+    email_webhook_rejected,
+    email_webhook_duplicates,
+    // Final completion: conference lifecycle (empty instant conferences, archive).
+    conferences_empty_ended,
+    conferences_archive_ended,
+    conference_presence_checks_unknown,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();

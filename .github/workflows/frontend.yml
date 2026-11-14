@@ -33,7 +33,8 @@ defaults:
 jobs:
   check:
     name: install / lint / typecheck / build
-    runs-on: ubuntu-latest
+    # Pinned: Playwright's Chromium is not supported on the ubuntu-latest (26.04) image.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

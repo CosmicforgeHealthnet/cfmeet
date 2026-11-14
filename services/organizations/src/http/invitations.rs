@@ -121,6 +121,23 @@ async fn decide(
 pub struct CreateBody {
     pub email: String,
     pub role: String,
+    /// Optional display hint stored instead of the masked email (`inviteeEmailHint`),
+    /// for invitations addressed by another identifier (the Meeting Service sends
+    /// `CF Meet ID <id>` so the invitee's email is never disclosed, even masked).
+    /// 1–120 printable characters without `@`.
+    #[serde(default)]
+    pub invitee_hint: Option<String>,
+}
+
+/// A caller-provided invitee hint: trimmed, 1–120 characters, no control characters and
+/// no `@` (it can never carry an email address).
+pub fn invitee_hint(value: &str) -> Option<String> {
+    let t = value.trim();
+    (!t.is_empty()
+        && t.chars().count() <= 120
+        && !t.contains('@')
+        && !t.chars().any(char::is_control))
+    .then(|| t.to_string())
 }
 
 /// `POST /internal/v1/organizations/{id}/invitations` → the invitation and its one-time
@@ -140,6 +157,12 @@ pub async fn create(
         .ok_or_else(|| ApiError::validation("email must be an email address"))?;
     let role = Role::parse(&req.role)
         .ok_or_else(|| ApiError::validation("role must be ADMIN, MANAGER, MEMBER or GUEST"))?;
+    let hint = match req.invitee_hint.as_deref() {
+        None => email_hint(&email),
+        Some(h) => invitee_hint(h).ok_or_else(|| {
+            ApiError::validation("inviteeHint must be 1-120 characters without '@'")
+        })?,
+    };
     let idem = idempotency::from_headers(
         &headers,
         format!("invitation.create:{}:{user}:{id}", caller.service()),
@@ -204,7 +227,7 @@ pub async fn create(
             id.into(),
             hash.into(),
             email.clone().into(),
-            email_hint(&email).into(),
+            hint.into(),
             role.as_str().into(),
             user.into(),
             now.into(),
@@ -496,5 +519,22 @@ mod tests {
         assert_ne!(ha, hb);
         assert_eq!(ha.len(), 64);
         assert!(!ha.contains(&a));
+    }
+}
+
+#[cfg(test)]
+mod invitee_hint_tests {
+    use super::invitee_hint;
+
+    #[test]
+    fn invitee_hints_never_carry_an_email() {
+        assert_eq!(
+            invitee_hint("  CF Meet ID ada-1234 ").as_deref(),
+            Some("CF Meet ID ada-1234")
+        );
+        assert_eq!(invitee_hint("a@b.c"), None);
+        assert_eq!(invitee_hint(""), None);
+        assert_eq!(invitee_hint("x\u{7}"), None);
+        assert_eq!(invitee_hint(&"x".repeat(121)), None);
     }
 }

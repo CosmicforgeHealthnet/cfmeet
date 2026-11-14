@@ -82,6 +82,44 @@ A manifest contains no row data and no credentials. It records:
 * The production host holds only the age **public** recipient. Every script refuses a recipients file that contains `AGE-SECRET-KEY-` or a `PRIVATE KEY`.
 * The CI drill asserts that the backup role's password never appears in any output, manifest or copy, and that no credential-bearing URL is printed.
 
+## Production off-host copy (coordinated release tooling)
+
+[`cfmeet-offsite-backup.yml`](../../.github/workflows/cfmeet-offsite-backup.yml) (daily at 02:17 UTC
+and on dispatch) gives production an encrypted off-host copy and a restore drill with no new
+host and no new provider account:
+
+1. **backup** (production lock): the coordinated `backup` on the VPS (every CF Meet database and
+   the Meeting database, sha256, `pg_restore --list`, same-host restore tests), then
+   `offsite_backup.py encrypt` encrypts each dump with `age` to the public recipients in the
+   repository variable `CFMEET_BACKUP_AGE_RECIPIENTS` (the runner ships the `age` binary by
+   checksum). Only `*.age` and a manifest without row data leave the host; they are stored as
+   the GitHub Actions artifact `cfmeet-offsite-backup-<run>` (separate provider, 90-day
+   retention, uncompressed ciphertext).
+2. **drill** (separate runner, no production access): download, verify every hash, decrypt with
+   the identity in the secret `CFMEET_BACKUP_AGE_IDENTITY`, verify the dump checksum, restore
+   into a fresh network-less PostgreSQL of the recorded major version and compare every
+   migration history row count (`offsite_drill.py`; `RESTORE_DRILL=PASS` per database).
+3. **record** (production lock): `offsite_backup.py record` re-hashes the VPS's encrypted files
+   against what the drill downloaded and writes `<backup>/offsite.json`
+   (`OFF_HOST_COPY_VERIFIED`). `org-cutover-import` refuses without it.
+
+Local retention of these daily runs: the newest 7 are kept; older ones are deleted after 14 days.
+
+**Owner step (once, about five minutes).** On your own machine:
+
+```bash
+age-keygen -o cfmeet-backup-identity.txt      # keep in two safe places (password manager + offline)
+age-keygen -o cfmeet-backup-drill.txt         # drill identity: stored in GitHub for the automated drill
+```
+
+Then in the repository settings: variable `CFMEET_BACKUP_AGE_RECIPIENTS` = both public keys
+(`age-keygen -y <file>`, comma separated); secret `CFMEET_BACKUP_AGE_IDENTITY` = the content of
+`cfmeet-backup-drill.txt`. Every backup decrypts with either key: the offline identity is the
+disaster-recovery key that GitHub never holds; the drill identity lets the drill run unattended.
+Anyone holding the drill identity together with the artifacts can read the backups, so the
+drill key is as sensitive as repository admin access. Remove its recipient to stop automated
+drills.
+
 ## Owner setup
 
 ### 1. Age key pair (owner, never on the VPS)

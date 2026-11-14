@@ -392,6 +392,14 @@ class Journey:
         self.done('opaque_qr_invitation_owner_isolation_and_private_discovery')
         self.connect(a,b)
         self.done('idempotent_request_and_acceptance')
+        if not self.c['stage']:
+            # Personal 1:1 calls name the other party: the client names lookup includes connected
+            # contacts (the Hub itself never returns principal ids).
+            names=self.request('meeting-service','/api/v2/messaging/principals/names','POST',
+                {'principalIds':[b['principalId']]},a['session'])
+            assert [n['principalId'] for n in names['principals']]==[b['principalId']]
+            assert names['principals'][0]['displayName']
+            self.done('connected_contact_named_for_calls')
         conversation=None
         if self.c['stage']:
             conversation=self.direct(a,b)['conversationId']

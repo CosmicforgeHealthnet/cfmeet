@@ -14,7 +14,22 @@ export type CallingIdentity = {
   tenantId: string;
   applicationId: string;
   environmentId: string;
+  /** The signed-in account's display name (from the identity service), when known. */
+  displayName?: string;
 };
+
+/**
+ * The caller name Calling accepts on a new call (initiatorDisplayName): whitespace collapsed,
+ * at most 100 characters, no control or bidi-override characters. Anything else is omitted
+ * (Calling would refuse it), so a call never fails because of the caller's name.
+ */
+export function callerDisplayName(name: unknown): string | undefined {
+  if (typeof name !== "string") return undefined;
+  const normalized = name.split(/\s+/).filter(Boolean).join(" ");
+  const value = Array.from(normalized).slice(0, 100).join("").trim();
+  if (!value || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(value)) return undefined;
+  return value;
+}
 
 /**
  * Calling development mode (fixed identity, mock reads). Only a development build without a
@@ -45,6 +60,7 @@ export async function callingIdentity(request: Request): Promise<CallingIdentity
     const devPrincipalId = process.env.CALLING_DEV_PRINCIPAL_ID || "dev-user-001";
     return {
       principalId: devPrincipalId,
+      displayName: "Development user",
       tenantId: "dev-tenant",
       applicationId: "dev-application",
       environmentId: "dev-environment",

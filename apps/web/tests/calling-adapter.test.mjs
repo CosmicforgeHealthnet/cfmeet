@@ -167,6 +167,22 @@ test("creation binds initiator and device, preserving version and idempotency he
   assert.ok(!invalid.sent.some((s) => s.init.method === "POST"));
 });
 
+test("the caller's name comes from the verified account, never from the client", async () => {
+  const named = fixture({ scope: { ...identity, displayName: "  Ada   Lovelace " } });
+  await named.request("v1/calls", "POST", { initiatorDisplayName: "Spoofed CEO", initiatorEndpointId: endpointId, kind: "VOICE", targetPrincipalIds: ["target"] });
+  assert.equal(JSON.parse(named.sent.at(-1).init.body).initiatorDisplayName, "Ada Lovelace");
+  // No (or an unusable) account name: the client's value is dropped, the call still goes out.
+  for (const displayName of [undefined, "", "bad\u0007name", "\u202Eevil"]) {
+    const f = fixture({ scope: { ...identity, displayName } });
+    const response = await f.request("v1/calls", "POST", { initiatorDisplayName: "Spoofed CEO", initiatorEndpointId: endpointId, kind: "VOICE", targetPrincipalIds: ["target"] });
+    assert.equal(response.status, 200);
+    assert.equal("initiatorDisplayName" in JSON.parse(f.sent.at(-1).init.body), false, String(displayName));
+  }
+  const long = fixture({ scope: { ...identity, displayName: "x".repeat(150) } });
+  await long.request("v1/calls", "POST", { initiatorEndpointId: endpointId, kind: "VOICE", targetPrincipalIds: ["target"] });
+  assert.equal(JSON.parse(long.sent.at(-1).init.body).initiatorDisplayName.length, 100);
+});
+
 test("media credentials are issued only for the user's own session", async () => {
   const f = fixture();
   assert.equal((await f.request(`v1/calls/${callId}/sessions/${sessionId}/media-credentials`, "POST", {})).status, 200);

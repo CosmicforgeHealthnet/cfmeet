@@ -2095,7 +2095,8 @@
         "policy",
         "effective",
         "digest",
-        "platformPolicyVersion"
+        "platformPolicyVersion",
+        "deployment"
       ],
       "properties": {
         "version": {
@@ -2115,6 +2116,98 @@
         "platformPolicyVersion": {
           "type": "integer",
           "minimum": 1
+        },
+        "deployment": {
+          "description": "What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused (VALIDATION_ERROR).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profiles",
+            "usableProfiles",
+            "contextsWithoutUsableProfile"
+          ],
+          "properties": {
+            "profiles": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "PRIVATE_E2EE",
+                "MANAGED"
+              ],
+              "properties": {
+                "PRIVATE_E2EE": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "available",
+                    "reason"
+                  ],
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "E2EE_DEVICES_DISABLED",
+                            "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "MANAGED": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "available",
+                    "reason"
+                  ],
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "E2EE_DEVICES_DISABLED",
+                            "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "usableProfiles": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SecurityProfile"
+                }
+              }
+            },
+            "contextsWithoutUsableProfile": {
+              "type": "array",
+              "items": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
+              }
+            }
+          }
         }
       }
     },

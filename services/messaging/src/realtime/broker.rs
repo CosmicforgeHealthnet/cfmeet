@@ -31,6 +31,12 @@ pub enum BrokerMessage {
         event_type: String,
         /// The principal the event is about (member events), for authorization changes.
         subject_principal_id: Option<Uuid>,
+        /// Inbox routing (organization Messaging realtime): the conversation's ACTIVE
+        /// member principals when the event was published, plus the subject of a member
+        /// event. Identifiers only, never content; empty when unknown or above the bound,
+        /// in which case only subscribed connections receive the event.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        recipients: Vec<Uuid>,
     },
     /// A committed event addressed to one device (e.g. an MLS Welcome is available).
     Device {
@@ -285,12 +291,19 @@ mod tests {
             event_sequence: 7,
             event_type: "messaging.message.created".into(),
             subject_principal_id: None,
+            recipients: vec![Uuid::from_u128(1)],
         };
         let text = serde_json::to_string(&m).unwrap();
         assert!(text.starts_with(r#"{"k":"durable""#));
         assert_eq!(serde_json::from_str::<BrokerMessage>(&text).unwrap(), m);
         for forbidden in ["ciphertext", "text", "content", "body"] {
             assert!(!text.contains(forbidden));
+        }
+        // A message published by an older instance (no recipients) still parses.
+        let legacy = r#"{"k":"durable","conversation_id":"00000000-0000-0000-0000-000000000000","event_sequence":7,"event_type":"messaging.message.created","subject_principal_id":null}"#;
+        match serde_json::from_str::<BrokerMessage>(legacy).unwrap() {
+            BrokerMessage::Durable { recipients, .. } => assert!(recipients.is_empty()),
+            other => panic!("unexpected {other:?}"),
         }
     }
 

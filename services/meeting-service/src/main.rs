@@ -58,20 +58,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Base migrations are pending (migration up)");
     }
 
-    // Load email configuration
-    let email_config = match EmailConfig::from_env() {
-        Ok(config) => {
-            tracing::info!("✅ Email configuration loaded");
-            config
-        }
-        Err(e) => {
-            tracing::warn!(
-                "⚠️ Email not configured: {}. Using defaults (emails will queue but not send).",
-                e
-            );
-            EmailConfig::default()
-        }
-    };
+    // Load email configuration (unified email delivery). A selected provider with missing or
+    // malformed settings stops startup (fail closed): mail must never be silently dropped.
+    let email_config = EmailConfig::from_env()
+        .unwrap_or_else(|e| panic!("email configuration error: {e}"));
+    tracing::info!(
+        "✅ Email configuration loaded (provider: {}, sender: {})",
+        email_config.provider.as_str(),
+        email_config.from_email
+    );
 
     // Load LiveKit configuration
     let livekit_config = LiveKitConfig::from_env()
@@ -235,31 +230,53 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Start email worker (only if SMTP is configured)
-    let _email_worker = if !email_config.smtp_host.is_empty() {
-        match spawn_email_worker(state.email_service.queue().clone(), &email_config) {
-            Some(handle) => {
-                tracing::info!("✅ Email worker started");
-                Some(handle)
-            }
-            None => {
-                tracing::warn!("⚠️ Failed to start email worker");
-                None
-            }
+    // Unified email delivery: the durable ledger lives in its own additive history.
+    if !migration::lifecycle_delivery_ready(&state.db)
+        .await
+        .expect("Lifecycle/delivery migration readiness")
+    {
+        panic!("Lifecycle/delivery migration is required (lifecycle-delivery-migration up)");
+    }
+    // Messages left in the former volatile Redis list move to the durable ledger once.
+    match backend::services::email_delivery::import_legacy_redis_queue(
+        &state.db,
+        &backend::queues::RedisEmailQueue::new(state.redis.clone()),
+    )
+    .await
+    {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("imported {n} queued legacy email jobs into the email ledger"),
+        Err(e) => tracing::warn!("legacy email queue import deferred: {e}"),
+    }
+    let _email_worker = match backend::services::email_delivery::provider_from_config(&email_config)
+    {
+        Ok(Some(provider)) => {
+            let worker = backend::services::email_delivery::EmailWorker::new(
+                state.db.clone(),
+                provider,
+                backend::services::email_delivery::WorkerSettings::from_config(&email_config),
+            );
+            tracing::info!("✅ Email worker started");
+            Some(spawn_email_worker(
+                worker,
+                std::time::Duration::from_millis(email_config.poll_millis),
+            ))
         }
-    } else {
-        tracing::info!("ℹ️ Email worker not started (SMTP not configured)");
-        None
+        Ok(None) => {
+            tracing::warn!("ℹ️ No email provider configured (EMAIL_PROVIDER): emails stay queued");
+            None
+        }
+        Err(e) => panic!("email provider error: {e}"),
     };
 
     // Blueprint Section 11: meeting notifications (reschedule/cancel notices, reminders).
-    // Off unless NOTIFICATIONS_EMAIL_ENABLED=true; emails still need the SMTP worker above.
+    // Off unless NOTIFICATIONS_EMAIL_ENABLED=true; emails still need the email worker above.
     let notification_context =
         backend::services::notifications::NotificationContext::from_state(&state);
     let _notification_worker = if notification_context.config.email_enabled {
-        if email_config.smtp_host.is_empty() {
+        if email_config.provider == backend::config::EmailProviderKind::None {
             tracing::warn!(
-                "Notification email is enabled but SMTP is not configured: emails stay queued"
+                "Notification email is enabled but no email provider is configured: emails stay queued"
             );
         }
         Some(backend::services::notifications::spawn_worker(
@@ -291,6 +308,19 @@ async fn main() -> anyhow::Result<()> {
     let _conference_scheduler = flags
         .meeting_v2_enabled
         .then(|| spawn_conference_scheduler(state.meeting.clone()));
+    // Final completion: empty LIVE instant conferences end after 10 minutes without anyone
+    // (CONFERENCE_EMPTY_TIMEOUT_SECS) and archived spaces never keep a LIVE conference.
+    let _empty_conference_sweeper = flags.meeting_v2_enabled.then(|| {
+        let timeout = backend::workers::empty_conference::empty_timeout_from_env();
+        tracing::info!(
+            "Empty instant conference timeout: {}s",
+            timeout.num_seconds()
+        );
+        backend::workers::spawn_empty_conference_sweeper(
+            backend::workers::EmptyConferenceSweeper::new(state.meeting.clone(), timeout),
+            30,
+        )
+    });
     // Part E: the outbox relay delivers client realtime events to Redis fanout (when
     // `conference_realtime_enabled`) and executes provider commands through the RTC
     // control plane (when `rtc_provider_control_v2`). Without a consumer, rows stay

@@ -45,7 +45,9 @@ pub struct AppState {
     /// Part VI §51: receiver of API Gateway–forwarded platform credential requests
     /// (`None`: platform access off — every service token on `/api/v2` is refused).
     pub platform: Option<crate::services::platform::PlatformReceiver>,
-    /// Blueprint Section 11: notification transport (the existing email queue) and the
+    /// Unified email delivery: provider webhook verification secret (Resend, Svix).
+    pub email_webhook_secret: Option<String>,
+    /// Blueprint Section 11: notification transport (the unified email ledger) and the
     /// recipient preference source (Communications Hub when configured).
     pub notifier: Arc<crate::services::notifications::Notifier>,
 }
@@ -85,7 +87,7 @@ impl AppState {
         let token_blacklist = Arc::new(TokenBlacklistService::new(redis.clone()));
         let rate_limiter = Arc::new(RateLimiterService::new(redis.clone()));
 
-        let email_service = Arc::new(EmailService::new(redis.clone(), email_config));
+        let email_service = Arc::new(EmailService::new(db.clone(), email_config));
         let notifier = Arc::new(crate::services::notifications::Notifier::new(
             email_service.clone(),
             Arc::new(crate::services::notifications::NoPreferenceStore),
@@ -110,6 +112,7 @@ impl AppState {
             organization_directory,
             realtime,
             platform: None,
+            email_webhook_secret: email_config.resend_webhook_secret.clone(),
             notifier,
         }
     }

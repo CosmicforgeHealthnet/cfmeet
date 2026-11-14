@@ -1661,3 +1661,133 @@ fn clone_account(a: &Account) -> Account {
         public_id: a.public_id.clone(),
     }
 }
+
+/// Personal 1:1 calls name the other party: the client's names lookup
+/// (`POST /api/v2/messaging/principals/names`) names connected Hub contacts with the name
+/// the Hub contact list shows, through the real Meeting Service → Communications path.
+#[tokio::test]
+async fn principal_names_include_connected_personal_contacts_across_real_services(
+) -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(contact_names_journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
+    let (a, b, c) = (account(s).await?, account(s).await?, account(s).await?);
+    let names = |who: &Account, ids: Vec<Uuid>| {
+        let token = who.session.clone();
+        let s = &*s;
+        async move {
+            let v = status(
+                request(
+                    s,
+                    "meeting-service",
+                    Some(&token),
+                    None,
+                    Method::POST,
+                    "/api/v2/messaging/principals/names",
+                    Some(json!({"principalIds": ids})),
+                )
+                .await?,
+                200,
+                "principal names",
+            )?;
+            let mut out: Vec<(Uuid, String, Option<String>)> = v["principals"]
+                .as_array()
+                .context("principals")?
+                .iter()
+                .map(|p| {
+                    (
+                        Uuid::parse_str(p["principalId"].as_str().unwrap_or_default())
+                            .unwrap_or_default(),
+                        p["displayName"].as_str().unwrap_or_default().to_owned(),
+                        p.get("alias").and_then(Value::as_str).map(str::to_owned),
+                    )
+                })
+                .collect();
+            out.sort();
+            anyhow::Ok(out)
+        }
+    };
+    // Not connected yet: only the caller itself is named.
+    let before = names(&a, vec![a.principal, b.principal, c.principal]).await?;
+    assert_eq!(
+        before.iter().map(|n| n.0).collect::<Vec<_>>(),
+        vec![a.principal]
+    );
+
+    connected(s, &a, &b).await?;
+    let contacts = status(
+        hub(s, &a, Method::GET, "/contacts", None).await?,
+        200,
+        "contacts",
+    )?;
+    let row = contacts["data"]
+        .as_array()
+        .context("contacts")?
+        .iter()
+        .find(|x| x["cfMeetId"] == json!(b.public_id))
+        .context("b in a's contacts")?
+        .clone();
+    assert!(
+        row.get("principalId").is_none(),
+        "Hub contacts never carry principal ids"
+    );
+    let shown = row["displayName"]
+        .as_str()
+        .context("contact display name")?
+        .to_owned();
+    assert!(!shown.is_empty());
+
+    // Connected: b is named for a (and a for b) with the Hub contact-list name; c is not.
+    let got = names(&a, vec![b.principal, c.principal]).await?;
+    assert_eq!(got, vec![(b.principal, shown.clone(), None)]);
+    let back = names(&b, vec![a.principal]).await?;
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].0, a.principal);
+
+    // The caller's private alias travels with the name.
+    let patched = status(
+        hub(
+            s,
+            &a,
+            Method::PATCH,
+            &format!("/contacts/{}", row["contactId"].as_str().context("id")?),
+            Some(json!({"expectedVersion": row["version"], "alias": "Tennis partner"})),
+        )
+        .await?,
+        200,
+        "contact alias",
+    )?;
+    assert_eq!(patched["alias"], json!("Tennis partner"));
+    assert_eq!(
+        names(&a, vec![b.principal]).await?,
+        vec![(b.principal, shown.clone(), Some("Tennis partner".into()))]
+    );
+
+    // A block (either direction) removes the name again; c still learns nobody's name.
+    status(
+        hub(
+            s,
+            &b,
+            Method::PUT,
+            &format!("/profiles/{}/block", a.public_id),
+            Some(json!({})),
+        )
+        .await?,
+        200,
+        "contact block",
+    )?;
+    assert!(names(&a, vec![b.principal]).await?.is_empty());
+    assert!(names(&c, vec![a.principal, b.principal]).await?.is_empty());
+    Ok(())
+}

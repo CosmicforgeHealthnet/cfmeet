@@ -24,6 +24,7 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | `CF_RUNTIME_ENVIRONMENT` | yes | `local`, `test`, `staging`, `production` |
 | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | receiver-authoritative trust bundle (`receiver: cfmeet.organizations`) |
 | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 provisioning saga (ADR 0058) |
+| `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`; requires provisioning): the saga also creates, verifies, renews and (after archive) revokes each organization's Calling and Messaging service bindings (ADR 0058 A2; Platform Access must grant `platform-identity.bind-organization-services`) |
 | `CF_SERVICE_AUTH_KEY_ID` | when provisioning | `kid` of the Organizations signing key |
 | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning | PKCS#8 PEM Ed25519 private key file |
 | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (https outside local / test) |
@@ -75,13 +76,60 @@ re-verify READY mappings every 6 h (drift → `FAILED`, `SCOPE_DRIFT`).
 | `step: WAITING_FOR_ACTIVE_ORGANIZATION` | the organization is suspended; nothing is created | reactivate the organization |
 | `scopes[0].lastSyncErrorClass` set | a tenant suspension / resumption is being retried | restore Platform Access; scope resolution refuses until applied |
 
+### Automatic service bindings (ADR 0058 Amendment A2, `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED`)
+
+With the flag on, a verified scope does not make the organization READY by itself: the
+workflow records `step: SCOPE_VERIFIED`, then for `calling` and `messaging` in turn calls
+Platform Access `PUT …/organization-scopes/{id}/primary/service-bindings/{service}` (create
+or return; the credential secret never leaves Platform Access), reads it back with `GET`,
+verifies it server-side (same triple, service account and credential ACTIVE, exact scope set:
+Calling `calls.read`, `enterprise.config.read`, `enterprise.config.write`; Messaging
+`messages.read`) and records the ids (`source = AUTOMATIC`, `step: BINDING_<SERVICE>_VERIFIED`).
+Only then is the organization READY (`organization.provisioned`). Every step is idempotent: a
+lost lease or a retry gets the same service account from Platform Access.
+
+| Symptom | Meaning | Action |
+|---|---|---|
+| `IN_PROGRESS`, `step: SCOPE_VERIFIED` / `BINDING_CALLING_VERIFIED`, `lastErrorClass: PLATFORM_ACCESS_UNAVAILABLE` | bindings being retried with backoff (FAILED after 8 attempts) | restore Platform Access |
+| `FAILED` + `SERVICE_BINDING_CONFLICT` | Platform Access refused (409): tenant not active, a foreign `org-<service>` account, or a binding revoked earlier | investigate in Platform Access, then retry |
+| `FAILED` + `SERVICE_BINDING_VERIFICATION_FAILED` | the binding's read-back does not verify (wrong triple, scopes or status) | investigate, then retry |
+| `FAILED` + `SERVICE_BINDING_DRIFT` | reconciliation found a recorded automatic binding no longer verifies; it was removed locally (fail closed); the tenant is NOT suspended | fix in Platform Access, then retry |
+| `FAILED` + `PLATFORM_ACCESS_REFUSED` | 401/403 (trust bundle / missing `platform-identity.bind-organization-services`) | fix the grant, then retry |
+
+Reconciliation (every 6 h per READY organization, `organization_platform_scopes.bindings_*`):
+backfills missing bindings of organizations that were READY before the flag was enabled,
+re-`PUT`s automatic bindings (Platform Access renews a credential close to expiry; the new
+credential id is recorded, version + 1, audited `scope.service_binding_rotated`) and
+re-verifies them. Failures back off (`bindings_last_error_class`). An `OPERATOR` binding is
+never touched; a binding revoked locally is never recreated.
+
+Archive marks every automatic binding revoked in the archive transaction (resolution stops at
+once; audited `scope.service_binding_revoked`); the worker then revokes the credential and
+service account at Platform Access (`DELETE`), retried with backoff until applied
+(`scope.service_binding_revocation_applied`). Suspension needs nothing extra: the tenant is
+suspended, so every credential fails, and resolution refuses a suspended organization;
+reactivation resumes the tenant and resolution returns the same bindings.
+
+Operator rotation of an automatic binding (Platform Access issues a successor credential and
+revokes the predecessor; the answer is verified before it is recorded):
+
+```
+POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{calling|messaging}/rotate   (organization.administer)
+```
+
 Operator retry (idempotent; READY / in-flight workflows unchanged; archived refused):
 
 ```
 POST /internal/v1/admin/organizations/{id}/provisioning/retry     (organization.administer)
 ```
 
-## Calling service binding (Section 12 follow-up, contract §8.5)
+## Operator (manual) service bindings (Section 12 follow-up, contract §8.5)
+
+With automatic service bindings enabled (above) nothing here is routine: this is the
+break-glass path. A binding recorded with `PUT` is `source = OPERATOR` and automation never
+replaces it; `DELETE` of an AUTOMATIC binding revokes it at Platform Access instead of just
+forgetting it, and automation does not recreate it. `PUT` is refused (`VERSION_CONFLICT`)
+while such a revocation is still being applied. The same routes exist for `messaging`.
 
 Per-organization Enterprise Calling needs, inside the organization's READY triple, a
 Platform Access service account with a credential and the Calling scope grants — an explicit

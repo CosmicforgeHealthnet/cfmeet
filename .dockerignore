@@ -31,3 +31,6 @@
 !**/.env.example
 **/*.log
 **/*~
+
+# Local Redis snapshots never enter the image context.
+**/*.rdb

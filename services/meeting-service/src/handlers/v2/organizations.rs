@@ -58,6 +58,7 @@ fn member(m: &organization_memberships::Model) -> OrganizationMemberResponse {
         version: None,
         display_name: None,
         username: None,
+        email: None,
     }
 }
 
@@ -226,6 +227,7 @@ fn legacy_member(m: &AuthorityMember) -> ApiResult<OrganizationMemberResponse> {
         version: m.version,
         display_name: None,
         username: None,
+        email: None,
     })
 }
 
@@ -455,7 +457,7 @@ pub async fn list_organization_members(
     RawQuery(query): RawQuery,
 ) -> ApiResult<Response> {
     let page = member_page(query.as_deref())?;
-    let mut list = if let Some(authority) = authoritative(&state) {
+    let (mut list, emails_visible) = if let Some(authority) = authoritative(&state) {
         let user = actor.require_registered()?;
         let acting = ActingUser::of(user);
         // Platform administrators read the authoritative list as a service read; everyone
@@ -465,13 +467,17 @@ pub async fn list_organization_members(
             .members(id, as_actor)
             .await
             .map_err(authority_error)?;
-        members
+        let visible = user.platform_admin || may_see_member_emails(&members, user.user_id);
+        let list = members
             .iter()
             .map(legacy_member)
-            .collect::<ApiResult<Vec<_>>>()?
+            .collect::<ApiResult<Vec<_>>>()?;
+        (list, visible)
     } else {
+        // The legacy directory admits only platform administrators and ACTIVE OWNERs /
+        // ADMINs of an active organization to this list, i.e. exactly the email policy.
         let list = state.meeting.organizations.list_members(&actor, id).await?;
-        list.iter().map(member).collect()
+        (list.iter().map(member).collect(), true)
     };
     list.sort_by_key(member_cursor);
     let mut next = None;
@@ -491,6 +497,9 @@ pub async fn list_organization_members(
         if let Some(identity) = known.get(&m.user_id) {
             m.display_name = Some(identity.display_name.clone());
             m.username = Some(identity.username.clone());
+            if emails_visible {
+                m.email = Some(identity.email.clone());
+            }
         }
     }
     let mut response = Json(list).into_response();
@@ -498,6 +507,14 @@ pub async fn list_organization_members(
         response.headers_mut().insert("x-next-cursor", v);
     }
     Ok(response)
+}
+
+/// The member-directory email policy: an ACTIVE OWNER or ADMIN of the organization sees
+/// member emails; every other member (MANAGER, MEMBER, GUEST, suspended) does not.
+pub(crate) fn may_see_member_emails(members: &[AuthorityMember], caller: Uuid) -> bool {
+    members.iter().any(|m| {
+        m.user_id == caller && m.status == "ACTIVE" && matches!(m.role.as_str(), "OWNER" | "ADMIN")
+    })
 }
 
 /// Add or change a membership (platform admins, organization OWNER/ADMIN within limits).
@@ -883,7 +900,14 @@ pub async fn transfer_organization_ownership(
     .await
 }
 
-/// Invite someone to an organization by email.
+/// Invite someone to an organization by email or CF Meet ID.
+///
+/// The invitee is given as `email`, or as `identifierType` (`EMAIL` / `CF_MEET_ID`) with
+/// `identifier`. A CF Meet ID is resolved server-side (Communications Hub discovery rules:
+/// discoverable, visible, not blocked, active) for callers who may invite; anything else is
+/// `404 INVITEE_NOT_FOUND`, and the invitee's email is never returned (the hint reads
+/// `CF Meet ID <id>`). An account that is already a member gets `409 ALREADY_MEMBER`; a
+/// second invitation for the same address replaces the pending one (resend).
 ///
 /// Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`
 /// (shown only in this response; only the token's hash is stored). Only an account whose verified
@@ -901,9 +925,9 @@ pub async fn transfer_organization_ownership(
         (status = 201, description = "Invitation with its one-time token", body = OrganizationInvitation),
         (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
-        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
-        (status = 409, description = "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
-        (status = 429, description = "RATE_LIMITED (invitation emails per hour)", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / INVITEE_NOT_FOUND (CF_MEET_ID) / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ALREADY_MEMBER / ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (invitation emails per hour, CF Meet ID lookups)", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
@@ -928,6 +952,7 @@ pub async fn create_organization_invitation(
         Some(Value::Bool(b)) => b,
         Some(_) => return Err(validation("sendEmail must be a boolean")),
     };
+    let addressed = address_invitee(&state, &actor, &headers, id, document.as_mut()).await?;
     let invitee = document
         .as_ref()
         .and_then(|d| d["email"].as_str())
@@ -997,7 +1022,174 @@ pub async fn create_organization_invitation(
             o.insert("emailDelivery".into(), json!(delivery));
         }
     }
+    if let (Some(addressed), Some(o)) = (addressed, reply.body.as_object_mut()) {
+        o.insert("identifierType".into(), json!(addressed.kind()));
+        if let Addressed::CfMeetId(cf_meet_id) = addressed {
+            o.insert("identifier".into(), json!(cf_meet_id));
+            // Never the resolved address, in any form.
+            o.remove("email");
+        }
+    }
     Ok(relayed_success(reply))
+}
+
+/// How an invitation was addressed (`identifierType`).
+enum Addressed {
+    Email,
+    CfMeetId(String),
+}
+
+impl Addressed {
+    fn kind(&self) -> &'static str {
+        match self {
+            Addressed::Email => "EMAIL",
+            Addressed::CfMeetId(_) => "CF_MEET_ID",
+        }
+    }
+}
+
+const INVITING_ROLES: [&str; 3] = ["OWNER", "ADMIN", "MANAGER"];
+
+fn invitee_not_found() -> ApiError {
+    ApiError::domain(
+        ErrorCode::InviteeNotFound,
+        "No account can be invited with this CF Meet ID",
+    )
+}
+
+fn already_member() -> ApiError {
+    ApiError::domain(
+        ErrorCode::AlreadyMember,
+        "This account is already a member of the organization",
+    )
+}
+
+/// Normalizes the invitee of `POST /api/v2/organizations/{id}/invitations` into the
+/// Organizations contract (`email`): either `email` as before, or `identifierType` +
+/// `identifier` (`EMAIL` / `CF_MEET_ID`). A CF Meet ID is resolved through the
+/// Communications Hub's discovery rules and only for callers who may invite (ACTIVE
+/// OWNER, ADMIN or MANAGER), so the route is never an account-discovery tool; the
+/// resolved address goes to Organizations only, with the hint `CF Meet ID <id>`. An
+/// account that already holds a membership is refused with `409 ALREADY_MEMBER`.
+async fn address_invitee(
+    state: &AppState,
+    actor: &ActorContext,
+    headers: &HeaderMap,
+    organization: Uuid,
+    document: Option<&mut Value>,
+) -> ApiResult<Option<Addressed>> {
+    let Some(obj) = document.and_then(Value::as_object_mut) else {
+        return Ok(None);
+    };
+    // The display hint is the server's (CF Meet ID invitations), never a client's.
+    if obj.remove("inviteeHint").is_some() {
+        return Err(validation("inviteeHint is not a request field"));
+    }
+    let (kind, identifier) = match (obj.remove("identifierType"), obj.remove("identifier")) {
+        (None, None) => {
+            if let Some(email) = obj.get("email").and_then(Value::as_str).map(str::to_owned) {
+                refuse_member_email(state, actor, organization, &email).await?;
+            }
+            return Ok(None);
+        }
+        (Some(Value::String(k)), Some(Value::String(i))) => (k, i.trim().to_string()),
+        _ => {
+            return Err(validation(
+                "identifierType and identifier must be given together, as strings",
+            ))
+        }
+    };
+    if obj.contains_key("email") {
+        return Err(validation(
+            "Send either email or identifierType with identifier",
+        ));
+    }
+    match kind.as_str() {
+        "EMAIL" => {
+            let email = identifier.to_ascii_lowercase();
+            refuse_member_email(state, actor, organization, &email).await?;
+            obj.insert("email".into(), json!(email));
+            Ok(Some(Addressed::Email))
+        }
+        "CF_MEET_ID" => {
+            if identifier.is_empty() || identifier.len() > 64 || identifier.contains('@') {
+                return Err(invitee_not_found());
+            }
+            let authority = require_authoritative(state)?;
+            let user = relay_actor(actor)?;
+            let acting = ActingUser::of(user);
+            let members = authority
+                .members(organization, Some(&acting))
+                .await
+                .map_err(authority_error)?;
+            let may_invite = members.iter().any(|m| {
+                m.user_id == user.user_id
+                    && m.status == "ACTIVE"
+                    && INVITING_ROLES.contains(&m.role.as_str())
+            });
+            if !may_invite {
+                return Err(permission_denied(
+                    "Your role in this organization cannot invite members",
+                ));
+            }
+            let invitee = crate::services::communications::resolve_organization_invitee(
+                state,
+                user,
+                headers,
+                &identifier,
+            )
+            .await?
+            .ok_or_else(invitee_not_found)?;
+            if invitee.is_self
+                || members
+                    .iter()
+                    .any(|m| m.user_id == invitee.user_id && m.status != "REMOVED")
+            {
+                return Err(already_member());
+            }
+            let email =
+                crate::services::organization_invitees::invitable_email(&state.db, invitee.user_id)
+                    .await?
+                    .ok_or_else(invitee_not_found)?;
+            obj.insert("email".into(), json!(email));
+            obj.insert(
+                "inviteeHint".into(),
+                json!(format!("CF Meet ID {identifier}")),
+            );
+            Ok(Some(Addressed::CfMeetId(identifier)))
+        }
+        _ => Err(validation("identifierType must be EMAIL or CF_MEET_ID")),
+    }
+}
+
+/// `409 ALREADY_MEMBER` when the account registered with `email` holds a membership of
+/// the organization (best effort: anything unavailable leaves the decision to the
+/// Organizations Service).
+async fn refuse_member_email(
+    state: &AppState,
+    actor: &ActorContext,
+    organization: Uuid,
+    email: &str,
+) -> ApiResult<()> {
+    let (Some(authority), Ok(user)) = (authoritative(state), actor.require_registered()) else {
+        return Ok(());
+    };
+    let Ok(Some(account)) =
+        crate::services::organization_invitees::account_with_email(&state.db, email).await
+    else {
+        return Ok(());
+    };
+    let acting = ActingUser::of(user);
+    let Ok(members) = authority.members(organization, Some(&acting)).await else {
+        return Ok(());
+    };
+    if members
+        .iter()
+        .any(|m| m.user_id == account && m.status != "REMOVED")
+    {
+        return Err(already_member());
+    }
+    Ok(())
 }
 
 /// List an organization's invitations.

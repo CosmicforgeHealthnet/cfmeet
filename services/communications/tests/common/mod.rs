@@ -226,6 +226,13 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
             if world.calling_down {
                 return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
             }
+            // The Hub always names the caller for the callee's incoming-call screen.
+            if !body["initiatorDisplayName"]
+                .as_str()
+                .is_some_and(|n| !n.trim().is_empty())
+            {
+                return Some(reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR"));
+            }
             let endpoint = uuid_at(body, "initiatorEndpointId");
             if !world
                 .endpoints

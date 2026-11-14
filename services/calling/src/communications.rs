@@ -426,6 +426,10 @@ struct LaunchBody {
     initiator_endpoint_id: Uuid,
     target_principal_ids: Vec<Uuid>,
     kind: crate::calls::kinds::CallKind,
+    /// The caller's Hub display name, shown to the callee on the incoming call. Best effort:
+    /// an invalid name is dropped. Not part of the idempotency fingerprint.
+    #[serde(default)]
+    initiator_display_name: Option<String>,
 }
 
 /// The creation command key of a Hub launch (see [`HUB_KEY_PREFIX`]).
@@ -553,7 +557,10 @@ async fn launch(
                     .iter()
                     .map(|p| PrincipalId::from_uuid(*p))
                     .collect(),
-                initiator_display_name: None,
+                initiator_display_name: request
+                    .initiator_display_name
+                    .as_deref()
+                    .and_then(crate::calls::participants::DisplayName::lenient),
                 privacy_relay_session: None,
                 key,
             },
@@ -823,6 +830,7 @@ mod tests {
             initiator_endpoint_id: Uuid::new_v4(),
             target_principal_ids: vec![Uuid::new_v4()],
             kind: crate::calls::kinds::CallKind::Voice,
+            initiator_display_name: None,
         }
     }
 

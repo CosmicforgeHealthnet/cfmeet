@@ -1,8 +1,8 @@
 //! Meeting and organization notifications (Blueprint v1.0 Section 11: MTG-006, ACC-020).
 //!
-//! **Reuse.** Email goes through the existing email queue (`EmailService` → Redis
-//! `email:queue` → `EmailWorker` → SMTP). No new transport, provider or notification
-//! service is introduced. Everything is OFF unless `NOTIFICATIONS_EMAIL_ENABLED=true`.
+//! **Reuse.** Email goes through the unified delivery ledger (`EmailService` →
+//! `email_deliveries` → email worker → Resend/SMTP); no separate notification transport.
+//! Everything is OFF unless `NOTIFICATIONS_EMAIL_ENABLED=true`.
 //!
 //! **What is sent.**
 //! * Meeting invitation emails, on request (`sendEmail: true` on an email-bound v2
@@ -82,6 +82,10 @@ const REMINDER_SCAN_LIMIT: i64 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutgoingEmail {
+    /// Ledger category (`email_delivery::category`).
+    pub category: &'static str,
+    /// Ledger idempotency key (`None`: every send is a new message).
+    pub idempotency_key: Option<String>,
     pub to: String,
     pub to_name: Option<String>,
     pub subject: String,
@@ -98,17 +102,22 @@ pub trait NotificationMail: Send + Sync {
 #[async_trait]
 impl NotificationMail for EmailService {
     async fn send(&self, email: OutgoingEmail) -> Result<(), String> {
-        self.queue()
-            .enqueue(
-                &email.to,
-                email.to_name.as_deref(),
-                &email.subject,
-                &email.html,
-                &email.text,
-            )
-            .await
-            .map(|_| ())
-            .map_err(|_| "MAIL_QUEUE_UNAVAILABLE".to_string())
+        crate::services::email_delivery::enqueue(
+            self.db(),
+            crate::services::email_delivery::NewEmail {
+                category: email.category,
+                idempotency_key: email.idempotency_key,
+                to: email.to,
+                to_name: email.to_name,
+                subject: email.subject,
+                html: email.html,
+                text: email.text,
+                expires_at: None,
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| "MAIL_QUEUE_UNAVAILABLE".to_string())
     }
 }
 
@@ -510,6 +519,8 @@ async fn meeting_invitation_inner(
         .notifier
         .mail
         .send(OutgoingEmail {
+            category: crate::services::email_delivery::category::MEETING_INVITATION,
+            idempotency_key: None,
             to: email,
             to_name: account.as_ref().map(|a| a.name()),
             subject,
@@ -599,6 +610,8 @@ pub async fn send_organization_invitation(
         .notifier
         .mail
         .send(OutgoingEmail {
+            category: crate::services::email_delivery::category::ORGANIZATION_INVITATION,
+            idempotency_key: None,
             to: email,
             to_name: account.as_ref().map(|a| a.name()),
             subject,
@@ -1021,6 +1034,8 @@ async fn deliver(
             .notifier
             .mail
             .send(OutgoingEmail {
+                category: crate::services::email_delivery::category::MEETING_NOTIFICATION,
+                idempotency_key: Some(format!("meeting-notification:{}:{}", job.id, key)),
                 to: r.email.clone(),
                 to_name: name,
                 subject: email.0,
@@ -1213,6 +1228,8 @@ mod tests {
     async fn recording_mail_and_static_preferences() {
         let m = RecordingMail::default();
         let e = OutgoingEmail {
+            category: "NOTIFICATION",
+            idempotency_key: None,
             to: "a@b.c".into(),
             to_name: None,
             subject: "s".into(),

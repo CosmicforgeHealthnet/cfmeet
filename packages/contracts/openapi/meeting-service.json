@@ -8728,6 +8728,98 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/questions/{questionId}/restore": {
+      "post": {
+        "tags": [
+          "Q&A (v2)"
+        ],
+        "summary": "Restore a dismissed question.",
+        "description": "Undoes a dismissal. A DISMISSED question returns to ANSWERED when an answer had been recorded\n(live or written; the original answer and `answeredAt` are kept) and to OPEN otherwise. The\nbody, author attribution, anonymity, upvotes and vote history are preserved; the pin removed by\nthe dismissal is not reinstated. Requires the Q&A dismiss permission (`qna.dismiss`: host,\nco-host or moderator by default) and a conference that is not ended or cancelled.\n\nIdempotent: restoring a question that is already OPEN or ANSWERED (a repeated request or a\nconcurrent moderator) returns it with `changed: false` and emits no event. ARCHIVED is terminal\nand returns CONFERENCE_STATE_CONFLICT. On change the question `version` increments, a\n`QNA_RESTORE` audit record is written and `qna.question_restored` is delivered in the same\ntransaction. Anonymous questions never reveal their author.",
+        "operationId": "v2_restore_question",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "questionId",
+            "in": "path",
+            "description": "Question id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored (`changed: true`) or already OPEN/ANSWERED (`changed: false`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED — caller lacks qna.dismiss",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "QUESTION_NOT_FOUND — unknown question or not in this conference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT — question is ARCHIVED, or the conference has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/questions/{questionId}/vote": {
       "post": {
         "tags": [
@@ -13418,7 +13510,7 @@
         "operationId": "v2_messaging_me",
         "responses": {
           "200": {
-            "description": "principalId, tenantId, applicationId, environmentId",
+            "description": "principalId, tenantId, applicationId, environmentId, displayName (the caller's own account display name)",
             "content": {
               "application/json": {
                 "schema": {
@@ -13460,8 +13552,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Display names of the principals the caller can see (self and colleagues).",
-        "description": "Returns display names for up to 256 `principalIds`. Only the caller's own principal and those of\nactive members of the caller's verified organizations are named; any other id is left out of the\nanswer without an error. Requires a bearer user token whose revocation status could be checked\nand the Messaging integration enabled.",
+        "summary": "Display names of the principals the caller can see (self, colleagues and connected contacts).",
+        "description": "Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
         "operationId": "v2_messaging_principal_names",
         "requestBody": {
           "content": {
@@ -13475,7 +13567,7 @@
         },
         "responses": {
           "200": {
-            "description": "principals: principalId, displayName",
+            "description": "principals: principalId, displayName, alias (connected contacts only, when the caller set one)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15117,8 +15209,8 @@
         "tags": [
           "Organizations (v2)"
         ],
-        "summary": "Invite someone to an organization by email.",
-        "description": "Creates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nWith `sendEmail: true` the invitation link is also emailed to the invitee when notification\nemail is enabled on the deployment (`emailDelivery` reports the outcome; an idempotent replay\nre-issues the token and emails the new link). Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
+        "summary": "Invite someone to an organization by email or CF Meet ID.",
+        "description": "The invitee is given as `email`, or as `identifierType` (`EMAIL` / `CF_MEET_ID`) with\n`identifier`. A CF Meet ID is resolved server-side (Communications Hub discovery rules:\ndiscoverable, visible, not blocked, active) for callers who may invite; anything else is\n`404 INVITEE_NOT_FOUND`, and the invitee's email is never returned (the hint reads\n`CF Meet ID <id>`). An account that is already a member gets `409 ALREADY_MEMBER`; a\nsecond invitation for the same address replaces the pending one (resend).\n\nCreates a PENDING invitation for `email` with `role` and returns it with its one-time `token`\n(shown only in this response; only the token's hash is stored). Only an account whose verified\nemail equals the invited address can accept it. Requires the `organization.members.invite`\ncapability (OWNER, ADMIN, MANAGER). Send an `Idempotency-Key` header to make retries safe.\nWith `sendEmail: true` the invitation link is also emailed to the invitee when notification\nemail is enabled on the deployment (`emailDelivery` reports the outcome; an idempotent replay\nre-issues the token and emails the new link). Returns FEATURE_DISABLED until the Organizations\nService is authoritative.",
         "operationId": "v2_create_organization_invitation",
         "parameters": [
           {
@@ -15174,7 +15266,7 @@
             }
           },
           "404": {
-            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "description": "ORGANIZATION_NOT_FOUND / INVITEE_NOT_FOUND (CF_MEET_ID) / FEATURE_DISABLED",
             "content": {
               "application/json": {
                 "schema": {
@@ -15184,7 +15276,7 @@
             }
           },
           "409": {
-            "description": "ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT",
+            "description": "ALREADY_MEMBER / ORGANIZATION_SUSPENDED / IDEMPOTENCY_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -15194,7 +15286,7 @@
             }
           },
           "429": {
-            "description": "RATE_LIMITED (invitation emails per hour)",
+            "description": "RATE_LIMITED (invitation emails per hour, CF Meet ID lookups)",
             "content": {
               "application/json": {
                 "schema": {
@@ -21078,13 +21170,23 @@
         "type": "object",
         "description": "`POST /api/v2/organizations/{id}/invitations`.",
         "required": [
-          "email",
           "role"
         ],
         "properties": {
           "email": {
             "type": "string",
-            "description": "The invitee's email address; only an account with this verified email can accept."
+            "description": "The invitee's email address; only an account with this verified email can accept.\nSend either `email`, or `identifierType` + `identifier`.",
+            "nullable": true
+          },
+          "identifier": {
+            "type": "string",
+            "description": "The email address or the CF Meet ID (trimmed; emails are lower-cased).",
+            "nullable": true
+          },
+          "identifierType": {
+            "type": "string",
+            "description": "`EMAIL` or `CF_MEET_ID`, together with `identifier` (instead of `email`). A\n`CF_MEET_ID` invitation is resolved server-side through the Communications Hub\nunder the consumer-discovery rules (discoverable id, visible profile, no block,\nactive account); anything the inviter may not discover is `404\nINVITEE_NOT_FOUND`, indistinguishably. The invitee's email is never returned to\nthe inviter, not even masked: the invitation shows `CF Meet ID <id>` as its hint.",
+            "nullable": true
           },
           "role": {
             "type": "string",
@@ -21574,6 +21676,8 @@
           "IDEMPOTENCY_CONFLICT",
           "PROVISIONING_PENDING",
           "INVITATION_REQUIRED",
+          "ALREADY_MEMBER",
+          "INVITEE_NOT_FOUND",
           "ORGANIZATION_POLICY_RESTRICTED",
           "TEAM_NOT_FOUND",
           "TEAM_ARCHIVED",
@@ -23450,6 +23554,16 @@
             "type": "string",
             "format": "uuid"
           },
+          "identifier": {
+            "type": "string",
+            "description": "Creation by `CF_MEET_ID` only: the CF Meet ID the invitation was addressed to.",
+            "nullable": true
+          },
+          "identifierType": {
+            "type": "string",
+            "description": "Creation by identifier only: the `identifierType` used (`EMAIL` or `CF_MEET_ID`).",
+            "nullable": true
+          },
           "invitedBy": {
             "type": "string",
             "format": "uuid",
@@ -23457,7 +23571,7 @@
           },
           "inviteeEmailHint": {
             "type": "string",
-            "description": "Masked invitee email, e.g. `a***@example.com`."
+            "description": "Masked invitee email, e.g. `a***@example.com`; `CF Meet ID <id>` for an invitation\naddressed by CF Meet ID (the email is never shown, not even masked)."
           },
           "organizationId": {
             "type": "string",
@@ -23562,7 +23676,12 @@
           },
           "displayName": {
             "type": "string",
-            "description": "ORG-006: the member's display name (the account's chosen display name, otherwise\nits username), from the account authority. `null` when the account no longer\nexists. The email address is never included: the organization policy has no\nemail-visibility setting, so only the display identity is shown.",
+            "description": "ORG-006: the member's display name (the account's chosen display name, otherwise\nits username), from the account authority. `null` when the account no longer\nexists.",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "description": "The member's account email address. Present ONLY when the caller may see member\nemails: an ACTIVE OWNER or ADMIN of this organization, or a platform\nadministrator. Absent (not `null`) for every other caller and for accounts that no\nlonger exist. Enforced by the backend; never infer it from the client role.",
             "nullable": true
           },
           "id": {

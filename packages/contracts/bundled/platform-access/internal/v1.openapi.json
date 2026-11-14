@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.8.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal)."
+    "version": "1.9.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned."
   },
   "components": {
     "securitySchemes": {
@@ -231,6 +231,162 @@
             "pattern": "^cfmeet\\.[a-z][a-z0-9-]*$"
           },
           "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationServiceBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The Calling / Messaging service account and credential Platform Access provisioned for one first-party organization inside its own FIRST_PARTY triple (ADR 0058 Amendment A2). Ids, statuses and scopes only — never a secret, verifier, public id or masked credential.",
+        "required": [
+          "organizationRef",
+          "capability",
+          "service",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "serviceAccountId",
+          "credentialId",
+          "requiredScopes",
+          "scopes",
+          "serviceAccount",
+          "credential",
+          "revision",
+          "verified",
+          "active",
+          "revokedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "organizationRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "enum": [
+              "calling",
+              "messaging"
+            ]
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "credentialId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "requiredScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true,
+            "description": "The service's closed scope set (sorted)."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true,
+            "description": "The credential's scopes (sorted)."
+          },
+          "serviceAccount": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "SUSPENDED",
+                  "REVOKED"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status",
+              "expiresAt",
+              "authenticates"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "ROTATION_OVERLAP",
+                  "NOT_YET_VALID",
+                  "EXPIRED",
+                  "SUPERSEDED",
+                  "REVOKED",
+                  "SUSPENDED"
+                ],
+                "description": "The credential's effective state."
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "authenticates": {
+                "type": "boolean",
+                "description": "Whether authentication would accept the credential now (credential state, service account and the whole triple ACTIVE, binding not revoked)."
+              }
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -1962,7 +2118,7 @@
     },
     {
       "name": "Internal — Organization Scopes",
-      "description": "Governed FIRST_PARTY organization scopes: the dedicated tenant, first-party application and PRODUCTION environment of one first-party organization (Organizations Service only, audited, ADR 0058)."
+      "description": "Governed FIRST_PARTY organization scopes: the dedicated tenant, first-party application and PRODUCTION environment of one first-party organization (Organizations Service only, audited, ADR 0058). Also the automatic Calling / Messaging service bindings inside the organization's triple (ADR 0058 Amendment A2)."
     }
   ],
   "paths": {
@@ -6866,6 +7022,334 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service}": {
+      "put": {
+        "operationId": "ensureOrganizationServiceBinding",
+        "summary": "Create, return or renew an organization's service binding",
+        "description": "Idempotent on the path (ADR 0058 Amendment A2). The first call, in ONE transaction, grants the service's closed scope set to the organization's first-party application, creates the service account in the organization's PRODUCTION environment, issues a credential with exactly those scopes and records the binding; it answers 201. Later calls answer 200 with the same ids, except that a credential that no longer authenticates (expired, revoked, superseded), expires within 30 days or carries other scopes is replaced for the same service account (predecessor revoked, revision + 1). Concurrent calls serialize. 404 when the organization scope was never provisioned; 409 when the tenant / application / environment is not ACTIVE, the binding was revoked, its credential is suspended, or a service account with the reserved name exists outside the binding registry (never adopted). Every committed change writes the operator audit (SCOPE_GRANTED, SERVICE_ACCOUNT_CREATED, CREDENTIAL_CREATED / CREDENTIAL_ROTATED / CREDENTIAL_REVOKED) with detail.organizationRef and detail.service. Permission `platform-identity.bind-organization-services` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED. The credential secret is never returned (it is discarded at issuance; only its verifier is stored).",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "description": "The consuming service of the binding (closed vocabulary): `calling` (scopes calls.read, enterprise.config.read, enterprise.config.write; service account `org-calling`) or `messaging` (scope messages.read; service account `org-messaging`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calling",
+                "messaging"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationServiceBinding"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already bound (unchanged), or the credential was renewed (revision incremented).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getOrganizationServiceBinding",
+        "summary": "Read back an organization's service binding",
+        "description": "The binding with the server-side facts the caller verifies: `verified` (service account and credential in exactly the organization's FIRST_PARTY / PRODUCTION triple, credential scopes equal to `requiredScopes`) and `active` (verified, every level ACTIVE, the credential authenticates now). 404 NOT_FOUND when never bound or the scope was never provisioned. Permission `platform-identity.bind-organization-services` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED. The credential secret is never returned (it is discarded at issuance; only its verifier is stored).",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "description": "The consuming service of the binding (closed vocabulary): `calling` (scopes calls.read, enterprise.config.read, enterprise.config.write; service account `org-calling`) or `messaging` (scope messages.read; service account `org-messaging`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calling",
+                "messaging"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeOrganizationServiceBinding",
+        "summary": "Revoke an organization's service binding",
+        "description": "Terminal (organization archived): revokes the credential, sets the service account REVOKED and records `revokedAt` (revision + 1). Idempotent: repeating it changes nothing. Allowed while the tenant is suspended (revocation only narrows). A later PUT or rotate answers 409. 404 when never bound. Permission `platform-identity.bind-organization-services` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED. The credential secret is never returned (it is discarded at issuance; only its verifier is stored).",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "description": "The consuming service of the binding (closed vocabulary): `calling` (scopes calls.read, enterprise.config.read, enterprise.config.write; service account `org-calling`) or `messaging` (scope messages.read; service account `org-messaging`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calling",
+                "messaging"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked (or already revoked: unchanged).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service}/rotate": {
+      "post": {
+        "operationId": "rotateOrganizationServiceBinding",
+        "summary": "Rotate an organization's service binding credential",
+        "description": "Issues a successor credential with the service's scopes for the same service account and revokes the predecessor at once (no overlap; nobody holds its secret), revision + 1. 404 when never bound; 409 when the binding was revoked, the credential is suspended or the organization scope is not ACTIVE. Permission `platform-identity.bind-organization-services` (grantable to cfmeet.organizations only) and the authenticated cfmeet.organizations identity; any other caller is INTERNAL_PERMISSION_DENIED. The credential secret is never returned (it is discarded at issuance; only its verifier is stored).",
+        "tags": [
+          "Internal — Organization Scopes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "organizationRef",
+            "in": "path",
+            "required": true,
+            "description": "The Organizations Service organization id (opaque to Platform Access).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "description": "Organization-scope capability; `primary` is the only one (ADR 0056 §4: one triple per organization).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "primary"
+              ]
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "description": "The consuming service of the binding (closed vocabulary): `calling` (scopes calls.read, enterprise.config.read, enterprise.config.write; service account `org-calling`) or `messaging` (scope messages.read; service account `org-messaging`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calling",
+                "messaging"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationServiceBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

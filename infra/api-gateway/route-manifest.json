@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 38,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 576,
+    "PUBLIC_CUSTOMER": 577,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -2179,6 +2179,22 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/conferences/{id}/questions/{questionId}/pin",
+      "auth": [
+        "MEETING_SESSION",
+        "PARTICIPANT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "x-client-kind"
+      ]
+    },
+    {
+      "id": "meetings.v2_restore_question",
+      "domain": "meetings",
+      "method": "POST",
+      "pattern": "/api/v2/conferences/{id}/questions/{questionId}/restore",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/conferences/{id}/questions/{questionId}/restore",
       "auth": [
         "MEETING_SESSION",
         "PARTICIPANT_TOKEN"
@@ -12094,6 +12110,14 @@
       "operationId": "v2_pin_question",
       "method": "POST",
       "path": "/api/v2/conferences/{id}/questions/{questionId}/pin",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_restore_question",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/questions/{questionId}/restore",
       "class": "PUBLIC_CUSTOMER"
     },
     {

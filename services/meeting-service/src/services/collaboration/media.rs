@@ -972,6 +972,7 @@ impl MediaControlService {
                     participant_session_id: session.id,
                     media_identity: session.media_identity.clone(),
                 },
+                participant_id: session.conference_participant_id,
                 display_name: me.display_name.clone(),
                 permissions,
                 ttl,

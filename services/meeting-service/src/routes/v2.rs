@@ -328,6 +328,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(engagement::dismiss),
         )
         .route(
+            "/conferences/:id/questions/:qid/restore",
+            post(engagement::restore),
+        )
+        .route(
             "/conferences/:id/questions/:qid/archive",
             post(engagement::archive),
         )

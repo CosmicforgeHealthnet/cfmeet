@@ -22,6 +22,14 @@ pub fn app(state: State) -> Router {
     let internal = Router::new()
         .route("/internal/v1/communications/dispatch", post(dispatch))
         .route(
+            "/internal/v1/communications/organization-invitations/resolve",
+            post(resolve_organization_invitee),
+        )
+        .route(
+            "/internal/v1/communications/contacts/names",
+            post(contact_names),
+        )
+        .route(
             "/internal/v1/communications/policy/check",
             post(policy_check),
         )
@@ -98,6 +106,114 @@ struct ResolvePrincipal {
     cf_meet_id: String,
     #[serde(default)]
     purpose: Option<cf_communications_policy::Action>,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveOrganizationInvitee {
+    account: VerifiedAccount,
+    cf_meet_id: String,
+}
+/// Organization invitation by CF Meet ID (Meeting Service only): translates a CF Meet ID
+/// into the owning account for an invitation the Meeting Service creates on the
+/// inviter's behalf. Exactly the consumer-discovery rules apply to the inviter
+/// (discoverable public id, visible profile, no block in either direction, active
+/// account, the discovery attempt budget); anything else is the same `404 NOT_FOUND` as
+/// an unknown id, so the route never confirms more than discovery would. The account
+/// reference is never relayed to clients: the Meeting Service uses it to address the
+/// invitation and answers the inviter with a masked identity only.
+async fn resolve_organization_invitee(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ResolveOrganizationInvitee>,
+) -> Result<Json<Value>> {
+    if ctx.authenticated_service() != &cf_service_auth::ServiceId::meeting_service() {
+        return Err(Error::Forbidden);
+    }
+    s.metrics.requests.fetch_add(1, Ordering::Relaxed);
+    let scope = auth::delegated(&ctx)?;
+    let actor = s.ensure_profile(&scope, &input.account).await?;
+    s.limit_attempt(&actor, "discovery.resolve", 120).await?;
+    let target = s
+        .store
+        .by_public_id(&s.store.db, actor.scope(), input.cf_meet_id.trim())
+        .await?;
+    if let Err(e) = s.visible_profile(&scope, &actor, &target, false).await {
+        s.metrics.denied.fetch_add(1, Ordering::Relaxed);
+        return Err(match e {
+            e @ (Error::Unavailable | Error::Database(_)) => e,
+            _ => Error::NotFound,
+        });
+    }
+    let mut r = json!({"schemaVersion":1,"accountReference":target.account_reference,
+        "displayName":target.display_name});
+    if actor.id == target.id {
+        r["self"] = json!(true);
+    }
+    Ok(Json(r))
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ContactNames {
+    account: VerifiedAccount,
+    principal_ids: Vec<Uuid>,
+}
+/// At most this many principals per lookup (the Meeting Service names lookup bound).
+pub const MAX_CONTACT_NAMES: usize = 256;
+/// Display names of the caller's CONNECTED contacts among `principalIds` (Meeting Service only).
+///
+/// The CF Meet client names the other party of a personal call or conversation from the
+/// principal ids those owners return. Only contacts the caller is connected with are named,
+/// with the name the Hub contact list shows (`displayName`, plus the caller's private `alias`
+/// when set); a pending, revoked or blocked (either direction) relationship, the caller itself
+/// and any unknown id are left out without an error, so the answer never reveals more than the
+/// caller's own contact list. Principal ids are never added to Hub responses.
+async fn contact_names(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<ContactNames>,
+) -> Result<Json<Value>> {
+    if ctx.authenticated_service() != &cf_service_auth::ServiceId::meeting_service() {
+        return Err(Error::Forbidden);
+    }
+    if input.principal_ids.len() > MAX_CONTACT_NAMES {
+        return Err(Error::Validation);
+    }
+    s.metrics.requests.fetch_add(1, Ordering::Relaxed);
+    let scope = auth::delegated(&ctx)?;
+    let actor = s.ensure_profile(&scope, &input.account).await?;
+    if input.principal_ids.is_empty() {
+        return Ok(Json(json!({"schemaVersion":1,"principals":[]})));
+    }
+    let principals: Vec<Value> = store::rows(
+        &s.store.db,
+        "SELECT jsonb_build_object('principalId',o.principal_id,'displayName',o.display_name,'alias',a.alias) doc \
+           FROM communication_contact_aliases a \
+           JOIN communication_connections c ON c.id=a.connection_id AND c.state='CONNECTED' \
+           JOIN communication_profiles o ON o.id=CASE WHEN c.left_profile_id=$1 THEN c.right_profile_id ELSE c.left_profile_id END \
+          WHERE a.owner_profile_id=$1 AND (c.left_profile_id=$1 OR c.right_profile_id=$1) \
+            AND o.tenant_id=$3 AND o.application_id=$4 AND o.environment_id=$5 AND o.principal_id IN (SELECT jsonb_array_elements_text($2::jsonb)::uuid) \
+            AND NOT EXISTS (SELECT 1 FROM communication_block_bridge b WHERE b.active \
+                AND ((b.blocker_profile_id=$1 AND b.blocked_profile_id=o.id) OR (b.blocker_profile_id=o.id AND b.blocked_profile_id=$1))) \
+          ORDER BY o.principal_id",
+        vec![
+            actor.id.into(),
+            json!(input.principal_ids).into(),
+            actor.tenant_id.into(),
+            actor.application_id.into(),
+            actor.environment_id.into(),
+        ],
+    )
+    .await?;
+    let principals: Vec<Value> = principals
+        .into_iter()
+        .map(|mut v| {
+            if v["alias"].is_null() {
+                v.as_object_mut().map(|o| o.remove("alias"));
+            }
+            v
+        })
+        .collect();
+    Ok(Json(json!({"schemaVersion":1,"principals":principals})))
 }
 /// A private translation for authoritative owners; consumer discovery never exposes it.
 async fn resolve_principal(

@@ -186,3 +186,24 @@ Per-organization Enterprise Calling runs in the organization's own triple. Provi
 **ServiceBinding** `{"organizationId","capability":"primary","service":"calling","serviceAccountId","credentialId","version","boundBy":"uuid|null","createdAt","updatedAt"}` — `boundBy` is the relayed acting operator (`X-CF-Acting-User`, only from `organization.act-for-user` callers), else `null`. Changes write `scope.service_binding_set` / `scope.service_binding_cleared` audit events (actor `OPERATOR`; ids only). No outbox event: consumers read the binding through `scopes/resolve` on every request.
 
 `POST /internal/v1/organizations/scopes/resolve` adds `serviceBindings: {"calling": {serviceAccountId, credentialId, version} | null}` to its 200 answer; every refusal is unchanged (a suspended or archived organization, or a scope that is not READY, never exposes a binding). Table `organization_scope_service_bindings` (migration `m20261108_000003_scope_service_bindings`, additive; PK organization + capability + service; `service` CHECK `calling`).
+
+### 8.6 Automatic service bindings (ADR 0058 Amendment A2, contract 1.5.0)
+
+With `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning), no operator step is needed. After the scope is verified, the provisioning worker asks Platform Access (`platform-identity.bind-organization-services`, `PUT /internal/v1/organization-scopes/{org}/primary/service-bindings/{calling|messaging}`) to create the service account and credential inside the organization's own triple:
+
+- `calling` gets `calls.read`, `enterprise.config.read` and `enterprise.config.write`; `messaging` gets `messages.read`.
+- The credential secret is never returned.
+- Organizations reads each binding back and verifies the same triple, `verified`/`active`, the exact scopes and matching ids. Only then does it record the ids (`source: AUTOMATIC`, `verifiedAt`, `credentialExpiresAt`).
+- The organization becomes READY only after both bindings are recorded. Workflow steps: `SCOPE_VERIFIED` → `BINDING_CALLING_VERIFIED` → `BINDING_MESSAGING_VERIFIED` → `VERIFIED`.
+
+**Failures** set the workflow to FAILED with one of `SERVICE_BINDING_CONFLICT`, `SERVICE_BINDING_VERIFICATION_FAILED`, `PLATFORM_ACCESS_UNAVAILABLE` (after backoff) or `PLATFORM_ACCESS_REFUSED`. They are recoverable with the existing operator retry, and retries are idempotent on both sides.
+
+**Reconciliation** backfills bindings for already-READY organizations and renews credentials that expire within 30 days. Drift removes the local binding and fails the workflow (`SERVICE_BINDING_DRIFT`).
+
+**Archiving, or an operator DELETE of an AUTOMATIC binding,** marks the local row revoked in the same transaction, so resolve stops returning it at once. A durable sync then revokes it at Platform Access, retrying until it is applied. Automation never recreates a revoked binding.
+
+**Operator bindings** (`PUT`, `source: OPERATOR`) are never overwritten.
+
+**Operator rotation:** `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/rotate` (`organization.administer`, audited `scope.service_binding_rotated`).
+
+Audit actions (ids only): `scope.service_binding_provisioned`, `scope.service_binding_rotated`, `scope.service_binding_revoked`, `scope.service_binding_revocation_applied`. Migration `m20261113_000005_automatic_service_bindings` is additive.

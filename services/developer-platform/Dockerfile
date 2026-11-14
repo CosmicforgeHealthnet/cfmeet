@@ -38,6 +38,7 @@ COPY --from=builder /src/services/developer-platform/target/release/developer-pl
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform-worker ./developer-platform-worker
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform-migration ./developer-platform-migration
 COPY --from=builder /src/services/developer-platform/target/release/developer-platform-reconcile-references ./developer-platform-reconcile-references
+COPY --from=builder /src/services/developer-platform/target/release/developer-platform-operator ./developer-platform-operator
 USER devplat
 ENV DEVELOPER_PLATFORM_BIND_ADDRESS=0.0.0.0:8098 \
     LOG_FORMAT=json

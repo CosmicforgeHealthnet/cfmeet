@@ -74,7 +74,19 @@ if [ "$existing" != "0" ]; then
   cfb_die 6 "target database is not empty ($existing tables); refusing to restore"
 fi
 
-if [ -n "${CFMEET_PG_WRAPPER:-}" ]; then
+# A client newer than the server (e.g. pg_restore 17 against PostgreSQL 16) emits session
+# settings the server does not know (`SET transaction_timeout = 0;`). Then the archive is
+# rendered to SQL, only those settings are dropped, and it is applied in one fail-fast
+# transaction (same semantics as --single-transaction --exit-on-error). The data and schema
+# statements are untouched.
+client_major="$(cfb_pg_major_of "$(cfb_pg pg_restore --version)")"
+server_major=$(( $(cfb_sql "SHOW server_version_num") / 10000 ))
+if [ "$client_major" -gt "$server_major" ]; then
+  cfb_pg pg_restore --no-owner --no-privileges --file=- <"$archive" |
+    sed -e '/^SET transaction_timeout = /d' |
+    cfb_pg psql -X -q -v ON_ERROR_STOP=1 --single-transaction --dbname="$PGDATABASE" >/dev/null ||
+    cfb_die 7 "restore failed for $in"
+elif [ -n "${CFMEET_PG_WRAPPER:-}" ]; then
   # A client container cannot see host paths: stream the archive on stdin.
   cfb_pg pg_restore --no-owner --no-privileges --exit-on-error --single-transaction --dbname="$PGDATABASE" <"$archive"
 else

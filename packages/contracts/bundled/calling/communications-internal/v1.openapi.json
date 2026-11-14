@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet calling private Communications integration",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 Calling owner interfaces (CL-1 … CL-5). Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -1298,6 +1298,11 @@
               "VOICE",
               "VIDEO"
             ]
+          },
+          "initiatorDisplayName": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The caller's Hub display name, shown to the callee on the incoming call. Best effort: Calling keeps it only if it is a valid display name (truncated to 100 characters); never part of the idempotency fingerprint. 1.2.0."
           }
         },
         "required": [
