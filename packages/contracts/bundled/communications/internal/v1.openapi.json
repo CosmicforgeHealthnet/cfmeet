@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -478,6 +478,104 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OrganizationInviteeResolve"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/contacts/names": {
+      "post": {
+        "operationId": "resolveContactNames",
+        "summary": "Name the caller's connected contacts (Meeting Service only)",
+        "description": "Display names of the caller's CONNECTED, unblocked Communications Hub contacts among `principalIds` (at most 256), for the CF Meet client's names lookup (POST /api/v2/messaging/principals/names) of personal calls and conversations. Callable by cfmeet.meeting-service only (permission communications-user.forward). The caller's Hub profile is ensured from `account` exactly like dispatch. Each named contact carries the name the Hub contact list shows (`displayName`) and the caller's private `alias` when set. A pending, revoked or blocked (either direction) relationship, the caller itself and unknown ids are left out without an error, so the answer never reveals more than the caller's own contact list. Hub responses still never carry principal ids. 1.6.0.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-user.forward",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's connected contacts among the asked principals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactNamesResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactNamesRequest"
               }
             }
           }
@@ -1310,6 +1408,69 @@
           "sourceVersion",
           "blocked"
         ]
+      },
+      "ContactNamesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "principalIds"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/VerifiedAccount"
+          },
+          "principalIds": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "ContactNamesResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "principals"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "principals": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "principalId",
+                "displayName"
+              ],
+              "properties": {
+                "principalId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "alias": {
+                  "type": "string",
+                  "maxLength": 160,
+                  "description": "The caller's private alias for the contact, when set."
+                }
+              }
+            }
+          }
+        }
       },
       "Decision": {
         "type": "object",

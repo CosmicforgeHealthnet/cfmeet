@@ -38,7 +38,8 @@ pub async fn middleware(
     };
     let permission = match request.uri().path() {
         "/internal/v1/communications/dispatch"
-        | "/internal/v1/communications/organization-invitations/resolve" => {
+        | "/internal/v1/communications/organization-invitations/resolve"
+        | "/internal/v1/communications/contacts/names" => {
             InternalPermission::CommunicationsUserForward
         }
         "/internal/v1/communications/policy/check"

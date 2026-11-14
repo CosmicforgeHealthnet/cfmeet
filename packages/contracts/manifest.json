@@ -1057,14 +1057,14 @@
     },
     {
       "id": "cfmeet.communications.communications-internal",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "communications/internal/v1.openapi.json",
       "owner": "communications",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority. 1.5.0 (Session 3): POST /internal/v1/communications/organization-invitations/resolve (Meeting Service only; CF Meet ID → account for organization invitations under the consumer-discovery rules)."
+      "description": "Private signed Communications integration owned by communications; no consumer credential or copied data authority. 1.5.0 (Session 3): POST /internal/v1/communications/organization-invitations/resolve (Meeting Service only; CF Meet ID → account for organization invitations under the consumer-discovery rules). 1.6.0: POST /internal/v1/communications/contacts/names (Meeting Service only; names of the caller's connected, unblocked contacts for the client names lookup)."
     },
     {
       "id": "cfmeet.calling.communications-internal",

@@ -13552,8 +13552,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Display names of the principals the caller can see (self and colleagues).",
-        "description": "Returns display names for up to 256 `principalIds`. Only the caller's own principal and those of\nactive members of the caller's verified organizations are named; any other id is left out of the\nanswer without an error. Requires a bearer user token whose revocation status could be checked\nand the Messaging integration enabled.",
+        "summary": "Display names of the principals the caller can see (self, colleagues and connected contacts).",
+        "description": "Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
         "operationId": "v2_messaging_principal_names",
         "requestBody": {
           "content": {
@@ -13567,7 +13567,7 @@
         },
         "responses": {
           "200": {
-            "description": "principals: principalId, displayName",
+            "description": "principals: principalId, displayName, alias (connected contacts only, when the caller set one)",
             "content": {
               "application/json": {
                 "schema": {

@@ -1114,13 +1114,14 @@ pub struct OrganizationInvitee {
 /// (discoverable id, visible profile, no block, active account, discovery attempt budget).
 /// `Ok(None)` for every id the inviter may not discover, indistinguishably. The account
 /// reference never leaves the backend.
-pub async fn resolve_organization_invitee(
+/// The signed-in caller as the Communications Hub's verified account (the same account a
+/// relayed Hub request carries), and the delegated scope to call the Hub with.
+async fn hub_account(
     state: &AppState,
+    bridge: &Bridge,
     user: &RegisteredActor,
     headers: &HeaderMap,
-    cf_meet_id: &str,
-) -> ApiResult<Option<OrganizationInvitee>> {
-    let bridge = state.communications.as_ref().ok_or_else(unavailable)?;
+) -> ApiResult<(VerifiedAccount, OutboundServiceRequest)> {
     let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -1146,6 +1147,17 @@ pub async fn resolve_organization_invitee(
         .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
     let outbound = OutboundServiceRequest::new_operation(ServiceId::communications())
         .with_delegated_context(scope);
+    Ok((account, outbound))
+}
+
+pub async fn resolve_organization_invitee(
+    state: &AppState,
+    user: &RegisteredActor,
+    headers: &HeaderMap,
+    cf_meet_id: &str,
+) -> ApiResult<Option<OrganizationInvitee>> {
+    let bridge = state.communications.as_ref().ok_or_else(unavailable)?;
+    let (account, outbound) = hub_account(state, bridge, user, headers).await?;
     let r = bridge
         .client
         .exchange_json(
@@ -1175,5 +1187,105 @@ pub async fn resolve_organization_invitee(
             "Too many lookups; try again later",
         )),
         _ => Err(unavailable()),
+    }
+}
+
+/// The Communications Hub's private contact-names lookup.
+pub const CONTACT_NAMES_PATH: &str = "/internal/v1/communications/contacts/names";
+
+/// A connected contact's name as the Hub contact list shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactName {
+    pub principal_id: Uuid,
+    pub display_name: String,
+    /// The caller's private alias for the contact, when set.
+    pub alias: Option<String>,
+}
+
+/// Names the caller's CONNECTED, unblocked Hub contacts among `principal_ids` (at most 256).
+/// Every other id is left out by the Hub. `Ok(vec![])` when the Hub is not configured.
+pub async fn contact_names(
+    state: &AppState,
+    user: &RegisteredActor,
+    headers: &HeaderMap,
+    principal_ids: &[Uuid],
+) -> ApiResult<Vec<ContactName>> {
+    let Some(bridge) = state.communications.as_ref() else {
+        return Ok(vec![]);
+    };
+    if principal_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let (account, outbound) = hub_account(state, bridge, user, headers).await?;
+    let r = bridge
+        .client
+        .exchange_json(
+            &outbound,
+            Method::POST,
+            CONTACT_NAMES_PATH,
+            Some(&json!({ "account": account, "principalIds": principal_ids })),
+        )
+        .await
+        .map_err(|_| unavailable())?;
+    if r.status() != 200 {
+        return Err(unavailable());
+    }
+    let v: Value = r.json().map_err(|_| unavailable())?;
+    parse_contact_names(&v, principal_ids).ok_or_else(unavailable)
+}
+
+/// The Hub's answer, keeping only ids that were asked for (never trusts extra rows).
+pub fn parse_contact_names(v: &Value, asked: &[Uuid]) -> Option<Vec<ContactName>> {
+    if v["schemaVersion"] != 1 {
+        return None;
+    }
+    v["principals"]
+        .as_array()?
+        .iter()
+        .map(|p| {
+            Some(ContactName {
+                principal_id: Uuid::parse_str(p["principalId"].as_str()?).ok()?,
+                display_name: p["displayName"].as_str()?.to_owned(),
+                alias: p.get("alias").and_then(Value::as_str).map(str::to_owned),
+            })
+        })
+        .filter(|c| c.as_ref().is_none_or(|c| asked.contains(&c.principal_id)))
+        .collect()
+}
+
+#[cfg(test)]
+mod contact_name_tests {
+    use super::*;
+
+    #[test]
+    fn hub_answer_is_validated_and_limited_to_the_asked_ids() {
+        let (a, b, other) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let v = json!({"schemaVersion": 1, "principals": [
+            {"principalId": a, "displayName": "Ada", "alias": "Best friend"},
+            {"principalId": b, "displayName": "Bo"},
+            {"principalId": other, "displayName": "Not asked"}]});
+        assert_eq!(
+            parse_contact_names(&v, &[a, b]).unwrap(),
+            vec![
+                ContactName {
+                    principal_id: a,
+                    display_name: "Ada".into(),
+                    alias: Some("Best friend".into())
+                },
+                ContactName {
+                    principal_id: b,
+                    display_name: "Bo".into(),
+                    alias: None
+                },
+            ]
+        );
+        assert!(
+            parse_contact_names(&json!({"schemaVersion": 2, "principals": []}), &[a]).is_none()
+        );
+        assert!(parse_contact_names(
+            &json!({"schemaVersion": 1, "principals": [{"principalId": "x"}]}),
+            &[a]
+        )
+        .is_none());
     }
 }

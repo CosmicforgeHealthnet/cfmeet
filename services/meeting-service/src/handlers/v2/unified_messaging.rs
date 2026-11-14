@@ -447,33 +447,73 @@ pub struct NamesRequest {
     pub principal_ids: Vec<Uuid>,
 }
 
-/// Display names of the principals the caller can see (self and colleagues).
+/// Display names of the principals the caller can see (self, colleagues and connected contacts).
 ///
-/// Returns display names for up to 256 `principalIds`. Only the caller's own principal and those of
-/// active members of the caller's verified organizations are named; any other id is left out of the
-/// answer without an error. Requires a bearer user token whose revocation status could be checked
-/// and the Messaging integration enabled.
+/// Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of
+/// active members of the caller's verified organizations, and the caller's connected personal
+/// contacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`
+/// when set). A pending, revoked or blocked contact and any other id are left out of the answer
+/// without an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer
+/// user token whose revocation status could be checked and the Messaging integration enabled.
 #[utoipa::path(
     post, path = "/api/v2/messaging/principals/names", tag = "Messaging (v2)", operation_id = "v2_messaging_principal_names",
     request_body = Object,
-    responses((status = 200, description = "principals: principalId, displayName", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope)),
+    responses((status = 200, description = "principals: principalId, displayName, alias (connected contacts only, when the caller set one)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn principal_names(
     State(state): State<AppState>,
     actor: ActorContext,
+    headers: HeaderMap,
     V2Json(body): V2Json<NamesRequest>,
 ) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
-    Ok(Json(
-        um.name_principals(
+    let mut answer = um
+        .name_principals(
             user,
             &colleague_scope(&state, &actor).await,
             &body.principal_ids,
         )
-        .await?,
-    ))
+        .await?;
+    let named: std::collections::HashSet<Uuid> = answer["principals"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            p["principalId"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
+        .collect();
+    let mut rest: Vec<Uuid> = body
+        .principal_ids
+        .iter()
+        .copied()
+        .filter(|p| !named.contains(p))
+        .collect();
+    rest.sort();
+    rest.dedup();
+    if let (false, Some(registered)) = (rest.is_empty(), actor.registered()) {
+        // Personal contacts are display-only: a Hub outage leaves them unnamed, never fails.
+        match crate::services::communications::contact_names(&state, registered, &headers, &rest)
+            .await
+        {
+            Ok(contacts) => {
+                if let Some(list) = answer["principals"].as_array_mut() {
+                    list.extend(contacts.into_iter().map(|c| {
+                        let mut v = serde_json::json!({ "principalId": c.principal_id, "displayName": c.display_name });
+                        if let Some(alias) = c.alias {
+                            v["alias"] = Value::String(alias);
+                        }
+                        v
+                    }));
+                }
+            }
+            Err(error) => tracing::warn!(error = %error, "contact names unavailable"),
+        }
+    }
+    Ok(Json(answer))
 }
 
 pub(crate) fn parse_query(raw: Option<String>) -> ApiResult<Vec<(String, String)>> {
