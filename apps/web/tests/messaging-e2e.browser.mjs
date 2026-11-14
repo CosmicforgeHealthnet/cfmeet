@@ -243,7 +243,10 @@ async function journey() {
     assert.equal(await el.textContent(), p);
   }
   assert.equal(await bob.page.evaluate(() => window.__xss ?? null), null);
-  assert.equal(await bob.page.locator("[data-testid=messages] img, [data-testid=messages] script, [data-testid=messages] svg").count(), 0);
+  // Message text is rendered as text only (no element inside it); the list holds no image,
+  // script or foreign SVG (the app's own status icons are Lucide SVGs).
+  assert.equal(await bob.page.locator("[data-testid=message-text] *").count(), 0, "no element inside message text");
+  assert.equal(await bob.page.locator("[data-testid=messages] img, [data-testid=messages] script, [data-testid=messages] svg:not(.lucide)").count(), 0);
   step("xss payloads inert", { payloads: payloads.length });
 
   // ---- 5. Reload: the device and its history come back from encrypted storage.
