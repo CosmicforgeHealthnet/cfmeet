@@ -272,6 +272,13 @@ class VerifyAcceptsTheCoordinatedRelease(unittest.TestCase):
                 with patch.object(coordinated,'last_release',return_value={'sha':'b'*40}), \
                         patch.object(coordinated,'registry',return_value=manifest):
                     self.assertEqual(release.accepted_images('b'*40),{s:'sha256:'+s for s in release.PORTS})
+                # A service the release kept (build inputs unchanged) must run the kept image.
+                kept={'sha':'d'*40,'kept':{'platform-access':{'imageId':'sha256:kept','revision':'e'*40}}}
+                with patch.object(coordinated,'last_release',return_value=kept), \
+                        patch.object(coordinated,'registry',return_value=manifest):
+                    want={s:'sha256:'+s for s in release.PORTS}
+                    want['platform-access']='sha256:kept'
+                    self.assertEqual(release.accepted_images('d'*40),want)
                 with patch.object(coordinated,'last_release',return_value=None):
                     with self.assertRaisesRegex(AssertionError,'not the recorded release'):
                         release.accepted_images('c'*40)

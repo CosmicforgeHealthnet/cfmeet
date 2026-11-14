@@ -678,7 +678,8 @@ def accepted_images(sha):
     import coordinated_release as coordinated
     assert coordinated.last_release(sha),'Requested source is not the recorded release'
     manifest=coordinated.registry(sha)
-    return {service:manifest[coordinated.image_of(service)]['imageId'] for service in PORTS}
+    # A service the release kept (build inputs unchanged) runs the image it kept, as recorded.
+    return {service:coordinated.expected_image(service,sha,manifest)[0] for service in PORTS}
 
 def verify(sha,run_id):
     images=accepted_images(sha)
